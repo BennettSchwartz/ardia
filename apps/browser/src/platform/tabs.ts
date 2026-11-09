@@ -24,6 +24,7 @@ export {
   type PageSelection,
   type ScrollState,
   type FocusRestoreOutcome,
+  type VerificationCodeSetup,
   type ProtectedMediaRequest,
   type AppBadge,
 } from "@ardia/ardiacore";

@@ -42,7 +42,7 @@
     }
   },
   "missing": {
-    "autofill": ["settings", "setSettings", "showSuggestions"],
+    "autofill": ["settings", "setSettings", "showSuggestions", "showApple"],
     "contentBlocker": ["state", "setEnabled", "setListEnabled", "isAllowed", "setAllowed", "hiddenElements", "hideElements", "restoreElements", "addList", "removeList", "devFailNextMessage", "devDelayNextLoad"],
     "engine": ["beginTracing", "endTracing", "isTracing", "cliTabTargets", "cliOwnsTab", "cliMoveOffscreen", "cliCloseOffscreenTabs"],
     "extensions": ["resolveInstallPrompt", "actionStates", "sidePanelUrl"],
@@ -65,7 +65,7 @@
       "changeCaptureSource",
       "stopCapture"
     ],
-    "passwords": ["autofillEnabled", "setAutofillEnabled"],
+    "passwords": ["autofillEnabled", "setAutofillEnabled", "setApplePasswords", "openPasswordsApp", "setUpVerificationCode"],
     "permissions": ["resolve", "devExternalLaunches"],
     "profiles": ["loaded", "unloadIdle"],
     "search": ["setEngineName"],

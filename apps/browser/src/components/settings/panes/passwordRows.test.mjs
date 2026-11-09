@@ -34,7 +34,7 @@ function savedLogins(n) {
 }
 
 async function openPasswords(n) {
-  S().hydrate({});
+  S().hydrate({ settings: { passwordManager: "ardia" } });
   S().createWindow({ url: "https://a.com/" });
   savedLogins(n);
   usePasswordUnlocks.setState({ unlocked: { "": true } });

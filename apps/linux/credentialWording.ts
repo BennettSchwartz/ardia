@@ -30,6 +30,10 @@ export const CREDENTIAL_WORDING: readonly Wording[] = [
   {
     file: "components/settings/rows/profileRows.ts",
     replacements: [
+      [
+        `description: "Apple Passwords uses your Mac's Passwords app and iCloud Keychain. Ardia's password manager keeps logins separately per profile.",\n          keywords: ["password manager", "icloud keychain", "apple passwords", "passkeys", "verification codes", "2fa", "one time code"],`,
+        `description: "Ardia's password manager keeps logins separately per profile.",\n          keywords: ["password manager", "passkeys"],`,
+      ],
       [`keywords: ["password manager", "logins", "credentials", "keychain", "offer to save and fill passwords"]`, `keywords: ["password manager", "logins", "credentials", "keyring", "offer to save and fill passwords"]`],
       ["description: `Showing or filling a card asks for ${PLATFORM_TERMS.deviceUnlock}.`", `description: "Showing a saved card number asks for your system password."`],
     ],

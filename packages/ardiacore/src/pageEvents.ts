@@ -30,6 +30,7 @@ import type {
   ProtectedMediaRequest,
   ScrollState,
   SecurityInfo,
+  VerificationCodeSetup,
   WebNotification,
   WebViewProps,
   ZoomState,
@@ -72,6 +73,7 @@ type NativeEvents = {
   onFocusRestore: { outcome?: string };
   onSelection: { selection: PageSelection | null };
   onScroll: { state: ScrollState };
+  onVerificationCodeSetup: VerificationCodeSetup;
   onProtectedMedia: ProtectedMediaRequest;
   onAutoplayBlocked: { count?: number };
   onReady: object;
@@ -126,6 +128,7 @@ const PAGE_EVENTS = {
   onFocusRestore: "focusRestore",
   onSelection: "selection",
   onScroll: "scroll",
+  onVerificationCodeSetup: "verificationCodeSetup",
   onProtectedMedia: "protectedMedia",
   onAutoplayBlocked: "autoplayBlocked",
   onReady: "ready",
@@ -178,6 +181,7 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onFocusRestore: (e) => [FOCUS_RESTORE_OUTCOMES.find((o) => o === e.outcome) ?? "unknown"],
   onSelection: (e) => [e.selection],
   onScroll: (e) => [e.state],
+  onVerificationCodeSetup: (e) => [e],
   onProtectedMedia: (e) => [e],
   onAutoplayBlocked: (e) => [Number.isInteger(e.count) ? Math.min(Math.max(e.count!, 1), 20) : 1],
   onReady: () => [],

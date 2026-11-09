@@ -93,6 +93,18 @@ const laterEvent = <E extends EventName>(name: E, data: EventData<E>) => queueMi
 export const emitDownload = (download: EngineEvents["downloads.changed"]) => emitEvent("downloads.changed", download);
 export const emitPermission = (request: EngineEvents["permissions.requested"]) => emitEvent("permissions.requested", request);
 
+export const passwordAutofill = new Map<string, boolean>();
+export const passwordManagerEngine = {
+  available: true,
+  extensionSupported: false,
+  enabled: false,
+  extensionProfiles: [] as string[],
+  opened: 0,
+  setupUrls: [] as string[],
+  calls: [] as unknown[][],
+  logins: undefined as Record<string, { origin: string; username: string }[]> | undefined,
+};
+export const appleAutoFillCalls: { tabId: string; kind: string }[] = [];
 export const current = { device: null as string | null };
 
 type Login = { origin: string; url: string; username: string; password: string; created: number };
@@ -424,8 +436,10 @@ const fakeModules = {
   ArdiaPasswords: domain(
     "passwords",
     {
-      list: () => ({
-        passwords: [...(passwordStores.get(current.device)?.values() ?? [])].map((l) => ({ origin: l.url, username: l.username, created: l.created, modified: l.created })),
+      list: ({ profile }) => ({
+        passwords: passwordStores.has(current.device)
+          ? [...(passwordStores.get(current.device)?.values() ?? [])].map((l) => ({ origin: l.url, username: l.username, created: l.created, modified: l.created }))
+          : (passwordManagerEngine.logins?.[profile] ?? []).map((l) => ({ origin: l.origin, username: l.username, created: 0, modified: 0 })),
       }),
       unlock: () => ({ unlocked: true }),
       reveal: (args) => ({ password: passwordStores.get(current.device)?.get(loginKey(args))?.password ?? null }),
@@ -434,9 +448,23 @@ const fakeModules = {
       allowSaving: () => ({ ok: true }),
       export: () => ({ status: "cancelled" }),
       autofillEnabled: ({ profile }) => profileToggle(profile, "passwords"),
-      setAutofillEnabled: ({ profile, enabled }) => (setProfileToggle(profile, "passwords", enabled), null),
+      setAutofillEnabled: ({ profile, enabled }) => {
+        setProfileToggle(profile, "passwords", enabled);
+        passwordManagerEngine.calls.push(["offerToSave", profile, enabled]);
+        return null;
+      },
+      setApplePasswords: ({ enabled, extensionProfiles = [] }) => {
+        passwordManagerEngine.enabled = enabled;
+        passwordManagerEngine.extensionProfiles = [...extensionProfiles];
+        passwordManagerEngine.calls.push(extensionProfiles.length ? ["applePasswords", enabled, extensionProfiles] : ["applePasswords", enabled]);
+        return null;
+      },
+      openPasswordsApp: () => (passwordManagerEngine.opened++, true),
+      setUpVerificationCode: ({ url }) => (passwordManagerEngine.setupUrls.push(url), true),
     },
     {
+      applePasswordsAvailable: () => passwordManagerEngine.available,
+      iCloudPasswordsExtensionSupported: () => passwordManagerEngine.extensionSupported,
       save: async (_profile: string, origin: string, username: string, password: string) => {
         const refused = new Error("Could not save the password (invalid, or already saved)");
         if (!/^https?:\/\/[^/?#]+$/i.test(origin)) throw refused;
@@ -472,6 +500,7 @@ const fakeModules = {
       remove: () => ({ ok: true }),
       cardNumber: () => ({ number: null }),
       showSuggestions: () => false,
+      showApple: ({ tabId, kind }) => (appleAutoFillCalls.push({ tabId, kind }), true),
     },
     { saveCard: async () => JSON.stringify({ id: `card-${++autofillIds}` }) },
   ),

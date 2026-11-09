@@ -3,6 +3,7 @@ import type { SettingsPane } from "../../../state/settings/settingsWindows";
 import { keyText } from "../../../state/commands/keyText";
 import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
 import { PLATFORM_TERMS } from "../../../lib/platformTerms";
+import { effectivePasswordManager } from "../../../state/site/passwordManagerChoice";
 
 const syncOn = (_: unknown, env: SettingsEnv) => !!env.syncOn;
 
@@ -102,16 +103,22 @@ export const profileRows = {
     {
       section: "Passwords and autofill",
       rows: {
+        passwordManager: {
+          title: "Autofill passwords and passkeys from",
+          description: "Apple Passwords uses your Mac's Passwords app and iCloud Keychain. Ardia's password manager keeps logins separately per profile.",
+          keywords: ["password manager", "icloud keychain", "apple passwords", "passkeys", "verification codes", "2fa", "one time code"],
+          shown: () => PLATFORM_FEATURES.applePasswords,
+        },
         offerToSavePasswords: {
           title: "Save and fill passwords",
           description: "Offers to save logins and fills saved ones.",
           keywords: ["password manager", "logins", "credentials", "keychain", "offer to save and fill passwords"],
-          shown: () => PLATFORM_FEATURES.passwordAutofillSwitch,
+          shown: (s) => PLATFORM_FEATURES.passwordAutofillSwitch && effectivePasswordManager(s) === "ardia",
         },
         passwords: {
           title: "Passwords",
           description: "Saved passwords, import and export.",
-          keywords: ["csv", "logins", "import passwords", "backup", "export passwords", "saved passwords", "never saved", "1password", "bitwarden", "password manager"],
+          keywords: ["csv", "logins", "import passwords", "backup", "export passwords", "saved passwords", "never saved", "1password", "bitwarden", "password manager", "apple passwords", "move passwords"],
         },
         addresses: {
           title: "Save and fill addresses",

@@ -29,6 +29,7 @@ import { currentSettings } from "../browser/current";
 import { engineProfile } from "../browser/model";
 import { currentSyncFolder, folderInfo } from "../sync/engine";
 import { extensionsProfileId, refreshExtensions } from "../extensions/actions";
+import { ardiaLoginCount, passwordAutofill } from "../site/passwordManager";
 import { cached, load, loadAll, need, resource, store, useAllLoaded, type Needed } from "./resources";
 import type { SettingsPane } from "./settingsWindows";
 import { FOLLOW_EVERY_MS, FOLLOW_FOR_MS, switchOutcome, updaterBusy } from "./updateStatus";
@@ -37,6 +38,8 @@ import { consentToken } from "../telemetry/client";
 import { notePreloadPagesTurned } from "../telemetry/preloadPagesCounts";
 import { trackAutofillToggleKept } from "../telemetry/track";
 import { askedValue, rememberAsked } from "./autofillAsked";
+
+export { ardiaLoginCount, passwordAutofill };
 
 export const APP_ICON_SIZE = 56;
 
@@ -52,7 +55,6 @@ export const siteOrigins = resource("siteOrigins", (profile: string) => getSiteS
 export const appLinks = resource("appLinks", (profile: string) => getExternalAppAllowances(profile).catch(() => []));
 export const zoomLevels = resource("zoomLevels", (profile: string) => getZoomLevels(profile).catch((): Record<string, number> => ({})));
 export const preloadPages = resource("preloadPages", (profile: string) => getPreloadPages(profile).catch(() => false));
-export const passwordAutofill = resource("passwordAutofill", (profile: string) => getPasswordAutofill(profile).catch(() => true));
 export const addresses = resource("addresses", (profile: string) => listAddresses(profile).catch(orWarn<SavedAddress[]>([])));
 export const cards = resource("cards", (profile: string) => listCards(profile).catch(orWarn<SavedCard[]>([])));
 export const autofillEnabled = resource("autofillEnabled", (profile: string) =>

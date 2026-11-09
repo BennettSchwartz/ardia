@@ -3,13 +3,17 @@ import { notePasswordExport, notePasswordExportFailure } from "../telemetry/expo
 import { consentToken } from "../telemetry/client";
 
 export {
+  applePasswordsAvailable,
   deletePassword,
   getNeverSavePasswordOrigins,
   getPassword,
+  iCloudPasswordsExtensionSupported,
   listPasswords,
+  openPasswordsApp,
   savePassword,
   setNeverSavePasswords,
   setPasswordAutofill,
+  setUpVerificationCode,
   unlockPasswords,
   updatePassword,
   type PasswordExportStatus,

@@ -32,6 +32,8 @@ import { goToSettingsPane, SETTINGS_DETAIL } from "../../../state/settings/setti
 import { ProfileSubPage } from "./ProfileSubPage";
 import { useGrowingRows } from "../../../state/settings/growingRows";
 import { notePasswordListShown } from "../../../state/telemetry/exportCounts";
+import { useEffectivePasswordManager } from "../../../state/site/passwordManager";
+import { ApplePasswordsDetails, OTHER_MANAGER_DESCRIPTION, PasswordManagerRow, SavedInArdiaDetails } from "./ApplePasswordsDetails";
 
 function passwordManagerAppsNote() {
   const apps = `1Password, Bitwarden, KeePassXC and Proton Pass extensions connect to their ${PLATFORM_TERMS.computer} apps.`;
@@ -53,6 +55,7 @@ export function PasswordsSection({ profileId }: { profileId: string }) {
     <>
       <SectionHeader title="Passwords and autofill" />
       <Group>
+        <PasswordManagerRow />
         <Row anchor="profiles.offerToSavePasswords" description={keptByExtensionNote(autofill, passwordsAsked)}>
           <Toggle value={autofill} onChange={(v) => setPasswordAutofillFor(profile, v)} />
         </Row>
@@ -77,8 +80,10 @@ export function PasswordsPage({ profileId }: { profileId: string }) {
   const [query, setQuery] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
+  const [showArdiaList, setShowArdiaList] = useState(false);
   const profile = currentEngineProfile(profileId);
   const unlocked = usePasswordsUnlocked(profile);
+  const mode = useEffectivePasswordManager();
   const arrived = useRef(0);
 
   const load = () => {
@@ -122,30 +127,60 @@ export function PasswordsPage({ profileId }: { profileId: string }) {
 
   const shown = (list ?? []).filter((p) => matchesQuery(query, p.origin, p.username));
   const rows = useGrowingRows(shown.length, `${profile}|${query}`);
+  const loginCount = list?.length ?? 0;
+  const showSavedList = mode === "ardia" || (unlocked && showArdiaList && loginCount > 0);
 
   return (
     <ProfileSubPage>
-      <SectionHeader
-        title="Passwords"
-        description={`Saved on this ${PLATFORM_TERMS.computer}, separately for each profile, and encrypted with ${PLATFORM_TERMS.passwordKey}.`}
-      />
+      {mode === "ardia" ? (
+        <SectionHeader
+          title="Passwords"
+          description={`Saved on this ${PLATFORM_TERMS.computer}, separately for each profile, and encrypted with ${PLATFORM_TERMS.passwordKey}.`}
+        />
+      ) : (
+        <SectionHeader title="Passwords" description={OTHER_MANAGER_DESCRIPTION[mode]} />
+      )}
       <Group>
-        <Row title="Import passwords" description={importStatus || "From a CSV exported by Chrome, Safari, Firefox, 1Password, Bitwarden…"}>
-          <Button title="Import CSV…" onPress={() => void importCsv()} />
-        </Row>
-        {PLATFORM_FEATURES.exportsBookmarksAndPasswords ? (
+        {mode === "none" ? (
+          <Row
+            title="Using another password manager"
+            description="Install the 1Password, Bitwarden, Proton Pass or KeePassXC extension from Extensions. Both Apple Passwords and Ardia's built-in prompts stay out of its way."
+          />
+        ) : null}
+        {mode === "ardia" ? (
+          <Row title="Import passwords" description={importStatus || "From a CSV exported by Chrome, Safari, Firefox, 1Password, Bitwarden…"}>
+            <Button title="Import CSV…" onPress={() => void importCsv()} />
+          </Row>
+        ) : null}
+        {mode === "ardia" && PLATFORM_FEATURES.exportsBookmarksAndPasswords ? (
           <Row title="Export passwords" description={exportStatus || "To a CSV file. Anyone who can open the file can read your passwords."}>
             <Button title="Export CSV…" onPress={() => void exportCsv()} />
           </Row>
         ) : null}
-        <Row
-          icon={<Symbol name="questionmark.circle" size={15} color={theme.icon} style={HELP_ICON} />}
-          title="Password manager apps"
-          description={passwordManagerAppsNote()}
-        />
+        {mode !== "apple" ? (
+          <Row
+            icon={<Symbol name="questionmark.circle" size={15} color={theme.icon} style={HELP_ICON} />}
+            title="Password manager apps"
+            description={passwordManagerAppsNote()}
+          />
+        ) : null}
       </Group>
 
-      {!unlocked ? (
+      {mode === "apple" ? <ApplePasswordsDetails profile={profile} /> : null}
+
+      {mode !== "ardia" && (!unlocked || loginCount > 0) ? (
+        <SavedInArdiaDetails
+          profile={profile}
+          unlocked={unlocked}
+          loginCount={loginCount}
+          showList={showArdiaList}
+          onShowList={setShowArdiaList}
+          exportStatus={exportStatus}
+          onExport={() => void exportCsv()}
+        />
+      ) : null}
+
+      {!showSavedList ? null : !unlocked ? (
         <Box gap="ml" style={LOCKED}>
           <Symbol name="lock.fill" size={26} color={theme.textTertiary} style={LOCK_ICON} />
           <Text size="title" weight="medium">

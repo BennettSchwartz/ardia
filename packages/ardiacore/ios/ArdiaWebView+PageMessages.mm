@@ -3,9 +3,12 @@
 #import "ArdiaEarlyWindow.h"
 #import "ArdiaFieldTiming.h"
 #import "ArdiaHost.h"
+#import "ArdiaLaunchConfig.h"
+#import "ArdiaNativeMessaging.h"
 #import "ArdiaPictureInPicture.h"
 #import "ArdiaServices.h"
 
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 #include <climits>
@@ -32,11 +35,29 @@ BOOL gDisplayMediaPicker = YES;
 
 static BOOL gSelectionPopover = YES;
 static BOOL gBlockAutoplayEverywhere = NO;
+static BOOL gApplePasswords = NO;
+static NSSet<NSString *> *gApplePasswordsExtensionProfiles = [NSSet set];
+static BOOL ApplePasswordsKey(NSString *profile) {
+  return gApplePasswords && ![gApplePasswordsExtensionProfiles containsObject:profile ?: @""];
+}
+static NSString *ApplePasswordsJSON(NSString *profile) {
+  return !gApplePasswords ? @"false" : ApplePasswordsKey(profile) ? @"true" : @"\"codes\"";
+}
+static NSString *const kInsertFromPasswordsAction = @"_handleInsertFromPasswordsCommand:";
+static NSDictionary<NSString *, NSString *> *AppleAutoFillActions() {
+  return @{
+    @"passwords" : kInsertFromPasswordsAction,
+    @"contact" : @"_handleInsertFromContactsCommand:",
+    @"creditCard" : @"_handleInsertFromCreditCardsCommand:",
+  };
+}
+static const CFTimeInterval kApplePasswordsInterval = 0.6;
 static char kScriptFramesKey;
+static char kSameSiteFramesKey;
 
 static NSDictionary *DisplayMediaAudioOffer(NSDictionary *message) {
   if (!Flag(message, @"audio")) return nil;
-  NSDictionary *support = ArdiaCoreEngine.desktopCaptureAudio;
+  NSDictionary *support = [ArdiaCoreEngine respondsToSelector:@selector(desktopCaptureAudio)] ? ArdiaCoreEngine.desktopCaptureAudio : nil;
   const bool system = Flag(support, @"system"), application = Flag(support, @"application");
   NSString *preference = Text(message, @"windowAudio", 16);
   NSString *window = nil;
@@ -57,7 +78,8 @@ static NSString *DisplayMediaAudioFor(NSDictionary *offer, NSString *sourceId) {
 namespace ardia_web_view {
 
 void AnswerHello(ArdiaCoreTab *tab, NSString *profile, NSString *frameId, BOOL main, NSString *verifiedOrigin) {
-  NSString *origin = (main ? VerifiedOrigin(verifiedOrigin) : nil) ?: OriginOf(tab.url);
+  NSString *sender = VerifiedOrigin(verifiedOrigin);
+  NSString *origin = (main ? sender : nil) ?: OriginOf(tab.url);
   __weak ArdiaCoreTab *weakTab = tab;
   void (^answer)(BOOL) = ^(BOOL blockAutoplay) {
     ArdiaCoreTab *to = weakTab;
@@ -67,6 +89,8 @@ void AnswerHello(ArdiaCoreTab *tab, NSString *profile, NSString *frameId, BOOL m
     if (gDisplayMediaPicker) config[@"displayMediaPicker"] = @YES;
     if (main && ArdiaFieldTimingEnabled()) config[@"fieldTiming"] = @YES;
     if (main) config[@"selectionPopover"] = @(gSelectionPopover);
+    if (gApplePasswords && (main || (sender.length && [sender isEqualToString:OriginOf(to.url)])))
+      config[@"applePasswords"] = ApplePasswordsKey(profile) ? @YES : @"codes";
     config[@"peek"] = gPeekModifier;
     config[@"split"] = SplitLinkModifier();
     config[@"peekOtherSites"] = @([ArdiaTabRegistry viewForTab:to].peeksLinksToOtherSites);
@@ -98,7 +122,8 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
 
 + (void)setDisplayMediaPicker:(BOOL)enabled {
   gDisplayMediaPicker = enabled;
-  ArdiaCoreEngine.pagesPickDisplayMedia = enabled;
+  if ([ArdiaCoreEngine respondsToSelector:@selector(setPagesPickDisplayMedia:)])
+    ArdiaCoreEngine.pagesPickDisplayMedia = enabled;
 }
 
 + (void)setBlockAutoplayEverywhere:(BOOL)enabled {
@@ -109,6 +134,28 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   if (enabled == gSelectionPopover) return;
   gSelectionPopover = enabled;
   for (ArdiaWebView *view in LiveViews().allObjects) [view pushSelectionPopover];
+}
+
++ (void)setApplePasswordsEnabled:(BOOL)enabled extensionProfiles:(NSArray<NSString *> *)profiles {
+  NSSet<NSString *> *extension = [NSSet setWithArray:profiles ?: @[]];
+  if (enabled == gApplePasswords && [extension isEqualToSet:gApplePasswordsExtensionProfiles]) return;
+  gApplePasswords = enabled;
+  gApplePasswordsExtensionProfiles = extension;
+  for (ArdiaWebView *view in LiveViews().allObjects) [view pushApplePasswords];
+}
+
++ (BOOL)iCloudPasswordsExtensionSupported {
+  return ardia_native_messaging::ApplePasswordsHelperAllowed();
+}
+
++ (BOOL)applePasswordsAvailable {
+  static const BOOL available = [] {
+    Class heuristic = NSClassFromString(@"NSAutoFillHeuristicController");
+    SEL chromiumField = NSSelectorFromString(@"_inputContextForChromiumSecureTextFieldFromResponder:");
+    return heuristic && [heuristic respondsToSelector:chromiumField] &&
+           [NSApplication instancesRespondToSelector:NSSelectorFromString(kInsertFromPasswordsAction)];
+  }();
+  return available;
 }
 
 - (void)tab:(ArdiaCoreTab *)tab
@@ -126,7 +173,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
     if (main && !tab.discarded) [self resetPageMedia];
     if (main) _reports.exclusiveFrames = nil;
     if (main && ![(Text(dict, @"url", 8192) ?: @"about:") hasPrefix:@"about:"]) _requests.requestedURL = nil;
-    [self noteScriptFrame:frameId main:main];
+    [self noteScriptFrame:frameId main:main sameSite:[self sameSiteFrame:main origin:sender]];
     [self callFrame:frameId kind:@"peekConfig" json:PeekConfigJSON(self)];
     AnswerHello(tab, _profile, frameId, main, verifiedOrigin);
     if (main) _firstPaint.scripted = YES;
@@ -140,8 +187,10 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   } else if ([kind isEqualToString:@"peek"] && dict) {
     [self peekLink:dict frame:frameId main:main];
   } else if ([kind isEqualToString:@"peekHello"]) {
-    [self noteScriptFrame:frameId main:main];
+    BOOL sameSite = [self sameSiteFrame:main origin:sender];
+    [self noteScriptFrame:frameId main:main sameSite:sameSite];
     [self callFrame:frameId kind:@"peekConfig" json:PeekConfigJSON(self)];
+    [self callFrame:frameId kind:@"applePasswords" json:sameSite ? ApplePasswordsJSON(_profile) : @"false"];
   } else if ([kind isEqualToString:@"peekGone"]) {
     [self forgetScriptFrame:frameId];
   } else if ([kind isEqualToString:@"exclusive"] && dict) {
@@ -185,6 +234,14 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
     NSString *state = Text(dict, @"state", 8);
     if ([@[ @"down", @"up", @"top" ] containsObject:state ?: @""])
       [self emit:@"scroll" payload:@{@"state" : state}];
+  } else if ([kind isEqualToString:@"applePasswords"]) {
+    if (ApplePasswordsKey(_profile) && _visible && _tab.view.window.isKeyWindow && [self sameSiteFrame:main origin:sender])
+      [self showAppleAutoFill:@"passwords"];
+  } else if ([kind isEqualToString:@"verificationCodeSetup"] && dict) {
+    NSString *url = Field<NSString>(dict, @"url");
+    if (gApplePasswords && [self sameSiteFrame:main origin:sender] && url.length && url.length <= 2048 &&
+        [url rangeOfString:@"^otpauth(-migration)?://" options:NSRegularExpressionSearch | NSCaseInsensitiveSearch].location == 0)
+      [self emit:@"verificationCodeSetup" payload:@{@"url" : url, @"origin" : sender ?: @"", @"main" : @(main)}];
   } else if ([kind isEqualToString:@"drm"] && dict) {
     [self emit:@"protectedMedia" payload:@{@"keySystem" : Text(dict, @"keySystem", 64) ?: @"", @"main" : @(main)}];
   } else if ([kind isEqualToString:@"nowPlaying"]) {
@@ -268,22 +325,86 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   }
 }
 
-- (void)noteScriptFrame:(NSString *)frameId main:(BOOL)main {
+static NSMutableSet<NSString *> *SameSiteFramesOf(ArdiaCoreTab *tab) {
+  if (!tab) return nil;
+  NSMutableSet *frames = objc_getAssociatedObject(tab, &kSameSiteFramesKey);
+  if (!frames) {
+    frames = [NSMutableSet set];
+    objc_setAssociatedObject(tab, &kSameSiteFramesKey, frames, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+  return frames;
+}
+
+- (void)noteScriptFrame:(NSString *)frameId main:(BOOL)main sameSite:(BOOL)sameSite {
   InstallPeekMonitor();
   NSMutableOrderedSet<NSString *> *frames = ScriptFramesOf(_tab);
+  NSMutableSet<NSString *> *sameSiteFrames = SameSiteFramesOf(_tab);
   if (!frames || !frameId.length) return;
   [frames removeObject:frameId];
   [frames addObject:frameId];
-  while (frames.count > 512) [frames removeObjectAtIndex:0];
+  if (sameSite) [sameSiteFrames addObject:frameId];
+  else [sameSiteFrames removeObject:frameId];
+  while (frames.count > 512) {
+    [sameSiteFrames removeObject:frames.firstObject];
+    [frames removeObjectAtIndex:0];
+  }
 }
 
 - (void)forgetScriptFrame:(NSString *)frameId {
-  if (frameId.length) [ScriptFramesOf(_tab) removeObject:frameId];
-  [_reports.exclusiveFrames removeObject:frameId ?: @""];
+  if (!frameId.length) return;
+  [ScriptFramesOf(_tab) removeObject:frameId];
+  [SameSiteFramesOf(_tab) removeObject:frameId];
+  [_reports.exclusiveFrames removeObject:frameId];
 }
 
 - (void)pushSelectionPopover {
   if (_tab) [self callFrame:@"" kind:@"selectionPopover" json:gSelectionPopover ? @"true" : @"false"];
+}
+
+- (void)pushApplePasswords {
+  if (!_tab) return;
+  NSString *state = ApplePasswordsJSON(_profile);
+  NSSet<NSString *> *sameSite = [SameSiteFramesOf(_tab) copy];
+  [self callFrame:@"" kind:@"applePasswords" json:state];
+  for (NSString *frameId in [ScriptFramesOf(_tab) copy])
+    [self callFrame:frameId kind:@"applePasswords" json:[sameSite containsObject:frameId] ? state : @"false"];
+}
+
+- (BOOL)sameSiteFrame:(BOOL)main origin:(NSString *)origin {
+  if (main) return YES;
+  NSString *top = OriginOf(_tab.url);
+  return origin.length && top.length && [origin isEqualToString:top];
+}
+
+static BOOL EditsWebText(NSResponder *responder, NSView *page) {
+  if (![responder isKindOfClass:NSView.class] || !page || ![(NSView *)responder isDescendantOf:page]) return NO;
+  SEL inputType = NSSelectorFromString(@"textInputType");
+  if (![responder respondsToSelector:inputType]) return NO;
+  const char *returns = [responder methodSignatureForSelector:inputType].methodReturnType;
+  const char kind = returns ? returns[0] : 0;
+  if (kind == 'i' || kind == 'I') return ((int (*)(id, SEL))objc_msgSend)(responder, inputType) != 0;
+  if (kind == 'q' || kind == 'Q' || kind == 'l' || kind == 'L') return ((long (*)(id, SEL))objc_msgSend)(responder, inputType) != 0;
+  return NO;
+}
+
+- (BOOL)showAppleAutoFill:(NSString *)kind {
+  NSString *actionName = AppleAutoFillActions()[kind ?: @""];
+  if (!actionName) return NO;
+  static CFTimeInterval lastAt = -kApplePasswordsInterval;
+  NSView *page = _tab.view;
+  NSWindow *window = page.window;
+  if (!ArdiaWebView.applePasswordsAvailable || !window.isKeyWindow || !EditsWebText(window.firstResponder, page)) return NO;
+  const CFTimeInterval now = CACurrentMediaTime();
+  if (now - lastAt < kApplePasswordsInterval) return NO;
+  lastAt = now;
+  if ([ArdiaLaunchConfig.shared background]) {
+    NSLog(@"[ardiacore] apple autofill %@ (background mode, not shown)", kind);
+    return YES;
+  }
+  SEL action = NSSelectorFromString(actionName);
+  NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"AutoFill" action:action keyEquivalent:@""];
+  id target = [NSApp targetForAction:action to:nil from:item];
+  return target && [NSApp sendAction:action to:target from:item];
 }
 
 - (void)callFrame:(NSString *)frameId kind:(NSString *)kind json:(NSString *)json {
@@ -302,7 +423,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   [_reports.displayRequests removeObjectForKey:requestId];
   if (sourceId.length && ![ArdiaHost mayCaptureDesktopSource:sourceId]) sourceId = nil;
   NSString *audio = shareAudio && sourceId.length ? DisplayMediaAudioFor(Field<NSDictionary>(request, @"audio"), sourceId) : nil;
-  if (sourceId.length && _tab)
+  if (sourceId.length && _tab && [ArdiaCoreEngine respondsToSelector:@selector(allowDesktopCapture:tab:frame:origin:audio:)])
     [ArdiaCoreEngine allowDesktopCapture:sourceId
                                   tab:_tab
                                 frame:[request[@"frame"] length] ? request[@"frame"] : nil
