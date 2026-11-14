@@ -12,6 +12,8 @@ if (!window[KEY]) {
   const SHEET = ${JSON.stringify(READER_SHEET)};
   const MAX_MARKED = 40000;
   const ICON_MAX = 48;
+  const LAZY = ["data-src", "data-srcset", "data-lazy-src", "data-original", "data-lazy", "data-url"];
+  const isIcon = (img) => img.complete && img.naturalWidth > 0 && img.naturalWidth < ICON_MAX && img.naturalHeight < ICON_MAX && !LAZY.some((name) => img.hasAttribute(name)) && !(img.parentElement?.textContent || "").trim();
   const UNMARKED = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|SOURCE|TRACK|PARAM|BR|WBR|META|LINK)$/;
   const SCREEN_READER_ONLY = /(^|[\s_-])(sr-only|visually-?hidden|screen-reader-text|a11y-hidden|offscreen)($|[\s_-])/i;
   const CLUTTER = "script,style,link,meta,noscript,template,button,input,select,textarea,nav,aside,dialog,[hidden],[aria-hidden=true]";
@@ -56,8 +58,7 @@ if (!window[KEY]) {
         const el = live[i], twin = copy[i];
         if (hiddenRoot && hiddenRoot.contains(el)) continue;
         if (el.tagName === "IMG") {
-          const box = el.getBoundingClientRect();
-          if (box.width > 0 && box.width < ICON_MAX && box.height < ICON_MAX && !(el.parentElement?.textContent || "").trim()) {
+          if (isIcon(el)) {
             gone.push(twin);
             continue;
           }
