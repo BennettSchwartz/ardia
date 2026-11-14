@@ -42,8 +42,8 @@ export const COMMANDS = {
   findInPage: { title: "Find…", barTitle: "Find in Page", symbol: "text.magnifyingglass", keys: ["⌘F"], ...pageInLittleArdia },
   findNext: { title: "Find Next", keys: ["⌘G"], ...pageInLittleArdia },
   findPrevious: { title: "Find Previous", keys: ["⇧⌘G"], ...pageInLittleArdia },
-  hideElement: { title: "Hide Element…", barTitle: "Hide an Element on This Page", symbol: "eye.slash", keys: ["⇧⌘H"], scope: "page" },
-  showHiddenElements: { title: "Hidden Elements on This Site…", barTitle: "Show Hidden Elements on This Site", symbol: "eye", keys: ["⇧⌘U"], scope: "page" },
+  hideElement: { title: "Hide Element…", barTitle: "Hide an Element on This Page", symbol: "eye.slash", keys: ["⇧⌘H"], ...pageInLittleArdia },
+  showHiddenElements: { title: "Hidden Elements on This Site…", barTitle: "Show Hidden Elements on This Site", symbol: "eye", keys: ["⇧⌘U"], ...pageInLittleArdia },
   setAppearance: {
     chooses: "appearance",
     variants: {
