@@ -7,19 +7,18 @@ import { useTab } from "../../state/browser/hooks";
 import { currentEngineProfile } from "../../state/browser/current";
 import { setPopover } from "../../state/tabs/pageState";
 import { dismissPopoverByPress } from "../../state/tabs/popoverDismiss";
+import type { SitePanelPlace } from "./ZoomControls";
 import { hiddenElementsOn, hiddenElementTitle, restoreHiddenElements, startHidingElement, useHiddenElements, type HiddenElement } from "../../state/site/hiddenElements";
 
 export const HIDDEN_ELEMENTS_WIDTH = POPOVER_WIDTH.l;
 const LIST_HEIGHT = 300;
 
-type Place = { tabId: string; right?: number; left?: number; top: number };
-
-export function HiddenElementsPopover({ open, ...place }: Place & { open: boolean }) {
+export function HiddenElementsPopover({ open, ...place }: SitePanelPlace & { open: boolean }) {
   const presence = usePopoverPresence(open);
   return presence.shown ? <HiddenElementsPanel {...place} closing={presence.closing} onClosed={presence.onClosed} /> : null;
 }
 
-function HiddenElementsPanel({ tabId, right, left, top, closing, onClosed }: Place & { closing: boolean; onClosed: () => void }) {
+function HiddenElementsPanel({ tabId, right, left, top, closing, onClosed }: SitePanelPlace & { closing: boolean; onClosed: () => void }) {
   const tab = useTab(tabId);
   const changes = useHiddenElements((s) => s.changes);
   const [listed, setListed] = useState<{ host: string; elements: HiddenElement[] } | null>(null);

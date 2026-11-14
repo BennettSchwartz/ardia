@@ -5,6 +5,7 @@ import { engineProfile, isIncognitoProfile } from "../browser/model";
 import { tabEngine } from "../engines/engines";
 import { webviews } from "../tabs/webviewHandles";
 import { togglePopover } from "../tabs/popoverDismiss";
+import { closeReader, readerState } from "../reader/reader";
 import { isSleeping } from "../tabs/sleepingTabs";
 import { pickerCall } from "./elementPicker";
 import {
@@ -115,6 +116,7 @@ export async function startHidingElement(tabId: string, point: [number, number] 
     return;
   }
   if (point) noteElementPickerFromContextMenu();
+  if (readerState(tabId).active) await closeReader(tabId);
   picking.add(tabId);
   let result: PickResult = null;
   try {
