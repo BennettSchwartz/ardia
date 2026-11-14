@@ -297,8 +297,20 @@
     };
   }
   const playableMedia = (all) => all.find((m) => m.currentSrc || m.srcObject || m.src || m.querySelector("source[src]")) || null;
-  handlers.media = ({ action, seconds }) => {
-    const el = pickMedia() || playableMedia([...document.querySelectorAll("video,audio")]);
+  const pictureInPictureMedia = (root) => {
+    let el = root.pictureInPictureElement || null;
+    while (el?.shadowRoot?.pictureInPictureElement) el = el.shadowRoot.pictureInPictureElement;
+    return el;
+  };
+  const mediaCommandTarget = (action, inPictureInPicture, pick) => {
+    if (action !== "seekPictureInPictureBy") return { action, el: pick() };
+    if (!inPictureInPicture) return null;
+    return { action: "seekBy", el: typeof inPictureInPicture.currentTime === "number" ? inPictureInPicture : null };
+  };
+  handlers.media = ({ action: asked, seconds }) => {
+    const target = mediaCommandTarget(asked, pictureInPictureMedia(document), () => pickMedia() || playableMedia([...document.querySelectorAll("video,audio")]));
+    if (!target) return;
+    const { action, el } = target;
     const call = (name, details) => {
       const h = actions.get(name);
       if (!h) return false;
