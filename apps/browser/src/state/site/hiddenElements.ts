@@ -5,6 +5,7 @@ import { engineProfile, isIncognitoProfile } from "../browser/model";
 import { tabEngine } from "../engines/engines";
 import { webviews } from "../tabs/webviewHandles";
 import { togglePopover } from "../tabs/popoverDismiss";
+import { isSleeping } from "../tabs/sleepingTabs";
 import { pickerCall } from "./elementPicker";
 import {
   noteElementHidden,
@@ -154,13 +155,15 @@ function unhideInOpenTabs(profile: string, elements: HiddenElement[]) {
   }
 }
 
+const savedProfileOf = (profile: string) => (isIncognitoProfile(profile) ? profile.slice(profile.indexOf("@") + 1) : profile);
+
 function reloadCoveredTabs(profile: string, restored: HiddenElement[]) {
   const s = store();
+  const saved = savedProfileOf(profile);
   for (const [tabId, tab] of Object.entries(s.tabs)) {
     const host = hidingHost(tab.url);
-    const tabProfile = engineProfile(s, tab.profileId);
-    const sameProfile = tabProfile === profile || (isIncognitoProfile(tabProfile) && tabProfile.endsWith(`@${profile}`));
-    if (host && sameProfile && restored.some((e) => coversHost(e.host, host))) void webviews.get(tabId)?.reload();
+    const sameProfile = savedProfileOf(engineProfile(s, tab.profileId)) === saved;
+    if (host && sameProfile && !isSleeping(tabId) && restored.some((e) => coversHost(e.host, host))) void webviews.get(tabId)?.reload();
   }
 }
 

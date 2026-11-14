@@ -79,14 +79,22 @@ if (!window[KEY]) {
   };
   const hidingSheet = new CSSStyleSheet();
   const rules = new Set();
+  const KEEP_MS = 1000;
+  let keeper = 0;
+  const ensure = () => {
+    if (rules.size && !document.adoptedStyleSheets.includes(hidingSheet)) adopt(hidingSheet, true);
+  };
   const writeRules = () => {
     hidingSheet.replaceSync([...rules].map((s) => s + " { display: none !important; }").join("\n"));
     adopt(hidingSheet, rules.size > 0);
+    if (rules.size && !keeper) keeper = setInterval(ensure, KEEP_MS);
+    if (!rules.size && keeper) keeper = clearInterval(keeper) || 0;
   };
   const pickable = (el) => !!el && el.nodeType === 1 && el !== document.documentElement && el !== document.body;
 
   const p = (window[KEY] = {
     session: null,
+    ensure,
     apply(selectors) {
       for (const s of selectors) rules.add(s);
       writeRules();
@@ -242,5 +250,5 @@ if (!window[KEY]) {
 `;
 
 export function pickerCall(op: "start" | "cancel" | "apply" | "unhide", ...args: unknown[]): string {
-  return `${INSTALL}\nPromise.resolve(window[Symbol.for("ardia.elementPicker")].${op}(...${JSON.stringify(args)})).then((v) => post("result", JSON.stringify(v)), () => post("result", "null"));`;
+  return `${INSTALL}\nwindow[Symbol.for("ardia.elementPicker")].ensure?.();\nPromise.resolve(window[Symbol.for("ardia.elementPicker")].${op}(...${JSON.stringify(args)})).then((v) => post("result", JSON.stringify(v)), () => post("result", "null"));`;
 }

@@ -71,6 +71,7 @@ async function check(tabId: string) {
   const tab = useBrowser.getState().tabs[tabId];
   if (!tab || !readable(tab.url)) return;
   const url = tab.url;
+  const pushes = lookPushes;
   const report = await callPage(tabId, readerCheckCall());
   if (!report) return;
   const available = !!report.readerable;
@@ -79,7 +80,7 @@ async function check(tabId: string) {
     counted.set(tabId, url);
     noteReaderCheck(available);
   }
-  settle(tabId, url, report, available);
+  settle(tabId, url, report, available, pushes);
   if (first && !available && useBrowser.getState().tabs[tabId]?.url === url) later(tabId, url);
 }
 
