@@ -116,6 +116,8 @@ if (!window[KEY]) {
     },
     start(point) {
       if (p.session) p.session.finish({ cancelled: true });
+      const focused = document.activeElement;
+      if (focused && (focused.localName === "iframe" || focused.localName === "frame")) focused.blur();
       return new Promise((resolve) => {
         const host = document.createElement("ardia-element-picker");
         host.style.cssText = "all: initial !important; display: block !important; position: fixed !important; inset: 0 !important; pointer-events: none !important; z-index: 2147483647 !important;";
