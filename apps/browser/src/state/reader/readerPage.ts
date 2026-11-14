@@ -30,8 +30,9 @@ if (!window[KEY]) {
     saved: null,
     readTop: 0,
     look: { dark: false, size: 1, font: "serif" },
+    styled: false,
     report(extra) {
-      return Object.assign({ active: this.shown, look: Object.assign({}, this.look) }, extra || {});
+      return Object.assign({ active: this.shown, look: this.styled ? Object.assign({}, this.look) : undefined }, extra || {});
     },
     check(isProbablyReaderable) {
       let readerable = false;
@@ -182,6 +183,7 @@ if (!window[KEY]) {
       next.font = next.font === "sans" ? "sans" : "serif";
       next.dark = !!next.dark;
       this.look = next;
+      this.styled = true;
       if (this.scroller) {
         const theme = next.dark ? "dark" : "light";
         this.scroller.setAttribute("data-theme", theme);

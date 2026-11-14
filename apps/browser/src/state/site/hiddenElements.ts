@@ -54,6 +54,20 @@ export const useHiddenElements = create<{ session: Record<string, string[]>; cha
 
 const changed = () => useHiddenElements.setState((s) => ({ changes: s.changes + 1 }));
 
+const privateWindowOf = (profile: string) => (isIncognitoProfile(profile) ? profile.slice("incognito:".length, profile.indexOf("@")) : null);
+
+export function startHiddenElements() {
+  return useBrowser.subscribe((s, prev) => {
+    if (s.windows === prev.windows) return;
+    const session = useHiddenElements.getState().session;
+    const kept = Object.entries(session).filter(([profile]) => {
+      const windowId = privateWindowOf(profile);
+      return !windowId || !!s.windows[windowId];
+    });
+    if (kept.length !== Object.keys(session).length) useHiddenElements.setState({ session: Object.fromEntries(kept) });
+  });
+}
+
 const store = () => useBrowser.getState();
 
 function pageOf(tabId: string) {

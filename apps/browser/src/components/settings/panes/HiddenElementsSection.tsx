@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../../ui";
 import { Favicon } from "../../favicon/Favicon";
 import { Group, ProfilePicker, Row, SectionHeader, useSettingsProfile } from "../Form";
+import { useProfiles } from "../../../state/browser/hooks";
 import { currentEngineProfile } from "../../../state/browser/current";
 import { hiddenElementTitle, profileHiddenElements, restoreHiddenElements, useHiddenElements, type HiddenElement } from "../../../state/site/hiddenElements";
 
@@ -11,6 +12,7 @@ export function HiddenElementsSection() {
   const [selected, setSelected] = useSettingsProfile();
   const profile = currentEngineProfile(selected);
   const changes = useHiddenElements((s) => s.changes);
+  const severalProfiles = useProfiles().length > 1;
   const [elements, setElements] = useState<HiddenElement[] | null>(null);
   useEffect(() => {
     let live = true;
@@ -24,31 +26,33 @@ export function HiddenElementsSection() {
   const byHost = new Map<string, HiddenElement[]>();
   for (const e of elements ?? []) byHost.set(e.host, [...(byHost.get(e.host) ?? []), e]);
   const hosts = [...byHost.keys()].sort();
-  if (!hosts.length) return null;
+  if (!hosts.length && !severalProfiles) return null;
   return (
     <>
       <SectionHeader
         title="Hidden elements"
-        description="Hidden with View › Hide Element… (⇧⌘H). They stay hidden on every visit, subdomains included."
+        description={hosts.length ? "Hidden with View › Hide Element… (⇧⌘H). They stay hidden on every visit, subdomains included." : "Nothing hidden in this profile."}
         action={<ProfilePicker value={selected} onChange={setSelected} />}
       />
-      <Group>
-        {hosts.map((host) => {
-          const list = byHost.get(host)!;
-          const titles = list.slice(0, SHOWN_TITLES).map((e) => hiddenElementTitle(e.selector));
-          const more = list.length - titles.length;
-          return (
-            <Row
-              key={host}
-              icon={<Favicon url={`https://${host}`} />}
-              title={host}
-              description={`${list.length} element${list.length === 1 ? "" : "s"}: ${titles.join(", ")}${more > 0 ? ` and ${more} more` : ""}`}
-            >
-              <Button title="Show Again" onPress={() => void restoreHiddenElements(profile, list)} />
-            </Row>
-          );
-        })}
-      </Group>
+      {hosts.length > 0 && (
+        <Group>
+          {hosts.map((host) => {
+            const list = byHost.get(host)!;
+            const titles = list.slice(0, SHOWN_TITLES).map((e) => hiddenElementTitle(e.selector));
+            const more = list.length - titles.length;
+            return (
+              <Row
+                key={host}
+                icon={<Favicon url={`https://${host}`} />}
+                title={host}
+                description={`${list.length} element${list.length === 1 ? "" : "s"}: ${titles.join(", ")}${more > 0 ? ` and ${more} more` : ""}`}
+              >
+                <Button title="Show Again" onPress={() => void restoreHiddenElements(profile, list)} />
+              </Row>
+            );
+          })}
+        </Group>
+      )}
     </>
   );
 }
