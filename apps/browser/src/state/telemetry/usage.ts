@@ -34,11 +34,14 @@ import { takeStripHoverCardCounts } from "./stripHoverCards";
 import { takeLittleArdiaEscapeCloses } from "./littleArdiaEscapes";
 import { takeLiveCompletedTabsClosed } from "./liveCompletedTabs";
 import { takeLiveHideCounts } from "./liveHides";
+import { takeHiddenElementCounts } from "./hiddenElementCounts";
 import { takeTidyTabsCounts } from "./tidyTabsCounts";
 import { airTrafficSnapshot, takeAirTrafficCounts } from "./airTrafficCounts";
 import { takeCliCounts } from "./cliCounts";
 import { keptTabsAdded } from "./keptTabs";
 import { takeTabStripCounts } from "./tabStripCounts";
+import { takeMinimalismCounts } from "./minimalismCounts";
+import { takeReaderCounts } from "./readerCounts";
 
 const HOUR_MS = 60 * 60_000;
 const FIRST_MEMORY_SAMPLE_MS = 10 * 60_000;
@@ -57,8 +60,11 @@ function emitCounts() {
   if (Object.values(counts).some(Boolean) || tornOffKept > 0 || Object.values(tabSleeps).some(Boolean) || Object.values(syncCodes).some(Boolean) || Object.values(stuckDrags).some(Boolean) || Object.values(escapeCloses).some(Boolean) || Object.values(liveHides).some(Boolean) || Object.values(tidyTabs).some(Boolean) || Object.values(tabStrip).some(Boolean) || Object.keys(webKitFaults).length || Object.values(airTraffic).some(Boolean) || Object.values(cliCounts).some(Boolean) || Object.values(externalAppRequests).some(Boolean) || urlCopies.url_copies || configProblemToasts.config_problem_toasts || configProblemToasts.config_problem_toast_dismissals || stripHoverCards.tab_strip_hover_cards || liveCompletedTabsClosed || snapshots.count || switcherOpensInWebKit || autoPictureInPictureNothingPlaying || backToTab.chromium || backToTab.webkit || clickSkips.back || clickSkips.ahead) {
     capture("usage_counts", {
       tabs_opened: counts.tabs,
+      ...takeMinimalismCounts(),
+      ...takeReaderCounts(),
       windows_opened: counts.windows,
       full_screens_entered: counts.fullScreens,
+      ...takeHiddenElementCounts(),
       sidebar_peeks: counts.sidebarPeeks,
       sidebar_peek_bounces: counts.sidebarPeekBounces,
       cli_tab_edits: counts.cliTabEdits, cli_group_edits: counts.cliGroupEdits, cli_edit_failures: counts.cliEditFailures, ...cliCounts,
