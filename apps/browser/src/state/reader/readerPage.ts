@@ -1,7 +1,7 @@
 import { READABILITY, READERABLE } from "./readabilitySource";
-import { READER_FONT_STACKS, READER_SHEET, READER_SIZES } from "./tokens";
+import { READER_FONT_STACKS, READER_FONTS, READER_SHEET, READER_SIZES } from "./tokens";
 
-export type ReaderLook = { dark: boolean; size: number; font: "serif" | "sans" };
+export type ReaderLook = { dark: boolean; size: number; font: (typeof READER_FONTS)[number] };
 export type ReaderReport = { active: boolean; readerable?: boolean; noArticle?: boolean; look?: ReaderLook };
 
 const INSTALL = String.raw`
