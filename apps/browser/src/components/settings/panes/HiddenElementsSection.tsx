@@ -13,18 +13,18 @@ export function HiddenElementsSection() {
   const profile = currentEngineProfile(selected);
   const changes = useHiddenElements((s) => s.changes);
   const severalProfiles = useProfiles().length > 1;
-  const [elements, setElements] = useState<HiddenElement[] | null>(null);
+  const [loaded, setLoaded] = useState<{ profile: string; elements: HiddenElement[] } | null>(null);
   useEffect(() => {
     let live = true;
     void profileHiddenElements(profile)
       .catch((): HiddenElement[] => [])
-      .then((found) => live && setElements(found));
+      .then((found) => live && setLoaded({ profile, elements: found }));
     return () => {
       live = false;
     };
   }, [profile, changes]);
   const byHost = new Map<string, HiddenElement[]>();
-  for (const e of elements ?? []) byHost.set(e.host, [...(byHost.get(e.host) ?? []), e]);
+  for (const e of loaded?.elements ?? []) byHost.set(e.host, [...(byHost.get(e.host) ?? []), e]);
   const hosts = [...byHost.keys()].sort();
   if (!hosts.length && !severalProfiles) return null;
   return (
@@ -47,7 +47,7 @@ export function HiddenElementsSection() {
                 title={host}
                 description={`${list.length} element${list.length === 1 ? "" : "s"}: ${titles.join(", ")}${more > 0 ? ` and ${more} more` : ""}`}
               >
-                <Button title="Show Again" onPress={() => void restoreHiddenElements(profile, list)} />
+                <Button title="Show Again" onPress={() => loaded && void restoreHiddenElements(loaded.profile, list)} />
               </Row>
             );
           })}
