@@ -136,6 +136,7 @@
   const session = navigator.mediaSession;
   const actions = new Map();
   let positionState = null;
+  let positionStateAt = 0;
   const listening = new WeakSet();
   const LISTEN_TRIES = 20;
   const playingUnmuted = (m) => !m.paused && !m.ended && !m.muted && m.volume > 0;
@@ -291,9 +292,11 @@
     };
     const setPositionState = proto.setPositionState;
     proto.setPositionState = function (state) {
+      const result = setPositionState.apply(this, arguments);
       positionState = state || null;
+      positionStateAt = performance.now();
       reportNowPlaying();
-      return setPositionState.apply(this, arguments);
+      return result;
     };
   }
   const playableMedia = (all) => all.find((m) => m.currentSrc || m.srcObject || m.src || m.querySelector("source[src]")) || null;
@@ -307,11 +310,19 @@
     if (!inPictureInPicture) return null;
     return { action: "seekBy", el: typeof inPictureInPicture.currentTime === "number" ? inPictureInPicture : null };
   };
-  const seekByCall = (seconds, el, registered) => {
+  const sessionTimeline = (state, elapsedSeconds, advancing) => {
+    if (typeof state?.duration !== "number") return null;
+    const rate = advancing ? state.playbackRate ?? 1 : 0;
+    return { position: Math.max(0, Math.min(state.duration, (state.position ?? 0) + elapsedSeconds * rate)), duration: state.duration };
+  };
+  const seekByCall = (seconds, el, registered, timeline) => {
     if (registered(seconds >= 0 ? "seekforward" : "seekbackward")) return seconds >= 0 ? ["seekforward", { seekOffset: seconds }] : ["seekbackward", { seekOffset: -seconds }];
-    if (!el) return null;
-    const seekTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + seconds));
-    return [registered("seekto") ? "seekto" : "currentTime", { seekTime }];
+    const within = (position, duration) => ({ seekTime: Math.max(0, Math.min(duration || Infinity, position + seconds)) });
+    if (registered("seekto")) {
+      const at = timeline || (el && { position: el.currentTime, duration: el.duration });
+      return at ? ["seekto", within(at.position, at.duration)] : null;
+    }
+    return el ? ["currentTime", within(el.currentTime, el.duration)] : null;
   };
   handlers.media = ({ action: asked, seconds }) => {
     const target = mediaCommandTarget(asked, pictureInPictureMedia(document), () => pickMedia() || playableMedia([...document.querySelectorAll("video,audio")]));
@@ -342,7 +353,9 @@
         call("previoustrack");
         break;
       case "seekBy": {
-        const [how, details] = seekByCall(seconds, el, (name) => actions.has(name)) || [];
+        const advancing = session?.playbackState === "playing" || (session?.playbackState !== "paused" && !el?.paused);
+        const timeline = sessionTimeline(positionState, (performance.now() - positionStateAt) / 1000, advancing);
+        const [how, details] = seekByCall(seconds, el, (name) => actions.has(name), timeline) || [];
         if (how === "currentTime") el.currentTime = details.seekTime;
         else if (how) call(how, details);
         break;

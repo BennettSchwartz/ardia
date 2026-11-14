@@ -3,8 +3,8 @@ const HELP = `Click to skip in the video Picture in Picture window (issue #1735)
 left of the video skips back 10 s, on the right ahead 10 s, the centre column (the play button's) does nothing, a drag
 moves the window without seeking (also one that only passes 3 pt at the release), quick repeated clicks skip once each,
 the skip moves the video in the window even while it is paused and another one plays, a page's Media Session seek
-handlers get the skip as they get Chrome's own button, a stashed window never seeks, and
-Chrome's close button still closes.
+handlers get the skip as they get Chrome's own button (seekto on the timeline the page reports), a stashed window
+never seeks, and Chrome's close button still closes.
 
   node apps/browser/scripts/pip-click-seek-test.mjs <Debug app> [--out DIR] [--keep] [--expect-no-seek]
   node apps/browser/scripts/pip-click-seek-test.mjs --attach [--out DIR] [--expect-no-seek]
@@ -62,12 +62,14 @@ const v = document.getElementById("v"), other = document.getElementById("other")
 window.ready = new Promise((r) => v.addEventListener("loadedmetadata", r, { once: true })).then(() => { v.currentTime = 60; return v.play(); }).then(() => "ok", (e) => String(e));
 window.sample = () => ({ time: v.currentTime, at: performance.now(), paused: v.paused, pip: document.pictureInPictureElement === v, otherTime: other.currentTime, otherPaused: other.paused });
 window.seekCalls = [];
-window.handleSeeks = (names) => {
+window.handleSeeks = (names, timelineOffset = 0) => {
   for (const name of ["seekbackward", "seekforward", "seekto"])
     navigator.mediaSession.setActionHandler(name, names.includes(name) ? (d) => {
       seekCalls.push(name);
-      v.currentTime = name === "seekto" ? d.seekTime : v.currentTime + (name === "seekforward" ? 1 : -1) * (d.seekOffset || 10);
+      v.currentTime = name === "seekto" ? d.seekTime - timelineOffset : v.currentTime + (name === "seekforward" ? 1 : -1) * (d.seekOffset || 10);
     } : null);
+  if (timelineOffset) navigator.mediaSession.setPositionState({ duration: v.duration + timelineOffset, position: v.currentTime + timelineOffset, playbackRate: 1 });
+  else navigator.mediaSession.setPositionState();
   seekCalls.length = 0;
   return "ok";
 };
@@ -249,6 +251,12 @@ if (ok) {
   await page.eval('window.handleSeeks(["seekto"])');
   await sleep(300);
   await seekCheck("left-zone click on a page with only a seekto handler", click(left, midY), -10, async () => {
+    const calls = await handled();
+    return calls === (before ? "[]" : '["seekto"]') ? null : `the page's handler got ${calls}`;
+  });
+  await page.eval('window.handleSeeks(["seekto"], 600)');
+  await sleep(2000);
+  await seekCheck("right-zone click on a seekto page whose timeline runs 600 s ahead of the video, reported 2 s ago", click(right, midY), 10, async () => {
     const calls = await handled();
     return calls === (before ? "[]" : '["seekto"]') ? null : `the page's handler got ${calls}`;
   });
