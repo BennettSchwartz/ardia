@@ -21,6 +21,7 @@ import {
   toggleSiteMute,
 } from "../browser/actions";
 import { bookmarkAllTabs, bookmarkTab } from "../bookmarks/actions";
+import { isBookmarklet, runBookmarklet } from "../bookmarks/bookmarklets";
 import { exportBookmarksFromWindow } from "../bookmarks/exportHtml";
 import { requestClearData } from "../profiles/clearDataRequest";
 import { showHistory } from "../history/showHistory";
@@ -36,7 +37,7 @@ import { addFolderToSidebar, restoreArcFolders } from "../bookmarks/bookmarkGrou
 import { withLivePage } from "../tabs/livePage";
 import { webviews } from "../../platform/webviews";
 import { togglePageEngine } from "../engines/actions";
-import { toggleReader } from "../reader/reader";
+import { runReaderCommand } from "../reader/reader";
 import { goBack, goForward } from "../tabs/navigation";
 import { awaitsFirstPage } from "../tabs/pendingAddress";
 import { openSplitPane } from "../splits/actions";
@@ -152,7 +153,7 @@ export function runCommand({ command, arg, windowId: requested }: CommandEvent, 
   const page = tab?.url ? tab : undefined;
   const web = tabId ? webviews.get(tabId) : undefined;
   const ui = s.windowUi[windowId];
-  if (page && runHidingCommand(command, page.id)) return;
+  if (page && (runHidingCommand(command, page.id) || runReaderCommand(command, page.id))) return;
   if (!targeted && runSidebarCommand(command, arg, windowId)) return;
 
   switch (command) {
@@ -299,12 +300,11 @@ export function runCommand({ command, arg, windowId: requested }: CommandEvent, 
       return page && arg ? void addBookmarkToFolder(windowId, page.id, arg) : undefined;
     case "openBookmark": {
       const node = arg ? s.bookmarks.nodes[arg] : undefined;
+      if (node?.kind === "url" && isBookmarklet(node.url)) return void runBookmarklet(node.url, windowId, tabId);
       return node?.kind === "url" && tab ? s.navigate(tab.id, node.url) : undefined;
     }
     case "togglePageEngine":
       return void (tabId && togglePageEngine(tabId));
-    case "toggleReader":
-      return void (page && toggleReader(page.id));
     case "toggleMute":
       return page ? (arg === "site" ? toggleSiteMute(page.id) : toggleMute(page.id)) : undefined;
     case "downloads":

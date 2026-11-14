@@ -9,7 +9,7 @@ export const NEW_TAB_BAR_POLICY = {
   closeTabKeyOnlyDismissesBar: true,
   dismissOnWindowDeactivation: true,
   showOnceOverNewEmptyWindow: true,
-  showOnLaunch: false,
+  showOnLaunch: true,
   closingLastTabLeavesEmptyWindow: true,
 };
 

@@ -97,6 +97,12 @@ function later(tabId: string, url: string) {
   );
 }
 
+export function runReaderCommand(command: string, tabId: string): boolean {
+  if (command !== "toggleReader") return false;
+  void toggleReader(tabId);
+  return true;
+}
+
 export async function toggleReader(tabId: string) {
   const s = useBrowser.getState();
   const tab = s.tabs[tabId];
