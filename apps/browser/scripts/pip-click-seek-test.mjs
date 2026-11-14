@@ -3,8 +3,9 @@ const HELP = `Click to skip in the video Picture in Picture window (issue #1735)
 left of the video skips back 10 s, on the right ahead 10 s, the centre column (the play button's) does nothing, a drag
 moves the window without seeking (also one that only passes 3 pt at the release), quick repeated clicks skip once each,
 the skip moves the video in the window even while it is paused and another one plays, a page's Media Session seek
-handlers get the skip as they get Chrome's own button (seekto on the timeline the page reports), a stashed window
-never seeks, and Chrome's close button still closes.
+handlers get the skip as they get Chrome's own button (seekto on the timeline the page reports, kept current through
+repeated clicks and a pause though the page reports it once, also for a video in a closed shadow root), a stashed
+window never seeks, and Chrome's close button still closes.
 
   node apps/browser/scripts/pip-click-seek-test.mjs <Debug app> [--out DIR] [--keep] [--expect-no-seek]
   node apps/browser/scripts/pip-click-seek-test.mjs --attach [--out DIR] [--expect-no-seek]
@@ -57,22 +58,36 @@ if (!existsSync(clip))
 writeFileSync(join(media, "index.html"), `<!doctype html><html><head><title>Seek</title><style>html,body{margin:0;background:#000}</style></head><body>
 <video id="v" src="clip.mp4" muted playsinline style="width:640px;height:360px"></video>
 <video id="other" src="clip.mp4" muted playsinline preload="auto" style="width:320px;height:180px"></video>
+<div id="host"></div>
 <script>
-const v = document.getElementById("v"), other = document.getElementById("other");
+const v = document.getElementById("v"), other = document.getElementById("other"), host = document.getElementById("host");
+const hidden = Object.assign(document.createElement("video"), { src: "clip.mp4", muted: true, playsInline: true, preload: "auto" });
+host.attachShadow({ mode: "closed" }).append(hidden);
+let subject = v;
 window.ready = new Promise((r) => v.addEventListener("loadedmetadata", r, { once: true })).then(() => { v.currentTime = 60; return v.play(); }).then(() => "ok", (e) => String(e));
-window.sample = () => ({ time: v.currentTime, at: performance.now(), paused: v.paused, pip: document.pictureInPictureElement === v, otherTime: other.currentTime, otherPaused: other.paused });
+window.sample = () => ({ time: subject.currentTime, at: performance.now(), paused: subject.paused, pip: document.pictureInPictureElement === (subject === v ? v : host), otherTime: other.currentTime, otherPaused: other.paused });
 window.seekCalls = [];
 window.handleSeeks = (names, timelineOffset = 0) => {
   for (const name of ["seekbackward", "seekforward", "seekto"])
     navigator.mediaSession.setActionHandler(name, names.includes(name) ? (d) => {
       seekCalls.push(name);
-      v.currentTime = name === "seekto" ? d.seekTime - timelineOffset : v.currentTime + (name === "seekforward" ? 1 : -1) * (d.seekOffset || 10);
+      subject.currentTime = name === "seekto" ? d.seekTime - timelineOffset : subject.currentTime + (name === "seekforward" ? 1 : -1) * (d.seekOffset || 10);
     } : null);
-  if (timelineOffset) navigator.mediaSession.setPositionState({ duration: v.duration + timelineOffset, position: v.currentTime + timelineOffset, playbackRate: 1 });
+  if (timelineOffset) navigator.mediaSession.setPositionState({ duration: subject.duration + timelineOffset, position: subject.currentTime + timelineOffset, playbackRate: 1 });
   else navigator.mediaSession.setPositionState();
   seekCalls.length = 0;
   return "ok";
 };
+window.pausePip = (paused, declared) => (paused ? Promise.resolve(subject.pause()) : subject.play()).then(() => {
+  if (declared) navigator.mediaSession.playbackState = paused ? "paused" : "playing";
+  return "ok";
+}, (e) => String(e));
+window.hideInShadowRoot = () => hidden.requestPictureInPicture().then(() => {
+  v.pause();
+  subject = hidden;
+  hidden.currentTime = 60;
+  return hidden.play();
+}).then(() => "ok", (e) => String(e));
 window.playOther = (playing) => (playing ? Promise.resolve(v.pause()).then(() => { other.currentTime = 20; return other.play(); }) : Promise.resolve(other.pause()).then(() => v.play())).then(() => "ok", (e) => String(e));
 </script></body></html>`);
 
@@ -254,14 +269,54 @@ if (ok) {
     const calls = await handled();
     return calls === (before ? "[]" : '["seekto"]') ? null : `the page's handler got ${calls}`;
   });
-  await page.eval('window.handleSeeks(["seekto"], 600)');
-  await sleep(2000);
-  await seekCheck("right-zone click on a seekto page whose timeline runs 600 s ahead of the video, reported 2 s ago", click(right, midY), 10, async () => {
-    const calls = await handled();
-    return calls === (before ? "[]" : '["seekto"]') ? null : `the page's handler got ${calls}`;
+  const seektoOnly = (count) => async () => {
+    const calls = await handled(), want = JSON.stringify(Array(before ? 0 : count).fill("seekto"));
+    return calls === want ? null : `the page's handlers got ${calls}`;
+  };
+  const reportedOnce = async (where, declared) => {
+    await page.eval('window.handleSeeks(["seekto"], 600)');
+    await sleep(2000);
+    await seekCheck(`${where}: right-zone click on a seekto page whose timeline runs 600 s ahead, reported once, 2 s ago`, click(right, midY), 10, seektoOnly(1));
+    await seekCheck(`${where}: double-click, with no new report between the clicks`, click(right, midY, 2), 20, seektoOnly(2));
+    await r.check(`${where}: right-zone click with the video paused after playing on`, async () => {
+      if ((await page.eval(`window.pausePip(true, ${declared})`)) !== "ok") throw new Error("the video didn't pause");
+      await sleep(400);
+      const a = await sample();
+      await mouse(click(right, midY));
+      await sleep(700);
+      const b = await sample();
+      if ((await page.eval(`window.pausePip(false, ${declared})`)) !== "ok") throw new Error("the video didn't resume");
+      await sleep(400);
+      const moved = b.time - a.time, calls = await handled();
+      const said = `the paused video moved ${moved >= 0 ? "+" : ""}${moved.toFixed(1)} s, the page's handler got ${calls}`;
+      if (!a.paused || !b.pip) throw new Error(`setup: ${JSON.stringify(a)}`);
+      if (Math.abs(moved - (before ? 0 : 10)) > 1 || calls !== (before ? "[]" : '["seekto"]')) throw new Error(said);
+      return said;
+    });
+    await seekCheck(`${where}: left-zone click once it plays again`, click(left, midY), -10, seektoOnly(1));
+    await page.eval('window.handleSeeks(["seekforward", "seekto"], 600)');
+    await sleep(300);
+    await seekCheck(`${where}: right-zone click through seekforward`, click(right, midY), 10, async () => {
+      const calls = await handled();
+      return calls === (before ? "[]" : '["seekforward"]') ? null : `the page's handlers got ${calls}`;
+    });
+    await seekCheck(`${where}: left-zone click through seekto after that`, click(left, midY), -10, seektoOnly(1));
+    await page.eval("window.handleSeeks([])");
+    await sleep(300);
+  };
+  await reportedOnce("video in reach", false);
+  await r.check("move Picture in Picture to a video inside a closed shadow root", async () => {
+    const entered = await page.eval("window.hideInShadowRoot()", { userGesture: true });
+    if (entered !== "ok") throw new Error(`no PiP: ${entered}`);
+    await until("the styled PiP window", shown, 8000);
+    await sleep(800);
+    await pip(`frame:${home}`);
+    await sleep(400);
+    const s = await sample();
+    if (!s.pip || s.paused) throw new Error(`the hidden video: ${JSON.stringify(s)}`);
+    return "playing in the window";
   });
-  await page.eval("window.handleSeeks([])");
-  await sleep(300);
+  await reportedOnce("video in a closed shadow root", true);
   await pip("stash");
   await sleep(900);
   await seekCheck("click on a stashed window", click(left, midY), 0, async () => (await shown())?.stashed ? null : "the window wasn't stashed");
