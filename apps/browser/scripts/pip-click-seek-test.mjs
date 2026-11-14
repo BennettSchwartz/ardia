@@ -62,9 +62,9 @@ const v = document.getElementById("v"), other = document.getElementById("other")
 window.ready = new Promise((r) => v.addEventListener("loadedmetadata", r, { once: true })).then(() => { v.currentTime = 60; return v.play(); }).then(() => "ok", (e) => String(e));
 window.sample = () => ({ time: v.currentTime, at: performance.now(), paused: v.paused, pip: document.pictureInPictureElement === v, otherTime: other.currentTime, otherPaused: other.paused });
 window.seekCalls = [];
-window.handleSeeks = (on) => {
+window.handleSeeks = (names) => {
   for (const name of ["seekbackward", "seekforward", "seekto"])
-    navigator.mediaSession.setActionHandler(name, on ? (d) => {
+    navigator.mediaSession.setActionHandler(name, names.includes(name) ? (d) => {
       seekCalls.push(name);
       v.currentTime = name === "seekto" ? d.seekTime : v.currentTime + (name === "seekforward" ? 1 : -1) * (d.seekOffset || 10);
     } : null);
@@ -235,7 +235,7 @@ if (ok) {
     return said;
   });
   const handled = async () => (await page.eval("JSON.stringify(window.seekCalls.splice(0))"));
-  await page.eval("window.handleSeeks(true)");
+  await page.eval('window.handleSeeks(["seekbackward", "seekforward", "seekto"])');
   await sleep(300);
   await seekCheck("right-zone click on a page with Media Session seek handlers", click(right, midY), 10, async () => {
     const calls = await handled();
@@ -246,7 +246,13 @@ if (ok) {
     r.say(`  Chrome's button called ${calls}`);
     return JSON.parse(calls).length === 1 ? null : `the page's handlers got ${calls}`;
   }, { byChrome: true });
-  await page.eval("window.handleSeeks(false)");
+  await page.eval('window.handleSeeks(["seekto"])');
+  await sleep(300);
+  await seekCheck("left-zone click on a page with only a seekto handler", click(left, midY), -10, async () => {
+    const calls = await handled();
+    return calls === (before ? "[]" : '["seekto"]') ? null : `the page's handler got ${calls}`;
+  });
+  await page.eval("window.handleSeeks([])");
   await sleep(300);
   await pip("stash");
   await sleep(900);

@@ -11,7 +11,10 @@ const define = (name, pattern) => {
 const pictureInPictureMedia = define("pictureInPictureMedia", /const pictureInPictureMedia = (\(root\) => \{[\s\S]*?\n {2}\});\n/);
 const mediaCommandTarget = define("mediaCommandTarget", /const mediaCommandTarget = (\(action, inPictureInPicture, pick\) => \{[\s\S]*?\n {2}\});\n/);
 
+const seekByCall = define("seekByCall", /const seekByCall = (\(seconds, el, registered\) => \{[\s\S]*?\n {2}\});\n/);
+
 const video = (currentTime) => ({ currentTime });
+const page = (...names) => (name) => names.includes(name);
 
 test("a Picture in Picture skip seeks the video in the window, not the one the page is playing", () => {
   const inWindow = video(60), playing = video(20);
@@ -44,4 +47,26 @@ test("a closed shadow root hides the video: the skip seeks no element, neither t
   assert.equal(pictureInPictureMedia({ pictureInPictureElement: host }), host);
   assert.deepEqual(mediaCommandTarget("seekPictureInPictureBy", host, () => (picked++, video(20))), { action: "seekBy", el: null });
   assert.equal(picked, 0);
+});
+
+test("a skip goes to the page's relative seek handler for its direction when it has one", () => {
+  assert.deepEqual(seekByCall(10, video(60), page("seekforward", "seekbackward", "seekto")), ["seekforward", { seekOffset: 10 }]);
+  assert.deepEqual(seekByCall(-10, video(60), page("seekforward", "seekbackward", "seekto")), ["seekbackward", { seekOffset: 10 }]);
+  assert.deepEqual(seekByCall(10, null, page("seekforward")), ["seekforward", { seekOffset: 10 }]);
+});
+
+test("a page with only a seekto handler is asked to seek to the new time instead of having currentTime set behind its back", () => {
+  assert.deepEqual(seekByCall(10, video(60), page("seekto")), ["seekto", { seekTime: 70 }]);
+  assert.deepEqual(seekByCall(-10, video(60), page("seekto", "seekforward")), ["seekto", { seekTime: 50 }]);
+});
+
+test("with no handler the element is seeked, kept inside the media", () => {
+  assert.deepEqual(seekByCall(10, video(60), page()), ["currentTime", { seekTime: 70 }]);
+  assert.deepEqual(seekByCall(-10, video(4), page()), ["currentTime", { seekTime: 0 }]);
+  assert.deepEqual(seekByCall(10, { currentTime: 175, duration: 180 }, page()), ["currentTime", { seekTime: 180 }]);
+});
+
+test("with no element and no relative handler nothing is seeked: the current time is unknown, so seekto gets no guess", () => {
+  assert.equal(seekByCall(10, null, page("seekto")), null);
+  assert.equal(seekByCall(-10, null, page("seekforward")), null);
 });

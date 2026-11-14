@@ -307,6 +307,12 @@
     if (!inPictureInPicture) return null;
     return { action: "seekBy", el: typeof inPictureInPicture.currentTime === "number" ? inPictureInPicture : null };
   };
+  const seekByCall = (seconds, el, registered) => {
+    if (registered(seconds >= 0 ? "seekforward" : "seekbackward")) return seconds >= 0 ? ["seekforward", { seekOffset: seconds }] : ["seekbackward", { seekOffset: -seconds }];
+    if (!el) return null;
+    const seekTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + seconds));
+    return [registered("seekto") ? "seekto" : "currentTime", { seekTime }];
+  };
   handlers.media = ({ action: asked, seconds }) => {
     const target = mediaCommandTarget(asked, pictureInPictureMedia(document), () => pickMedia() || playableMedia([...document.querySelectorAll("video,audio")]));
     if (!target) return;
@@ -336,8 +342,9 @@
         call("previoustrack");
         break;
       case "seekBy": {
-        const handled = seconds >= 0 ? call("seekforward", { seekOffset: seconds }) : call("seekbackward", { seekOffset: -seconds });
-        if (!handled && el) el.currentTime = Math.max(0, Math.min(el.duration || Infinity, el.currentTime + seconds));
+        const [how, details] = seekByCall(seconds, el, (name) => actions.has(name)) || [];
+        if (how === "currentTime") el.currentTime = details.seekTime;
+        else if (how) call(how, details);
         break;
       }
       case "seekTo":
