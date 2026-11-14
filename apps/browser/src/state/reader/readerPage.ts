@@ -11,6 +11,7 @@ if (!window[KEY]) {
   const FONTS = ${JSON.stringify({ serif: READER_FONT_STACKS.serif, sans: READER_FONT_STACKS.sans })};
   const SHEET = ${JSON.stringify(READER_SHEET)};
   const MAX_MARKED = 40000;
+  const ICON_MAX = 48;
   const UNMARKED = /^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE|SOURCE|TRACK|PARAM|BR|WBR|META|LINK)$/;
   const SCREEN_READER_ONLY = /(^|[\s_-])(sr-only|visually-?hidden|screen-reader-text|a11y-hidden|offscreen)($|[\s_-])/i;
   const CLUTTER = "script,style,link,meta,noscript,template,button,input,select,textarea,nav,aside,dialog,[hidden],[aria-hidden=true]";
@@ -55,6 +56,11 @@ if (!window[KEY]) {
         const el = live[i], twin = copy[i];
         if (hiddenRoot && hiddenRoot.contains(el)) continue;
         if (el.tagName === "IMG") {
+          const box = el.getBoundingClientRect();
+          if (box.width > 0 && box.width < ICON_MAX && box.height < ICON_MAX && !(el.parentElement?.textContent || "").trim()) {
+            gone.push(twin);
+            continue;
+          }
           const src = el.currentSrc;
           if (src && !src.startsWith("data:") && el.naturalWidth > 2) {
             twin.setAttribute("src", src);

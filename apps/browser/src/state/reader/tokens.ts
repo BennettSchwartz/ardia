@@ -37,6 +37,8 @@ const roles = (palette: typeof LIGHT) =>
 
 const BAR_FADE = "0.15s";
 
+export const READER_GROUND = { light: LIGHT.ground, dark: DARK.ground } as const;
+
 export const READER_SHEET = [
   ":host{all:initial !important;display:block !important;position:fixed !important;inset:0 !important;width:auto !important;height:auto !important;",
   "max-width:none !important;max-height:none !important;margin:0 !important;padding:0 !important;border:0 !important;overflow:hidden !important;",
