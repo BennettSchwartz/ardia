@@ -154,7 +154,17 @@ function unhideInOpenTabs(profile: string, elements: HiddenElement[]) {
   }
 }
 
-export async function restoreHiddenElements(profile: string, elements: HiddenElement[], { reloadTab }: { reloadTab?: string } = {}) {
+function reloadCoveredTabs(profile: string, restored: HiddenElement[]) {
+  const s = store();
+  for (const [tabId, tab] of Object.entries(s.tabs)) {
+    const host = hidingHost(tab.url);
+    const tabProfile = engineProfile(s, tab.profileId);
+    const sameProfile = tabProfile === profile || (isIncognitoProfile(tabProfile) && tabProfile.endsWith(`@${profile}`));
+    if (host && sameProfile && restored.some((e) => coversHost(e.host, host))) void webviews.get(tabId)?.reload();
+  }
+}
+
+export async function restoreHiddenElements(profile: string, elements: HiddenElement[]) {
   const session = new Set(elements.filter((e) => e.session).map((e) => e.filter));
   const kept = elements.filter((e) => !e.session).map((e) => e.filter);
   if (session.size)
@@ -167,7 +177,7 @@ export async function restoreHiddenElements(profile: string, elements: HiddenEle
     noteHiddenElementWriteFailure();
   }
   changed();
-  if (kept.length && reloadTab) void webviews.get(reloadTab)?.reload();
+  if (kept.length) reloadCoveredTabs(profile, elements.filter((e) => !e.session));
 }
 
 const sessionHidingKey = (s: BrowserState, tabId: string) => {

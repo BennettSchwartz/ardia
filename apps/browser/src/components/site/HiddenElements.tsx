@@ -35,7 +35,7 @@ function HiddenElementsPanel({ tabId, right, left, top, closing, onClosed }: Pla
   const close = () => setPopover(tabId, null);
   const profile = currentEngineProfile(tab.profileId);
   const elements = listed?.elements ?? [];
-  const restore = (which: HiddenElement[]) => void restoreHiddenElements(profile, which, { reloadTab: tabId });
+  const restore = (which: HiddenElement[]) => void restoreHiddenElements(profile, which);
   const hideAnother = () => {
     close();
     void startHidingElement(tabId);
