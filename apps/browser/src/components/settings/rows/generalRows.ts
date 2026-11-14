@@ -141,6 +141,12 @@ export const generalRows = {
           description: "In every window, the tabs slide out of view and come back when you move the pointer to the window's edge. Changing it here resets every window; ⌘S and View › Auto-Hide Tabs hide or show the tabs in one window only.",
           keywords: ["hide tabs", "hide sidebar", "show sidebar", "toggle sidebar", "hide tab bar", "tab strip", "top tabs", "focus mode", "full screen", "zen"],
         },
+        revealTabsOnHover: {
+          title: "Show tabs at the window's edge",
+          description: "While the tabs are hidden, moving the pointer to the window's edge slides them out. Off, they come back only with ⌘S, the Hide Tabs button or View › Auto-Hide Tabs; dragging a tab to the edge still opens them.",
+          keywords: ["hover", "edge", "peek", "reveal", "slide out", "pointer", "mouse", "hidden tabs", "hide sidebar", "zen", "compact", "focus mode"],
+          shown: (settings) => settings.autoHideTabs,
+        },
         sidebarSide: {
           title: "Sidebar position",
           description: "On the left, as in Dia, or on the right, as in Arc. The window buttons stay at the top left.",

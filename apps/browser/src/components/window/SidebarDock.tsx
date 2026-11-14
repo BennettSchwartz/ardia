@@ -5,7 +5,7 @@ import { switchOn } from "../../state/app/switches";
 import { useTheme } from "../ui/theme";
 import { spring, curve } from "../ui/motion";
 import { Panel, reduceMotion, WindowBackdrop, WindowDragRegion } from "../ui";
-import { useSidebarSide, useWindowId } from "../../state/browser/hooks";
+import { useSettings, useSidebarSide, useWindowId } from "../../state/browser/hooks";
 import { useSidebarDockState } from "../../state/windows/hooks";
 import { useToolbarLightsCenter } from "../../state/windows/layout";
 import { Sidebar } from "../sidebar/Sidebar";
@@ -201,8 +201,10 @@ function SidebarDock({
   latestPeek.current = peek;
   useEffect(() => (peek.live ? watchHolds("peek", () => latestPeek.current.recheck()) : undefined), [peek.live]);
   const state = dockState({ open, fullscreen, moving, peekLive: peek.live, peekLeaving: peek.leaving });
-  const latestReveal = useRef({ state, right, windowWidth });
-  latestReveal.current = { state, right, windowWidth };
+  const draggingTab = useTabDrag((d) => d.phase === "tab" && d.windowId === windowId);
+  const reveals = useSettings((s) => s.revealTabsOnHover || !s.autoHideTabs) || draggingTab;
+  const latestReveal = useRef({ state, right, windowWidth, reveals });
+  latestReveal.current = { state, right, windowWidth, reveals };
   const frame = useCardFrame();
   const peekAt = frame.peek;
   const holdWidth = peekHoldWidth(width, peekAt.left);
@@ -212,8 +214,7 @@ function SidebarDock({
   const holding = state === "peeking";
   const shown = shownAs(state);
   useLayoutEffect(() => () => dismissHoverIn(windowId), [windowId, shown]);
-  const watching = watchesEdge(state, moving);
-  const draggingTab = useTabDrag((d) => d.phase === "tab" && d.windowId === windowId);
+  const watching = watchesEdge(state, moving) && (reveals || peeking);
   const nativeHold = edgeWatchWidth(holding, draggingTab, holdWidth, frame.inset);
   useEffect(() => {
     if (!watching) return;
@@ -221,6 +222,7 @@ function SidebarDock({
       if (e.type !== "sidebarEdge" || e.id !== windowId) return;
       const reveal = latestReveal.current;
       if (e.over && !edgeEventReveals(reveal.state, e.point[0], reveal.right, reveal.windowWidth)) return;
+      if (e.over && !reveal.reveals && !peekOnScreen(reveal.state)) return;
       edgeOver.current = e.over;
       if (e.over) latestPeek.current.show();
       else latestPeek.current.hide();
@@ -281,8 +283,8 @@ function SidebarDock({
       )}
       {strip.current && (
         <View
-          pointerEvents={!open && !fullscreen && !edgeStripOverPage(frame.inset) ? "auto" : "none"}
-          onMouseEnter={peek.show}
+          pointerEvents={!open && !fullscreen && reveals && !edgeStripOverPage(frame.inset) ? "auto" : "none"}
+          onMouseEnter={reveals ? peek.show : undefined}
           onMouseLeave={leaveStrip}
           style={{
             position: "absolute",

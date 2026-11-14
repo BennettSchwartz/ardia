@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { Animated, StyleSheet, View, type ViewStyle } from "react-native";
 import { topStripPeekHeld, watchHolds } from "../../state/app/transientUi";
-import { useWindowFullScreen, useWindowId, useWindowProfileId } from "../../state/browser/hooks";
+import { useSettings, useWindowFullScreen, useWindowId, useWindowProfileId } from "../../state/browser/hooks";
 import { beginExternalDrag, endExternalDrag, moveExternalDrag } from "../../state/drag/tabDrag";
 import { lightsCenter, TOP_STRIP_LIGHTS_CENTER } from "../../state/windows/dockMotion";
 import { usePagerPages } from "../../state/windows/profilePager";
@@ -117,7 +117,8 @@ function StripDropHighlight({ left, right }: { left: number; right: number }) {
 export function TopStripPeek({ windowWidth, enabled }: { windowWidth: number; enabled: boolean }) {
   const theme = useTheme();
   const windowId = useWindowId();
-  const { slide, live, show, hide, recheck, cancelPending } = usePeek(enabled, false, () => topStripPeekHeld(windowId), undefined, noteTabStripPeek);
+  const atEdge = useSettings((s) => s.revealTabsOnHover || !s.autoHideTabs);
+  const { slide, live, show, hide, recheck, cancelPending } = usePeek(enabled && atEdge, false, () => topStripPeekHeld(windowId), undefined, noteTabStripPeek);
   const latestRecheck = useRef(recheck);
   latestRecheck.current = recheck;
   useEffect(() => (live ? watchHolds("topStrip", () => latestRecheck.current()) : undefined), [live]);
@@ -137,7 +138,7 @@ export function TopStripPeek({ windowWidth, enabled }: { windowWidth: number; en
   };
   return (
     <>
-      {enabled ? (
+      {enabled && atEdge ? (
         <View
           onMouseEnter={show}
           onMouseLeave={leaveStrip}
