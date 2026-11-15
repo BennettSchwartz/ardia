@@ -42,6 +42,7 @@ REFUSAL_HINTS = {
     "to that URL": "only http, https, data and about:blank pages can be opened",
     "on a tab the ardia command didn't open": "the viewport can be set only on a tab this command opened: `ardia browse open <url>`, then set it there",
     "with that option": "only a width, a height, a scale and mobile can be set",
+    "on a tab that isn't off-screen": "Ardia sets a viewport only on a tab it has taken off-screen, which `ardia browse set viewport <w> <h>` does for a tab this session opened and never showed",
 }
 
 
@@ -78,6 +79,14 @@ class CdpError(BrowseError):
         super().__init__(f"{method}: {message}")
         self.method = method
         self.cdp_message = message
+
+
+class NotFocusable(CdpError):
+    def __init__(self, label: str):
+        BrowseError.__init__(self, f"{label} can't take focus (it's hidden, inert or a wrapper with no field inside). Click it to open "
+                                   "its field, then snapshot -i and use the field that appears", code="not_focusable")
+        self.method = "DOM.focus"
+        self.cdp_message = "Element is not focusable"
 
 
 class CdpTimeout(BrowseError):

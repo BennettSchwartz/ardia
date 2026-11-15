@@ -10,6 +10,7 @@ import {
   newId,
   pinKeyOf,
   resolveWindowId,
+  tabsShownIn,
   viewTabIds,
   without,
 } from "../browser/model";
@@ -27,7 +28,8 @@ import { isLastRegularWindow, isOpenRegularWindow, isRegularWindow, isSmall, isS
 import { activated, apply, removeTabs, withNewTab } from "../tabs/tabs";
 import type { AdoptId, BrowserWindow, ClosedWindow, Frame, ParkedPins, Tab, WindowKind } from "../browser/types";
 import { emptyWindow, smallWindow, withWindow } from "./newWindow";
-import { choose } from "../settings/settings";
+import { newTabHome } from "../tabs/newTabHome";
+import { noteAutoHideTabsChosen, noteTornOffWindowKeptAutoHide } from "../telemetry/autoHideTabsChoices";
 import { lastClosedEntry, lastClosedTab, restoreTab, restoreWindow } from "./reopenClosed";
 import { groupTree, regrouped, splitsWithin, withSplitsBack } from "./groupMoves";
 import { commonGroup, orderSections } from "../groups/groups";
@@ -43,6 +45,7 @@ export type CreateWindowOptions = {
   tabIds?: string[];
   frame?: Frame | null;
   linkPointer?: [number, number];
+  linkApp?: string;
   background?: boolean;
   chromeWindow?: string;
 };
@@ -178,11 +181,17 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
       : (known ?? (small ? lastActiveProfile(s) : s.settings.defaultProfileId));
     const w: BrowserWindow =
       kind === "small"
-        ? { ...smallWindow(id, profileId, o.frame ?? null), ...(o.linkPointer ? { linkPointer: o.linkPointer } : {}) }
+        ? { ...smallWindow(id, profileId, o.frame ?? null), ...(o.linkPointer ? { linkPointer: o.linkPointer } : {}), ...(o.linkApp ? { linkApp: o.linkApp } : {}) }
         : { ...emptyWindow(id, profileId, kind, o.frame ?? null), ...(o.chromeWindow ? { chromeWindow: o.chromeWindow } : {}) };
+    const from = o.tabIds?.length && !small ? s.windows[s.tabs[o.tabIds[0]!]?.windowId ?? ""] : undefined;
+    if (from?.autoHideTabs !== undefined && !isSmallWindow(from)) {
+      w.autoHideTabs = from.autoHideTabs;
+      noteTornOffWindowKeptAutoHide();
+    }
     let next = withWindow(s, w);
     if (o.tabIds?.length && !small) next = moveTabsInto(next, o.tabIds, id);
-    if (!next.windows[id]!.tabIds.length) next = withNewTab(next, id, { url: o.url, adoptId: o.adoptId })[0];
+    const home = !next.windows[id]!.tabIds.length && o.url === undefined && !small && !o.adoptId ? newTabHome(s, id, profileId) : undefined;
+    if (!next.windows[id]!.tabIds.length) next = withNewTab(next, id, { url: o.url ?? home?.url, replaced: home?.replaced, adoptId: o.adoptId })[0];
     const first = next.windows[id]!.tabIds[0]!;
     const shown = next.windows[id]!.activeTabIds[next.tabs[first]!.profileId] ?? first;
     if (!small) next = adoptParkedPins(next, id, next.tabs[shown]!.profileId);
@@ -195,6 +204,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
       };
     }
     set(next);
+    home?.settle(first, get, () => {});
     return id;
   },
 
@@ -250,7 +260,11 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
   toggleSidebar(windowId) {
     set((s) => {
       const w = s.windows[windowId];
-      return !w || isSmallWindow(w) ? {} : choose(s, { autoHideTabs: !s.settings.autoHideTabs });
+      if (!w || isSmallWindow(w)) return {};
+      noteAutoHideTabsChosen();
+      const { autoHideTabs: _, ...rest } = w;
+      const hide = tabsShownIn(s, windowId);
+      return { windows: { ...s.windows, [windowId]: hide === s.settings.autoHideTabs ? rest : { ...rest, autoHideTabs: hide } } };
     });
   },
 

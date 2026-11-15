@@ -1,6 +1,6 @@
 import { readDocument, writeDocument } from "../../platform/documents";
 import { create } from "zustand";
-import { repoKey } from "./rows";
+import { repoKey, stackMembers } from "./rows";
 import type { CompletedItem, CompletionState, FolderStatus, LiveAccount, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "./types";
 import { parseSaved, unchanged, versionedJson, type Migrations } from "../../lib/savedDocument";
 import { DEFAULT_COUNTDOWN_LEAD, keepDismissedNow, type DismissedNow } from "./meetings";
@@ -67,8 +67,14 @@ export const DEFAULT_CALENDAR: CalendarSettings = {
 };
 
 const DOC = "live.json";
-const DOC_VERSION = 1;
-const DOC_MIGRATIONS: Migrations = { 0: unchanged };
+const DOC_VERSION = 2;
+const DOC_MIGRATIONS: Migrations = {
+  0: unchanged,
+  1: (doc) => ({
+    ...doc,
+    folders: Object.fromEntries(Object.entries((doc.folders ?? {}) as Record<string, object>).map(([id, f]) => [id, { showNewRepos: true, shownRepos: [], ...f }])),
+  }),
+};
 const PERSISTED = ["folders", "folderOrder", "items", "known", "unread", "hidden", "repoHidden", "completed", "expandedStacks", "accounts", "config", "calendar", "meetingGroups", "dismissedAlerts", "dismissedNow"] as const;
 
 function load(): Partial<LiveState> {
@@ -81,7 +87,7 @@ function load(): Partial<LiveState> {
 
 const saved = load();
 
-const FOLDER_OPTION_DEFAULTS = { groupStacks: true, showCompleted: true, hiddenRepos: [] as string[] } satisfies Partial<LiveFolder>;
+const FOLDER_OPTION_DEFAULTS = { groupStacks: true, showCompleted: true, hiddenRepos: [] as string[], showNewRepos: true, shownRepos: [] as string[] } satisfies Partial<LiveFolder>;
 
 const withOptionDefaults = (folders: Record<string, LiveFolder> = {}) =>
   Object.fromEntries(Object.entries(folders).map(([id, f]) => [id, { ...FOLDER_OPTION_DEFAULTS, ...f }]));
@@ -309,14 +315,15 @@ export function setRepoHidden(folderId: string, repo: string, hidden: boolean) {
     const folder = s.folders[folderId];
     if (!folder) return {};
     const hiddenRepos = folder.hiddenRepos.filter((r) => r !== repo);
-    if (!hidden) return { folders: { ...s.folders, [folderId]: { ...folder, hiddenRepos } } };
+    const shownRepos = folder.shownRepos.filter((r) => r !== repo);
+    if (!hidden) return { folders: { ...s.folders, [folderId]: { ...folder, hiddenRepos, shownRepos: folder.showNewRepos ? shownRepos : [...shownRepos, repo] } } };
     const shown = (it: LiveItem) => repoKey(it) !== repo;
     const keptOut = s.repoHidden[folderId] ?? [];
     const kept = new Set(keptOut.map((it) => it.id));
     const leaving = [...(s.items[folderId] ?? []), ...(s.completed[folderId] ?? []).map((c) => c.item)].filter((it) => !shown(it) && !kept.has(it.id));
     const removed = new Set(leaving.map((it) => it.id));
     return {
-      folders: { ...s.folders, [folderId]: { ...folder, hiddenRepos: [...hiddenRepos, repo] } },
+      folders: { ...s.folders, [folderId]: { ...folder, hiddenRepos: [...hiddenRepos, repo], shownRepos } },
       repoHidden: { ...s.repoHidden, [folderId]: [...keptOut, ...leaving] },
       items: { ...s.items, [folderId]: (s.items[folderId] ?? []).filter(shown) },
       unread: { ...s.unread, [folderId]: (s.unread[folderId] ?? []).filter((id) => !removed.has(id)) },
@@ -335,6 +342,10 @@ export function releaseShownRepos(folderId: string, fetchedSources: Set<LiveSour
     const still = keptOut?.filter((it) => repoStillHidden(it) || awaitingFetch(it));
     return keptOut && still && still.length !== keptOut.length ? { repoHidden: { ...s.repoHidden, [folderId]: still } } : {};
   });
+}
+
+export function hideStack(folderId: string, stackId: string) {
+  hideItems(folderId, stackMembers(live().items[folderId] ?? [], stackId));
 }
 
 export function unhide(folderId: string) {

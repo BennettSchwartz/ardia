@@ -2,6 +2,7 @@ import { CastMode, closeCastDialog, onCastDialog, onCastRoutes, showCastDialog, 
 import { create } from "zustand";
 import { tolerateMissingCall } from "../../lib/fallback";
 import { useBrowser, type BrowserState } from "../browser/store";
+import { onProfilesUnloaded } from "../profiles/profileLoading";
 import { engineProfile } from "../browser/model";
 import { shownPageId } from "../peek/peek";
 import { isTabReady } from "../tabs/pageState";
@@ -53,9 +54,12 @@ export function startCast() {
       void watchCastRoutes(profile).catch(tolerateMissingCall);
     }
   };
+  onProfilesUnloaded((profiles) => {
+    for (const profile of profiles) watched.delete(profile);
+  });
   watch(useBrowser.getState());
   useBrowser.subscribe((s, prev) => {
-    if (s.windowOrder !== prev.windowOrder) watch(s);
+    if (s.windowOrder !== prev.windowOrder || s.windows !== prev.windows) watch(s);
   });
 }
 
