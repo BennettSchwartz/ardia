@@ -62,7 +62,7 @@ test("the report store keeps reports without expiry and cannot outgrow its disk"
 const { REPLAY_SAMPLE_RATE, REPLAY_MAX_CHUNK_BYTES } = await import("../../../apps/site/src/data/telemetry.ts");
 const replayStore = groups.telemetry.services[SERVICES.objects];
 const MB = 1024 ** 2;
-const PEAK_DAY_BYTES_AT_FULL_RATE = 4_450_000_000;
+const PEAK_DAY_BYTES_AT_FULL_RATE = 4_620_000_000;
 const VOLUMES_GROWN_AT_ONCE = 7;
 const DISK_SHARE_FOR_VOLUMES = 0.75;
 
