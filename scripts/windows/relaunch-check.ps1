@@ -1,0 +1,179 @@
+param(
+  [string]$Setup,
+  [string]$App,
+  [Parameter(Mandatory = $true)][string]$Out,
+  [int]$WindowSeconds = 90
+)
+
+$ErrorActionPreference = "Stop"
+New-Item -ItemType Directory -Force -Path $Out | Out-Null
+$data = Join-Path $env:LOCALAPPDATA "Ardia"
+$started = Get-Date
+$failures = @()
+
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class RelaunchInput {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll", EntryPoint = "PostMessageW")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+}
+"@
+
+function Save-Screenshot([string]$Path) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  } catch {
+    Write-Host "::warning::no screenshot: $_"
+  }
+}
+
+function Get-ArdiaProcesses {
+  return @(Get-CimInstance Win32_Process -Filter "Name='Ardia.exe'" -ErrorAction SilentlyContinue)
+}
+
+function Get-BrowserProcess {
+  foreach ($process in Get-ArdiaProcesses) {
+    if ($process.CommandLine -notmatch "--type=") { return Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue }
+  }
+  return $null
+}
+
+function Save-DataFolder([string]$Name) {
+  $target = Join-Path $Out "data-$Name"
+  New-Item -ItemType Directory -Force -Path $target | Out-Null
+  if (-not (Test-Path -LiteralPath $data)) { "no data folder" | Set-Content (Join-Path $target "missing.txt"); return }
+  Get-ChildItem -LiteralPath $data -Recurse -Force -File -ErrorAction SilentlyContinue |
+    Select-Object @{ n = "Path"; e = { $_.FullName.Substring($data.Length) } }, Length, LastWriteTime |
+    Export-Csv -NoTypeInformation -Path (Join-Path $target "files.csv")
+  foreach ($file in Get-ChildItem -LiteralPath $data -Recurse -Force -File -ErrorAction SilentlyContinue) {
+    $relative = $file.FullName.Substring($data.Length).TrimStart("\")
+    $keep = $file.Length -lt 2MB -and ($file.Extension -in @(".json", ".log", ".txt", ".dmp", "") -or $file.Name -in @("Local State", "Preferences", "Secure Preferences", "lockfile", "Last Version", "First Run"))
+    if ($relative -match "\\(Cache|Code Cache|GPUCache|GrShaderCache|ShaderCache|DawnGraphiteCache|DawnWebGPUCache)\\") { $keep = $false }
+    if (-not $keep) { continue }
+    $copy = Join-Path $target $relative
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $copy) | Out-Null
+    try { Copy-Item -LiteralPath $file.FullName -Destination $copy -Force } catch { Write-Host "::warning::could not copy $relative ($_)" }
+  }
+}
+
+function Start-Ardia([string]$Name) {
+  $before = @(Get-ArdiaProcesses | ForEach-Object { $_.ProcessId })
+  $at = Get-Date
+  $process = Start-Process -FilePath $App -PassThru
+  $deadline = $at.AddSeconds($WindowSeconds)
+  $window = $null
+  while ((Get-Date) -lt $deadline) {
+    $browser = Get-BrowserProcess
+    if ($browser) {
+      $browser.Refresh()
+      if ($browser.MainWindowHandle -ne [IntPtr]::Zero -and [RelaunchInput]::IsWindowVisible($browser.MainWindowHandle)) { $window = $browser; break }
+    }
+    if ($process.HasExited -and -not (Get-BrowserProcess)) { break }
+    Start-Sleep -Milliseconds 250
+  }
+  $ms = [int]((Get-Date) - $at).TotalMilliseconds
+  $process.Refresh()
+  $launcherExit = if ($process.HasExited) { $process.ExitCode } else { "running" }
+  if (-not $window) {
+    Save-Screenshot (Join-Path $Out "$Name-no-window.png")
+    $left = Get-ArdiaProcesses | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }
+    Write-Host "Relaunch ($Name): no window within $ms ms; the started process (pid $($process.Id), alive before: $($before.Count)) ended with $launcherExit; Ardia processes now: $($left.Count)"
+    $left | ForEach-Object { Write-Host "  $_" }
+    return $null
+  }
+  Start-Sleep -Seconds 8
+  if ($window.HasExited) {
+    Save-Screenshot (Join-Path $Out "$Name-gone.png")
+    Write-Host "Relaunch ($Name): a window showed after $ms ms, but the browser process (pid $($window.Id)) ended with $($window.ExitCode) within 8 s"
+    return $null
+  }
+  Save-Screenshot (Join-Path $Out "$Name-window.png")
+  Write-Host "Relaunch ($Name): a window after $ms ms (browser pid $($window.Id), $(@(Get-ArdiaProcesses).Count) Ardia processes), still up 8 s later"
+  return $window
+}
+
+function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [string]$How) {
+  $Browser.Refresh()
+  $handle = $Browser.MainWindowHandle
+  [RelaunchInput]::SetForegroundWindow($handle) | Out-Null
+  Start-Sleep -Milliseconds 500
+  if ($How -eq "alt-f4") {
+    [RelaunchInput]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
+    [RelaunchInput]::keybd_event(0x73, 0, 0, [UIntPtr]::Zero)
+    [RelaunchInput]::keybd_event(0x73, 0, 2, [UIntPtr]::Zero)
+    [RelaunchInput]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+  } else {
+    [RelaunchInput]::PostMessage($handle, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
+  }
+  $at = Get-Date
+  $deadline = $at.AddSeconds(60)
+  while ((Get-Date) -lt $deadline -and @(Get-ArdiaProcesses).Count -gt 0) { Start-Sleep -Milliseconds 250 }
+  $ms = [int]((Get-Date) - $at).TotalMilliseconds
+  $left = @(Get-ArdiaProcesses)
+  $exit = if ($Browser.HasExited) { $Browser.ExitCode } else { "running" }
+  Write-Host "Relaunch ($Name): closed with $How; the browser process ended with $exit; every Ardia process was gone after $ms ms ($($left.Count) left)"
+  $left | ForEach-Object { Write-Host "  left: $($_.ProcessId) $($_.CommandLine)" }
+  return $left.Count -eq 0
+}
+
+if ($Setup) {
+  $run = Start-Process -FilePath (Resolve-Path -LiteralPath $Setup).Path -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
+  if ($run.ExitCode -ne 0) { throw "the installer exited with $($run.ExitCode)" }
+  $App = Join-Path $env:LOCALAPPDATA "Programs\Ardia\Ardia.exe"
+}
+if (-not $App -or -not (Test-Path -LiteralPath $App -PathType Leaf)) { throw "no app to start: give -Setup or -App" }
+if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "Ardia.test-build")) { throw "the app carries an Ardia.test-build marker; this check starts the app as a person does" }
+Get-Content -LiteralPath (Join-Path (Split-Path -Parent $App) "Ardia.build.json") -ErrorAction SilentlyContinue | Write-Host
+Save-DataFolder "0-before"
+
+$steps = @(
+  @{ Name = "1-first"; Wait = 0; Close = "alt-f4"; Settle = 20 },
+  @{ Name = "2-at-once"; Wait = 0; Close = "taskbar-close"; Settle = 10 },
+  @{ Name = "3-after-5s"; Wait = 5; Close = "alt-f4"; Settle = 10 },
+  @{ Name = "4-after-60s"; Wait = 60; Close = "alt-f4"; Settle = 10 }
+)
+foreach ($step in $steps) {
+  if ($step.Wait) { Start-Sleep -Seconds $step.Wait }
+  $browser = Start-Ardia $step.Name
+  if (-not $browser) {
+    $failures += "start $($step.Name): no lasting window"
+    Save-DataFolder "$($step.Name)-failed"
+    foreach ($leftover in Get-ArdiaProcesses) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 3
+    continue
+  }
+  Start-Sleep -Seconds $step.Settle
+  if (-not (Close-Ardia $browser $step.Name $step.Close)) {
+    $failures += "close $($step.Name): Ardia processes were still running 60 s after the last window closed"
+    foreach ($leftover in Get-ArdiaProcesses) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
+  Save-DataFolder "$($step.Name)-closed"
+}
+
+try {
+  Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started } -ErrorAction SilentlyContinue |
+    Where-Object { $_.Message -match "Ardia" } |
+    ForEach-Object { "[$($_.TimeCreated.ToString('o'))] $($_.ProviderName) $($_.Id)`n$($_.Message)`n" } |
+    Set-Content -Path (Join-Path $Out "application-events.txt")
+} catch { Write-Host "::warning::no event log: $_" }
+foreach ($folder in @($data, (Join-Path $env:LOCALAPPDATA "CrashDumps"))) {
+  Get-ChildItem -LiteralPath $folder -Recurse -Force -File -Filter "*.dmp" -ErrorAction SilentlyContinue | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Out $_.Name) -Force
+    Write-Host "Relaunch: crash dump $($_.FullName) ($($_.Length) bytes, $($_.LastWriteTime.ToString('o')))"
+  }
+}
+if (Test-Path (Join-Path $Out "application-events.txt")) { Get-Content (Join-Path $Out "application-events.txt") | Select-Object -First 60 | Write-Host }
+
+foreach ($failure in $failures) { Write-Host "::error::relaunch: $failure" }
+if ($failures.Count) { exit 1 }
+Write-Host "Relaunch: every start after a close as a person makes it showed a lasting window"

@@ -1,0 +1,32 @@
+name: Windows relaunch probe
+on:
+  push:
+    branches: [t3/windows-relaunch-probe]
+permissions:
+  contents: read
+jobs:
+  x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Keep full crash dumps of Ardia.exe
+        shell: pwsh
+        run: |
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
+          New-Item -Force -Path $key | Out-Null
+          New-ItemProperty -Force -Path $key -Name DumpFolder -PropertyType ExpandString -Value "%LOCALAPPDATA%\CrashDumps" | Out-Null
+          New-ItemProperty -Force -Path $key -Name DumpType -PropertyType DWord -Value 1 | Out-Null
+      - name: Fetch the released installer
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v0.2.47-nightly.3 --repo ${{ github.repository }} -p "Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -D "${{ runner.temp }}/setup"
+      - name: Install, close like a person and start again
+        shell: pwsh
+        run: scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/setup/Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -Out "${{ runner.temp }}/relaunch"
+      - if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: relaunch-x64
+          path: ${{ runner.temp }}/relaunch
