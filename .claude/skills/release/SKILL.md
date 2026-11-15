@@ -335,6 +335,10 @@ mkdir -p dist/<version>-rc/export && ditto "$mnt/Ardia.app" dist/<version>-rc/ex
 
 The release itself is then a second run with `dry_run=false` on the same commit.
 
+**iPhone in the same release.** Add `-f iphone=true` to both runs when the owner asked for the iPhone build: the dry run
+builds and signs it, the real run sends it to TestFlight and its public testers after the Mac release publishes, at
+the same version (`docs/releasing.md` › Every platform). Never add it unasked: a TestFlight upload goes out to testers.
+
 The engine is never packed by a release: when engine/ changed since the last prebuilt engine, release.sh stops and
 asks for `scripts/publish-engine.sh` first, which publishes `engine-<tree:12>` (with the Helium source) and appends
 its line to `packages/ardiacore/prebuilt-engines.tsv`; commit that line before the release. Every release's notes end

@@ -79,6 +79,35 @@ every copy on Stable sees only stable items. A copy on Nightly allows `nightly` 
   a local feed. Going back to Nightly inside Sparkle's own Nightly session (its window open) waits for the next
   scheduled check, while going back after a drop checks at once.
 
+## Every platform
+
+One version string names a release everywhere, and the same two channel names, Stable and Nightly, go with it. On the
+phones a build that isn't a release says Dev.
+
+- **Mac.** The channels above. Debug builds (local and agent builds) carry their own icon, `AppIcon-Dev.icon` (the sun
+  over copper hills on a circuit board), so a dev copy in the Dock never looks like the real app. They share the real
+  app's defaults, so a Debug build ignores the picked app icon variant and keeps its own in the Dock
+  (`IconStyle.shown`); Settings still previews the variants. Release builds, which every release is, keep
+  `AppIcon.icon`. A Debug build still shows the committed version in About and Settings, nightly or not.
+- **iPhone.** The Mac's version, with `-nightly.<n>` dropped because Apple takes only `<major>.<minor>.<patch>`
+  (`apple_version_of` in `scripts/lib/releases.sh`); the full version rides in the `ArdiaReleaseVersion` Info.plist key.
+  The same build moves from TestFlight to the App Store, so the channel is read at run time: from TestFlight the app
+  calls itself Nightly ("0.2.47 Nightly 2"), from the App Store it's Stable ("0.2.47"). The Release workflow builds it
+  in the same run when dispatched with `iphone=true`: a dry run builds and signs it, a real run sends it to TestFlight
+  and its public testers after the Mac release publishes. If that job fails after the Mac release is out, re-run the
+  failed jobs of the same run, or dispatch iOS Release with `mode=upload` and the version; never re-run the whole
+  release. Builds already in TestFlight under the iPhone app's old 1.0 don't block the shared version, since nothing
+  was released on the App Store; any App Store version drafted under 1.0 has to move to the shared version before it
+  is submitted. Sending a build to App Store review stays a step a person takes (`docs/ios.md` › Releasing to
+  TestFlight).
+- **Android.** `-PardiaVersion=<version>` gives the build that version and its channel (`docs/android.md` › Build and
+  test). Nothing distributes it yet: that needs a Play Console account and an upload key.
+- **CLI.** It follows the app: the app installs the CLI of its own version, with the digest pinned in its bundle
+  (`docs/cli.md`), so a Nightly Mac runs the nightly CLI.
+- **Windows.** Joins when the Windows app is on main. Its updater reads one feed today; it needs a feed per channel
+  (the stable one on the latest stable release, the nightly one on the `nightly` prerelease, as the Mac's DMG links do)
+  and the same Settings switch.
+
 ## Source and licenses
 
 Every binary we publish (DMG, zip, engine archive) has its source next to it, and keeps it for as long as the binary
