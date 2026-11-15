@@ -7,7 +7,10 @@ param(
   [switch]$FinishOnboarding,
   [switch]$KeepLingering,
   [int]$FirstSettle = 20,
-  [string]$ComingFrom = "Edge"
+  [string]$ComingFrom = "Edge",
+  [switch]$Sharing,
+  [switch]$Maximize,
+  [int]$WatchSeconds = 25
 )
 
 $ErrorActionPreference = "Stop"
@@ -100,14 +103,22 @@ function Start-Ardia([string]$Name) {
     $left | ForEach-Object { Write-Host "  $_" }
     return $null
   }
-  Start-Sleep -Seconds 8
+  $shownAt = Get-Date
+  $watchUntil = $shownAt.AddSeconds($WatchSeconds)
+  $shots = 0
+  while ((Get-Date) -lt $watchUntil -and -not $window.HasExited) {
+    Start-Sleep -Milliseconds 250
+    if ($shots -lt 8 -and ((Get-Date) - $shownAt).TotalSeconds -ge $shots) { Save-Screenshot (Join-Path $Out "$Name-at-$($shots)s.png"); $shots++ }
+  }
   if ($window.HasExited) {
+    $died = [int]((Get-Date) - $shownAt).TotalMilliseconds
     Save-Screenshot (Join-Path $Out "$Name-gone.png")
-    Write-Host "Relaunch ($Name): a window showed after $ms ms, but the browser process (pid $($window.Id)) ended with $($window.ExitCode) within 8 s"
+    $left = @(Get-ArdiaProcesses)
+    Write-Host "Relaunch ($Name): a window showed after $ms ms, then the browser process (pid $($window.Id)) ended with exit code $($window.ExitCode) (0x$('{0:X8}' -f $window.ExitCode)) about $died ms after the window showed; $($left.Count) Ardia processes left"
     return $null
   }
   Save-Screenshot (Join-Path $Out "$Name-window.png")
-  Write-Host "Relaunch ($Name): a window after $ms ms (browser pid $($window.Id), $(@(Get-ArdiaProcesses).Count) Ardia processes), still up 8 s later"
+  Write-Host "Relaunch ($Name): a window after $ms ms (browser pid $($window.Id), $(@(Get-ArdiaProcesses).Count) Ardia processes), still up $WatchSeconds s later"
   return $window
 }
 
@@ -134,6 +145,20 @@ function Click-Named([IntPtr]$Handle, [string[]]$Names) {
   return $null
 }
 
+function Click-NameLike([IntPtr]$Handle, [string]$Pattern) {
+  Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle($Handle)
+  foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+    $name = $element.Current.Name
+    if (-not $name -or $name -notlike $Pattern -or $element.Current.IsOffscreen) { continue }
+    $bounds = $element.Current.BoundingRectangle
+    if ($bounds.Width -le 0 -or $bounds.Height -le 0) { continue }
+    Send-Click ([int]($bounds.X + $bounds.Width / 2)) ([int]($bounds.Y + $bounds.Height / 2))
+    return $name
+  }
+  return $null
+}
+
 function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$Onboarding) {
   Add-Type -AssemblyName System.Windows.Forms
   $Browser.Refresh()
@@ -144,14 +169,20 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     $clicked = @()
     $picked = Click-Named $handle @($ComingFrom)
     if ($picked) { $clicked += $picked; Start-Sleep -Seconds 1 }
+    $shared = $false
     foreach ($page in 1..14) {
       Save-Screenshot (Join-Path $Out "$Name-onboarding-$page.png")
+      if ($Sharing -and -not $shared) {
+        $card = Click-NameLike $handle "*Share anonymous crash reports*"
+        if ($card) { $shared = $true; $clicked += "sharing card"; Start-Sleep -Seconds 1; Save-Screenshot (Join-Path $Out "$Name-onboarding-$page-shared.png") }
+      }
       $next = Click-Named $handle @("Continue", "Get Started", "Get Started →", "Next", "Done", "Finish", "Import", "Skip")
       if (-not $next) { break }
       $clicked += $next
       Start-Sleep -Seconds 3
     }
     Write-Host "Relaunch ($Name): onboarding clicks: $($clicked -join ', ')"
+    if ($Sharing -and -not $shared) { Write-Host "::warning::relaunch: the sharing card was never found in onboarding" }
   } elseif ($Onboarding) {
     $rect = New-Object RelaunchInput+Rect
     [RelaunchInput]::GetWindowRect($handle, [ref]$rect) | Out-Null
@@ -167,8 +198,13 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     [System.Windows.Forms.SendKeys]::SendWait("$address{ENTER}")
     Start-Sleep -Seconds 6
   }
+  [System.Windows.Forms.SendKeys]::SendWait("^t")
+  Start-Sleep -Seconds 2
+  [System.Windows.Forms.SendKeys]::SendWait("nyse{ENTER}")
+  Start-Sleep -Seconds 6
+  if ($Maximize) { [RelaunchInput]::PostMessage($handle, 0x0112, [IntPtr]0xF030, [IntPtr]::Zero) | Out-Null; Start-Sleep -Seconds 2 }
   Save-Screenshot (Join-Path $Out "$Name-page.png")
-  Write-Host "Relaunch ($Name): opened two pages with Ctrl+T"
+  Write-Host "Relaunch ($Name): opened two pages and a search with Ctrl+T$(if ($Maximize) { ', maximized the window' })"
 }
 
 function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [string]$How) {
