@@ -19,6 +19,10 @@ public static class RelaunchInput {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")] public static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
   [DllImport("user32.dll", EntryPoint = "PostMessageW")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
 }
 "@
 
@@ -102,6 +106,37 @@ function Start-Ardia([string]$Name) {
   return $window
 }
 
+function Send-Click([int]$X, [int]$Y) {
+  [RelaunchInput]::SetCursorPos($X, $Y) | Out-Null
+  Start-Sleep -Milliseconds 150
+  [RelaunchInput]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 80
+  [RelaunchInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+}
+
+function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$Onboarding) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $Browser.Refresh()
+  $handle = $Browser.MainWindowHandle
+  [RelaunchInput]::SetForegroundWindow($handle) | Out-Null
+  Start-Sleep -Milliseconds 500
+  if ($Onboarding) {
+    $rect = New-Object RelaunchInput+Rect
+    [RelaunchInput]::GetWindowRect($handle, [ref]$rect) | Out-Null
+    $width = $rect.Right - $rect.Left
+    $height = $rect.Bottom - $rect.Top
+    Send-Click ($rect.Left + [int]($width * 222 / 1008)) ($rect.Top + [int]($height * 594 / 712))
+    Start-Sleep -Seconds 3
+    Save-Screenshot (Join-Path $Out "$Name-after-skip.png")
+  }
+  [System.Windows.Forms.SendKeys]::SendWait("^t")
+  Start-Sleep -Seconds 2
+  [System.Windows.Forms.SendKeys]::SendWait("https://example.com/{ENTER}")
+  Start-Sleep -Seconds 8
+  Save-Screenshot (Join-Path $Out "$Name-page.png")
+  Write-Host "Relaunch ($Name): opened https://example.com/ with Ctrl+T$(if ($Onboarding) { ' after Skip on onboarding' })"
+}
+
 function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [string]$How) {
   $Browser.Refresh()
   $handle = $Browser.MainWindowHandle
@@ -152,6 +187,7 @@ foreach ($step in $steps) {
     Start-Sleep -Seconds 3
     continue
   }
+  Use-Ardia $browser $step.Name ($step.Name -eq "1-first")
   Start-Sleep -Seconds $step.Settle
   if (-not (Close-Ardia $browser $step.Name $step.Close)) {
     $failures += "close $($step.Name): Ardia processes were still running 60 s after the last window closed"
