@@ -537,7 +537,10 @@ is plain Chromium.
   (ArdiaCore's page script also counts a `window.open()` during an activation; Windows doesn't).
   Cross-site iframes run in their own process and their own DevTools target, so links in them don't peek yet.
   The Peek card's background is a surface painted beneath the Peek's page, so a Peek's page (`temporary`) keeps a
-  cover that encloses it whole; anything over part of it still cuts it. Escape closes a Peek from either page, as on
+  cover that encloses it whole; anything over part of it still cuts it. A Peek belongs to its tab (#1361): while
+  another tab shows, its card stays mounted and unseen, its page is hidden, and `PageCoverGate` (a plain pass-through
+  on the Mac) keeps the card's surfaces from cutting holes in the page that shows; back on its tab the Peek's page is
+  asked to follow again (not seen on Windows yet). Escape closes a Peek from either page, as on
   the Mac: the host reports an Escape keydown the page didn't use as the `command` event `escape`, from any frame
   of the page (it watches every frame widget, so a cross-site iframe counts).
 - A tab restored from the last session, or duplicated, loads its address: the Windows engine keeps no saved page
