@@ -6,7 +6,8 @@ param(
   [switch]$NoUpdates,
   [switch]$FinishOnboarding,
   [switch]$KeepLingering,
-  [int]$FirstSettle = 20
+  [int]$FirstSettle = 20,
+  [string]$ComingFrom = "Edge"
 )
 
 $ErrorActionPreference = "Stop"
@@ -141,11 +142,11 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
   Start-Sleep -Milliseconds 500
   if ($Onboarding -and $FinishOnboarding) {
     $clicked = @()
-    $picked = Click-Named $handle @("Edge", "Chrome", "Starting fresh")
+    $picked = Click-Named $handle @($ComingFrom)
     if ($picked) { $clicked += $picked; Start-Sleep -Seconds 1 }
     foreach ($page in 1..14) {
       Save-Screenshot (Join-Path $Out "$Name-onboarding-$page.png")
-      $next = Click-Named $handle @("Continue", "Next", "Done", "Finish", "Get started", "Start browsing", "Let's go", "Import", "Skip")
+      $next = Click-Named $handle @("Continue", "Get Started", "Get Started →", "Next", "Done", "Finish", "Import", "Skip")
       if (-not $next) { break }
       $clicked += $next
       Start-Sleep -Seconds 3
@@ -160,12 +161,14 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     Start-Sleep -Seconds 3
     Save-Screenshot (Join-Path $Out "$Name-after-skip.png")
   }
-  [System.Windows.Forms.SendKeys]::SendWait("^t")
-  Start-Sleep -Seconds 2
-  [System.Windows.Forms.SendKeys]::SendWait("https://example.com/{ENTER}")
-  Start-Sleep -Seconds 8
+  foreach ($address in @("https://example.com/", "https://www.wikipedia.org/")) {
+    [System.Windows.Forms.SendKeys]::SendWait("^t")
+    Start-Sleep -Seconds 2
+    [System.Windows.Forms.SendKeys]::SendWait("$address{ENTER}")
+    Start-Sleep -Seconds 6
+  }
   Save-Screenshot (Join-Path $Out "$Name-page.png")
-  Write-Host "Relaunch ($Name): opened https://example.com/ with Ctrl+T$(if ($Onboarding) { ' after Skip on onboarding' })"
+  Write-Host "Relaunch ($Name): opened two pages with Ctrl+T"
 }
 
 function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [string]$How) {
