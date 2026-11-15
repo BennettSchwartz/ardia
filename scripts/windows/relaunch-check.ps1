@@ -2,7 +2,11 @@ param(
   [string]$Setup,
   [string]$App,
   [Parameter(Mandatory = $true)][string]$Out,
-  [int]$WindowSeconds = 90
+  [int]$WindowSeconds = 90,
+  [switch]$NoUpdates,
+  [switch]$FinishOnboarding,
+  [switch]$KeepLingering,
+  [int]$FirstSettle = 20
 )
 
 $ErrorActionPreference = "Stop"
@@ -73,7 +77,7 @@ function Save-DataFolder([string]$Name) {
 function Start-Ardia([string]$Name) {
   $before = @(Get-ArdiaProcesses | ForEach-Object { $_.ProcessId })
   $at = Get-Date
-  $process = Start-Process -FilePath $App -PassThru
+  $process = Start-Process -FilePath $App -ArgumentList "--log-file=`"$(Join-Path $Out "$Name.log")`"" -PassThru
   $deadline = $at.AddSeconds($WindowSeconds)
   $window = $null
   while ((Get-Date) -lt $deadline) {
@@ -114,13 +118,40 @@ function Send-Click([int]$X, [int]$Y) {
   [RelaunchInput]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
 }
 
+function Click-Named([IntPtr]$Handle, [string[]]$Names) {
+  Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle($Handle)
+  foreach ($name in $Names) {
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name)
+    $found = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    if (-not $found -or $found.Current.IsOffscreen) { continue }
+    $bounds = $found.Current.BoundingRectangle
+    if ($bounds.Width -le 0 -or $bounds.Height -le 0) { continue }
+    Send-Click ([int]($bounds.X + $bounds.Width / 2)) ([int]($bounds.Y + $bounds.Height / 2))
+    return $name
+  }
+  return $null
+}
+
 function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$Onboarding) {
   Add-Type -AssemblyName System.Windows.Forms
   $Browser.Refresh()
   $handle = $Browser.MainWindowHandle
   [RelaunchInput]::SetForegroundWindow($handle) | Out-Null
   Start-Sleep -Milliseconds 500
-  if ($Onboarding) {
+  if ($Onboarding -and $FinishOnboarding) {
+    $clicked = @()
+    $picked = Click-Named $handle @("Edge", "Chrome", "Starting fresh")
+    if ($picked) { $clicked += $picked; Start-Sleep -Seconds 1 }
+    foreach ($page in 1..14) {
+      Save-Screenshot (Join-Path $Out "$Name-onboarding-$page.png")
+      $next = Click-Named $handle @("Continue", "Next", "Done", "Finish", "Get started", "Start browsing", "Let's go", "Import", "Skip")
+      if (-not $next) { break }
+      $clicked += $next
+      Start-Sleep -Seconds 3
+    }
+    Write-Host "Relaunch ($Name): onboarding clicks: $($clicked -join ', ')"
+  } elseif ($Onboarding) {
     $rect = New-Object RelaunchInput+Rect
     [RelaunchInput]::GetWindowRect($handle, [ref]$rect) | Out-Null
     $width = $rect.Right - $rect.Left
@@ -158,6 +189,7 @@ function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [strin
   $exit = if ($Browser.HasExited) { $Browser.ExitCode } else { "running" }
   Write-Host "Relaunch ($Name): closed with $How; the browser process ended with $exit; every Ardia process was gone after $ms ms ($($left.Count) left)"
   $left | ForEach-Object { Write-Host "  left: $($_.ProcessId) $($_.CommandLine)" }
+  Save-Screenshot (Join-Path $Out "$Name-closed.png")
   return $left.Count -eq 0
 }
 
@@ -169,10 +201,15 @@ if ($Setup) {
 if (-not $App -or -not (Test-Path -LiteralPath $App -PathType Leaf)) { throw "no app to start: give -Setup or -App" }
 if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "Ardia.test-build")) { throw "the app carries an Ardia.test-build marker; this check starts the app as a person does" }
 Get-Content -LiteralPath (Join-Path (Split-Path -Parent $App) "Ardia.build.json") -ErrorAction SilentlyContinue | Write-Host
+if ($NoUpdates) {
+  New-Item -ItemType Directory -Force -Path $data | Out-Null
+  '{"automaticChecks":false,"automaticDownloads":false,"lastCheck":null}' | Set-Content -NoNewline -Encoding utf8NoBOM -Path (Join-Path $data "windows-updates.json")
+  Write-Host "Relaunch: automatic update checks are off, as they had nothing to offer before nightly.4 was published"
+}
 Save-DataFolder "0-before"
 
 $steps = @(
-  @{ Name = "1-first"; Wait = 0; Close = "alt-f4"; Settle = 20 },
+  @{ Name = "1-first"; Wait = 0; Close = "alt-f4"; Settle = $FirstSettle },
   @{ Name = "2-at-once"; Wait = 0; Close = "taskbar-close"; Settle = 10 },
   @{ Name = "3-after-5s"; Wait = 5; Close = "alt-f4"; Settle = 10 },
   @{ Name = "4-after-60s"; Wait = 60; Close = "alt-f4"; Settle = 10 }
@@ -191,7 +228,13 @@ foreach ($step in $steps) {
   Start-Sleep -Seconds $step.Settle
   if (-not (Close-Ardia $browser $step.Name $step.Close)) {
     $failures += "close $($step.Name): Ardia processes were still running 60 s after the last window closed"
+    if ($KeepLingering) {
+      $again = Start-Ardia "$($step.Name)-while-lingering"
+      if (-not $again) { $failures += "start while $($step.Name)'s process lingered: no lasting window" }
+      Save-DataFolder "$($step.Name)-while-lingering"
+    }
     foreach ($leftover in Get-ArdiaProcesses) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 3
   }
   Save-DataFolder "$($step.Name)-closed"
 }
