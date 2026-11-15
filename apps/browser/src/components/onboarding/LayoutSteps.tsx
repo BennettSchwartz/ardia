@@ -7,6 +7,7 @@ import { ChoiceList, useMockFocus, type ChoiceOption } from "./ChoiceList";
 import { MockPanel, useScreen } from "./Screen";
 import { confirmAnswer, previewLive, PRESET_NAMES, PRESETS, setOnboardingDraft, skipStep, useOnboarding, type Preset, type QuestionId } from "../../state/onboarding/onboarding";
 import { keysOf, questionKeys, useQuestions } from "../../state/onboarding/questions";
+import { placementCard, placementFromCard } from "../../state/omnibox/barPlacement";
 import { StepActions, StepLayout } from "./StepLayout";
 import { OptionCard } from "./OptionCard";
 import { OptionRow } from "./Parts";
@@ -49,7 +50,7 @@ export function Page({
   );
 }
 
-export function useQuestion(step: "layout" | "tabs" | "look" | "details") {
+export function useQuestion(step: "layout" | "tabs" | "look") {
   const sub = useOnboarding((s) => s.sub);
   const id = useQuestions(step)[sub]?.id;
   return { id, focus: useMockFocus(id) };
@@ -113,13 +114,13 @@ export function LayoutStep() {
         subtitle="The command bar, for going anywhere."
         tag={tag}
         patch={{ commandBarPlacement: values.commandBarPlacement }}
-        picked={[values.commandBarPlacement === "centred" ? "⌘L opens in the centre" : "⌘L opens under the address"]}
+        picked={[values.commandBarPlacement !== "field" ? "⌘L opens in the centre" : "⌘L opens under the address"]}
         preview={preview}
       >
         <ChoiceList
           options={CMDL_CHOICES}
-          value={values.commandBarPlacement}
-          onChange={(commandBarPlacement) => change({ commandBarPlacement }, true)}
+          value={placementCard(values.commandBarPlacement)}
+          onChange={(card) => change({ commandBarPlacement: placementFromCard(card, values.commandBarPlacement) }, true)}
           mock={focus}
         />
       </Page>

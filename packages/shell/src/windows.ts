@@ -7,7 +7,7 @@ export type WindowEvent =
   | { type: "close"; id: string }
   | { type: "frame"; id: string; frame: [number, number, number, number] }
   | { type: "fullScreen"; id: string; on: boolean }
-  | { type: "sidebarEdge"; id: string; over: boolean; point: [number, number] }
+  | { type: "sidebarEdge"; id: string; over: boolean; point: [number, number]; screenEdge?: "stopped" | "passed" }
   | { type: "closeRequest"; id: string };
 
 export type OpenWindowOptions = {
@@ -22,6 +22,7 @@ export type OpenWindowOptions = {
   chromeWindow?: string;
   claim?: string;
   pointer?: [number, number];
+  returnTo?: string;
   animated?: boolean;
 };
 
@@ -45,6 +46,7 @@ export type WindowsNative = {
   dragPreviewEnd(windowId: string | null, frame: Rect4 | null): Promise<void>;
   raiseView(tag: number, levels: number, raised: boolean): Promise<void>;
   windowFrame(id: string): Promise<Rect4 | null>;
+  frameCornerRadius(id: string): Promise<number>;
   setWindowTitle(id: string, title: string): Promise<void>;
   windowIds(): Promise<string[]>;
   replyToTerminate(ok: boolean): Promise<void>;

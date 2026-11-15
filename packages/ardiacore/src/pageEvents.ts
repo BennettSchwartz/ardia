@@ -8,11 +8,14 @@ import type {
   BlockedPopup,
   ContentBlockedState,
   CrashInfo,
+  DiscardReason,
   DisplayMediaRequest,
   DownloadNavigation,
+  FairPlayReport,
   FindResult,
   LoadError,
   MediaAccess,
+  MediaFault,
   MediaState,
   NavigationState,
   NowPlaying,
@@ -21,6 +24,7 @@ import type {
   PageSelection,
   PasswordPrompt,
   PictureInPictureState,
+  PictureInPictureDrag,
   ProtectedMediaRequest,
   ScrollState,
   SecurityInfo,
@@ -53,17 +57,21 @@ type NativeEvents = {
   onNotificationClose: { id: string };
   onPictureInPicture: PictureInPictureState;
   onAutoPictureInPictureKept: { appSwitch?: boolean; reason?: string };
+  onPictureInPictureDragged: PictureInPictureDrag;
+  onPictureInPictureSkip: { seconds: number };
+  onMediaFault: MediaFault;
   onActivateRequest: ActivateRequest;
   onDisplayMediaRequest: DisplayMediaRequest;
   onWindowClose: object;
   onCommand: PageCommand;
   onPageFocus: object;
-  onPagePress: object;
+  onPagePress: { refused?: boolean };
   onSelection: { selection: PageSelection | null };
   onScroll: { state: ScrollState };
   onProtectedMedia: ProtectedMediaRequest;
+  onFairPlay: FairPlayReport;
   onReady: object;
-  onDiscarded: { url: string };
+  onDiscarded: { url: string; reason?: DiscardReason | "" };
   onPasswordPrompt: PasswordPrompt;
   onAutofillPrompt: AutofillPrompt | { id: number; closed: true };
   onExternalApp: ExternalAppRequest;
@@ -99,6 +107,9 @@ const PAGE_EVENTS = {
   onNotificationClose: "notificationClose",
   onPictureInPicture: "pictureInPicture",
   onAutoPictureInPictureKept: "autoPictureInPictureKept",
+  onPictureInPictureDragged: "pictureInPictureDragged",
+  onPictureInPictureSkip: "pictureInPictureSkip",
+  onMediaFault: "mediaFault",
   onActivateRequest: "activateRequest",
   onDisplayMediaRequest: "displayMediaRequest",
   onWindowClose: "windowClose",
@@ -108,6 +119,7 @@ const PAGE_EVENTS = {
   onSelection: "selection",
   onScroll: "scroll",
   onProtectedMedia: "protectedMedia",
+  onFairPlay: "fairPlay",
   onReady: "ready",
   onDiscarded: "discarded",
   onPasswordPrompt: "passwordPrompt",
@@ -145,17 +157,21 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onNotificationClose: (e) => [e.id],
   onPictureInPicture: (e) => [e],
   onAutoPictureInPictureKept: (e) => [e.reason === "nothingPlaying" ? "nothingPlaying" : e.appSwitch ? "appSwitch" : "onScreen"],
+  onPictureInPictureDragged: (e) => [{ offCursor: !!e.offCursor, slowMove: !!e.slowMove }],
+  onPictureInPictureSkip: (e) => [e.seconds],
+  onMediaFault: (e) => [e],
   onActivateRequest: (e) => [e],
   onDisplayMediaRequest: (e) => [e],
   onWindowClose: () => [],
   onCommand: (e) => [e],
   onPageFocus: () => [],
-  onPagePress: () => [],
+  onPagePress: (e) => [e.refused === true],
   onSelection: (e) => [e.selection],
   onScroll: (e) => [e.state],
   onProtectedMedia: (e) => [e],
+  onFairPlay: (e) => [e],
   onReady: () => [],
-  onDiscarded: (e) => [toAppUrl(e.url)],
+  onDiscarded: (e) => [toAppUrl(e.url), e.reason || null],
   onPasswordPrompt: (e) => [e],
   onAutofillPrompt: (e) => ("closed" in e ? [null, e.id] : [e, e.id]),
   onExternalApp: (e) => [e],

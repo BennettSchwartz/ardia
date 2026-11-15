@@ -8,30 +8,34 @@ struct BrowsingView: View {
 
   @Environment(AppModel.self) private var app
   @Environment(\.profileLook) private var look
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @Namespace private var omnibox
   @State private var pager = PagerModel()
-  @State private var barHidden = false
+  @State private var barVisibility = BottomBarVisibility()
   @State private var tabSwitchTicks = 0
-  @State private var pageWidth: CGFloat = 402
+  @State private var pageSpan = PageSpan(width: 402, safeSide: 0)
   @State private var storedCover: StoredCover?
+  @Environment(\.screenLayout) private var screenLayout
 
   var body: some View {
     @Bindable var browse = app.browse
     let tab = app.tabs.selectedTab
     ZStack(alignment: .bottom) {
-      look.surface.ignoresSafeArea()
+      Rectangle().fill(screenLayout.column == nil ? AnyShapeStyle(look.surface) : AnyShapeStyle(.background)).ignoresSafeArea()
       if let tab {
         pageLayer(tab)
           .overlay(alignment: .top) { statusStrip(tab) }
           .opacity(pager.isActive ? 0 : 1)
+          .padding(columnEdge, screenLayout.column?.contentReserve ?? 0)
           .ignoresSafeArea()
         if pager.isActive {
           PagerStage(pager: pager, reduceMotion: reduceMotion)
         }
       }
-      bar
+      if let column = screenLayout.column {
+        columnBar(column)
+      } else if screenLayout == .phone {
+        bar
+      }
     }
     .overlay(alignment: .top) {
       if let page = currentWebPage {
@@ -40,7 +44,10 @@ struct BrowsingView: View {
           .ignoresSafeArea(edges: .horizontal)
       }
     }
-    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
+    .onGeometryChange(for: PageSpan.self) { proxy in
+      let insets = proxy.safeAreaInsets
+      return PageSpan(width: proxy.size.width + insets.leading + insets.trailing, safeSide: max(insets.leading, insets.trailing))
+    } action: { pageSpan = $0 }
     .modifier(PageRequestAlert(page: currentWebPage))
     .sheet(isPresented: $browse.isToolbarPresented) {
       if let id = app.tabs.selectedTabID {
@@ -67,11 +74,25 @@ struct BrowsingView: View {
       stepTab(request.delta)
     }
     .onChange(of: currentWebPage?.scrollDirection) { _, direction in
-      guard app.settings.collapsesBottomBar else { return }
-      withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Motion.barCollapse) { barHidden = direction == .down }
+      withAnimation(barMotion) {
+        barVisibility.scrolled(down: direction == .down, collapses: app.settings.collapsesBottomBar)
+      }
+    }
+    .onChange(of: app.settings.collapsesBottomBar) { _, collapses in
+      if !collapses { withAnimation(barMotion) { barVisibility.expand() } }
+    }
+    .task { await collapseBarForDemo() }
+    .onChange(of: isFindingInPage) { _, active in
+      barVisibility.findSessionChanged(isActive: active)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+      barVisibility.keyboardWillShow()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidHideNotification)) { _ in
+      barVisibility.keyboardDidHide()
     }
     .onChange(of: app.tabs.selectedTabID, initial: true) { _, id in
-      barHidden = false
+      barVisibility.expand()
       app.goBackToSearchIfEmpty()
       if let id { _ = app.web.webTab(for: id) }
       warmPagerNeighbors()
@@ -79,7 +100,7 @@ struct BrowsingView: View {
     .task { await freezePagerForDemo() }
     .task { await runPagerScriptForDemo() }
     .onChange(of: isFront) { _, front in
-      if front { barHidden = false }
+      if front { barVisibility.expand() }
     }
     .onChange(of: findScope) { old, _ in
       endFindInPage(on: old.tabID)
@@ -91,6 +112,8 @@ struct BrowsingView: View {
     .accessibilityHidden(!isFront)
     .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: tabSwitchTicks)
   }
+
+  private var pageWidth: CGFloat { pageSpan.width }
 
   private var isFindingInPage: Bool {
     currentWebPage?.isFindingInPage ?? false
@@ -126,7 +149,7 @@ struct BrowsingView: View {
         .background(alignment: .top) {
           top.color
             .ignoresSafeArea(edges: .top)
-            .animation(.easeOut(duration: 0.25), value: top)
+            .animation(Motion.barTone, value: top)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -147,7 +170,8 @@ struct BrowsingView: View {
         tab: tab,
         cover: cover(for: tab),
         swipeMode: app.preferences.swipeNavigation,
-        bottomInset: BrowseLayout.barHeight - 26,
+        topInset: screenLayout.isWide || screenLayout.fold != nil ? DuoLayout.toolbarClearance : 0,
+        bottomInset: screenLayout == .phone ? BrowseLayout.barHeight : 0,
         onTone: { id, tone in browse.setTone(tone, for: id) }
       )
       if MotionDemo.loadFreeze != nil {
@@ -173,25 +197,14 @@ struct BrowsingView: View {
 
   private func openDeck() {
     app.browse.thawOrder()
-    saveCurrentSnapshot()
     app.showTabSwitcher()
+    keepHandoffAsCover()
   }
 
-  private func saveCurrentSnapshot() {
-    rememberCurrentCover()
-    guard let id = app.tabs.selectedTabID, let image = app.browse.covers.image(for: id), let cgImage = image.cgImage else { return }
-    let snapshots = app.web.snapshots
-    let tabs = app.tabs
-    if tabs.isPrivate(id) {
-      tabs.update(id, snapshotFileName: snapshots.keepInMemory(cgImage, for: id))
-      return
-    }
-    let scale = image.scale
-    Task {
-      if let name = await snapshots.save(cgImage, scale: scale, for: id) {
-        tabs.update(id, snapshotFileName: name)
-      }
-    }
+  private func keepHandoffAsCover() {
+    guard let handoff = app.deck.handoff, let page = app.web.existingWebTab(handoff.tabID), page.webView != nil,
+          !page.isLoading, page.failure == nil else { return }
+    app.browse.covers.store(handoff.image, for: handoff.tabID)
   }
 
   private func rememberCurrentCover() {
@@ -200,31 +213,81 @@ struct BrowsingView: View {
     app.browse.covers.store(image, for: id)
   }
 
-  private var bar: some View {
-    BottomBar(
-      plusNamespace: omnibox,
-      isSearchPresented: app.browse.search != nil,
+  private var barActions: BarActions {
+    BarActions(
       onTabs: openDeck,
+      onAddress: editAddress,
       onPlus: openSearch,
       onMore: { app.browse.isToolbarPresented = true },
+      onExpand: { withAnimation(barMotion) { barVisibility.expand() } },
       onStep: stepTab,
       onSelectTab: { id in switchTab(to: id, order: swipeOrder) },
       onCloseTab: closeCurrentTab
     )
-    .frame(height: BrowseLayout.hitTarget)
-    .padding(.top, BrowseLayout.barHeight - BrowseLayout.barCenterFromBottom - BrowseLayout.hitTarget / 2)
-    .frame(maxWidth: .infinity)
-    .frame(height: BrowseLayout.barHeight, alignment: .top)
-    .background { BarBacking(tone: tone?.bottom, solid: reduceTransparency) }
-    .environment(\.colorScheme, barScheme)
-    .contentShape(.rect)
-    .highPriorityGesture(pagerGesture)
-    .offset(y: barHidden || isFindingInPage ? BrowseLayout.barCollapseTravel : 0)
-    .opacity(barHidden || isFindingInPage ? 0 : 1)
-    .allowsHitTesting(!barHidden && !isFindingInPage)
-    .animation(reduceMotion ? .easeOut(duration: 0.2) : Motion.barCollapse, value: isFindingInPage)
-    .ignoresSafeArea(.container, edges: .bottom)
+  }
+
+  private var columnEdge: Edge.Set {
+    screenLayout.column?.edge == .leading ? .leading : .trailing
+  }
+
+  private func columnBar(_ column: ScreenLayout.SideColumn) -> some View {
+    GeometryReader { proxy in
+      let insets = proxy.safeAreaInsets
+      BottomBar(
+        address: BarAddress(tab: app.tabs.selectedTab, page: currentWebPage),
+        isCollapsed: false,
+        arrangement: .column(column, CGSize(width: proxy.size.width + insets.leading + insets.trailing, height: proxy.size.height + insets.top + insets.bottom)),
+        actions: barActions
+      )
+      .ignoresSafeArea()
+    }
+    .opacity(isBarShown ? 1 : 0)
+    .allowsHitTesting(isBarShown)
+    .animation(barMotion, value: isBarShown)
     .ignoresSafeArea(.keyboard)
+  }
+
+  private var bar: some View {
+    BottomBar(
+      address: BarAddress(tab: app.tabs.selectedTab, page: currentWebPage),
+      isCollapsed: barPresentation == .collapsed,
+      sideInset: pageSpan.safeSide,
+      actions: barActions
+    )
+    .padding(.bottom, BrowseLayout.barBottomGap)
+    .environment(\.colorScheme, barScheme)
+    .highPriorityGesture(pagerGesture)
+    .offset(y: isBarShown ? 0 : BrowseLayout.barCollapseTravel)
+    .opacity(isBarShown ? 1 : 0)
+    .allowsHitTesting(isBarShown)
+    .animation(barMotion, value: isBarShown)
+    .animation(barMotion, value: barPresentation)
+    .frame(maxHeight: .infinity, alignment: .bottom)
+    .ignoresSafeArea(.container, edges: [.bottom, .horizontal])
+    .ignoresSafeArea(.keyboard)
+  }
+
+  private var barMotion: Animation {
+    reduceMotion ? .easeOut(duration: 0.2) : Motion.barCollapse
+  }
+
+  private var barPresentation: BottomBarVisibility.Presentation {
+    barVisibility.presentation(searchTrayPresented: app.browse.isSearchTrayOnScreen)
+  }
+
+  private var isBarShown: Bool {
+    barPresentation != .hidden
+  }
+
+  private func editAddress() {
+    guard let tab = app.tabs.selectedTab else { return }
+    app.browse.presentSearch(from: .page, text: app.currentQuery(for: tab), selectsAll: true)
+  }
+
+  private func collapseBarForDemo() async {
+    guard ProcessInfo.processInfo.arguments.contains("-BrowseCollapsed") else { return }
+    try? await Task.sleep(for: .seconds(MotionDemo.delay))
+    withAnimation(barMotion) { barVisibility.scrolled(down: true, collapses: true) }
   }
 
   @Environment(\.colorScheme) private var systemScheme
@@ -401,6 +464,11 @@ struct BrowsingView: View {
     guard let index = order.firstIndex(where: { $0.id == app.tabs.selectedTabID }), order.indices.contains(index + delta) else { return }
     switchTab(to: order[index + delta].id, order: order)
   }
+}
+
+nonisolated struct PageSpan: Equatable {
+  let width: CGFloat
+  let safeSide: CGFloat
 }
 
 struct StoredCover {

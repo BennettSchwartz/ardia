@@ -1,8 +1,12 @@
 #import "ArdiaChromeWindowInternal.h"
 #import "ArdiaEarlyWindow.h"
+#import "ArdiaRuntime.h"
 #import "ArdiaWebViewInternal.h"
 
+#import <objc/message.h>
 #import <objc/runtime.h>
+
+#include <cmath>
 
 using namespace ardia_window;
 
@@ -11,6 +15,20 @@ namespace {
 BOOL (^gShouldClose)(NSWindow *);
 
 void (^gSwapped)(NSWindow *, NSWindow *);
+
+const void *const kFloatsForWindowManagersKey = &kFloatsForWindowManagersKey;
+
+void AnswerFloatingSubrole(Class windowClass) {
+  static NSMutableSet<Class> *answered = [NSMutableSet set];
+  if (!windowClass || [answered containsObject:windowClass]) return;
+  [answered addObject:windowClass];
+  ardia_runtime::ReplaceMethod(windowClass, @selector(accessibilitySubrole), ^id(IMP original) {
+    return ^NSAccessibilitySubrole(NSWindow *window) {
+      if (objc_getAssociatedObject(window, kFloatsForWindowManagersKey)) return NSAccessibilitySystemFloatingWindowSubrole;
+      return ((NSAccessibilitySubrole (*)(id, SEL))original)(window, @selector(accessibilitySubrole));
+    };
+  });
+}
 
 }
 
@@ -22,6 +40,23 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
 
 + (CGFloat)windowCornerRadius {
   return WindowCornerRadius(nil);
+}
+
++ (CGFloat)frameCornerRadiusOfWindow:(NSWindow *)window {
+  if (window.styleMask & NSWindowStyleMaskFullScreen) return 0;
+  NSView *frame = window.contentView.superview;
+  for (NSString *name in @[ @"cornerRadius", @"_cornerRadius" ]) {
+    SEL selector = NSSelectorFromString(name);
+    if (![frame respondsToSelector:selector]) continue;
+    CGFloat radius = reinterpret_cast<CGFloat (*)(id, SEL)>(objc_msgSend)(frame, selector);
+    if (std::isfinite(radius) && radius > 0) return radius;
+  }
+  SEL rounded = NSSelectorFromString(@"roundedCornerRadius");
+  if ([frame respondsToSelector:rounded]) {
+    float radius = reinterpret_cast<float (*)(id, SEL)>(objc_msgSend)(frame, rounded);
+    if (std::isfinite(radius) && radius > 0) return radius;
+  }
+  return 0;
 }
 
 + (NSWindow *)makeWindowForProfile:(NSString *)profile {
@@ -53,6 +88,12 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
   else window = [self makeWindowForProfile:profile chromeWindow:chromeWindow];
   if (window && appWindow.length && !link) [ArdiaWindowController forNSWindow:window].appWindowId = appWindow;
   return window;
+}
+
++ (void)floatForWindowManagers:(NSWindow *)window {
+  if (!window) return;
+  objc_setAssociatedObject(window, kFloatsForWindowManagersKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  AnswerFloatingSubrole(window.class);
 }
 
 + (void)recordLaunchLayout {

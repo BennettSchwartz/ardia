@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import contextlib
 import difflib
 import json
 import os
@@ -21,7 +22,7 @@ ALIASES = {
 MUTATING = {
     "open", "click", "dblclick", "type", "fill", "press", "keyboard", "keydown", "keyup", "hover", "check", "uncheck",
     "select", "drag", "upload", "download", "scroll", "scrollintoview", "mouse", "back", "forward", "reload", "tab",
-    "find", "auth", "pushstate", "eval", "dialog", "batch", "storage", "cookies", "set", "state", "clipboard", "close", "script",
+    "find", "auth", "pushstate", "eval", "dialog", "batch", "storage", "cookies", "set", "state", "clipboard", "close", "script", "flow",
 }
 KNOWN_SCHEMES = ("http", "https", "about", "data", "file", "blob", "chrome", "view-source")
 LOOPBACK = re.compile(r"^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?(/|$)")
@@ -122,6 +123,15 @@ async def page_title(page) -> str:
         return ""
 
 
+async def shows_content(page, loader: str) -> bool:
+    try:
+        ready = await page.call("() => [document.readyState, (document.body && document.body.innerText || '').trim().length]",
+                                frame=page.main_frame, read=True)
+    except BrowseError:
+        return False
+    return page.loader(page.main_frame) == loader and bool(ready) and ready[0] in ("interactive", "complete") and ready[1] > 0
+
+
 async def wait_for_load(page, loader: str | None, timeout: float, until: str = "load"):
     event = {"load": "load", "domcontentloaded": "DOMContentLoaded", "networkidle": "networkIdle"}.get(until, until)
 
@@ -133,7 +143,9 @@ async def wait_for_load(page, loader: str | None, timeout: float, until: str = "
         if event in ("load", "DOMContentLoaded"):
             try:
                 state = await page.call("() => document.readyState", frame=main, read=True)
-            except BrowseError:
+            except BrowseError as error:
+                if error.code == "tab_detached":
+                    await page.state.reattach(page)
                 return False
             frame_loader = page.loader(main)
             if loader is not None and frame_loader != loader:
@@ -147,18 +159,38 @@ async def wait_for_load(page, loader: str | None, timeout: float, until: str = "
 async def navigate(ctx: Ctx, page, url: str, until: str = "load"):
     from ardia_cli.browse import readpages
 
+    if page.crashed:
+        try:
+            result = await page.send("Page.navigate", {"url": url}, timeout=ctx.timeout)
+        except Gated:
+            raise BrowseError(f"Ardia's policy only lets the ardia command open web pages (http, https, data, about:blank); {url} isn't one", code="policy_refused") from None
+        if result.get("errorText"):
+            raise BrowseError(f"Navigation to {url} failed: {result['errorText']}", code="navigation_failed")
+        await page.recovered(ctx.timeout)
+        return
     before = await readpages.before_navigating(page, url)
     try:
         result = await page.send("Page.navigate", {"url": url}, timeout=ctx.timeout)
     except Gated:
-        raise BrowseError(f"Ardia's policy only lets the ardia command open web pages (http, https, data, about:blank); {url} isn't one") from None
+        raise BrowseError(f"Ardia's policy only lets the ardia command open web pages (http, https, data, about:blank); {url} isn't one", code="policy_refused") from None
     if result.get("errorText"):
-        raise BrowseError(f"Navigation to {url} failed: {result['errorText']}")
+        raise BrowseError(f"Navigation to {url} failed: {result['errorText']}", code="navigation_failed")
     loader = result.get("loaderId")
+    page.state.load_note = None
     if loader:
-        await wait_for_load(page, loader, ctx.timeout, until)
+        try:
+            await wait_for_load(page, loader, ctx.timeout, until)
+        except BrowseError as error:
+            if error.code != "timeout" or until != "load" or not await shows_content(page, loader):
+                raise
+            from ardia_cli import command_metrics
+
+            command_metrics.flag("open_still_loading", True)
+            page.state.load_note = (f"The page hadn't finished loading after {ctx.timeout:g} s (something on it is still loading); "
+                                    "its content so far is here, and `wait --load load` waits for the rest")
     else:
         await readpages.after_same_document(page, before, asyncio.get_running_loop().time() + ctx.timeout)
+    await page.state.reattach(page)
     await page.refresh_frames()
 
 
@@ -175,7 +207,7 @@ async def new_tab(ctx: Ctx, url: str | None, label: str | None = None, window: b
     try:
         result = await state.browser.send("Target.createTarget", params)
     except Gated as error:
-        raise BrowseError(f"Ardia's policy refused to open a tab for the ardia command ({error.refusal})") from None
+        raise BrowseError(f"Ardia's policy refused to open a tab for the ardia command ({error.refusal})", code="policy_refused") from None
     target_id = result["targetId"]
     state.opened.add(target_id)
     state.registry.note_opened(state.instance, target_id)
@@ -193,11 +225,90 @@ async def new_tab(ctx: Ctx, url: str | None, label: str | None = None, window: b
     if url:
         await navigate(ctx, page, normalize_url(url))
     if show:
-        await show_tab(ctx, page)
+        page = await show_tab(ctx, page)
     return page
 
 
+OFFSCREEN_TIMEOUT = 10.0
+NEEDS_HIDDEN_TAB = ("`set viewport` works on a tab this session opened that has never been shown: Ardia takes it off-screen first, so "
+                    "an emulated page is never on screen")
+OPEN_ONE = "Open one with `ardia browse open <url>` (without --show) and set its viewport there"
+
+
+async def engine_offscreen(state, target_id: str) -> bool:
+    if target_id in state.offscreen:
+        return True
+    if state.endpoint is None or state.endpoint.explicit or state.browser is None:
+        return False
+    try:
+        info = (await state.browser.send("Target.getTargetInfo", {"targetId": target_id})).get("targetInfo") or {}
+    except BrowseError:
+        return False
+    if info.get("ardiaOffscreen") is True:
+        state.set_offscreen(target_id, True)
+        return True
+    return False
+
+
+async def go_offscreen(ctx: Ctx, page) -> bool:
+    from ardia_cli import control
+    from ardia_cli.browse import tabs
+
+    state = ctx.state
+    if state.endpoint is None or state.endpoint.explicit:
+        return False
+    if await engine_offscreen(state, page.target_id):
+        return True
+    app_tab = (await tabs.app_tab_map(state)).get(page.target_id)
+    if not app_tab:
+        raise BrowseError(f"{NEEDS_HIDDEN_TAB}. Ardia doesn't list this session's tab. {OPEN_ONE}", code="viewport_needs_hidden_tab")
+    try:
+        await tabs.app_call(state, "offscreen", {"tab": app_tab}, OFFSCREEN_TIMEOUT)
+    except control.MethodError as error:
+        if error.code == "unknown_method":
+            raise BrowseError("This Ardia can't take a tab off-screen for a viewport yet; update Ardia", code="viewport_unsupported") from None
+        raise BrowseError(f"{NEEDS_HIDDEN_TAB}. {error.message} {OPEN_ONE}", code="viewport_needs_hidden_tab") from None
+    except control.Unreachable as error:
+        raise BrowseError(f"Couldn't ask Ardia to take the tab off-screen ({error})", code="viewport_unsupported") from None
+    state.set_offscreen(page.target_id, True)
+    state.app_tabs.pop(page.target_id, None)
+    return True
+
+
+async def leave_offscreen(ctx: Ctx, page):
+    state = ctx.state
+    old = page.target_id
+    known = page.url or state.target_infos.get(old, {}).get("url", "")
+    url = known if known and not known.startswith("about:") else None
+    label = next((label for label, owner in state.labels.items() if owner == old), None)
+    if label:
+        del state.labels[label]
+    try:
+        fresh = await new_tab(ctx, url, label)
+    except BaseException:
+        if label:
+            state.labels.setdefault(label, old)
+        raise
+    state.set_offscreen(old, False)
+    if state.registry.reserve_close(state.instance, old):
+        try:
+            with contextlib.suppress(BrowseError):
+                await state.browser.send("Target.closeTarget", {"targetId": old})
+        finally:
+            state.registry.finish_close(state.instance, old)
+    state.forget_target(old)
+    state.extras["left_offscreen"] = state.tab_id(fresh.target_id)
+    return fresh
+
+
+def offscreen_note(state) -> str:
+    tab = state.extras.pop("left_offscreen", None)
+    return f"\n→ The viewport ended and the page was reloaded in a new tab [{tab}]: Ardia never shows an emulated page" if tab else ""
+
+
 async def show_tab(ctx: Ctx, page):
+    if await engine_offscreen(ctx.state, page.target_id):
+        page = await leave_offscreen(ctx, page)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + 5
     nudge = 0.0
@@ -209,7 +320,7 @@ async def show_tab(ctx: Ctx, page):
         if not await page.hidden() and await tab_shown(ctx.state, page) is not False:
             shown_since = shown_since or loop.time()
             if loop.time() - shown_since >= SHOWN_HOLD:
-                return
+                return page
         else:
             shown_since = None
             nudge = min(nudge, loop.time() + 0.2)
@@ -250,6 +361,7 @@ async def add_init_script(ctx: Ctx, page, source: str, tag: str | None) -> str:
     result = await page.send("Page.addScriptToEvaluateOnNewDocument", {"source": source})
     identifier = result["identifier"]
     page.init_scripts[identifier] = tag or source
+    page.script_sources[identifier] = source
     ctx.state.extras.setdefault("init_sources", {})[identifier] = source
     ctx.state.leases.add("init")
     return identifier
@@ -284,7 +396,7 @@ def refuse_on_borrowed(ctx: Ctx, page, what: str):
     if borrowed and borrowed == page.target_id:
         tab = ctx.state.tab_id(borrowed)
         raise BrowseError(
-            f"This session is using your tab [{tab}] (it had no tab of its own), so it won't {what} it. To drive that tab anyway, "
+            f"This session is using your tab [{tab}] (picked with `tab active`), so it won't {what} it. To drive that tab anyway, "
             f"pick it with `ardia browse tab {tab}`; to browse on your own, use `ardia browse open <url>`",
             data={"tabId": tab}, code="borrowed_tab",
         )
@@ -312,18 +424,26 @@ async def cmd_open(ctx: Ctx, argv):
     else:
         page = await state.page()
         came_from = page.url
+        if page.crashed and url:
+            await navigate(ctx, page, "about:blank")
+            came_from = "about:blank"
         await apply_open_options(ctx, page)
     if reporting:
         await changes.settled(page, lambda: navigate(ctx, page, url))
     elif url and not fresh_tab:
         await navigate(ctx, page, url)
+    page = await state.reattach(page)
     if show and (reporting or not fresh_tab):
-        await show_tab(ctx, page)
+        page = await show_tab(ctx, page)
     background = await page.takes_input() if fresh_tab and not show else None
     await page.refresh_frames()
     title = await page_title(page)
     data = {"url": page.url, "title": title}
-    text = f"✓ {title}\n  {page.url}"
+    text = f"✓ {title}\n  {page.url}" + offscreen_note(state)
+    still_loading, state.load_note = getattr(state, "load_note", None), None
+    if still_loading:
+        data["stillLoading"] = True
+        text += f"\n{still_loading}"
     if background is not None:
         tab = state.tab_id(page.target_id)
         data.update({"tabId": tab, "background": True, "takesInput": background})
@@ -378,6 +498,9 @@ async def cmd_history(ctx: Ctx, argv):
 async def cmd_reload(ctx: Ctx, argv):
     page = await ctx.state.page()
     refuse_on_borrowed(ctx, page, "reload")
+    if page.crashed:
+        await page.revive(ctx.timeout)
+        return Result({"url": page.url, "crashed": True}, f"{page.url}\n→ The page had crashed; it was reloaded")
     before = page.navigations
     await page.send("Page.reload", {})
     await wait_until(lambda: _settled(page, before), ctx.timeout, 0.05, "the reload")
@@ -406,6 +529,7 @@ async def cmd_pushstate(ctx: Ctx, argv):
 @command("snapshot")
 async def cmd_snapshot(ctx: Ctx, argv):
     from ardia_cli import notes
+    from ardia_cli.browse import flows
 
     options, args = parse(
         argv,
@@ -433,6 +557,10 @@ async def cmd_snapshot(ctx: Ctx, argv):
             body = changes.render(report)
     root = ctx.state.config.get("data_root")
     site, header = notes.header(Path(root), page.url) if root else (None, None)
+    saved = flows.hint(ctx.state, page.url)
+    if saved:
+        data["flows"] = saved
+        body = saved + "\n" + body
     if header:
         data["notes"] = {"site": site, "header": header}
         body = header + "\n" + body
@@ -465,8 +593,12 @@ async def cmd_notes(ctx: Ctx, argv):
     return notes.run_request(Path(ctx.state.config["data_root"]), request, url)
 
 
+APPEAR_WAIT = 3.0
+CHECKS_PRESENCE = {"is"}
+
+
 async def resolve(ctx: Ctx, selector: str):
-    return await ctx.state.locate(selector)
+    return await ctx.state.locate(selector, wait=0.0 if ctx.command in CHECKS_PRESENCE else APPEAR_WAIT)
 
 
 @command("click")
@@ -484,7 +616,19 @@ async def cmd_click(ctx: Ctx, argv):
         ctx.state.current = previous or tab.target_id
         return Result({"clicked": args[0], "newTab": ctx.state.tab_id(tab.target_id), "url": tab.url})
     _, report = await changes.observe(ctx, page, lambda: actions.click(page, element, humanize, 1, options.get("button") or "left"))
-    return changes.attach(Result({"clicked": args[0]}), report)
+    return consent_note(ctx, changes.attach(Result({"clicked": args[0]}), report))
+
+
+def consent_note(ctx: Ctx, result: Result) -> Result:
+    note, ctx.state.consent_dismissed = ctx.state.consent_dismissed, None
+    if note:
+        result.data["dismissed"] = note
+        result.text = f"{result.text or '✓ Done'}\n{note}"
+    fallback, ctx.state.click_note = getattr(ctx.state, "click_note", None), None
+    if fallback:
+        result.data["domClick"] = fallback
+        result.text = f"{result.text or '✓ Done'}\n{fallback}"
+    return result
 
 
 @command("dblclick")
@@ -493,7 +637,7 @@ async def cmd_dblclick(ctx: Ctx, argv):
     need(args, 1, "dblclick <selector>")
     page, element = await resolve(ctx, args[0])
     _, report = await changes.observe(ctx, page, lambda: actions.click(page, element, ctx.humanize and not options.get("no_humanize"), 2))
-    return changes.attach(Result({"clicked": args[0], "count": 2}), report)
+    return consent_note(ctx, changes.attach(Result({"clicked": args[0], "count": 2}), report))
 
 
 @command("hover")
@@ -533,7 +677,7 @@ async def cmd_fill(ctx: Ctx, argv):
         finally:
             await actions.unwatch_suggestions(page, element)
 
-    ((retargeted, stored), found), report = await changes.observe(ctx, page, run)
+    ((retargeted, stored), found), report = await changes.observe(ctx, page, run, None if typeahead else (element, None))
     result = filled_result("filled", args[0], retargeted, text, stored)
     if found:
         result.data["suggestions"] = [item["text"] for item in found]
@@ -567,19 +711,35 @@ async def cmd_type(ctx: Ctx, argv):
     options, args = parse(argv, {"--no-humanize": "bool", "--delay": "value"})
     need(args, 2, "type <selector> <text>")
     page, element = await resolve(ctx, args[0])
-    retargeted, report = await changes.observe(ctx, page, lambda: actions.type_text(page, element, " ".join(args[1:]), ctx.humanize and not options.get("no_humanize")))
+    retargeted, report = await changes.observe(ctx, page, lambda: actions.type_text(page, element, " ".join(args[1:]), ctx.humanize and not options.get("no_humanize")),
+                                               (element, None))
     return changes.attach(typed_result("typed", args[0], retargeted), report)
 
 
 @command("press")
 async def cmd_press(ctx: Ctx, argv):
     options, args = parse(argv, {"--no-humanize": "bool"})
-    need(args, 1, "press <key>")
-    page = await ctx.state.page()
+    need(args, 1, "press [selector] <key>")
     humanize = ctx.humanize and not options.get("no_humanize")
+    if len(args) >= 2:
+        key = args[1]
+        page, element = await resolve(ctx, args[0])
+        frame = element.frame or page.main_frame
+
+        async def focus_and_press():
+            from ardia_cli import command_metrics
+
+            command_metrics.flag("press_targeted", True)
+            await page.focus_element(element)
+            return await page.input.gesture("press", lambda: page.input.press_combo(key, humanize))
+
+        _, report = await changes.observe(ctx, page, lambda: actions.expect_input(page, frame, focus_and_press, {"keydown": 1}, "The key press"),
+                                          (element, None))
+        return changes.attach(Result({"pressed": key, "in": args[0]}), report)
+    page = await ctx.state.page()
     frame = ctx.state.frame_for(page) or page.main_frame
     _, report = await changes.observe(ctx, page, lambda: actions.expect_input(
-        page, frame, lambda: page.input.gesture("press", lambda: page.input.press_combo(args[0], humanize)), {"keydown": 1}, "The key press"))
+        page, frame, lambda: page.input.gesture("press", lambda: page.input.press_combo(args[0], humanize)), {"keydown": 1}, "The key press"), (None, frame))
     return changes.attach(Result({"pressed": args[0]}), report)
 
 
@@ -606,7 +766,7 @@ async def cmd_keyboard(ctx: Ctx, argv):
         await page.require_visible()
         _, report = await changes.observe(ctx, page, lambda: actions.expect_input(
             page, frame, lambda: page.input.gesture("keyboard inserttext", lambda: page.send("Input.insertText", {"text": text}, input_event=True)),
-            {"beforeinput|input": 1} if text else {}, "The text insert"))
+            {"beforeinput|input": 1} if text else {}, "The text insert"), (None, frame))
         return changes.attach(Result({"inserted": True}), report)
     if args[0] != "type":
         raise Usage(f"Unknown keyboard subcommand: {args[0]} (type or inserttext)")
@@ -614,7 +774,8 @@ async def cmd_keyboard(ctx: Ctx, argv):
     humanize = ctx.humanize and not options.get("no_humanize")
     frame = ctx.state.frame_for(page) or page.main_frame
     _, report = await changes.observe(ctx, page, lambda: actions.expect_input(
-        page, frame, lambda: page.input.gesture("keyboard type", lambda: keyboard.type_text(text, humanize=humanize)), {"keydown": len(text)}, "The typing"))
+        page, frame, lambda: page.input.gesture("keyboard type", lambda: keyboard.type_text(text, humanize=humanize)), {"keydown": len(text)}, "The typing"),
+        (None, frame))
     return changes.attach(Result({"typed": True}), report)
 
 
@@ -867,7 +1028,7 @@ async def evaluate_main(page, expression: str):
     if "exceptionDetails" in result:
         details = result["exceptionDetails"]
         description = (details.get("exception") or {}).get("description") or details.get("text") or "error"
-        raise BrowseError(f"Evaluation error: {description}")
+        raise BrowseError(f"Evaluation error: {description}", code="page_script_error")
     remote = result.get("result") or {}
     if remote.get("type") == "undefined":
         return None
@@ -891,7 +1052,7 @@ async def cmd_eval(ctx: Ctx, argv):
         hint_once(ctx.state, "fetch", FETCH_HINT)
     value = await evaluate_main(page, script)
     origin = page.frames.get(page.main_frame, {}).get("origin") or ""
-    return Result({"origin": origin + "/" if origin and not origin.endswith("/") else origin, "result": value}, json.dumps(value, ensure_ascii=False, indent=2), page_content=True)
+    return Result({"origin": origin + "/" if origin and not origin.endswith("/") else origin, "result": value}, render_json(value), page_content=True)
 
 
 @command("get")
@@ -969,7 +1130,7 @@ async def cmd_is(ctx: Ctx, argv):
     return Result({"origin": origin + "/" if origin else origin, what: bool(value)}, "true" if value else "false")
 
 
-FIND_ACTIONS = ("click", "fill", "type", "check", "uncheck", "select", "hover", "focus", "dblclick", "text")
+FIND_ACTIONS = ("click", "fill", "type", "press", "check", "uncheck", "select", "hover", "focus", "dblclick", "text")
 FIND_LOCATORS = ("role", "text", "label", "placeholder", "alt", "title", "testid", "first", "last", "nth")
 MAX_CANDIDATES = 8
 BATCH_DEFAULT_CAP = 6000
@@ -991,8 +1152,10 @@ def find_arguments(args: list[str], name: str | None) -> tuple[str, list[str], s
 
 @command("find")
 async def cmd_find(ctx: Ctx, argv):
-    options, args = parse(argv, {"--name": "value", "--exact": "bool", "--no-humanize": "bool"})
+    options, args = parse(argv, {"--name": "value", "--exact": "bool", "--partial": "bool", "--no-humanize": "bool"})
     need(args, 1, "find <locator> <value> [action] [text]")
+    if options.get("exact") and options.get("partial"):
+        raise Usage("find takes --exact or --partial, not both")
     locator, args, wanted_name = find_arguments(args, options.get("name"))
     need(args, 1, "find <locator> <value> [action] [text]")
     page = await ctx.state.page()
@@ -1050,10 +1213,10 @@ async def cmd_find(ctx: Ctx, argv):
         return changes.attach(Result({"clicked": f"@{ref}", "count": 2}), report)
     if action == "fill":
         text = " ".join(rest[1:])
-        (retargeted, stored), report = await changes.observe(ctx, page, lambda: actions.fill(page, element, text, humanize))
+        (retargeted, stored), report = await changes.observe(ctx, page, lambda: actions.fill(page, element, text, humanize), (element, None))
         return changes.attach(filled_result("filled", f"@{ref}", retargeted, text, stored), report)
     if action == "type":
-        retargeted, report = await changes.observe(ctx, page, lambda: actions.type_text(page, element, " ".join(rest[1:]), humanize))
+        retargeted, report = await changes.observe(ctx, page, lambda: actions.type_text(page, element, " ".join(rest[1:]), humanize), (element, None))
         return changes.attach(typed_result("typed", f"@{ref}", retargeted), report)
     if action in ("check", "uncheck"):
         _, report = await changes.observe(ctx, page, lambda: actions.set_checked(page, element, action == "check", humanize))
@@ -1066,6 +1229,16 @@ async def cmd_find(ctx: Ctx, argv):
     if action == "focus":
         _, report = await changes.observe(ctx, page, lambda: page.focus_element(element))
         return changes.attach(Result({"focused": f"@{ref}"}), report)
+    if action == "press":
+        key = rest[1] if len(rest) > 1 else "Enter"
+        frame = element.frame or page.main_frame
+
+        async def focus_and_press():
+            await page.focus_element(element)
+            return await page.input.gesture("press", lambda: page.input.press_combo(key, humanize))
+
+        _, report = await changes.observe(ctx, page, lambda: actions.expect_input(page, frame, focus_and_press, {"keydown": 1}, "The key press"), (element, None))
+        return changes.attach(Result({"pressed": key, "in": f"@{ref}"}), report)
     text = await page.call("(el) => (el.innerText != null ? el.innerText : el.textContent || '').trim()", element, frame=element.frame)
     return Result({"ref": f"@{ref}", "text": text}, text, page_content=True)
 
@@ -1160,25 +1333,24 @@ async def cmd_tab(ctx: Ctx, argv):
         state.forget_target(target_id)
         return Result({"closed": tab, "targetId": target_id}, f"✓ Tab [{tab}] closed")
     if action == "active":
-        target_id = await user_active_tab(state)
-        if not target_id:
-            raise BrowseError("The user isn't on a web page right now (New Tab or another Ardia view)")
-        action = target_id
-    await state.refresh_targets()
-    target_id = await state.find_tab(action)
-    state.current = target_id
-    state.extras.pop("attached", None)
-    if state.pin_tab:
-        state.extras["pinned_target"] = target_id
+        target_id = await state.take_active()
+    else:
+        await state.refresh_targets()
+        target_id = await state.find_tab(action)
+        state.current = target_id
+        state.extras.pop("attached", None)
+        if state.pin_tab:
+            state.extras["pinned_target"] = target_id
     page = await state.page(target_id)
     if wants_show(ctx, options):
-        await show_tab(ctx, page)
+        page = await show_tab(ctx, page)
+        target_id = page.target_id
     title = await page_title(page)
     from ardia_cli.browse import tabs as tab_registry
 
     await tab_registry.app_tab_map(state)
     data = {"tabId": state.tab_id(target_id), "appTabId": state.app_tabs.get(target_id), "targetId": target_id, "title": title, "url": page.url}
-    return Result(data, f"✓ {title}\n  {page.url}")
+    return Result(data, f"✓ {title}\n  {page.url}" + offscreen_note(state))
 
 
 def tab_line(tab: dict, session: str) -> str:
@@ -1191,21 +1363,6 @@ def tab_line(tab: dict, session: str) -> str:
     app = f" {tab['appTabId']} " if tab.get("appTabId") else ""
     extra = f" ({'; '.join(notes)})" if notes else ""
     return f"{'→' if tab['active'] else ' '} [{tab['tabId']}]{app} {tab['title'] or tab['url']} - {tab['url']}{extra}"
-
-
-async def user_active_tab(state):
-    endpoint = state.endpoint
-    if not endpoint or not endpoint.active:
-        raise BrowseError("`tab active` needs the token path (Ardia's own control server), not --port or --ws")
-    import urllib.request
-
-    def fetch():
-        direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with direct.open(endpoint.active, timeout=3) as response:
-            return json.loads(response.read(64 * 1024))
-
-    answer = await asyncio.to_thread(fetch)
-    return answer.get("targetId") if isinstance(answer, dict) else None
 
 
 @command("window")
@@ -1237,7 +1394,19 @@ async def cmd_frame(ctx: Ctx, argv):
         described = await page.send("DOM.describeNode", {"backendNodeId": element.backend_id})
         frame_id = (described.get("node") or {}).get("frameId")
         if not frame_id or frame_id not in page.frames:
-            raise BrowseError(f"{target} isn't an iframe this tab can reach (ardia browse doesn't attach cross-process iframes)")
+            box = await actions.element_box(page, element) if frame_id else None
+            if box is None:
+                raise BrowseError(f"{target} isn't an iframe this tab can reach (ardia browse doesn't attach cross-process iframes)")
+            from ardia_cli import command_metrics
+
+            command_metrics.flag("frame_cross_process_box", True)
+            left, top, right, bottom = (round(value) for value in box)
+            raise BrowseError(
+                f"{target} is a cross-process iframe, which ardia browse can't enter, but the mouse reaches it: it sits at "
+                f"{left},{top} to {right},{bottom} in the viewport. Click a point inside it with `mouse move <x> <y>`, "
+                "`mouse down` and `mouse up` (in one batch), then `screenshot` to see what changed",
+                data={"box": [left, top, right, bottom]}, code="cross_process_frame",
+            )
     ctx.state.frames[page.target_id] = frame_id
     return Result({"frame": frame_id, "url": page.frames[frame_id]["url"]})
 
@@ -1366,6 +1535,11 @@ DEVICES = {
 }
 
 
+async def overridden(page, method: str, params: dict):
+    await page.send(method, params)
+    page.overrides[method] = params
+
+
 @command("set")
 async def cmd_set(ctx: Ctx, argv):
     _, args = parse(argv)
@@ -1375,11 +1549,26 @@ async def cmd_set(ctx: Ctx, argv):
     refuse_on_borrowed(ctx, page, f"change the {setting} of")
     try:
         if setting == "viewport":
-            need(args, 3, "set viewport <w> <h> [scale]")
+            if len(args) == 2 and args[1] in ("reset", "off"):
+                if await engine_offscreen(ctx.state, page.target_id):
+                    fresh = await leave_offscreen(ctx, page)
+                    tab = ctx.state.extras.pop("left_offscreen", None)
+                    return Result({"reset": True, "tabId": tab, "url": fresh.url}, f"✓ Viewport reset: the page was reloaded in a new background tab [{tab}]")
+                with contextlib.suppress(BrowseError):
+                    await page.send("Emulation.clearDeviceMetricsOverride")
+                page.overrides.pop("Emulation.setDeviceMetricsOverride", None)
+                ctx.state.leases.discard("emulation")
+                return Result({"reset": True}, "✓ Viewport reset")
+            need(args, 3, "set viewport <w> <h> [scale] | reset")
             width, height = int(args[1]), int(args[2])
             scale = float(args[3]) if len(args) > 3 else 1.0
-            await page.send("Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": scale, "mobile": False})
-            ctx.state.leases.add("emulation")
+            offscreen = await go_offscreen(ctx, page)
+            await overridden(page, "Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": scale, "mobile": False})
+            if not offscreen:
+                ctx.state.leases.add("emulation")
+            from ardia_cli import command_metrics
+
+            command_metrics.flag("viewport_set", True)
             return Result({"width": width, "height": height, "deviceScaleFactor": scale, "mobile": False})
         if setting == "device":
             need(args, 2, "set device <name>")
@@ -1387,28 +1576,28 @@ async def cmd_set(ctx: Ctx, argv):
             if device is None:
                 raise BrowseError(f"Unknown device: {' '.join(args[1:])} ({', '.join(sorted(DEVICES))})")
             width, height, scale, mobile, agent = device
-            await page.send("Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": scale, "mobile": mobile})
-            await page.send("Emulation.setTouchEmulationEnabled", {"enabled": mobile})
+            await overridden(page, "Emulation.setTouchEmulationEnabled", {"enabled": mobile})
+            await overridden(page, "Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": scale, "mobile": mobile})
             if agent:
-                await page.send("Emulation.setUserAgentOverride", {"userAgent": agent})
+                await overridden(page, "Emulation.setUserAgentOverride", {"userAgent": agent})
             ctx.state.leases.add("emulation")
             return Result({"device": " ".join(args[1:]), "width": width, "height": height})
         if setting == "geo":
             need(args, 3, "set geo <lat> <lng>")
-            await page.send("Emulation.setGeolocationOverride", {"latitude": float(args[1]), "longitude": float(args[2]), "accuracy": 10})
+            await overridden(page, "Emulation.setGeolocationOverride", {"latitude": float(args[1]), "longitude": float(args[2]), "accuracy": 10})
             ctx.state.leases.add("emulation")
             return Result({"latitude": float(args[1]), "longitude": float(args[2])})
         if setting == "offline":
             offline = (args[1] if len(args) > 1 else "on").lower() in ("on", "true", "1")
             await page.enable_network()
-            await page.send("Network.emulateNetworkConditions", {"offline": offline, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1})
+            await overridden(page, "Network.emulateNetworkConditions", {"offline": offline, "latency": 0, "downloadThroughput": -1, "uploadThroughput": -1})
             ctx.state.leases.add("emulation")
             return Result({"offline": offline})
         if setting == "headers":
             need(args, 2, "set headers <json>")
             headers = json.loads(" ".join(args[1:]))
             await page.enable_network()
-            await page.send("Network.setExtraHTTPHeaders", {"headers": headers})
+            await overridden(page, "Network.setExtraHTTPHeaders", {"headers": headers})
             ctx.state.leases.add("emulation")
             return Result({"headers": sorted(headers)})
         if setting in ("credentials", "auth"):
@@ -1424,7 +1613,7 @@ async def cmd_set(ctx: Ctx, argv):
                 features.append({"name": "prefers-color-scheme", "value": scheme})
             if "reduced-motion" in args[1:]:
                 features.append({"name": "prefers-reduced-motion", "value": "reduce"})
-            await page.send("Emulation.setEmulatedMedia", {"features": features})
+            await overridden(page, "Emulation.setEmulatedMedia", {"features": features})
             ctx.state.leases.add("emulation")
             return Result({"features": features})
     except Gated as error:
@@ -1575,8 +1764,10 @@ async def cmd_removeinitscript(ctx: Ctx, argv):
     page = await ctx.state.page()
     if args[0] not in page.init_scripts:
         raise BrowseError(f"No init script {args[0]} in this tab")
-    await page.send("Page.removeScriptToEvaluateOnNewDocument", {"identifier": args[0]})
+    await page.send("Page.removeScriptToEvaluateOnNewDocument", {"identifier": page.script_ids.get(args[0], args[0])})
     page.init_scripts.pop(args[0], None)
+    page.script_sources.pop(args[0], None)
+    page.script_ids.pop(args[0], None)
     ctx.state.extras.get("init_sources", {}).pop(args[0], None)
     if not any(p.init_scripts for p in ctx.state.pages.values()):
         ctx.state.leases.discard("init")
@@ -1588,6 +1779,13 @@ async def cmd_read(ctx: Ctx, argv):
     from ardia_cli.browse import readpages, readurl
 
     options, args = parse(argv, readpages.flags(), readpages.ALIASES)
+    if options.get("data"):
+        from ardia_cli.browse import pagedata
+
+        if args or options.get("links") is not None:
+            raise Usage("read --data reads this tab's embedded JSON; open the page first, then run `read --data`")
+        page = await ctx.state.page()
+        return await pagedata.run(ctx, page, ctx.state.frame_for(page) or page.main_frame, options)
     if readpages.scrolls(options):
         return await readpages.run_scroll(ctx, options, args)
     if readpages.single_fetch(options, args):
@@ -1600,6 +1798,12 @@ async def cmd_read(ctx: Ctx, argv):
     page = await ctx.state.page()
     frame = ctx.state.frame_for(page) or page.main_frame
     selector = options.get("selector")
+    from ardia_cli.browse import pdftext
+
+    if frame == page.main_frame and await pdftext.page_is_pdf(page):
+        content = readurl.post_process(await pdftext.page_text(page), options)
+        return Result({"content": content, "contentType": "application/pdf", "finalUrl": page.url, "source": "pdf", "truncated": False, "url": page.url},
+                      content, page_content=True)
     if selector:
         content = await page.call("(s) => ardiaBrowse.queryAll(s).map((el) => ardiaBrowse.readable(el)).filter(Boolean).join('\\n\\n')",
                                   selector, frame=frame, read=True)
@@ -1607,8 +1811,28 @@ async def cmd_read(ctx: Ctx, argv):
         content = await page.call("() => ardiaBrowse.readable()", frame=frame, read=True)
     content = readurl.post_process(content, options)
     readpages.note_virtualized(content)
-    return Result({"content": content, "contentType": "text/html", "finalUrl": page.url, "source": "active-tab-html", "truncated": False, "url": page.url},
-                  content, page_content=True)
+    scope = "" if options.get("selector") else await page_scope(page, frame)
+    shown = f"{content}\n[scope: {scope}]" if scope else content
+    return Result({"content": content, "contentType": "text/html", "finalUrl": page.url, "source": "active-tab-html", "truncated": False, "url": page.url,
+                   "scope": scope or None}, shown, page_content=True)
+
+
+def render_json(value) -> str:
+    from ardia_cli.browse.script import render_json as render
+
+    return render(value)
+
+
+async def page_scope(page, frame) -> str:
+    from ardia_cli import command_metrics
+
+    try:
+        scope = await page.call("() => ardiaBrowse.scope()", frame=frame, read=True)
+    except BrowseError:
+        return ""
+    if scope:
+        command_metrics.flag("read_scope_shown", True)
+    return scope or ""
 
 
 @command("script")
@@ -1707,6 +1931,34 @@ async def cmd_session(ctx: Ctx, argv):
     return Result({"session": ctx.state.session}, ctx.state.session)
 
 
+def batch_out(item: list[str], name: str) -> tuple[list[str], str | None]:
+    from ardia_cli.browse import outfile
+
+    if name not in outfile.TAKES_OUT:
+        return item, None
+    return outfile.take_out(item, item[0])
+
+
+def save_batch_line(ctx: Ctx, name: str, result, path: str) -> str:
+    from ardia_cli import command_metrics
+    from ardia_cli.browse import outfile
+
+    if name in outfile.AS_TEXT:
+        text, summary = result.text or "", "its text"
+    else:
+        text, summary = outfile.content(name, result.data or {}, Path(path))
+    if not text.strip():
+        return f"✗ {name} returned nothing to save, so {path} wasn't written"
+    try:
+        target = outfile.save(ctx.path(path), text)
+    except (OSError, Usage) as error:
+        reason = error.message if isinstance(error, Usage) else (error.strerror or str(error))
+        return f"✗ Couldn't write {path}: {reason}\n{result.text or ''}"
+    command_metrics.flag("saved_to_file", True)
+    command_metrics.flag("batch_line_saved", True)
+    return f"✓ Saved to {target} ({len(text):,} characters): {summary}"
+
+
 @command("batch")
 async def cmd_batch(ctx: Ctx, argv):
     options, args = parse(argv, {"--bail": "bool"})
@@ -1736,6 +1988,7 @@ async def cmd_batch(ctx: Ctx, argv):
                 break
             continue
         try:
+            item, saving = batch_out(item, name)
             command, line_options = batch_line_options(item)
         except Usage as error:
             outcomes.append({"command": item, "success": False, "result": None, "error": error.message, "code": error.code})
@@ -1755,6 +2008,8 @@ async def cmd_batch(ctx: Ctx, argv):
                    "error": error.message if error else ("the command reported a failure" if failed else None), "text": result.text if result else None}
         if error is not None and error.code:
             outcome["code"] = error.code
+        if saving and outcome["success"]:
+            outcome["text"] = save_batch_line(ctx, name, result, saving)
         outcomes.append(outcome)
         if isinstance(error, (OutcomeUnknown, ConnectionLost)):
             outcomes.extend({"command": rest, "success": False, "result": None, "error": "not run: an earlier command's outcome is unknown",
@@ -1864,5 +2119,5 @@ SKIPPED = {
     "swipe": "iOS isn't supported",
     "tap": "iOS isn't supported",
     "device": "iOS isn't supported",
-    "skills": "use `ardia skills install`",
+    "skills": "use `ardia --skill` (or `ardia skills get --full`) to print the skill, `ardia skills install` to copy it",
 }

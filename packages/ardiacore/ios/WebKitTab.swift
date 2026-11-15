@@ -93,7 +93,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     WebKitHub.shared.permissions.drop(browserId: browserId)
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
     webView = nil
-    view.onFocus = nil
+    stopListening(to: view)
     WebKitHub.shared.transfers.unregister(view)
     view.navigationDelegate = nil
     view.uiDelegate = nil
@@ -118,7 +118,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     view.allowsMagnification = true
     view.isInspectable = WebKitHub.inspectable && !WebKitStores.isPrivate(profile)
     if let color = pageBackgroundColor { view.underPageBackgroundColor = color }
-    view.onFocus = { [weak self] in self?.emit("focus") }
+    listen(to: view)
     view.frame = bounds
     view.autoresizingMask = [.width, .height]
     addSubview(view)
@@ -158,7 +158,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
     if let key = transferKey { WebKitHub.shared.transfers.forgetLive(self, key: key) }
     guard let view = webView else { return }
     webView = nil
-    view.onFocus = nil
+    stopListening(to: view)
     if let key = transferKey, WebKitHub.shared.transfers.isPrepared(key) {
       WebKitHub.shared.transfers.unregister(view)
       view.navigationDelegate = nil
@@ -443,6 +443,8 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
       let active = dict?["active"] as? Bool ?? false
       autoPictureInPictureRule.reported(active: active)
       emit("pictureInPicture", ["kind": "video", "active": active])
+    case "mediaFault":
+      if let fault = WebKitMediaFaults.event(dict, from: frameInfo, muted: muted, blockerActive: WebKitContentBlocker.shared.isFiltering && !blocked.exemptLoad) { emit("mediaFault", fault) }
     case "status":
       emit("status", ["text": data as? String ?? ""])
     case "icons":

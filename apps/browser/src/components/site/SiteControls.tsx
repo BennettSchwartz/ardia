@@ -17,7 +17,7 @@ import { updateSettings } from "../../state/settings/actions";
 import { useEngineRule, usePageEngine, useRecommendedEngine, useStreamingSite } from "../../state/engines/hooks";
 import { useSettings, useTab } from "../../state/browser/hooks";
 import { isIncognitoProfile, tabLabel } from "../../state/browser/model";
-import { ENGINE_NAMES, ENGINE_SYMBOLS, otherEngine } from "../../state/engines/engines";
+import { ENGINE_NAMES, ENGINE_SYMBOLS, offersEngineChoice, otherEngine } from "../../state/engines/engines";
 import { openPageIn, togglePageEngine } from "../../state/engines/actions";
 import { Box, Divider, MenuRow, MenuSeparator, PANEL, PanelHeader, Popover, PopoverValue, space, Toggle, usePopoverPresence } from "../ui";
 import { Favicon } from "../favicon/Favicon";
@@ -25,7 +25,8 @@ import { patchPage, setPopover, usePage } from "../../state/tabs/pageState";
 import { dismissPopoverByPress } from "../../state/tabs/popoverDismiss";
 import { toggleCastPicker } from "../../state/media/cast";
 import { useMedia, usePictureInPicture } from "../../state/media/media";
-import { openSettings } from "../../state/settings/settingsWindows";
+import { openSettings, openSiteSettings } from "../../state/settings/settingsWindows";
+import { noteSiteControls } from "../../state/telemetry/usage";
 import { copyPageUrl } from "../../state/site/selection";
 import { clearSiteDataAfterConfirm, setSiteBlocking, siteOrigin } from "../../state/site/reloadMenu";
 import { canShare, shareTab } from "../../state/site/share";
@@ -34,6 +35,7 @@ import { SectionLabel } from "../sidebar/SectionLabel";
 import { CertificateDetails, ConnectionChip, ConnectionRow } from "./SiteConnection";
 import { SiteExtensions } from "./SiteExtensions";
 import { TranslateRows } from "./TranslateControls";
+import { ReaderRow } from "./ReaderControls";
 import { ZoomStepper } from "./ZoomControls";
 import { blockerLabel, choiceTitle, featuredPermissions, permissionValue, readSiteSettings, setSitePermission, sitePermissionsFor, type SitePermission } from "../../state/site/siteControls";
 import { isWebPageUrl } from "../../lib/url";
@@ -119,6 +121,12 @@ function SiteControlsPanel({
     const allowed = await setSiteBlocking(tab, host, on);
     setBlocker((b) => (b ? { ...b, allowed } : b));
   };
+  const showSiteSettings = () => {
+    if (!origin) return;
+    close();
+    noteSiteControls("siteSettings");
+    openSiteSettings(origin, tab.profileId);
+  };
   const clearData = async () => {
     if (!origin) return;
     const n = await clearSiteDataAfterConfirm(tab, origin);
@@ -154,6 +162,7 @@ function SiteControlsPanel({
   const toggle = (section: Exclude<Expanded, null>) => setExpanded((e) => (e === section ? null : section));
 
   const findable = isWebPageUrl(url);
+  const engineChoice = offersEngineChoice();
   const castTile = !video && !!origin;
   const tiles = [
     canShare(tab) ? <ActionTile key="share" ref={shareTile} icon="square.and.arrow.up" label="Share…" onPress={share} /> : null,
@@ -224,7 +233,7 @@ function SiteControlsPanel({
                       }
               }
             />
-            <SettingRow icon={ENGINE_SYMBOLS[pageEngine]} title="Opens in" value={opensIn} on={!!engineRule} onPress={() => void pickEngine()} />
+            {engineChoice ? <SettingRow icon={ENGINE_SYMBOLS[pageEngine]} title="Opens in" value={opensIn} on={!!engineRule} onPress={() => void pickEngine()} /> : null}
             {shownPermissions.map((p) => (
               <SettingRow
                 key={p.type}
@@ -256,7 +265,7 @@ function SiteControlsPanel({
             <MenuSeparator />
             <MenuRow icon="plus.magnifyingglass" title="Zoom" accessory={<ZoomStepper tabId={tabId} zoom={tab.zoom} />} />
             {origin && !castTile ? <MenuRow icon="tv.and.mediabox" title="Cast…" onPress={cast} /> : null}
-            {origin ? (
+            {engineChoice && origin ? (
               <MenuRow
                 icon={ENGINE_SYMBOLS[otherEngine(pageEngine)]}
                 title={`Open Page in ${ENGINE_NAMES[otherEngine(pageEngine)]}`}
@@ -269,6 +278,7 @@ function SiteControlsPanel({
             {origin ? (
               <>
                 <MenuSeparator />
+                <ReaderRow tabId={tabId} onClose={close} />
                 <TranslateRows tabId={tabId} onClose={close} />
                 {otherPermissions.map((p) => (
                   <MenuRow
@@ -278,7 +288,8 @@ function SiteControlsPanel({
                     accessory={<PopoverValue title={value(p)} onPress={() => void pickPermission(p.type, p.choices)} />}
                   />
                 ))}
-                {otherPermissions.length ? <MenuSeparator /> : null}
+                {pageEngine === "chromium" ? <MenuRow icon="slider.horizontal.3" title="Site Settings…" onPress={showSiteSettings} /> : null}
+                <MenuSeparator />
                 <MenuRow icon="trash" title="Clear Cookies and Site Data…" detail={cleared ?? undefined} onPress={() => void clearData()} />
               </>
             ) : null}
