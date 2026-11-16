@@ -18,4 +18,10 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return upstreamResolve ? upstreamResolve(context, moduleName, platform) : context.resolveRequest(context, moduleName, platform);
 };
 
+const upstreamTransformOptions = config.transformer.getTransformOptions;
+config.transformer.getTransformOptions = async (...args) => {
+  const options = upstreamTransformOptions ? await upstreamTransformOptions(...args) : { transform: {} };
+  return { ...options, transform: { ...options.transform, inlineRequires: true } };
+};
+
 module.exports = config;
