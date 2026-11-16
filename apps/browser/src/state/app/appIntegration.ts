@@ -2,7 +2,8 @@ import { isDefaultBrowser, systemInfo } from "../../platform/app";
 import { setAsDefaultBrowser } from "./appSettings";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { readDocument, saveDocument } from "../../platform/documents";
-import { maybeStartOnboarding, onboardingCompletedAt, useOnboarding } from "../onboarding/onboarding";
+import { maybeStartOnboarding, onboardingCompletedAt, startOnboarding, useOnboarding } from "../onboarding/onboarding";
+import { lateOnboardingMs } from "../onboarding/overlayLab";
 import { trackAppVersion } from "../releaseNotes/releaseNotes";
 import { afterFirstWindow } from "../../lib/afterFirstWindow";
 import { offerDefaultBrowserAgain } from "../onboarding/defaultBrowserOffer";
@@ -20,6 +21,7 @@ export function startAppIntegration() {
   const firstRun = maybeStartOnboarding();
   if (updated && firstRun) noteReleaseNotesHeldForFirstRun();
   if (updated && !firstRun) openReleaseNotesAfterUpdate();
+  if (!firstRun && lateOnboardingMs()) setTimeout(() => startOnboarding(), lateOnboardingMs());
   afterFirstWindow(() => {
     if (!PLATFORM_FEATURES.setsDefaultBrowser) return;
     void offerDefaultBrowserAgain({

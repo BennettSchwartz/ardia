@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
+import { BackedView } from "./views/BackedView";
 import { VisualEffect } from "./views/materials";
 import { WindowDragRegion } from "./windowDragRegion";
 
@@ -17,7 +18,7 @@ const SHAPES = [
 
 export const FADE_VARIANTS: Variant[] = [false, true].flatMap((later) => SHAPES.map((shape) => ({ ...shape, name: `${shape.name}${later ? " later" : ""}`, later })));
 
-export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel"];
+export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex"];
 
 const CONTAINERS: { slot: number; style: object; pointerEvents?: "none" }[] = [
   { slot: 2, style: { backgroundColor: "#010101" } },
@@ -113,6 +114,7 @@ export function FadeLab() {
       {shown ? FADE_VARIANTS.map((variant, i) => <FadeTile key={`${round}-${variant.name}`} variant={variant} round={round} slot={i + 1} />) : null}
       {shown ? <StateTile key={`${round}-state`} round={round} /> : null}
       {shown ? <NativePropsTile key={`${round}-native`} round={round} /> : null}
+      <BackedView style={[styles.tile, at(1, 7), { backgroundColor: "#010101", zIndex: 10 }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</BackedView>
       {CONTAINERS.map(({ slot, style, pointerEvents }) => (
         <View key={slot} pointerEvents={pointerEvents} style={[styles.tile, at(1, slot), style]}>
           {shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}

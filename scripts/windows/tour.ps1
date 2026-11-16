@@ -1456,6 +1456,42 @@ function Invoke-PagesTour {
     $stop.Facts.Add("the new window is titled '$([ArdiaTour]::TitleOf($private))'")
   } | Out-Null
   Stop-Ardia $session
+  Invoke-UrlFieldBackground "url-field-raw" "rawBackgrounds=1" "as React Native Windows draws it today"
+  Invoke-UrlFieldBackground "url-field-backed" "" "with BackedView"
+}
+
+function Invoke-UrlFieldBackground([string]$Name, [string]$Test, [string]$Label) {
+  $env:ARDIA_TEST = $Test
+  try { $session = Start-Ardia $Name -Onboarded -Settings @{ tabLayout = "top" } } finally { $env:ARDIA_TEST = "" }
+  Invoke-Stop $session $Name "Tabs on top: the address field hovered while its page reloads, $Label" {
+    param($stop)
+    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com, rested the pointer on the address field, pressed F5, then clicked the field. Pictures: hovered, 120 ms into the reload, 1.5 s later, and after the click."
+    $stop.Expected = "report only: the hover pill keeps its rounded ends, the reload glow draws above the pill, and the click opens the command bar (#2197)."
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
+    $loaded = Open-Page $session $stop "example.com" "example\.com"
+    $field = @(Find-Named $session.Main "example.com") | Sort-Object -Property Top | Select-Object -First 1
+    $stop.Facts.Add("page loaded: $loaded; address field found: $([bool]$field)")
+    if (-not $loaded -or -not $field) { $stop.Seen = "no"; return }
+    Focus-Window $session $session.Main $stop | Out-Null
+    [ArdiaTour]::SetCursorPos($field.X, $field.Y) | Out-Null
+    Start-Sleep -Milliseconds 700
+    $pictures = [ordered]@{}
+    $pictures.hovered = Measure-Screen ($stop.Shot -replace '\.png$', '-hovered.png') $session.Main
+    Send-Key 0x74 0
+    Send-Key 0x74 2
+    Start-Sleep -Milliseconds 120
+    $pictures.reloading = Measure-Screen ($stop.Shot -replace '\.png$', '-reloading.png') $session.Main
+    Start-Sleep -Milliseconds 1400
+    $pictures.reloaded = Measure-Screen ($stop.Shot -replace '\.png$', '-reloaded.png') $session.Main
+    Send-Click $field.X $field.Y
+    Start-Sleep -Milliseconds 900
+    $pictures.clicked = Measure-Screen ($stop.Shot -replace '\.png$', '-clicked.png') $session.Main
+    foreach ($entry in $pictures.GetEnumerator()) { $stop.Facts.Add("$($entry.Key): saved $([bool]$entry.Value.Saved)$(if ($entry.Value.Problem) { ", $($entry.Value.Problem)" })") }
+    $stop.Facts.Add("the field sits at $($field.Left),$($field.Top) $($field.Width)x$($field.Height) on screen")
+    Send-Escape
+    $stop.Seen = "yes"
+  } | Out-Null
+  Stop-Ardia $session
 }
 
 function Invoke-LayoutTour([string]$Name, [hashtable]$Settings, [string]$Title, [string]$Expected) {

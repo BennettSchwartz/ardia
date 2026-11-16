@@ -28,6 +28,7 @@ export * from "./systemSignals";
 export * from "./translation";
 export * from "./updater";
 export * from "./userScripts";
+export { AnimatedBackedView, BackedView } from "./backedView";
 export { ClipView } from "./clipView";
 export { PageCoverGate, type PageCoverGateProps } from "./pageCoverGate";
 export * from "./views";
