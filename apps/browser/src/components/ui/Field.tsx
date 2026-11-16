@@ -1,5 +1,6 @@
 import { OutsidePressArea, showMenu, type MenuItem } from "@ardia/shell";
 import { withIconNames } from "../../lib/activeLook";
+import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { modifiersOf, type ClickModifiers } from "../../lib/keys";
 import { Symbol } from "./Symbol";
 import { useEffect, useRef, type Ref } from "react";
@@ -229,12 +230,16 @@ export function PopUp<T extends string>({
               scaleStyle,
             ]}
           >
-            <Text numberOfLines={1} style={{ flex: 1, ...typeScale.body, color: theme.textPrimary }}>
+            <Text numberOfLines={1} style={{ ...(PLATFORM_FEATURES.dropDownPopUps ? { flexGrow: 1, flexShrink: 1 } : { flex: 1 }), ...typeScale.body, color: theme.textPrimary }}>
               {current?.title ?? ""}
             </Text>
-            <View style={{ width: 16, height: 16, borderRadius: radius.control, backgroundColor: theme.formAccent, alignItems: "center", justifyContent: "center" }}>
-              <Symbol name="chevron.up.chevron.down" size={8} weight="bold" color={theme.onAccent} style={{ width: 16, height: 16 }} />
-            </View>
+            {PLATFORM_FEATURES.dropDownPopUps ? (
+              <Symbol name="chevron.down" size={9} weight="semibold" color={theme.textSecondary} style={{ width: 16, height: 16 }} />
+            ) : (
+              <View style={{ width: 16, height: 16, borderRadius: radius.control, backgroundColor: theme.formAccent, alignItems: "center", justifyContent: "center" }}>
+                <Symbol name="chevron.up.chevron.down" size={8} weight="bold" color={theme.onAccent} style={{ width: 16, height: 16 }} />
+              </View>
+            )}
           </Animated.View>
         )}
       </Pressable>

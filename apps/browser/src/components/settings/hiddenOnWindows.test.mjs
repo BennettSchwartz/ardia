@@ -29,3 +29,13 @@ test("Windows hides the settings whose only effect is an engine call it doesn't 
   assert.match(source("./rows/toolRows.ts"), /compactCliPill: \{\n\s+advanced: true,\n\s+shown: \(\) => PLATFORM_FEATURES\.ardiaCommand,/, "compactCliPill");
   assert.match(privacy, /SETTING_LABELS\.filter\(\(\[type\]\) => settings\?\.\[type\] && offersSiteSetting\(type\)\)/);
 });
+
+test("on Windows a pop-up button grows to fit its value and shows a drop-down chevron, the Mac and Linux keep the stepper", () => {
+  const source = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.match(source("../../lib/platformFeatures.windows.ts"), /dropDownPopUps: true\b/);
+  assert.match(source("../../lib/platformFeatures.ts"), /dropDownPopUps: false\b/);
+  assert.match(source("../../lib/platformFeatures.linux.ts"), /dropDownPopUps: false\b/);
+  const field = source("../ui/Field.tsx");
+  assert.match(field, /PLATFORM_FEATURES\.dropDownPopUps \? \{ flexGrow: 1, flexShrink: 1 \} : \{ flex: 1 \}/);
+  assert.match(field, /PLATFORM_FEATURES\.dropDownPopUps \? \(\s*<Symbol name="chevron\.down"[^>]*color=\{theme\.textSecondary\}/);
+});
