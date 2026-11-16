@@ -1594,7 +1594,7 @@ public static class ArdiaFirstFramesFront {
   }
 }
 
-if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesUp) {
+if ($Part -ne "gate" -and $withEngineForEdge -and $httpPagesUp) {
   if (-not ([System.Management.Automation.PSTypeName]"ArdiaContrast").Type) {
     Add-Type @"
 using System;
@@ -1670,8 +1670,17 @@ public static class ArdiaContrast {
     }
   }
 
+  function Save-ContrastShot([string]$Path) {
+    try {
+      Save-Screenshot $Path
+    } catch {
+    }
+  }
+
   function Invoke-ContrastScenario([string]$Name, [switch]$Settings, [int]$Pairs, [int]$PauseMs) {
     $log = Join-Path $Out "contrast-$Name.log"
+    $launchActions = if ($Settings) { ',"launchActions":["openSettings"]' } else { "" }
+    Set-Content -Path (Join-Path $contrastData "config.json") -Value ('{"settings":{"openLinksInLittleArdia":false' + $launchActions + '}}') -Encoding utf8NoBOM
     $env:ARDIA_DATA_DIR = $contrastData
     $env:ARDIA_CONFIG_DIR = $contrastData
     $since = Get-Date
@@ -1683,22 +1692,20 @@ public static class ArdiaContrast {
       Start-Sleep -Seconds 12
       $app.Refresh()
       if ($app.HasExited) { return @("contrast ($Name): the app exited before the switch (exit code $($app.ExitCode))") }
-      [ArdiaInput]::SetForegroundWindow($app.MainWindowHandle) | Out-Null
-      Start-Sleep -Milliseconds 400
       if ($Settings) {
-        Send-Chord @([byte]0x11) ([byte]0xBC)
-        Start-Sleep -Seconds 4
-        $notes += "windows open after Ctrl+, : $([ArdiaContrast]::CountWindows($app.Id))"
+        $open = [ArdiaContrast]::CountWindows($app.Id)
+        $notes += "windows open with the openSettings launch action: $open"
+        if ($open -lt 2) { $problems += "contrast ($Name): Settings did not open from the launch action" }
       }
-      Save-Screenshot (Join-Path $Out "contrast-$Name-0-before.png")
+      Save-ContrastShot (Join-Path $Out "contrast-$Name-0-before.png")
       for ($pair = 1; $pair -le $Pairs; $pair++) {
         $notes += Set-Contrast $true
         Start-Sleep -Milliseconds $PauseMs
-        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-Screenshot (Join-Path $Out "contrast-$Name-$pair-on.png") }
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-on.png") }
         if ($app.HasExited) { $notes += "the app exited after contrast went on in pair $pair"; break }
         $notes += Set-Contrast $false
         Start-Sleep -Milliseconds $PauseMs
-        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-Screenshot (Join-Path $Out "contrast-$Name-$pair-off.png") }
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-off.png") }
         if ($app.HasExited) { $notes += "the app exited after contrast went off in pair $pair"; break }
       }
       Start-Sleep -Seconds 3
@@ -1725,7 +1732,7 @@ public static class ArdiaContrast {
 
   $contrastData = New-DataDirectory "contrast-data"
   Set-Content -Path (Join-Path $contrastData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
-  Set-Content -Path (Join-Path $contrastData "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
+  Set-Content -Path (Join-Path $contrastData "automation-approvals.json") -Value '{"approved":{"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06":{"key":"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06","kind":"launchAction","name":"launchActions: openSettings","summary":"Runs openSettings each time Ardia starts","at":1700000000000}},"dismissed":[],"version":1}' -Encoding utf8NoBOM
   $dumps = Join-Path $Out "contrast-dumps"
   New-Item -ItemType Directory -Force -Path $dumps | Out-Null
   $dumpKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
@@ -1739,7 +1746,7 @@ public static class ArdiaContrast {
   } catch {
     Write-Host "Contrast: full crash dumps could not be turned on: $($_.Exception.Message)"
   }
-  Write-Host "Contrast: before the checks, $(Get-SystemColours), contrast on: $([ArdiaContrast]::IsOn()); full dumps on: $dumpsOn."
+  Write-Host "Contrast: on $env:PROCESSOR_ARCHITECTURE $((Get-CimInstance Win32_OperatingSystem).Caption) build $([Environment]::OSVersion.Version.Build); before the checks, $(Get-SystemColours), contrast on: $([ArdiaContrast]::IsOn()); full dumps on: $dumpsOn."
   $contrastProblems = @()
   try {
     $contrastProblems += @(Invoke-ContrastScenario "browser" -Pairs 2 -PauseMs 4000)
@@ -1753,7 +1760,8 @@ public static class ArdiaContrast {
   $found = @(Get-ChildItem -LiteralPath $dumps -Filter "*.dmp" -ErrorAction SilentlyContinue)
   Write-Host "Contrast: $($found.Count) crash dumps written."
   if ($found.Count) {
-    $debugger = @("${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe", "$env:ProgramFiles\Windows Kits\10\Debuggers\x64\cdb.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $machine = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+    $debugger = @("${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\$machine\cdb.exe", "$env:ProgramFiles\Windows Kits\10\Debuggers\$machine\cdb.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $debugger) { Write-Host "Contrast: no cdb.exe on this runner; the dumps are in the artifact." }
     else {
       $symbols = Join-Path $Out "contrast-symbols"
