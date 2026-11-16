@@ -5,8 +5,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$lab = @{ Tile = 48; Slot = 64; Left = 24; Top = 96; Rounds = 6; FadeMs = 250 }
+$lab = @{ Tile = 48; Slot = 64; Left = 24; Rows = @(96, 176); Rounds = 6; FadeMs = 250 }
 $variants = @("plain", "blur", "layout", "blur+layout", "overlay", "plain later", "blur later", "layout later", "blur+layout later", "overlay later")
+$probes = @("state", "setNativeProps", "inside background", "inside clear")
+$slots = $variants.Count + 1
 $captureMs = 15000
 $whiteAt = 220
 $darkBelow = 30
@@ -101,7 +103,7 @@ public static class ArdiaFadeCheck {
     return found;
   }
 
-  public static Run Capture(string app, string arguments, int milliseconds, int tiles, int left, int slot, int tile, int top) {
+  public static Run Capture(string app, string arguments, int milliseconds, int tiles, int left, int slot, int tile, int[] tops) {
     SetProcessDPIAware();
     Run run = new Run();
     Stopwatch clock = Stopwatch.StartNew();
@@ -112,7 +114,8 @@ public static class ArdiaFadeCheck {
     IntPtr screen = GetDC(IntPtr.Zero);
     IntPtr memory = CreateCompatibleDC(screen);
     IntPtr section = IntPtr.Zero, bits = IntPtr.Zero, previous = IntPtr.Zero;
-    int width = 0, y = 0, x0 = 0;
+    int width = 0, x0 = 0;
+    int[] ys = new int[tops.Length];
     int[] xs = new int[tiles];
     long[] shotsAt = new long[] { 300, 900, 1500, 2600, 4500 };
     int nextShot = 0;
@@ -128,7 +131,7 @@ public static class ArdiaFadeCheck {
           ClientToScreen(window, ref origin);
           x0 = origin.X + (int)(left * run.Scale);
           width = (int)(tiles * slot * run.Scale);
-          y = origin.Y + (int)((top + tile / 2) * run.Scale);
+          for (int r = 0; r < tops.Length; r++) ys[r] = origin.Y + (int)((tops[r] + tile / 2) * run.Scale);
           for (int i = 0; i < tiles; i++) xs[i] = (int)((i * slot + tile / 2) * run.Scale);
           BitmapInfoHeader header = new BitmapInfoHeader();
           header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
@@ -145,16 +148,20 @@ public static class ArdiaFadeCheck {
           nextShot++;
           continue;
         }
-        if (!BitBlt(memory, 0, 0, width, 1, screen, x0, y, 0x40CC0020)) { Thread.Sleep(1); continue; }
-        byte[] row = new byte[width * 4];
-        Marshal.Copy(bits, row, 0, row.Length);
         Sample sample = new Sample();
         sample.Ms = at;
-        sample.Values = new int[tiles];
-        for (int i = 0; i < tiles; i++) {
-          int p = xs[i] * 4;
-          sample.Values[i] = (row[p] + row[p + 1] + row[p + 2]) / 3;
+        sample.Values = new int[tiles * ys.Length];
+        bool read = true;
+        for (int r = 0; r < ys.Length && read; r++) {
+          if (!BitBlt(memory, 0, 0, width, 1, screen, x0, ys[r], 0x40CC0020)) { read = false; break; }
+          byte[] row = new byte[width * 4];
+          Marshal.Copy(bits, row, 0, row.Length);
+          for (int i = 0; i < tiles; i++) {
+            int p = xs[i] * 4;
+            sample.Values[r * tiles + i] = (row[p] + row[p + 1] + row[p + 2]) / 3;
+          }
         }
+        if (!read) { Thread.Sleep(1); continue; }
         run.Samples.Add(sample);
         Thread.Sleep(2);
       }
@@ -181,7 +188,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
   $env:ARDIA_BACKGROUND = ""
   $env:ARDIA_TEST = "fadeLab=1"
   try {
-    $run = [ArdiaFadeCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $variants.Count + 1, $lab.Left, $lab.Slot, $lab.Tile, $lab.Top)
+    $run = [ArdiaFadeCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $slots, $lab.Left, $lab.Slot, $lab.Tile, [int[]]$lab.Rows)
   } finally {
     $env:ARDIA_TEST = ""
   }
@@ -199,7 +206,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
     $bitmap.Dispose()
   }
   $csv = [System.Text.StringBuilder]::new()
-  [void]$csv.AppendLine("ms," + (@("marker") + $variants -join ","))
+  [void]$csv.AppendLine("ms," + ((@("marker") + $variants + $probes + @(1..($slots - $probes.Count) | ForEach-Object { "row2-$_" })) -join ","))
   foreach ($sample in @($run.Samples)) { [void]$csv.AppendLine("$($sample.Ms - $run.WindowMs)," + ($sample.Values -join ",")) }
   Set-Content -LiteralPath (Join-Path $Out "fade-$Label-samples.csv") -Value $csv.ToString() -Encoding utf8NoBOM
   Start-Sleep -Milliseconds 800
@@ -218,8 +225,11 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
   Write-Host "fades, $Label`: $($intervals.Count) rounds seen by the marker"
   if ($intervals.Count -lt $lab.Rounds) { $problems += "fades, $Label`: the marker showed $($intervals.Count) rounds, not $($lab.Rounds)" }
   $byRound = @($intervals | ForEach-Object { $from = $_[0]; $to = $_[1]; , @($samples | Where-Object { $_.Ms -ge $from -and $_.Ms -lt $to }) })
-  for ($v = 0; $v -lt $variants.Count; $v++) {
-    $column = $v + 1
+  $columns = @()
+  for ($v = 0; $v -lt $variants.Count; $v++) { $columns += [pscustomobject]@{ Name = $variants[$v]; Column = $v + 1; Gates = $true } }
+  for ($v = 0; $v -lt $probes.Count; $v++) { $columns += [pscustomobject]@{ Name = $probes[$v]; Column = $slots + $v; Gates = $false } }
+  foreach ($entry in $columns) {
+    $column = $entry.Column
     $rows = @()
     for ($r = 0; $r -lt $intervals.Count; $r++) {
       $round = $r + 1
@@ -230,11 +240,11 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
       $landed = if ($white) { [int]($white.Ms - $interval[0]) } else { $null }
       $last = if ($inRound.Count) { $inRound[-1].Values[$column] } else { -1 }
       $rows += [pscustomobject]@{ Round = $round; Between = $between.Count; Landed = $landed; Last = $last; Shown = [int]($interval[1] - $interval[0]) }
-      if ($null -eq $landed) { $problems += "fades, $Label, $($variants[$v]), round $round`: never reached white in $([int]($interval[1] - $interval[0])) ms (last $last)" }
-      elseif ($round -gt 1 -and $between.Count -eq 0) { $problems += "fades, $Label, $($variants[$v]), round $round`: no in-between frame; white at $landed ms" }
+      if ($null -eq $landed) { if ($entry.Gates) { $problems += "fades, $Label, $($entry.Name), round $round`: never reached white in $([int]($interval[1] - $interval[0])) ms (last $last)" } }
+      elseif ($entry.Gates -and $round -gt 1 -and $between.Count -eq 0) { $problems += "fades, $Label, $($entry.Name), round $round`: no in-between frame; white at $landed ms" }
     }
     $summary = ($rows | ForEach-Object { if ($null -eq $_.Landed) { "r$($_.Round) never (last $($_.Last))" } else { "r$($_.Round) $($_.Between) between, white at $($_.Landed) ms" } }) -join "; "
-    Write-Host "fades, $Label, $($variants[$v]): $summary"
+    Write-Host "fades, $Label, $($entry.Name): $summary"
   }
   if (Test-Path $log) { Select-String -Path $log -Pattern "fade lab round 1 " | Select-Object -First 4 | ForEach-Object { Write-Host "fades, $Label log: $($_.Line)" } }
   return $problems
