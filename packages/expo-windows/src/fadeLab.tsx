@@ -69,7 +69,7 @@ export function FadeLab() {
 }
 
 const styles = StyleSheet.create({
-  panel: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000000" },
+  panel: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000000", zIndex: 1000 },
   tile: { position: "absolute", top: FADE_LAB.top, width: FADE_LAB.tile, height: FADE_LAB.tile },
   white: { backgroundColor: "#FFFFFF" },
 });

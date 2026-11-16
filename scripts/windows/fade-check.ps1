@@ -43,7 +43,48 @@ public static class ArdiaFadeCheck {
   [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dc, int x, int y, int width, int height, IntPtr source, int sx, int sy, uint op);
 
   public class Sample { public long Ms; public int[] Values; }
-  public class Run { public long WindowMs = -1; public double Scale = 1; public List<Sample> Samples = new List<Sample>(); public Process Process; }
+  public class Shot { public long Ms; public int Width; public int Height; public byte[] Pixels; public string Front; }
+  public class Run { public long WindowMs = -1; public double Scale = 1; public List<Sample> Samples = new List<Sample>(); public List<Shot> Shots = new List<Shot>(); public Process Process; }
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+
+  static string Describe(IntPtr window, uint process) {
+    if (window == IntPtr.Zero) return "none";
+    uint owner;
+    GetWindowThreadProcessId(window, out owner);
+    StringBuilder name = new StringBuilder(64);
+    GetClassName(window, name, 64);
+    return name.ToString() + (owner == process ? " (ours)" : " (pid " + owner + ")");
+  }
+
+  static Shot Whole(IntPtr window, IntPtr screen, IntPtr memory, long at, uint process) {
+    Rect client;
+    GetClientRect(window, out client);
+    Point origin = new Point();
+    ClientToScreen(window, ref origin);
+    Shot shot = new Shot();
+    shot.Ms = at;
+    shot.Width = client.Right - client.Left;
+    shot.Height = client.Bottom - client.Top;
+    shot.Front = Describe(GetForegroundWindow(), process);
+    if (shot.Width < 8 || shot.Height < 8) return shot;
+    BitmapInfoHeader header = new BitmapInfoHeader();
+    header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
+    header.Width = shot.Width;
+    header.Height = -shot.Height;
+    header.Planes = 1;
+    header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    if (section == IntPtr.Zero) return shot;
+    IntPtr previous = SelectObject(memory, section);
+    if (BitBlt(memory, 0, 0, shot.Width, shot.Height, screen, origin.X, origin.Y, 0x40CC0020)) {
+      shot.Pixels = new byte[shot.Width * shot.Height * 4];
+      Marshal.Copy(bits, shot.Pixels, 0, shot.Pixels.Length);
+    }
+    SelectObject(memory, previous);
+    DeleteObject(section);
+    return shot;
+  }
 
   static IntPtr Find(uint process) {
     IntPtr found = IntPtr.Zero;
@@ -73,6 +114,9 @@ public static class ArdiaFadeCheck {
     IntPtr section = IntPtr.Zero, bits = IntPtr.Zero, previous = IntPtr.Zero;
     int width = 0, y = 0, x0 = 0;
     int[] xs = new int[tiles];
+    long[] shotsAt = new long[] { 300, 900, 1500, 2600, 4500 };
+    int nextShot = 0;
+    IntPtr shotMemory = CreateCompatibleDC(screen);
     try {
       while (clock.ElapsedMilliseconds < milliseconds && !run.Process.HasExited) {
         if (window == IntPtr.Zero) {
@@ -96,6 +140,11 @@ public static class ArdiaFadeCheck {
           previous = SelectObject(memory, section);
         }
         long at = clock.ElapsedMilliseconds;
+        if (nextShot < shotsAt.Length && at - run.WindowMs >= shotsAt[nextShot]) {
+          run.Shots.Add(Whole(window, screen, shotMemory, at - run.WindowMs, (uint)run.Process.Id));
+          nextShot++;
+          continue;
+        }
         if (!BitBlt(memory, 0, 0, width, 1, screen, x0, y, 0x40CC0020)) { Thread.Sleep(1); continue; }
         byte[] row = new byte[width * 4];
         Marshal.Copy(bits, row, 0, row.Length);
@@ -112,6 +161,7 @@ public static class ArdiaFadeCheck {
     } finally {
       if (section != IntPtr.Zero) { SelectObject(memory, previous); DeleteObject(section); }
       DeleteDC(memory);
+      DeleteDC(shotMemory);
       ReleaseDC(IntPtr.Zero, screen);
     }
     return run;
@@ -136,6 +186,22 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
     $env:ARDIA_TEST = ""
   }
   if ($run.Process -and -not $run.Process.HasExited) { Stop-Process -Id $run.Process.Id -Force -ErrorAction SilentlyContinue }
+  Add-Type -AssemblyName System.Drawing
+  foreach ($shot in @($run.Shots)) {
+    Write-Host "fades, $Label`: shot at $($shot.Ms) ms after the window, $($shot.Width)x$($shot.Height), in front: $($shot.Front)"
+    if (-not $shot.Pixels) { continue }
+    $bitmap = [System.Drawing.Bitmap]::new($shot.Width, $shot.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+    $box = [System.Drawing.Rectangle]::new(0, 0, $shot.Width, $shot.Height)
+    $locked = $bitmap.LockBits($box, [System.Drawing.Imaging.ImageLockMode]::WriteOnly, $bitmap.PixelFormat)
+    [System.Runtime.InteropServices.Marshal]::Copy($shot.Pixels, 0, $locked.Scan0, $shot.Pixels.Length)
+    $bitmap.UnlockBits($locked)
+    $bitmap.Save((Join-Path $Out ("fade-$Label-{0:00000}ms.png" -f $shot.Ms)), [System.Drawing.Imaging.ImageFormat]::Png)
+    $bitmap.Dispose()
+  }
+  $csv = [System.Text.StringBuilder]::new()
+  [void]$csv.AppendLine("ms," + (@("marker") + $variants -join ","))
+  foreach ($sample in @($run.Samples)) { [void]$csv.AppendLine("$($sample.Ms - $run.WindowMs)," + ($sample.Values -join ",")) }
+  Set-Content -LiteralPath (Join-Path $Out "fade-$Label-samples.csv") -Value $csv.ToString() -Encoding utf8NoBOM
   Start-Sleep -Milliseconds 800
   $problems = @()
   $samples = @($run.Samples)
