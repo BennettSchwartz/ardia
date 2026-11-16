@@ -146,7 +146,7 @@ export function parseStack(stack: unknown, limit = 50): ExceptionFrame[] {
 export type NativeFrame = { image: string; symbol?: string; symbolOffset?: number; offset?: number };
 export type NativeImage = { name: string; uuid: string };
 
-const OUR_IMAGES = /^(Ardia|ArdiaCore|ArdiaShell|Chromium Framework|Expo|ExpoModulesCore|React|hermes|RCT|Sparkle)/;
+const OUR_IMAGES = /^(Ardia|ArdiaCore|ArdiaShell|Chromium Framework|Expo|ExpoModulesCore|React|hermes|RCT|Sparkle|chrome$|chrome_crashpad_handler$|lib(?:EGL|GLESv2|vk_swiftshader|vulkan|qt5_shim|qt6_shim)\.so)/;
 const STRIPPED_EXPORT = /^(?:ArdiaCoreMain|ChromeMain|ChromeWebAppShortcutCopierMain|ac_[a-z0-9_]+)$/;
 const NEAREST_EXPORT_DISTANCE = 0x4000;
 
@@ -183,14 +183,14 @@ export function nativeFrames(frames: NativeFrame[], limit = 64): ExceptionFrame[
   }).reverse();
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const IMAGE_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{40})$/;
 
 export function nativeImages(images: unknown, limit = 24): NativeImage[] {
   if (!Array.isArray(images)) return [];
   return images.flatMap((i: Partial<NativeImage>) => {
     const uuid = typeof i?.uuid === "string" ? i.uuid.toLowerCase() : "";
     const name = nativeImageName(i?.name);
-    return UUID.test(uuid) && OUR_IMAGES.test(name) ? [{ name, uuid }] : [];
+    return IMAGE_ID.test(uuid) && OUR_IMAGES.test(name) ? [{ name, uuid }] : [];
   }).slice(0, limit);
 }
 
