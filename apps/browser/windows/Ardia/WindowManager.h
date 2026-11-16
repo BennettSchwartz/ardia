@@ -378,6 +378,12 @@ struct WindowManager {
     }
   }
 
+  void RefreshCaptionColors() noexcept {
+    bool contrast = HighContrastOn();
+    for (auto &[id, entry] : m_windows) ApplyTheme(entry, m_dark);
+    LaunchLog::Write(L"window", contrast ? L"caption buttons take the contrast theme's colours" : L"caption buttons take the app's colours again");
+  }
+
   void SetDark(bool dark) noexcept {
     m_dark = dark;
     for (auto &[id, entry] : m_windows) ApplyTheme(entry, dark);
@@ -831,12 +837,6 @@ struct WindowManager {
     } catch (...) {
       LaunchLog::Write(L"warning", L"caption button colours could not be set");
     }
-  }
-
-  void RefreshCaptionColors() noexcept {
-    bool contrast = HighContrastOn();
-    for (auto &[id, entry] : m_windows) ApplyTheme(entry, m_dark);
-    LaunchLog::Write(L"window", contrast ? L"caption buttons take the contrast theme's colours" : L"caption buttons take the app's colours again");
   }
 
   static void KeepOnADisplay(ManagedWindow &entry) noexcept {
