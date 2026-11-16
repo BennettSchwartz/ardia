@@ -106,19 +106,21 @@ function Start-Ardia([string]$Name) {
   $shownAt = Get-Date
   $watchUntil = $shownAt.AddSeconds($WatchSeconds)
   $shots = 0
+  $peakMb = 0
   while ((Get-Date) -lt $watchUntil -and -not $window.HasExited) {
     Start-Sleep -Milliseconds 250
+    try { $window.Refresh(); $peakMb = [Math]::Max($peakMb, [int]($window.PrivateMemorySize64 / 1MB)) } catch { }
     if ($shots -lt 8 -and ((Get-Date) - $shownAt).TotalSeconds -ge $shots) { Save-Screenshot (Join-Path $Out "$Name-at-$($shots)s.png"); $shots++ }
   }
   if ($window.HasExited) {
     $died = [int]((Get-Date) - $shownAt).TotalMilliseconds
     Save-Screenshot (Join-Path $Out "$Name-gone.png")
     $left = @(Get-ArdiaProcesses)
-    Write-Host "Relaunch ($Name): a window showed after $ms ms, then the browser process (pid $($window.Id)) ended with exit code $($window.ExitCode) (0x$('{0:X8}' -f $window.ExitCode)) about $died ms after the window showed; $($left.Count) Ardia processes left"
+    Write-Host "Relaunch ($Name): a window showed after $ms ms, then the browser process (pid $($window.Id)) ended with exit code $($window.ExitCode) (0x$('{0:X8}' -f $window.ExitCode)) about $died ms after the window showed (peak $peakMb MB private); $($left.Count) Ardia processes left"
     return $null
   }
   Save-Screenshot (Join-Path $Out "$Name-window.png")
-  Write-Host "Relaunch ($Name): a window after $ms ms (browser pid $($window.Id), $(@(Get-ArdiaProcesses).Count) Ardia processes), still up $WatchSeconds s later"
+  Write-Host "Relaunch ($Name): a window after $ms ms (browser pid $($window.Id), $(@(Get-ArdiaProcesses).Count) Ardia processes), still up $WatchSeconds s later; the browser process peaked at $peakMb MB private"
   return $window
 }
 
@@ -283,6 +285,7 @@ foreach ($step in $steps) {
     Start-Sleep -Seconds 3
   }
   Save-DataFolder "$($step.Name)-closed"
+  python (Join-Path $PSScriptRoot "probe\count-history.py") (Join-Path $data "User Data\Default\History") | Write-Host
 }
 
 try {
