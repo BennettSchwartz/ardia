@@ -15,6 +15,8 @@ struct WindowMotion {
   static constexpr std::chrono::milliseconds kMainExit{180};
   static constexpr std::chrono::milliseconds kSmallExit{150};
   static constexpr std::chrono::milliseconds kRevealTimeout{600};
+  static constexpr std::chrono::milliseconds kFirstFrameTimeout{1500};
+  static constexpr double kWaitingOpacity = 1.0 / 255.0;
   static constexpr std::chrono::milliseconds kReplacementSettle{200};
   static constexpr std::chrono::milliseconds kLingerLimit{2000};
   static constexpr std::chrono::milliseconds kStep{8};
@@ -208,6 +210,8 @@ struct WindowFade {
   double opacity{0};
   std::chrono::milliseconds duration{0};
   std::chrono::steady_clock::time_point started{};
+  bool fadesIn{true};
+  std::chrono::milliseconds revealTimeout{WindowMotion::kRevealTimeout};
   LayeredWindows layered;
   winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer timer{nullptr};
   winrt::event_token tick{};

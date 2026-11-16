@@ -254,9 +254,21 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     fade makes the app window and every visible window it owns (the page windows) layered for its length and puts
     their styles back at the end; on the way out they ignore clicks, and pages still shown after the hide stay
     transparent until the engine hides them (at most 2 s). A minimized, full screen or not yet shown window, or
-    Windows' "Animation effects" off, shows and hides at once. The launch log says `window <id> fades in over <ms> ms
+    Windows' "Animation effects" off, hides at once. The launch log says `window <id> fades in over <ms> ms
     with <n> page windows`, `window <id> shown`, `window <id> fades out over <ms> ms`, `window <id> hidden` and
     `window <id> hidden at once: <reason>`.
+  - Every other window (the first window of a launch, a restored session's windows, any browser window opened without
+    `animated`, and every window while "Animation effects" is off) opens, activates and takes the keyboard at once but
+    keeps its pixels back until its React root has content, for at most 1.5 s, then shows at full opacity with no
+    fade (#2169). Before that it showed whatever was under the empty island: plain white for 64 to 253 ms, in light
+    and in dark. While it waits it is layered at alpha 1 of 255, invisible but still hit-tested, so a click there
+    goes to it and never to the window behind; its taskbar button and Alt+Tab entry show at once. The launch log
+    says `window <id> shown with its first frame <ms> ms after it opened`, or `shown without a first frame: none came
+    in <ms> ms` when the deadline shows it anyway. A background instance shows its windows at once, as before. The
+    launch check captures the first window from process start, light and dark, for a fresh and a finished profile,
+    compares each capture with the screen before the launch, fails on any plain white capture before the UI's first
+    frame, on a window that comes to the front more than 100 ms after it is visible, and on a click at its centre in
+    the first moment that lands on the window behind.
 - What has a C++ version: windows, documents, config files and their watcher, secrets (Credential Manager), local
   telemetry, launch config and system info, file actions and icons, launch at login, the theme, lock and sleep
   signals, the clipboard, the bang list, confirm, prompt and file dialogs, the command table with its shortcuts and
