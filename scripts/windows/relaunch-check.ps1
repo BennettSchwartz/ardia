@@ -171,6 +171,10 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     if ($picked) { $clicked += $picked; Start-Sleep -Seconds 1 }
     $shared = $false
     foreach ($page in 1..14) {
+      $settings = @(Get-Process SystemSettings -ErrorAction SilentlyContinue)
+      if ($settings.Count) { $settings | Stop-Process -Force; $clicked += "closed Windows Settings"; Start-Sleep -Seconds 1 }
+      [RelaunchInput]::SetForegroundWindow($handle) | Out-Null
+      Start-Sleep -Milliseconds 400
       Save-Screenshot (Join-Path $Out "$Name-onboarding-$page.png")
       if ($Sharing -and -not $shared) {
         $card = Click-NameLike $handle "*Share anonymous crash reports*"
@@ -182,6 +186,9 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
       Start-Sleep -Seconds 3
     }
     Write-Host "Relaunch ($Name): onboarding clicks: $($clicked -join ', ')"
+    $state = Get-Content -Raw -LiteralPath (Join-Path $data "onboarding.json") -ErrorAction SilentlyContinue
+    Write-Host "Relaunch ($Name): onboarding.json: $state"
+    if ($state -notmatch '"completedAt":\d') { Write-Host "::warning::relaunch: onboarding did not finish" }
     if ($Sharing -and -not $shared) { Write-Host "::warning::relaunch: the sharing card was never found in onboarding" }
   } elseif ($Onboarding) {
     $rect = New-Object RelaunchInput+Rect
