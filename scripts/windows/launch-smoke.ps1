@@ -845,6 +845,7 @@ using System.Runtime.InteropServices;
 public static class ArdiaSnapKeys {
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr window, uint command);
   [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr window, int attribute, out Rect rect, int size);
 }
@@ -889,11 +890,18 @@ public static class ArdiaSnapKeys {
     [ArdiaInput]::SetForegroundWindow($handle) | Out-Null
     Start-Sleep -Milliseconds 300
     $client = Get-ClientArea $Process
-    if (-not $client) { return $null }
+    if (-not $client) { return }
     if ($Where -eq "page") { Send-Click ($client.X + [int]($client.Width * 0.7)) ($client.Y + [int]($client.Height * 0.65)) }
     else { Send-Click ($client.X + [int](24 * $client.Scale)) ($client.Y + [int]($client.Height * 0.62)) }
     Start-Sleep -Milliseconds 500
-    return Get-SnapDescription ([ArdiaSnapKeys]::GetForegroundWindow())
+  }
+
+  function Test-SnapFocusHeld([IntPtr]$Handle, [string]$Where) {
+    $foreground = [ArdiaSnapKeys]::GetForegroundWindow()
+    $class = New-Object System.Text.StringBuilder 256
+    [ArdiaInput]::GetClassName($foreground, $class, 256) | Out-Null
+    if ($Where -eq "page") { return $class.ToString().StartsWith("Chrome_") -and [ArdiaSnapKeys]::GetWindow($foreground, 4) -eq $Handle }
+    return $foreground -eq $Handle
   }
 
   function Test-SnapKeys([System.Diagnostics.Process]$Process, [string]$Where) {
@@ -908,9 +916,20 @@ public static class ArdiaSnapKeys {
       @{ Name = "Win+Left"; Arrow = 0x25; Home = $true; Want = "left half" },
       @{ Name = "Win+Right"; Arrow = 0x27; Home = $true; Want = "right half" }
     )
+    $start = $null
     foreach ($step in $steps) {
-      if ($step.Home) { Set-SnapHome $handle $work }
-      $foreground = Set-SnapFocus $Process $Where
+      if ($step.Home) {
+        Set-SnapHome $handle $work
+        Set-SnapFocus $Process $Where
+      }
+      if (-not $start) { $start = Get-SnapBounds $handle }
+      $foreground = Get-SnapDescription ([ArdiaSnapKeys]::GetForegroundWindow())
+      if (-not (Test-SnapFocusHeld $handle $Where)) {
+        $how = if ($step.Home) { "after a click there" } else { "kept from the step before, without a new click" }
+        $failures += "snap keys ($Where): before $($step.Name) the keyboard was not in the $Where ($how); the foreground window was $foreground"
+        Write-Host "Snap keys ($Where): before $($step.Name) the foreground window was $foreground, not the $Where; the step is skipped."
+        continue
+      }
       $before = Get-SnapBounds $handle
       Send-WindowsArrow ([byte]$step.Arrow)
       $zoomed = [ArdiaInput]::IsZoomed($handle)
@@ -923,16 +942,18 @@ public static class ArdiaSnapKeys {
       $near = { param($a, $b) [Math]::Abs($a - $b) -le 16 }
       $got = switch ($step.Want) {
         "maximized" { $zoomed }
-        "restored" { -not $zoomed -and -not $iconic }
+        "restored" { -not $zoomed -and -not $iconic -and $after -and $start -and (& $near $after.Left $start.Left) -and (& $near $after.Top $start.Top) -and (& $near $after.Right $start.Right) -and (& $near $after.Bottom $start.Bottom) }
         "minimized" { $iconic }
         "left half" { $after -and -not $iconic -and (& $near $after.Left $work.Left) -and (& $near $after.Right ($work.Left + $half)) -and (& $near $after.Top $work.Top) -and (& $near $after.Bottom $work.Bottom) }
         "right half" { $after -and -not $iconic -and (& $near $after.Left ($work.Left + $half)) -and (& $near $after.Right $work.Right) -and (& $near $after.Top $work.Top) -and (& $near $after.Bottom $work.Bottom) }
       }
       Write-Host "Snap keys ($Where): $($step.Name) with the foreground window $foreground; the window was at $was and is at $place (maximized $zoomed, minimized $iconic; the work area is $($work.Left),$($work.Top),$($work.Right),$($work.Bottom)); wanted $($step.Want): $got."
       if (-not $got) { $failures += "snap keys ($Where): $($step.Name) did not leave the window $($step.Want) (maximized $zoomed, minimized $iconic, at $place; the foreground window was $foreground)" }
-      [ArdiaInput]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
-      [ArdiaInput]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
-      Start-Sleep -Milliseconds 400
+      if ($step.Arrow -eq 0x25 -or $step.Arrow -eq 0x27) {
+        [ArdiaInput]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero)
+        [ArdiaInput]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 400
+      }
     }
     Set-SnapHome $handle $work
     return $failures

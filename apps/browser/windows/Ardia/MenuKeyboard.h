@@ -327,6 +327,14 @@ struct MenuKeyboard {
 
   static LRESULT CALLBACK KeyboardProc(int code, WPARAM wParam, LPARAM lParam) noexcept {
     MenuKeyboard &keyboard = Shared();
+    if (code == HC_ACTION && (wParam == VK_LWIN || wParam == VK_RWIN || GetKeyState(VK_LWIN) < 0 || GetKeyState(VK_RWIN) < 0)) {
+      wchar_t name[64]{};
+      HWND focus = GetFocus();
+      if (focus) GetClassNameW(GetAncestor(focus, GA_ROOT), name, 64);
+      wchar_t line[200]{};
+      swprintf_s(line, L"snap keys: the thread hook saw key 0x%02X %s with the Windows key down, the keyboard in %s", static_cast<unsigned>(wParam), (lParam & (1u << 31)) ? L"up" : L"down", name);
+      LaunchLog::Write(L"keys", line);
+    }
     if (code == HC_ACTION) {
       bool handled = false;
       try {
