@@ -267,8 +267,8 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     in <ms> ms` when the deadline shows it anyway. A background instance shows its windows at once, as before. The
     launch check captures the first window from process start, light and dark, for a fresh and a finished profile,
     over a solid window of its own that counts clicks, and compares each capture with the screen before the launch.
-    It fails on any plain white capture before the UI's first frame, on anything showing while the window is still
-    transparent (a page window shown before its owner), on a window that never shows its UI, on a window that comes
+    It fails on any plain white capture before the UI's first frame, on anything covering more than 3% of the window
+    while it is still transparent (a page window shown before its owner), on a window that never shows its UI, on a window that comes
     to the front more than 100 ms after it is visible, and when a click at its centre in its first moment reaches the
     window underneath.
 - What has a C++ version: windows, documents, config files and their watcher, secrets (Credential Manager), local

@@ -1223,8 +1223,9 @@ public static class ArdiaFirstFrames {
     return DefWindowProcW(window, message, wParam, lParam);
   }
 
-  public static void ShowBackdrop() {
+  public static bool ShowBackdrop() {
     BackdropClicks = 0;
+    bool shown = false;
     ManualResetEvent ready = new ManualResetEvent(false);
     backdropLoop = new Thread(() => {
       backdropThread = GetCurrentThreadId();
@@ -1235,13 +1236,15 @@ public static class ArdiaFirstFrames {
         windowClass.Instance = instance;
         windowClass.Background = CreateSolidBrush(0x00804020);
         windowClass.Name = "ArdiaFirstFramesBackdrop";
-        RegisterClassW(ref windowClass);
-        backdropRegistered = true;
+        backdropRegistered = RegisterClassW(ref windowClass) != 0;
       }
       Rect work = new Rect();
       SystemParametersInfoW(0x30, 0, ref work, 0);
       IntPtr backdrop = CreateWindowExW(0x80, "ArdiaFirstFramesBackdrop", "first frames backdrop", 0x80000000, work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
-      ShowWindow(backdrop, 4);
+      if (backdrop != IntPtr.Zero) {
+        ShowWindow(backdrop, 4);
+        shown = IsWindowVisible(backdrop);
+      }
       ready.Set();
       Message message;
       while (GetMessageW(out message, IntPtr.Zero, 0, 0) > 0) {
@@ -1252,8 +1255,9 @@ public static class ArdiaFirstFrames {
     });
     backdropLoop.IsBackground = true;
     backdropLoop.Start();
-    ready.WaitOne(5000);
+    if (!ready.WaitOne(5000)) return false;
     Thread.Sleep(400);
+    return shown;
   }
 
   public static void HideBackdrop() {
@@ -1338,7 +1342,7 @@ public static class ArdiaFirstFrames {
 
   static string KindOf(Frame frame, double sameShare) {
     if (frame.Width == 0) return frame.Alpha <= 8 ? "hidden" : "unread";
-    if (frame.Alpha <= 8) return sameShare < 0.6 ? "leak" : "hidden";
+    if (frame.Alpha <= 8) return sameShare < 0.97 ? "leak" : "hidden";
     if (sameShare >= 0.9) return "behind";
     if (frame.Uniform && frame.White > 0.9) return "white";
     if (frame.Uniform) return "plain";
@@ -1470,10 +1474,11 @@ public static class ArdiaFirstFramesFront {
     $log = Join-Path $Out "first-frames-$Label.log"
     $env:ARDIA_DATA_DIR = $data
     $env:ARDIA_CONFIG_DIR = $data
-    [ArdiaFirstFrames]::ShowBackdrop()
-    $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000, [bool]$Click)
-    $env:ARDIA_CONFIG_DIR = ""
+    $launch = $null
     try {
+      if (-not [ArdiaFirstFrames]::ShowBackdrop()) { return @("first frames ($Label): the check's own click-counting window did not open, so nothing was measured") }
+      $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000, [bool]$Click)
+      $env:ARDIA_CONFIG_DIR = ""
       $frames = @($launch.Frames)
       $savedCount = 0
       foreach ($frame in $frames) {
@@ -1533,11 +1538,15 @@ public static class ArdiaFirstFramesFront {
       if ($launch.ClickedMs -ge 0 -and -not $ours) { $problems += "first frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms ($($launch.ClickedOn)) went to the window behind; the foreground window is $(Get-SnapDescription $foreground)" }
       return $problems
     } finally {
-      if (-not $launch.Process.HasExited) {
-        Stop-Process -Id $launch.Process.Id -Force
-        $launch.Process.WaitForExit(10000) | Out-Null
+      $env:ARDIA_CONFIG_DIR = ""
+      try {
+        if ($launch -and -not $launch.Process.HasExited) {
+          Stop-Process -Id $launch.Process.Id -Force
+          $launch.Process.WaitForExit(10000) | Out-Null
+        }
+      } finally {
+        [ArdiaFirstFrames]::HideBackdrop()
       }
-      [ArdiaFirstFrames]::HideBackdrop()
     }
   }
 
