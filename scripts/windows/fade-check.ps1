@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $lab = @{ Tile = 48; Slot = 64; Left = 24; Rows = @(96, 176); Rounds = 6; FadeMs = 250 }
 $variants = @("plain", "blur", "layout", "blur+layout", "overlay", "plain later", "blur later", "layout later", "blur+layout later", "overlay later")
-$probes = @("state", "setNativeProps", "inside background", "inside clear")
+$probes = @("state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel")
 $slots = $variants.Count + 1
 $captureMs = 15000
 $whiteAt = 220
@@ -212,6 +212,12 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
   Start-Sleep -Milliseconds 800
   $problems = @()
   $samples = @($run.Samples)
+  $shots = @($run.Shots)
+  $covered = @($shots | Where-Object { $_.Front -notmatch "\(ours\)" })
+  if ($shots.Count -and $covered.Count -eq $shots.Count) {
+    Write-Host "fades, $Label`: unverified, another window was in front for every shot ($($covered[0].Front))"
+    return @()
+  }
   Write-Host "fades, $Label`: window at $($run.WindowMs) ms, scale $($run.Scale), $($samples.Count) samples"
   if ($samples.Count -lt 100) { return @("fades, $Label`: only $($samples.Count) samples were captured") }
   $intervals = @()

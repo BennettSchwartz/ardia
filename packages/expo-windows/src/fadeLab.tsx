@@ -17,7 +17,15 @@ const SHAPES = [
 
 export const FADE_VARIANTS: Variant[] = [false, true].flatMap((later) => SHAPES.map((shape) => ({ ...shape, name: `${shape.name}${later ? " later" : ""}`, later })));
 
-export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear"];
+export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel"];
+
+const CONTAINERS: { slot: number; style: object; pointerEvents?: "none" }[] = [
+  { slot: 2, style: { backgroundColor: "#010101" } },
+  { slot: 3, style: {} },
+  { slot: 4, style: { zIndex: 10 } },
+  { slot: 5, style: { backgroundColor: "#010101", zIndex: 10 } },
+  { slot: 6, style: { backgroundColor: "#010101", zIndex: 1000 }, pointerEvents: "none" },
+];
 
 const note = (text: string) => console.info(`[ardia windows] fade lab ${text}`);
 
@@ -105,8 +113,11 @@ export function FadeLab() {
       {shown ? FADE_VARIANTS.map((variant, i) => <FadeTile key={`${round}-${variant.name}`} variant={variant} round={round} slot={i + 1} />) : null}
       {shown ? <StateTile key={`${round}-state`} round={round} /> : null}
       {shown ? <NativePropsTile key={`${round}-native`} round={round} /> : null}
-      <View style={[styles.tile, styles.filled, at(1, 2)]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</View>
-      <View style={[styles.tile, at(1, 3)]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</View>
+      {CONTAINERS.map(({ slot, style, pointerEvents }) => (
+        <View key={slot} pointerEvents={pointerEvents} style={[styles.tile, at(1, slot), style]}>
+          {shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}
+        </View>
+      ))}
     </View>
   );
 }
@@ -116,5 +127,4 @@ const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "#000000" },
   tile: { position: "absolute", width: FADE_LAB.tile, height: FADE_LAB.tile },
   white: { backgroundColor: "#FFFFFF" },
-  filled: { backgroundColor: "#010101" },
 });
