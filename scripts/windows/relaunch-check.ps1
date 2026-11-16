@@ -11,7 +11,8 @@ param(
   [switch]$Sharing,
   [switch]$Maximize,
   [int]$WatchSeconds = 25,
-  [switch]$Import
+  [switch]$Import,
+  [string]$SeedEngine
 )
 
 $ErrorActionPreference = "Stop"
@@ -340,6 +341,9 @@ foreach ($step in $steps) {
   }
   Save-DataFolder "$($step.Name)-closed"
   python (Join-Path $PSScriptRoot "probe\count-history.py") (Join-Path $data "User Data\Default\History") | Write-Host
+  if ($SeedEngine -and $step.Name -eq "1-first") {
+    python (Join-Path $PSScriptRoot "probe\seed-engine-history.py") $SeedEngine (Join-Path $data "User Data\Default\History") | Write-Host
+  }
 }
 
 try {
