@@ -15,6 +15,8 @@ enum WebKitPageScript {
   const drmEvents = ["encrypted", "waitingforkey", "error"];
   const drmSeen = new Set();
   let drmKeySystem = "";
+  const mediaFaultSites = \#(WebKitMediaFaults.sitesJSON);
+  const streaming = location.protocol === "https:" && mediaFaultSites.some((site) => location.hostname === site || location.hostname.endsWith("." + site));
   const detached = new Set();
   const listened = new WeakSet();
   const heard = new WeakSet();
@@ -87,6 +89,7 @@ enum WebKitPageScript {
       hasVideo: m.tagName === "VIDEO" && m.videoWidth > 0,
       actions: pageActions,
       controllable: fromSession !== "none" || !(m.duration > 0 && m.duration <= 5),
+      loop: !pagePosition && m.loop,
     });
   };
   const schedule = () => {
@@ -98,7 +101,7 @@ enum WebKitPageScript {
     if (listened.has(m)) return;
     listened.add(m);
     for (const type of mediaEvents) m.addEventListener(type, onMedia);
-    for (const type of drmEvents) m.addEventListener(type, onDrm);
+    if (streaming) for (const type of drmEvents) m.addEventListener(type, onDrm);
   };
   const track = (m) => {
     listen(m);
@@ -139,20 +142,22 @@ enum WebKitPageScript {
     if (e.type === "error") reportDrm("error", drmKeySystem, m.error ? m.error.code : 0);
     else reportDrm(e.type, drmKeySystem, 0);
   };
-  for (const type of drmEvents) document.addEventListener(type, onDrm, true);
-  document.addEventListener(
-    "ardia:drm",
-    (e) => {
-      let data = null;
-      try {
-        data = typeof e.detail === "string" ? JSON.parse(e.detail) : null;
-      } catch (error) {}
-      if (!data || typeof data !== "object" || typeof data.keySystem !== "string") return;
-      drmKeySystem = data.keySystem.length <= 64 ? data.keySystem : "";
-      reportDrm(data.ok === true ? "access" : "accessDenied", drmKeySystem, Number.isInteger(data.code) ? data.code : 0);
-    },
-    true,
-  );
+  if (streaming) {
+    for (const type of drmEvents) document.addEventListener(type, onDrm, true);
+    document.addEventListener(
+      "ardia:drm",
+      (e) => {
+        let data = null;
+        try {
+          data = typeof e.detail === "string" ? JSON.parse(e.detail) : null;
+        } catch (error) {}
+        if (!data || typeof data !== "object" || typeof data.keySystem !== "string") return;
+        drmKeySystem = data.keySystem.length <= 64 ? data.keySystem : "";
+        reportDrm(data.ok === true ? "access" : "accessDenied", drmKeySystem, Number.isInteger(data.code) ? data.code : 0);
+      },
+      true,
+    );
+  }
   document.addEventListener(
     "ardia:media-element",
     (e) => {
@@ -163,6 +168,17 @@ enum WebKitPageScript {
     },
     true,
   );
+  if (streaming) {
+    let faultsRelayed = 0;
+    document.addEventListener(
+      "ardia:media-fault",
+      (e) => {
+        if (typeof e.detail !== "string" || e.detail.length > 64 || ++faultsRelayed > 200) return;
+        post("mediaFault", { reason: e.detail });
+      },
+      true,
+    );
+  }
   const knownActions = ["play", "pause", "stop", "seekbackward", "seekforward", "seekto", "previoustrack", "nexttrack", "skipad", "enterpictureinpicture"];
   document.addEventListener(
     "ardia:media-session",
@@ -229,6 +245,10 @@ enum WebKitPageScript {
   if (isTop) {
     const scrollDirection = () => {
       const DOWN = 24, UP = 12, MIN_RANGE = 120, SETTLE = 300, GESTURE = 300;
+      const paged = (snap, vertical) => {
+        const [axis, strictness] = snap.split(" ");
+        return strictness === "mandatory" && (axis === "y" || axis === "both" || axis === (vertical ? "inline" : "block"));
+      };
       let anchor = 0, last = 0, lastAt = -1e9, settleUntil = -1e9, budget = 0, height = 0, sent = null, gestureSent = false, heading = 0;
       const resized = (viewport, now) => {
         if (now >= settleUntil) budget = 0;
@@ -253,7 +273,7 @@ enum WebKitPageScript {
         undirected() {
           heading = 0;
         },
-        scrolled(y, range, viewport, now, user) {
+        scrolled(y, range, viewport, now, user, snap = "", vertical = false) {
           resized(viewport, now);
           if (now - lastAt > GESTURE) {
             gestureSent = false;
@@ -271,7 +291,7 @@ enum WebKitPageScript {
           if (y <= 2) state = "top";
           else if (!user || moved * heading < 0) anchor = y;
           else if (y - anchor >= DOWN) {
-            if (range >= MIN_RANGE) state = "down";
+            if (range >= MIN_RANGE && !paged(snap, vertical)) state = "down";
             else anchor = y;
           } else if (anchor - y >= UP) state = "up";
           else if (sent === "down" ? gestureSent && y > anchor : y < anchor) anchor = y;
@@ -314,7 +334,8 @@ enum WebKitPageScript {
         if (!el || !doc || (el !== doc && (el.clientHeight < innerHeight * 0.5 || el.clientWidth < innerWidth * 0.5))) return;
         if (el !== scroller) direction.rebase((scroller = el).scrollTop);
         const now = performance.now();
-        const state = direction.scrolled(el.scrollTop, el.scrollHeight - el.clientHeight, innerHeight, now, now - inputAt < 1000);
+        const style = getComputedStyle(el === doc ? document.documentElement : el);
+        const state = direction.scrolled(el.scrollTop, el.scrollHeight - el.clientHeight, innerHeight, now, now - inputAt < 1000, style.scrollSnapType, /^(vertical|sideways)/.test(style.writingMode));
         if (state) post("scroll", { state });
       } catch (e) {}
     };
@@ -408,7 +429,35 @@ enum WebKitPageScript {
   const Mouse = MouseEvent;
   const now = Date.now;
   const doc = document;
+  const NativePromise = Promise;
+  const then = Promise.prototype.then;
+  const sites = \#(WebKitMediaFaults.sitesJSON);
+  const watched = location.protocol === "https:" && sites.some((site) => location.hostname === site || location.hostname.endsWith("." + site));
+  const noop = () => {};
+  const reported = Object.create(null);
+  const fault = (reason) => {
+    reported[reason] = (reported[reason] || 0) + 1;
+    if (reported[reason] > 20) return;
+    apply(dispatch, doc, [new Custom("ardia:media-fault", { detail: reason })]);
+  };
+  const observe = (promise, onValue, onError) =>
+    apply(then, promise, [
+      (value) => {
+        try {
+          onValue(value);
+        } catch (e) {}
+        return value;
+      },
+      (error) => {
+        try {
+          onError(error);
+        } catch (e) {}
+        throw error;
+      },
+    ]);
   const handedOver = new WeakSet();
+  const errorsHeard = new WeakSet();
+  const errorEventsCounted = new WeakSet();
   const mediaProto = HTMLMediaElement.prototype;
   const play = mediaProto.play;
   mediaProto.play = function () {
@@ -418,36 +467,24 @@ enum WebKitPageScript {
         apply(dispatch, doc, [new Mouse("ardia:media-element", { relatedTarget: this })]);
       } catch (e) {}
     }
-    return apply(play, this, arguments);
+    if (watched && !errorsHeard.has(this) && !apply(connected, this, [])) {
+      errorsHeard.add(this);
+      apply(listen, this, ["error", reportMediaError]);
+    }
+    const result = apply(play, this, arguments);
+    return watched && result instanceof NativePromise ? observe(result, noop, (error) => fault("play_rejected_" + playRejection(error))) : result;
   };
 
-  const then = Promise.prototype.then;
+\#(WebKitMediaFaults.pageScript)
+
   const test = RegExp.prototype.test;
   const protectedKeySystem = /^com\.(widevine\.alpha|microsoft\.playready|apple\.fps)/;
-  const requestAccess = Navigator.prototype.requestMediaKeySystemAccess;
-  const reportAccess = (keySystem, ok, code) => {
-    try {
-      apply(dispatch, doc, [new Custom("ardia:drm", { detail: stringify({ keySystem, ok, code }) })]);
-    } catch (e) {}
+  const domCodeOf = getter(DOMException.prototype, "code");
+  const reportAccess = (name, ok, error) => {
+    if (typeof name !== "string" || !apply(test, protectedKeySystem, [name])) return;
+    const code = !ok && error instanceof DOMException ? read(domCodeOf, error) : 0;
+    apply(dispatch, doc, [new Custom("ardia:drm", { detail: stringify({ keySystem: name, ok, code }) })]);
   };
-  if (typeof requestAccess === "function") {
-    Navigator.prototype.requestMediaKeySystemAccess = function (keySystem) {
-      const result = apply(requestAccess, this, arguments);
-      if (typeof keySystem !== "string" || !apply(test, protectedKeySystem, [keySystem])) return result;
-      return apply(then, result, [
-        (value) => {
-          reportAccess(keySystem, true, 0);
-          return value;
-        },
-        (error) => {
-          try {
-            reportAccess(keySystem, false, error.code);
-          } catch (e) {}
-          throw error;
-        },
-      ]);
-    };
-  }
 
   const session = navigator.mediaSession;
   const proto = session && Object.getPrototypeOf(session);

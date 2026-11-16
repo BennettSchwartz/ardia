@@ -32,6 +32,7 @@ export type EngineTask = {
   memory: number;
   gpuMemory: number;
   tabIds: (string | null)[];
+  pid?: number;
 };
 
 export type SystemState = {
@@ -83,9 +84,11 @@ export type HoverLostEpisode = {
 
 export type CliTabTarget = { targetId: string | null; pageGeneration: number };
 
-export type CliDragsEnded = { ownerGone: number; debuggerUnowned: number; nativeRefused: number };
+export type CliDragsEnded = { ownerGone: number; debuggerUnowned: number; nativeRefused: number; sourceGone?: number };
 
-export type CliControlStatus = { dragsEnded?: CliDragsEnded } & (
+export type CliWindowlessPages = { given: number; missed: number };
+
+export type CliControlStatus = { dragsEnded?: CliDragsEnded; windowlessPages?: CliWindowlessPages } & (
   | { state: "external" }
   | ({ state: "off" | "starting" } & CliServer)
   | ({ state: "on"; port: number } & CliServer)

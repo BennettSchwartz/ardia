@@ -3,131 +3,68 @@ import ArdiaDesign
 import SwiftUI
 
 struct BottomBar: View {
-  let plusNamespace: Namespace.ID
-  let isSearchPresented: Bool
-  var onTabs: () -> Void
-  var onPlus: () -> Void
-  var onMore: () -> Void
-  var onStep: (Int) -> Void = { _ in }
-  var onSelectTab: (UUID) -> Void = { _ in }
-  var onCloseTab: () -> Void = {}
+  let address: BarAddress
+  let isCollapsed: Bool
+  let sideInset: CGFloat
+  let sidesShown: Bool
+  let centreShown: Bool
+  let actions: BarActions
 
-  @Environment(AppModel.self) private var app
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    let order = app.deckOrder
-    HStack(spacing: 0) {
-      Button(action: onTabs) {
-        TabStackGlyph(tabs: Array(order.suffix(2)))
-          .offset(x: -2.8)
-          .frame(width: 47, height: BrowseLayout.hitTarget)
-          .contentShape(.rect)
+    ZStack(alignment: .bottom) {
+      if isCollapsed {
+        BarCollapsedPill(address: address, action: actions.onExpand)
+          .reportsBarAnchor(.page, face: .collapsedAddress(address))
+          .barReturn(.centre, isShown: centreShown)
+          .transition(.scale(scale: reduceMotion ? 1 : 1 / BrowseLayout.barCollapsedScale, anchor: .bottom).combined(with: .opacity))
+      } else {
+        expanded
+          .transition(.scale(scale: reduceMotion ? 1 : BrowseLayout.barCollapsedScale, anchor: .bottom).combined(with: .opacity))
       }
-      .buttonStyle(BarButtonStyle())
-      .contextMenu { recentTabsMenu(order) }
-      .accessibilityLabel("Tabs")
-      .accessibilityValue(Text("^[\(order.count) tab](inflect: true)"))
-      .accessibilityHint("Touch and hold for recent tabs.")
-      .accessibilityActions {
-        Button("Previous Tab") { onStep(-1) }
-        Button("Next Tab") { onStep(1) }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
-
-      ZStack {
-        if isSearchPresented {
-          Color.clear
-        } else {
-          Button(action: onPlus) {
-            Image(systemName: "plus")
-              .font(.system(size: 16, weight: .semibold))
-              .foregroundStyle(BrowsePalette.foregroundPrimary)
-              .frame(width: BrowseLayout.plusCapsule.width, height: BrowseLayout.plusCapsule.height)
-              .contentShape(.capsule)
-          }
-          .buttonStyle(BarButtonStyle())
-          .background {
-            Capsule()
-              .fill(BarPalette.plusFill)
-              .overlay { Capsule().strokeBorder(BarPalette.controlEdge, lineWidth: 1 / 3) }
-              .matchedGeometryEffect(id: "omnibox", in: plusNamespace)
-          }
-          .transition(.opacity)
-          .accessibilityLabel("New Search")
-        }
-      }
-      .frame(width: BrowseLayout.plusCapsule.width, height: BrowseLayout.plusCapsule.height)
-
-      Button(action: onMore) {
-        Image(systemName: "chevron.up")
-          .font(.system(size: 15, weight: .semibold))
-          .foregroundStyle(BrowsePalette.foregroundPrimary)
-          .frame(width: BrowseLayout.chevronCircle, height: BrowseLayout.chevronCircle)
-          .background(BarPalette.chevronFill, in: .circle)
-          .overlay { Circle().strokeBorder(BarPalette.controlEdge, lineWidth: 1 / 3) }
-          .frame(width: BrowseLayout.hitTarget, height: BrowseLayout.hitTarget)
-          .contentShape(.rect)
-      }
-      .buttonStyle(BarButtonStyle())
-      .accessibilityLabel("Page Menu")
-      .frame(maxWidth: .infinity, alignment: .trailing)
     }
-    .padding(.horizontal, BrowseLayout.barSideInset - 4)
+    .frame(maxWidth: .infinity)
+    .padding(.horizontal, sideInset + BrowseLayout.barEdgeInset)
   }
 
-  @ViewBuilder
-  private func recentTabsMenu(_ order: [BrowserTab]) -> some View {
-    let recent = order.dropLast().suffix(8).reversed()
-    ForEach(Array(recent)) { tab in
-      Button(TabText.title(for: tab)) { onSelectTab(tab.id) }
+  private var expanded: some View {
+    HStack(spacing: BrowseLayout.barGap) {
+      BarTabsButton(actions: actions)
+        .barReturn(.leading, isShown: sidesShown)
+      BarAddressField(address: address, onAddress: actions.onAddress, onMore: actions.onMore)
+        .reportsBarAnchor(.page, face: .address(address))
+        .barReturn(.centre, isShown: centreShown)
+      BarPlusButton(action: actions.onPlus)
+        .barReturn(.trailing, isShown: sidesShown)
     }
-    if !recent.isEmpty { Divider() }
-    Button("Close Tab", systemImage: "xmark", role: .destructive, action: onCloseTab)
+  }
+}
+
+struct BarColumn: View {
+  let address: BarAddress
+  let column: ScreenLayout.SideColumn
+  let size: CGSize
+  let actions: BarActions
+
+  var body: some View {
+    SideColumnStack(column: column, size: size) {
+      BarTabsButton(actions: actions)
+      BarSiteButton(address: address, action: actions.onAddress)
+      BarRoundMenuButton(action: actions.onMore)
+      BarPlusButton(action: actions.onPlus)
+    }
   }
 }
 
 enum BarPalette {
-  static let plusFill = Color.adaptive(light: Color(hex: 0x767680, opacity: 0.16), dark: Color.white.opacity(0.16))
-  static let chevronFill = Color.adaptive(light: Color(hex: 0x767680, opacity: 0.12), dark: Color.white.opacity(0.13))
-  static let controlEdge = Color.adaptive(light: Color.black.opacity(0.06), dark: Color.white.opacity(0.1))
   static let tileFill = Color.adaptive(light: Color(hex: 0x767680, opacity: 0.2), dark: Color.white.opacity(0.2))
   static let tileEdge = Color.adaptive(light: Color.black.opacity(0.14), dark: Color.white.opacity(0.28))
-}
-
-struct BarBacking: View {
-  let tone: ToneColor?
-  var solid = false
-
-  @Environment(\.profileLook) private var look
-
-  var body: some View {
-    ZStack {
-      if let tone {
-        if solid {
-          tone.color
-        } else {
-          Rectangle().fill(.ultraThinMaterial)
-          tone.color.opacity(0.9)
-        }
-        (tone.isDark ? Color.white.opacity(0.06) : Color.black.opacity(0.025))
-      } else {
-        if solid {
-          look.surface
-        } else {
-          Rectangle().fill(.bar)
-          look.surface.opacity(BrowseLayout.sheetTintShare)
-        }
-      }
-    }
-    .animation(Motion.barTone, value: tone)
-  }
 }
 
 struct BarButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
-      .scaleEffect(configuration.isPressed ? BrowseLayout.barControlScale : 1)
-      .animation(configuration.isPressed ? Motion.barPressIn : Motion.barPressOut, value: configuration.isPressed)
       .sensoryFeedback(.impact(weight: .light, intensity: 0.5), trigger: configuration.isPressed) { _, pressed in pressed }
   }
 }
