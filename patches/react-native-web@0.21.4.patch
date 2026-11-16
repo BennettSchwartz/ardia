@@ -1,0 +1,56 @@
+diff --git a/dist/cjs/modules/useResponderEvents/ResponderSystem.js b/dist/cjs/modules/useResponderEvents/ResponderSystem.js
+index dd697f33308523ebf91a98b75991e0d140899b4f..32ec06a6cb1987079eb035cf3518d4fedce1a183 100644
+--- a/dist/cjs/modules/useResponderEvents/ResponderSystem.js
++++ b/dist/cjs/modules/useResponderEvents/ResponderSystem.js
+@@ -175,6 +175,7 @@ var emptyResponder = {
+ var responderListenersMap = new Map();
+ var isEmulatingMouseEvents = false;
+ var trackedTouchCount = 0;
++var mousePressPaths = null;
+ var currentResponder = {
+   id: null,
+   node: null,
+@@ -261,7 +262,14 @@ function eventListener(domEvent) {
+    * Responder System logic
+    */
+ 
+-  var eventPaths = (0, _utils.getResponderPaths)(domEvent);
++  var isMouseEvent = domEvent.touches == null;
++  if (isMouseEvent && isStartEvent) {
++    mousePressPaths = (0, _utils.getResponderPaths)(domEvent);
++  }
++  var eventPaths = isMouseEvent && isMoveEvent && mousePressPaths != null ? mousePressPaths : (0, _utils.getResponderPaths)(domEvent);
++  if (isMouseEvent && isEndEvent) {
++    mousePressPaths = null;
++  }
+   var wasNegotiated = false;
+   var wantsResponder;
+ 
+diff --git a/dist/modules/useResponderEvents/ResponderSystem.js b/dist/modules/useResponderEvents/ResponderSystem.js
+index 0aec2d67c73c0d1e3f5bd034e4be0a2712439d70..10e2066f41e1fb4c7dcf8bfbe975b4e09d9d6429 100644
+--- a/dist/modules/useResponderEvents/ResponderSystem.js
++++ b/dist/modules/useResponderEvents/ResponderSystem.js
+@@ -167,6 +167,7 @@ var emptyResponder = {
+ var responderListenersMap = new Map();
+ var isEmulatingMouseEvents = false;
+ var trackedTouchCount = 0;
++var mousePressPaths = null;
+ var currentResponder = {
+   id: null,
+   node: null,
+@@ -253,7 +254,14 @@ function eventListener(domEvent) {
+    * Responder System logic
+    */
+ 
+-  var eventPaths = getResponderPaths(domEvent);
++  var isMouseEvent = domEvent.touches == null;
++  if (isMouseEvent && isStartEvent) {
++    mousePressPaths = getResponderPaths(domEvent);
++  }
++  var eventPaths = isMouseEvent && isMoveEvent && mousePressPaths != null ? mousePressPaths : getResponderPaths(domEvent);
++  if (isMouseEvent && isEndEvent) {
++    mousePressPaths = null;
++  }
+   var wasNegotiated = false;
+   var wantsResponder;
+ 
