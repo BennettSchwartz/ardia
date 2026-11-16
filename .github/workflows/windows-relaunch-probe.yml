@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [visits-20000x50, visits-100000x10, malformed, huge]
+        mode: [brave-history-10000-shaped-maximized, shaped-maximized]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -54,7 +54,7 @@ jobs:
         shell: pwsh
         env:
           MODE: ${{ matrix.mode }}
-        run: scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/setup/Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -Out "${{ runner.temp }}/relaunch" -FinishOnboarding -NoUpdates -KeepLingering -Import:($env:MODE -like '*history*') -SeedEngine $(if ($env:MODE -like 'brave*') { '' } else { $env:MODE }) -ComingFrom $(if ($env:MODE -like 'brave*') { 'Brave' } else { 'Edge' }) -Sharing -Maximize:($env:MODE -like '*maximized') -FirstSettle $(if ($env:MODE -like '*history*') { 120 } else { 20 })
+        run: scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/setup/Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -Out "${{ runner.temp }}/relaunch" -FinishOnboarding -NoUpdates -KeepLingering -Import:($env:MODE -like '*history*') -SeedEngine $(if ($env:MODE -like 'visits*' -or $env:MODE -in @('malformed','huge')) { $env:MODE } else { '' }) -TesterShape:($env:MODE -like '*shaped*') -ComingFrom $(if ($env:MODE -like 'brave*') { 'Brave' } else { 'Edge' }) -Sharing -Maximize:($env:MODE -like '*maximized') -FirstSettle $(if ($env:MODE -like '*history*') { 120 } else { 20 })
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

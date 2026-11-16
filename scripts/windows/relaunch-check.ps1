@@ -12,7 +12,8 @@ param(
   [switch]$Maximize,
   [int]$WatchSeconds = 25,
   [switch]$Import,
-  [string]$SeedEngine
+  [string]$SeedEngine,
+  [switch]$TesterShape
 )
 
 $ErrorActionPreference = "Stop"
@@ -256,6 +257,27 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     Start-Sleep -Seconds 3
     Save-Screenshot (Join-Path $Out "$Name-after-skip.png")
   }
+  if ($Onboarding -and $TesterShape) {
+    $keys = [System.Windows.Forms.SendKeys]
+    $keys::SendWait("^+s")
+    Start-Sleep -Seconds 2
+    Save-Screenshot (Join-Path $Out "$Name-shape-sidebar.png")
+    $keys::SendWait("^t"); Start-Sleep -Seconds 2
+    $keys::SendWait("https://www.roblox.com/{ENTER}"); Start-Sleep -Seconds 8
+    $keys::SendWait("^%+d"); Start-Sleep -Seconds 2
+    Save-Screenshot (Join-Path $Out "$Name-shape-pinned.png")
+    $keys::SendWait("^t"); Start-Sleep -Seconds 2
+    $keys::SendWait("https://www.youtube.com/{ENTER}"); Start-Sleep -Seconds 8
+    $keys::SendWait("^l"); Start-Sleep -Seconds 2
+    $keys::SendWait("Move to Top Apps"); Start-Sleep -Seconds 2
+    $keys::SendWait("{ENTER}"); Start-Sleep -Seconds 2
+    Save-Screenshot (Join-Path $Out "$Name-shape-tile.png")
+    $keys::SendWait("^l"); Start-Sleep -Seconds 2
+    $keys::SendWait("Dark Appearance"); Start-Sleep -Seconds 2
+    $keys::SendWait("{ENTER}"); Start-Sleep -Seconds 3
+    Save-Screenshot (Join-Path $Out "$Name-shape-dark.png")
+    Write-Host "Relaunch ($Name): shaped like the tester's: tabs in the sidebar, roblox.com pinned, youtube.com in Top Apps, dark appearance"
+  }
   foreach ($address in @("https://example.com/", "https://www.wikipedia.org/")) {
     [System.Windows.Forms.SendKeys]::SendWait("^t")
     Start-Sleep -Seconds 2
@@ -264,7 +286,7 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
   }
   [System.Windows.Forms.SendKeys]::SendWait("^t")
   Start-Sleep -Seconds 2
-  [System.Windows.Forms.SendKeys]::SendWait("nyse{ENTER}")
+  [System.Windows.Forms.SendKeys]::SendWait("nkse{ENTER}")
   Start-Sleep -Seconds 6
   if ($Maximize) { [RelaunchInput]::PostMessage($handle, 0x0112, [IntPtr]0xF030, [IntPtr]::Zero) | Out-Null; Start-Sleep -Seconds 2 }
   Save-Screenshot (Join-Path $Out "$Name-page.png")
