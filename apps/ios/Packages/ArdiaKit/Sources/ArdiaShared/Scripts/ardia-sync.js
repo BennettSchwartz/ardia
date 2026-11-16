@@ -316,12 +316,20 @@ async function changesOf(state            , adapter         , now        ) {
   if (adapter.adoptRemoteOnJoin && !state.joined) return null;
   let pending                     = null;
   const queued = (key        ) => (pending ??= new Set([...state.outbox, ...(state.journal ?? []).flatMap((f) => f.ops)].map((op) => op.k))).has(key);
-  const extraction = await adapter.extract((key) => parseBase(state.base[key]), queued, now, (key) => key in state.records, (key) => state.records[key]?.v, (key) => state.records[key]?.h);
+  const extraction = await adapter.extract(
+    (key) => parseBase(state.base[key]),
+    queued,
+    now,
+    (key) => key in state.records,
+    (key) => state.records[key]?.v,
+    (key) => state.records[key]?.h,
+    (key) => state.base[key],
+  );
   if (!extraction) return null;
   const changes           = [];
   for (const [key, value] of extraction.values) {
     if (value === null || value === undefined) throw new Error(`[sync] ${key}: a live value can't be null`);
-    const json = canonical(value);
+    const json = extraction.json?.(key, value) ?? canonical(value);
     if (state.base[key] === json && !extraction.republish?.(key)) continue;
     changes.push({ key, value, json });
   }
@@ -692,6 +700,7 @@ const emptyScope = ()             => ({
                                     
                                        
                                           
+                                                             
   
 
                             
@@ -712,6 +721,7 @@ const emptyScope = ()             => ({
                                     
                                      
                                             
+                                                  
                                                     
                                                                                                                                                               
                                                 
@@ -1217,7 +1227,7 @@ const MAX_DEVICE_TABS = 30;
 const MAX_VISIT_TIMES = 50;
 const SAME_VISIT_MS = 1;
 
-                                                                              
+                                                                                            
 
                                                                                
                                                                                    
@@ -1857,6 +1867,20 @@ function searchOf(app            )                    {
   return { engineId: typeof engine === "string" && engine ? engine : "google", customURL: optStr(customUrl), customEngines: engines };
 }
 
+function spaceOrder(app            , me        )           {
+  let newest                                                        = null;
+  for (const [k, v] of visible(app, "dev:")) {
+    const id = k.slice(4);
+    const stamp = app.records[k]?.h;
+    const listed = (v                      )?.o;
+    if (id === me || typeof stamp !== "string" || !Array.isArray(listed)) continue;
+    const order = [...new Set(listed.filter((profile)                    => typeof profile === "string"))];
+    if (!order.length) continue;
+    if (!newest || stamp > newest.stamp || (stamp === newest.stamp && id < newest.id)) newest = { stamp, id, order };
+  }
+  return newest?.order ?? [];
+}
+
 function buildView(scopes                            , me        )       {
   const app = scopes.app;
   if (!app) return { devices: [], profiles: [], search: null, look: null };
@@ -1897,7 +1921,9 @@ function buildView(scopes                            , me        )       {
       history: historyList(data),
     };
   });
-  profileList.sort((a, z) => Number(z.isDefault) - Number(a.isDefault) || a.name.localeCompare(z.name) || (a.syncId < z.syncId ? -1 : 1));
+  const rank = new Map(spaceOrder(app, me).map((id, i) => [id, i]));
+  const placed = (p             ) => rank.get(p.syncId) ?? rank.size;
+  profileList.sort((a, z) => placed(a) - placed(z) || Number(z.isDefault) - Number(a.isDefault) || a.name.localeCompare(z.name) || (a.syncId < z.syncId ? -1 : 1));
   return { devices: deviceList, profiles: profileList, search: searchOf(app), look: lookOf(app) };
 }
 

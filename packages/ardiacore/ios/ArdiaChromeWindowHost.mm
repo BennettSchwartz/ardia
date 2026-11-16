@@ -31,6 +31,18 @@ void AnswerFloatingSubrole(Class windowClass) {
   });
 }
 
+void AnswerAppWindowTitle(Class windowClass) {
+  static NSMutableSet<Class> *answered = [NSMutableSet set];
+  if (!windowClass || [answered containsObject:windowClass]) return;
+  [answered addObject:windowClass];
+  ardia_runtime::ReplaceMethod(windowClass, @selector(accessibilityTitle), ^id(IMP original) {
+    return ^NSString *(NSWindow *window) {
+      if (window.title.length && [ArdiaWindowController forNSWindow:window]) return window.title;
+      return ((NSString * (*)(id, SEL))original)(window, @selector(accessibilityTitle));
+    };
+  });
+}
+
 const void *const kInterfaceMinSizeKey = &kInterfaceMinSizeKey;
 
 const void *const kInterfaceContentScaleKey = &kInterfaceContentScaleKey;
@@ -169,6 +181,7 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
   if (window) [self showProfile:profile ?: @"" inWindow:window];
   else window = [self makeWindowForProfile:profile chromeWindow:chromeWindow];
   if (window && appWindow.length && !link) [ArdiaWindowController forNSWindow:window].appWindowId = appWindow;
+  if (window) AnswerAppWindowTitle(window.class);
   return window;
 }
 

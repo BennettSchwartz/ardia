@@ -1,6 +1,7 @@
 import { pressesWithoutRelease, pressRepeated } from "../../platform/focus";
 import { capture, useTelemetry } from "./client";
 import { takeHoverCardCounts } from "./hoverCardCounts";
+import { takeStripCommandCounts } from "./stripCommandCounts";
 import { percentile } from "./transport";
 
 export type TabPressEnd = "click" | "dragClick" | "drag";
@@ -110,7 +111,8 @@ export function emitTabPresses() {
   const landedOn = [...repeatsLandedOn].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
   forgetRepeats();
   const hoverCards = takeHoverCardCounts();
-  if (!counts.presses && !counts.range_selects && !counts.page_refused && !lostReleases && !repeated.presses && !Object.values(hoverCards).some(Boolean)) return;
+  const strips = takeStripCommandCounts();
+  if (!counts.presses && !counts.range_selects && !counts.page_refused && !lostReleases && !repeated.presses && !Object.values(hoverCards).some(Boolean) && !strips.tab_strip_commands_refused) return;
   const at = (list: number[], p: number) => (list.length ? percentile(list, p) : null);
   capture("tab_presses", {
     ...counts,
@@ -126,6 +128,7 @@ export function emitTabPresses() {
     held_ms_p75: at(held, 0.75),
     held_n: held.length,
     ...hoverCards,
+    ...strips,
   });
 }
 

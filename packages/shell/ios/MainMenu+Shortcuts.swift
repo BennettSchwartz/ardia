@@ -117,6 +117,7 @@ extension MainMenu {
     if bound != announcedShortcuts {
       announcedShortcuts = bound
       ArdiaHost.menuShortcutsChanged()
+      LittleArdiaHotKey.shared.shortcutsChanged()
     }
   }
 

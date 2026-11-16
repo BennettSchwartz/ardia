@@ -1,17 +1,17 @@
 import { findBang, type BangMatch } from "./bangs.ts";
 import { calculate } from "./calculator.ts";
-import { NO_BOOKMARKS, poolFor, tabsOver, type Candidate } from "./candidatePool.ts";
+import { NO_BOOKMARKS, poolFor, savedBookmark, savedVisit, tabsOver, type Candidate } from "./candidatePool.ts";
 import { extensionSuggestions } from "./extensionRows.ts";
 import { BUILT_IN_ENGINES, searchUrl } from "./engines.ts";
 import { matchActions } from "./fuzzy.ts";
 import { fixupUrl, hostOf, searchUrlFor } from "./omnibox.ts";
 import { matchScore, matchScoreWord, narrowing, parseQuery, remember, TopList, type Ranked } from "./pageMatch.ts";
-import { hostLowerOfPage, hostOfPage, hostPart, originOfPage, pageKey, type PageText } from "./pageText.ts";
+import { hostLowerOfPage, hostOfPage, hostPart, originOfPage, pageKey, type PageText, withRootSlash } from "./pageText.ts";
 import { globalProviderRows, providerUrl, safeProviderRows, type ProviderSection, type ProviderSuggestion } from "./providerRows.ts";
 import { matchQuickCreate } from "./quickCreate.ts";
 import { scopedSearchUrl, type SearchScope } from "./siteSearch.ts";
 import type { SuggestionResult, SuggestionSource, SuggestOptions, Suggestion } from "./suggestion.ts";
-import { actionRow, createRow, dedupeSuggestions, Output, pageSuggestion } from "./suggestionRows.ts";
+import { actionRow, createRow, dedupeSuggestions, Output, pageSuggestion, type PageRow } from "./suggestionRows.ts";
 
 export type { CommandAction, Suggestion, SuggestionResult, SuggestionSource, SuggestOptions } from "./suggestion.ts";
 export { displayUrl } from "./pageText.ts";
@@ -42,18 +42,26 @@ export function buildSuggestions(raw: string, source: SuggestionSource, options:
   }
 
   const pool = poolFor(source.history, source.bookmarks ?? NO_BOOKMARKS);
-  const { tabIds, extra } = tabsOver(pool, source.tabs, options.currentTabId);
+  const { tabIds, extra, renamed } = tabsOver(pool, source.tabs, options.currentTabId);
   const currentKey = options.currentUrl ? pageKey(options.currentUrl) : null;
   const known = (url: string) => {
     const key = pageKey(url);
     const c = pool.byKey.get(key) ?? extra.find((x) => x.text.key === key);
-    return c && pageSuggestion(c, null);
+    if (!c) return undefined;
+    const shown = { ...c, title: c.pageTitle ?? c.title };
+    const opened = withRootSlash(url);
+    if (withRootSlash(c.url) === opened) return pageSuggestion(shown, null);
+    const visit = savedVisit(source.history, opened);
+    const bookmark = savedBookmark(source.bookmarks ?? NO_BOOKMARKS, opened);
+    const lent = visit ?? bookmark ?? shown;
+    const row: PageRow = { url: visit?.url ?? opened, title: lent.title, favicon: lent.favicon, visits: visit?.visits ?? 0, bookmarked: bookmark !== undefined };
+    return pageSuggestion(row, null);
   };
 
   const websiteFirst = preference === "website";
   const oneWord = tokens.length === 1;
   const noInline = preventInline || (oneWord && raw.length !== query.length && /\s$/.test(raw));
-  const completes = websiteFirst && !scope && oneWord && !noInline;
+  const completes = !scope && oneWord && !noInline;
   const from = narrowing(pool, q, tokens);
   const pages = from ? from.pages : pool.list;
   const again = from !== null && from.q === q;
@@ -77,6 +85,7 @@ export function buildSuggestions(raw: string, source: SuggestionSource, options:
         scores[found++] = m;
       }
       const key = c.text.key;
+      if (inPages && renamed.has(key)) continue;
       const derank = currentKey !== null && key === currentKey ? 80 : 0;
       const lastVisit = c.fresh ? now : c.lastVisit;
       let age = 10;
@@ -182,7 +191,7 @@ function inlineTarget(q: string, c: Candidate): { text: string; url: string; fav
   const origin = originOfPage(c.text);
   const host = hostPart(c.text.shown);
   if (origin && host.toLowerCase().startsWith(q)) return { text: host, url: `${origin}/`, favicon: c.favicon };
-  return { text: c.text.shown, url: c.url, favicon: c.favicon };
+  return { text: c.text.shown, url: c.text.url, favicon: c.favicon };
 }
 
 function bangSuggestions(match: BangMatch, source: SuggestionSource, options: SuggestOptions, limit: number): SuggestionResult {

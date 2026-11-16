@@ -4,6 +4,7 @@ import { setCommandScrollZoom } from "../../platform/siteSettings";
 import { setPopupsOpenAsTabs } from "../../platform/pageOptions";
 import { setBlockAutoplayEverywhere, setFairPlayInChromium } from "../../platform/pageOptions";
 import { useBrowser } from "../browser/store";
+import { startUpscalingGuard, upscalingWanted } from "../media/upscalingGuard";
 import type { Settings } from "./settings";
 import { startInterfaceScale } from "./interfaceScaleSync";
 
@@ -15,7 +16,7 @@ const NATIVE_SETTINGS: Mirror[] = [
   mirror("appearance", setAppearance),
   mirror("pageScrollBars", (bars) => setThinScrollBars(bars === "thin")),
   mirror("autoPictureInPicture", setAutoPictureInPicture),
-  mirror("videoUpscaling", setVideoUpscaling),
+  mirror("videoUpscaling", (enabled) => upscalingWanted(enabled, setVideoUpscaling)),
   mirror("commandScrollZoom", setCommandScrollZoom),
   mirror("popupsOpenAsTabs", setPopupsOpenAsTabs),
   mirror("blockAutoplayEverywhere", setBlockAutoplayEverywhere),
@@ -24,6 +25,7 @@ const NATIVE_SETTINGS: Mirror[] = [
 
 export function startNativeSettings() {
   startInterfaceScale();
+  startUpscalingGuard();
   const sent = new Map<keyof Settings, unknown>();
   const sync = (settings: Settings) => {
     for (const { key, send } of NATIVE_SETTINGS) {

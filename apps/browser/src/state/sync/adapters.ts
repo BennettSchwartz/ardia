@@ -46,11 +46,12 @@ export function sharedDataAdapter(links: () => Record<string, ShareLink>): Adapt
   };
 }
 
-export function deviceAdapter(deviceId: string, name: () => string, retired = false): Adapter {
+export function deviceAdapter(deviceId: string, name: () => string, retired = false, spaceOrder: () => string[] = () => []): Adapter {
+  const recordOf = (order: string[]): DeviceRecord => ({ n: name(), k: "mac", f: [RECEIVES_TABS], ...(order.length ? { o: order } : {}) });
   return {
     prefix: DEVICE,
     extract: () => ({
-      values: retired ? new Map() : new Map([[`${DEVICE}${deviceId}`, { n: name(), k: "mac", f: [RECEIVES_TABS] } satisfies DeviceRecord]]),
+      values: retired ? new Map() : new Map([[`${DEVICE}${deviceId}`, recordOf(spaceOrder())]]),
       ignore: (key) => key !== `${DEVICE}${deviceId}`,
     }),
     apply: () => true,
@@ -173,15 +174,43 @@ export function historyExpired(key: string, value: unknown, now: number) {
   return !!v && lastVisitOf(v) < now - HISTORY_WINDOW_MS;
 }
 
+type ExtractedVisit = { entry: HistoryEntry; json: string | undefined; value: HistoryValue; valueJson: string | undefined };
+type HistoryExtracts = { parsed: Map<string, { json: string; known: HistoryValue | null }>; visits: Map<string, ExtractedVisit> };
+
+const historyExtracts = new Map<string, HistoryExtracts>();
+
+function historyExtractsOf(profileId: string): HistoryExtracts {
+  let extracts = historyExtracts.get(profileId);
+  if (!extracts) historyExtracts.set(profileId, (extracts = { parsed: new Map(), visits: new Map() }));
+  return extracts;
+}
+
 export function historyAdapter(profileId: string): Adapter {
   const ready = () => !!historyViewOf(store(), profileId)?.ready;
+  const extracts = historyExtractsOf(profileId);
+  const { parsed } = extracts;
+  const knownOf = (key: string, json: string | undefined) => {
+    if (json === undefined) return null;
+    const cached = parsed.get(key);
+    if (cached?.json === json) return cached.known;
+    const known = historyValue(JSON.parse(json));
+    parsed.set(key, { json, known });
+    return known;
+  };
+  const visitOf = (key: string, e: HistoryEntry, json: string | undefined): ExtractedVisit => {
+    const local: HistoryValue = { t: e.title, n: e.visits, vt: e.visitTimes?.length ? e.visitTimes : [e.lastVisit] };
+    const known = knownOf(key, json);
+    const edited = !known || local.vt.some((t) => !known.vt.some((k) => Math.abs(k - t) <= SAME_VISIT_MS));
+    return edited ? { entry: e, json, value: local, valueJson: undefined } : { entry: e, json, value: known, valueJson: json };
+  };
   return {
     prefix: HISTORY,
-    extract: (base) => {
+    extract: (_base, _queued, _now, _known, _remote, _stamp, baseJson) => {
       if (!ready()) return null;
       const since = Date.now() - HISTORY_WINDOW_MS;
       const values = new Map<string, unknown>();
       const older = new Set<string>();
+      const next = new Map<string, ExtractedVisit>();
       const { list: view, floor } = historyViewOf(store(), profileId)!;
       for (const e of view) {
         if (!isWebPageUrl(e.url)) continue;
@@ -190,17 +219,24 @@ export function historyAdapter(profileId: string): Adapter {
           older.add(key);
           continue;
         }
-        const local: HistoryValue = { t: e.title, n: e.visits, vt: e.visitTimes?.length ? e.visitTimes : [e.lastVisit] };
-        const known = historyValue(base(key));
-        const edited = !known || local.vt.some((t) => !known.vt.some((k) => Math.abs(k - t) <= SAME_VISIT_MS));
-        values.set(key, edited ? local : known);
+        const json = baseJson(key);
+        const was = extracts.visits.get(key);
+        const visit = was && was.entry === e && was.json === json ? was : visitOf(key, e, json);
+        next.set(key, visit);
+        values.set(key, visit.value);
       }
+      extracts.visits = next;
+      for (const key of parsed.keys()) if (!next.has(key) && baseJson(key) === undefined) parsed.delete(key);
       const ignore = (key: string) => {
         if (older.has(key) || !isWebPageUrl(recordId(HISTORY, key))) return true;
-        const known = historyValue(base(key));
+        const known = knownOf(key, baseJson(key));
         return !!known && (lastVisitOf(known) < since || lastVisitOf(known) <= floor);
       };
-      return { values, ignore };
+      const json = (key: string, value: unknown) => {
+        const visit = next.get(key);
+        return visit && visit.value === value ? visit.valueJson : undefined;
+      };
+      return { values, ignore, json };
     },
     editedAt: (v) => {
       const value = historyValue(v);

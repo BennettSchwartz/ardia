@@ -289,7 +289,8 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
           @"origin" : OriginOf(tab.url) ?: sender,
           @"frameOrigin" : sender,
           @"audio" : audio ?: NSNull.null,
-          @"sources" : ArdiaHost.displayMediaSources
+          @"sources" : ArdiaHost.displayMediaSources,
+          @"controller" : @([dict[@"controller"] isEqual:@YES])
         }];
   }
 }

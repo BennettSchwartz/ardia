@@ -206,7 +206,7 @@ enum CrashReports {
       return valid.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) == nil ? nil : name
     }
     if let details = body["exceptionReason"] as? [String: Any], let name = details["name"] as? String { return checked(name) }
-    let named = try! NSRegularExpression(pattern: "uncaught exception '([^']{1,64})'")
+    let named = try! NSRegularExpression(pattern: "uncaught exception '([A-Za-z0-9_]{1,64})[':]")
     for case let lines as [String] in (body["asi"] as? [String: Any] ?? [:]).values {
       for line in lines {
         if let match = named.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),

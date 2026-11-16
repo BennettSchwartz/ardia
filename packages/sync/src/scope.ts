@@ -109,6 +109,29 @@ export function visible(state: ScopeState, prefix: string): Map<string, unknown>
 
 const parseBase = (json: string | undefined) => (json === undefined ? undefined : (JSON.parse(json) as unknown));
 
+type BaseIndex = { all: Set<string>; byPrefix: Map<string, Set<string>> };
+const baseIndexes = new WeakMap<ScopeState, BaseIndex>();
+
+function baseKeysWith(state: ScopeState, prefix: string): Iterable<string> {
+  const index = baseIndexes.get(state);
+  if (!index) return Object.keys(state.base).filter((key) => key.startsWith(prefix));
+  let keys = index.byPrefix.get(prefix);
+  if (!keys) {
+    keys = new Set();
+    for (const key of index.all) if (key.startsWith(prefix)) keys.add(key);
+    index.byPrefix.set(prefix, keys);
+  }
+  return keys;
+}
+
+function setBase(state: ScopeState, key: string, json: string) {
+  const index = key in state.base ? undefined : baseIndexes.get(state);
+  state.base[key] = json;
+  if (!index) return;
+  index.all.add(key);
+  for (const [prefix, keys] of index.byPrefix) if (key.startsWith(prefix)) keys.add(key);
+}
+
 const settling = new WeakMap<ScopeState, (() => void)[]>();
 
 function settleWhenDurable(state: ScopeState, settle: () => void) {
@@ -131,17 +154,25 @@ async function changesOf(state: ScopeState, adapter: Adapter, now: number) {
   if (adapter.adoptRemoteOnJoin && !state.joined) return null;
   let pending: Set<string> | null = null;
   const queued = (key: string) => (pending ??= new Set([...state.outbox, ...(state.journal ?? []).flatMap((f) => f.ops)].map((op) => op.k))).has(key);
-  const extraction = await adapter.extract((key) => parseBase(state.base[key]), queued, now, (key) => key in state.records, (key) => state.records[key]?.v, (key) => state.records[key]?.h);
+  const extraction = await adapter.extract(
+    (key) => parseBase(state.base[key]),
+    queued,
+    now,
+    (key) => key in state.records,
+    (key) => state.records[key]?.v,
+    (key) => state.records[key]?.h,
+    (key) => state.base[key],
+  );
   if (!extraction) return null;
   const changes: Change[] = [];
   for (const [key, value] of extraction.values) {
     if (value === null || value === undefined) throw new Error(`[sync] ${key}: a live value can't be null`);
-    const json = canonical(value);
+    const json = extraction.json?.(key, value) ?? canonical(value);
     if (state.base[key] === json && !extraction.republish?.(key)) continue;
     changes.push({ key, value, json });
   }
-  for (const key of Object.keys(state.base)) {
-    if (!key.startsWith(adapter.prefix) || extraction.values.has(key) || extraction.ignore?.(key)) continue;
+  for (const key of baseKeysWith(state, adapter.prefix)) {
+    if (!(key in state.base) || extraction.values.has(key) || extraction.ignore?.(key)) continue;
     changes.push({ key, value: null, json: "null" });
   }
   return { changes, settle: extraction.published };
@@ -164,7 +195,7 @@ async function publishAdapter(state: ScopeState, adapter: Adapter, clock: Clock,
   for (const change of found.changes) {
     const { key, value, json } = change;
     if (value === null) delete state.base[key];
-    else state.base[key] = json;
+    else setBase(state, key, json);
     const candidate = stamps?.get(key);
     const h = candidate?.json === json ? candidate.h : stampOf(state, adapter, clock, change);
     const known = state.records[key];
@@ -255,7 +286,7 @@ async function applyAdapter(state: ScopeState, adapter: Adapter, keys: Set<strin
   const applyAs = (state.applyAs ??= {});
   applyAs[adapter.prefix] ??= state.joined ? "joined" : "joining";
   const settle = (key: string) => {
-    if (view.has(key)) state.base[key] = canonical(view.get(key));
+    if (view.has(key)) setBase(state, key, canonical(view.get(key)));
     else delete state.base[key];
   };
   const landed = new Set<string>();
@@ -360,6 +391,15 @@ export async function syncScope(args: {
   now?: () => number;
   options?: ScopeOptions;
 }): Promise<CycleResult> {
+  baseIndexes.set(args.state, { all: new Set(Object.keys(args.state.base)), byPrefix: new Map() });
+  try {
+    return await syncScopeIndexed(args);
+  } finally {
+    baseIndexes.delete(args.state);
+  }
+}
+
+async function syncScopeIndexed(args: Parameters<typeof syncScope>[0]): Promise<CycleResult> {
   const { scope, state, transport, adapters, clock, device, options } = args;
   const now = args.now ?? Date.now;
   let published = 0;

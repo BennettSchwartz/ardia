@@ -18,6 +18,8 @@ import { notePageFocusRequest, notingPageFocus } from "../../pageFocus";
 import { withPopupDismissal } from "../../popupDismissal";
 import { registerSwitchView } from "../../tabSwitchAhead";
 
+const SHELL_TEXT_ENTRY = "input, textarea, [contenteditable=''], [contenteditable='true']";
+
 export const HostWebView = forwardRef<WebViewHandle, WebViewProps>(function HostWebView(props, ref) {
   return props.extensionHost && extensionViewsSupported(ardiaHost) ? <HostExtensionWebView ref={ref} {...props} /> : <HostTabWebView ref={ref} {...props} />;
 });
@@ -71,6 +73,11 @@ const HostTabWebView = forwardRef<WebViewHandle, WebViewProps>(function HostTabW
         if (property === "loadUrl") {
           args[0] = toEngineUrl(args[0] as string);
           if (current.repeatsCreate(args[0] as string)) return undefined;
+        }
+        if (property === "focusIfUnfocused") {
+          if (document.activeElement?.matches(SHELL_TEXT_ENTRY)) return false;
+          notePageFocusRequest();
+          return current.command("focus", []).then(() => true, () => false);
         }
         if (property === "focus") notePageFocusRequest();
         if (property === "getSecurityInfo") return current.pageResult(property, args);

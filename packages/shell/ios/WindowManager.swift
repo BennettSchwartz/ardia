@@ -44,7 +44,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
   var keyWindowId: String? { id(of: NSApp.keyWindow) ?? id(of: NSApp.mainWindow) }
 
   func closeForeignKeyWindow() -> Bool {
-    guard keyWindowId == nil, let key = NSApp.keyWindow, !(key is NSPanel), key.styleMask.contains(.closable)
+    guard let key = NSApp.keyWindow, id(of: key) == nil, key.sheetParent == nil, key.styleMask.contains(.closable)
     else { return false }
     key.performClose(nil)
     return true
@@ -168,6 +168,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
       window.orderFront(nil)
     }
     if small, focus, smallPointer != nil { linkActivation.openedFromLink(window) }
+    if small, focus, smallPointer == nil, LittleArdiaHotKey.shared.takePress() { activateForGlobalShortcut(window) }
     observeFrame(window)
     reportFrame(window)
     fullScreen.windowShown(id)
@@ -242,7 +243,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     guard let id = id(of: from), let entry = managed[id] else { return }
     NotificationCenter.default.removeObserver(self, name: nil, object: from)
     entry.window = to
-    if entry.kind == .small { ArdiaChromeWindowHost.float(forWindowManagers: to) }
+    if entry.kind == .small { configureSmall(to) }
     Self.identify(to, id: id, kind: entry.kind)
     if lastPlaced === from { lastPlaced = to }
     observeDelegateNotifications(to)
@@ -313,7 +314,18 @@ final class WindowManager: NSObject, NSWindowDelegate {
     window.minSize = NSSize(width: 420, height: 300)
     ArdiaChromeWindowHost.setInterfaceMinSize(window.minSize, of: window)
     window.tabbingMode = .disallowed
-    window.collectionBehavior.insert(.moveToActiveSpace)
+    let fullScreenRoles: NSWindow.CollectionBehavior = [.fullScreenPrimary, .fullScreenNone]
+    window.collectionBehavior = window.collectionBehavior.subtracting(fullScreenRoles).union([.moveToActiveSpace, .fullScreenAuxiliary])
+  }
+
+  private func activateForGlobalShortcut(_ window: NSWindow) {
+    guard !NSApp.isActive else { return }
+    linkActivation.openedFromLink(window)
+    if LaunchConfig.shared.background {
+      NSLog("[littleArdia] global shortcut opened a window (background mode, not activated)")
+    } else {
+      NSApp.activate(ignoringOtherApps: true)
+    }
   }
 
   private func placeSmall(_ window: NSWindow, size: CGSize?, pointer: NSPoint?) {
