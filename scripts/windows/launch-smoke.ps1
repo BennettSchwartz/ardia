@@ -1195,6 +1195,73 @@ public static class ArdiaFirstFrames {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+  public delegate IntPtr WindowProc(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct WindowClass { public uint Style; public WindowProc Proc; public int ClassExtra, WindowExtra; public IntPtr Instance, Icon, Cursor, Background; public string Menu, Name; }
+  [StructLayout(LayoutKind.Sequential)] public struct Message { public IntPtr Window; public uint Id; public IntPtr WParam, LParam; public uint Time; public int X, Y; }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassW(ref WindowClass windowClass);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint extended, string className, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+  [DllImport("user32.dll")] static extern IntPtr DefWindowProcW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern int GetMessageW(out Message message, IntPtr window, uint from, uint to);
+  [DllImport("user32.dll")] static extern bool TranslateMessage(ref Message message);
+  [DllImport("user32.dll")] static extern IntPtr DispatchMessageW(ref Message message);
+  [DllImport("user32.dll")] static extern bool PostThreadMessageW(uint thread, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+  [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref Rect rect, uint ini);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandleW(IntPtr name);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateSolidBrush(uint color);
+
+  public static int BackdropClicks;
+  static WindowProc backdropProc = BackdropMessage;
+  static bool backdropRegistered;
+  static uint backdropThread;
+  static Thread backdropLoop;
+
+  static IntPtr BackdropMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam) {
+    if (message == 0x0201 || message == 0x0204 || message == 0x0021) BackdropClicks++;
+    return DefWindowProcW(window, message, wParam, lParam);
+  }
+
+  public static void ShowBackdrop() {
+    BackdropClicks = 0;
+    ManualResetEvent ready = new ManualResetEvent(false);
+    backdropLoop = new Thread(() => {
+      backdropThread = GetCurrentThreadId();
+      IntPtr instance = GetModuleHandleW(IntPtr.Zero);
+      if (!backdropRegistered) {
+        WindowClass windowClass = new WindowClass();
+        windowClass.Proc = backdropProc;
+        windowClass.Instance = instance;
+        windowClass.Background = CreateSolidBrush(0x00804020);
+        windowClass.Name = "ArdiaFirstFramesBackdrop";
+        RegisterClassW(ref windowClass);
+        backdropRegistered = true;
+      }
+      Rect work = new Rect();
+      SystemParametersInfoW(0x30, 0, ref work, 0);
+      IntPtr backdrop = CreateWindowExW(0x80, "ArdiaFirstFramesBackdrop", "first frames backdrop", 0x80000000, work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
+      ShowWindow(backdrop, 4);
+      ready.Set();
+      Message message;
+      while (GetMessageW(out message, IntPtr.Zero, 0, 0) > 0) {
+        TranslateMessage(ref message);
+        DispatchMessageW(ref message);
+      }
+      DestroyWindow(backdrop);
+    });
+    backdropLoop.IsBackground = true;
+    backdropLoop.Start();
+    ready.WaitOne(5000);
+    Thread.Sleep(400);
+  }
+
+  public static void HideBackdrop() {
+    if (backdropLoop == null) return;
+    PostThreadMessageW(backdropThread, 0x0012, IntPtr.Zero, IntPtr.Zero);
+    backdropLoop.Join(5000);
+    backdropLoop = null;
+  }
 
   static byte[] desktop;
   static int desktopWidth, desktopHeight;
@@ -1269,10 +1336,10 @@ public static class ArdiaFirstFrames {
     return pixels;
   }
 
-  static string KindOf(Frame frame, bool behind) {
-    if (frame.Alpha <= 8) return "hidden";
-    if (frame.Width == 0) return "unread";
-    if (behind) return "behind";
+  static string KindOf(Frame frame, double sameShare) {
+    if (frame.Width == 0) return frame.Alpha <= 8 ? "hidden" : "unread";
+    if (frame.Alpha <= 8) return sameShare < 0.6 ? "leak" : "hidden";
+    if (sameShare >= 0.9) return "behind";
     if (frame.Uniform && frame.White > 0.9) return "white";
     if (frame.Uniform) return "plain";
     return "content";
@@ -1286,9 +1353,9 @@ public static class ArdiaFirstFrames {
     Point origin = new Point();
     ClientToScreen(window, ref origin);
     int width = client.Right - client.Left, height = client.Bottom - client.Top;
-    if (width < 8 || height < 8) { frame.Kind = KindOf(frame, false); return frame; }
+    if (width < 8 || height < 8) { frame.Kind = KindOf(frame, 1); return frame; }
     byte[] pixels = Grab(origin.X, origin.Y, width, height);
-    if (pixels == null) { frame.Kind = KindOf(frame, false); return frame; }
+    if (pixels == null) { frame.Kind = KindOf(frame, 1); return frame; }
     int same = 0, compared = 0;
     frame.Width = width;
     frame.Height = height;
@@ -1317,7 +1384,7 @@ public static class ArdiaFirstFrames {
     frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
     frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
     if (keep) frame.Pixels = pixels;
-    frame.Kind = KindOf(frame, compared > 0 && same >= compared * 0.9);
+    frame.Kind = KindOf(frame, compared > 0 ? same / (double)compared : 1);
     return frame;
   }
 
@@ -1403,6 +1470,7 @@ public static class ArdiaFirstFramesFront {
     $log = Join-Path $Out "first-frames-$Label.log"
     $env:ARDIA_DATA_DIR = $data
     $env:ARDIA_CONFIG_DIR = $data
+    [ArdiaFirstFrames]::ShowBackdrop()
     $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000, [bool]$Click)
     $env:ARDIA_CONFIG_DIR = ""
     try {
@@ -1444,7 +1512,8 @@ public static class ArdiaFirstFramesFront {
       [ArdiaFirstFramesFront]::GetWindowThreadProcessId($foreground, [ref]$frontOwner) | Out-Null
       $ours = $frontOwner -eq $launch.Process.Id
       Write-Host "First frames ($Label): the window is visible to Windows (taskbar, Alt+Tab) from $($launch.VisibleMs) ms and in front from $($launch.ForegroundMs) ms; at the end the foreground window is ours: $ours."
-      if ($launch.ClickedMs -ge 0) { Write-Host "First frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms, while it was $($launch.ClickedOn), left the foreground with the app: $ours." }
+      $backdropClicks = [ArdiaFirstFrames]::BackdropClicks
+      if ($launch.ClickedMs -ge 0) { Write-Host "First frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms, while it was $($launch.ClickedOn), reached the window underneath $backdropClicks times and left the foreground with the app: $ours." }
       if ($firstWindow) { Write-Host "First frames ($Label) log: $firstWindow" }
       foreach ($line in $windowLines) { Write-Host "First frames ($Label) log: $line" }
       $sequence = @()
@@ -1455,6 +1524,10 @@ public static class ArdiaFirstFramesFront {
       }
       Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
       $problems = @()
+      $leaks = @($frames | Where-Object { $_.Kind -eq "leak" })
+      if ($leaks.Count) { $problems += "first frames ($Label): something showed in $($leaks.Count) captures while the window was still transparent, from $($leaks[0].Ms) ms" }
+      if ($contentIndex -lt 0) { $problems += "first frames ($Label): the window never showed its UI in 9 s" }
+      if ($backdropClicks -gt 0) { $problems += "first frames ($Label): the window underneath got $backdropClicks clicks or activations meant for the app's window" }
       if ($white.Count -gt 0) { $problems += "first frames ($Label): the window showed plain white in $($white.Count) captures over $whiteMs ms before the UI's first frame" }
       if ($launch.ForegroundMs -lt 0 -or ($launch.ForegroundMs - $launch.VisibleMs) -gt 100) { $problems += "first frames ($Label): the window was visible from $($launch.VisibleMs) ms but in front only from $($launch.ForegroundMs) ms" }
       if ($launch.ClickedMs -ge 0 -and -not $ours) { $problems += "first frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms ($($launch.ClickedOn)) went to the window behind; the foreground window is $(Get-SnapDescription $foreground)" }
@@ -1464,6 +1537,7 @@ public static class ArdiaFirstFramesFront {
         Stop-Process -Id $launch.Process.Id -Force
         $launch.Process.WaitForExit(10000) | Out-Null
       }
+      [ArdiaFirstFrames]::HideBackdrop()
     }
   }
 

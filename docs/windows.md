@@ -266,9 +266,11 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     says `window <id> shown with its first frame <ms> ms after it opened`, or `shown without a first frame: none came
     in <ms> ms` when the deadline shows it anyway. A background instance shows its windows at once, as before. The
     launch check captures the first window from process start, light and dark, for a fresh and a finished profile,
-    compares each capture with the screen before the launch, fails on any plain white capture before the UI's first
-    frame, on a window that comes to the front more than 100 ms after it is visible, and on a click at its centre in
-    the first moment that lands on the window behind.
+    over a solid window of its own that counts clicks, and compares each capture with the screen before the launch.
+    It fails on any plain white capture before the UI's first frame, on anything showing while the window is still
+    transparent (a page window shown before its owner), on a window that never shows its UI, on a window that comes
+    to the front more than 100 ms after it is visible, and when a click at its centre in its first moment reaches the
+    window underneath.
 - What has a C++ version: windows, documents, config files and their watcher, secrets (Credential Manager), local
   telemetry, launch config and system info, file actions and icons, launch at login, the theme, lock and sleep
   signals, the clipboard, the bang list, confirm, prompt and file dialogs, the command table with its shortcuts and
