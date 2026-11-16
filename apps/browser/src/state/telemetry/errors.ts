@@ -5,7 +5,7 @@ import type { SavedContext } from "./savedContext";
 import { recordLog } from "./logs";
 import { errorCode, errorMessage, errorType, nativeCrashExceptions, nativeCrashTermination, parseStack, type ExceptionFrame } from "./sanitize";
 
-type Mechanism = "onerror" | "onunhandledrejection" | "react" | "console" | "native_crash" | "helper_crash";
+type Mechanism = "onerror" | "onunhandledrejection" | "react" | "react_recovered" | "console" | "native_crash" | "helper_crash";
 
 const MAX_PER_SESSION = 25;
 const reported = new WeakSet<object>();

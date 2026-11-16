@@ -95,6 +95,14 @@ export const LINUX_WORDING: readonly Wording[] = [
         "change it any time in Settings › Privacy & Security. Either way, Ardia sends one anonymous “opened today” count a day, with its version and macOS version and no persistent ID.",
         "change it any time in Settings › Privacy & Security. Either way, Ardia sends one anonymous “opened today” count a day, with its version and operating system version and no persistent ID.",
       ],
+      [
+        "After a crash: the exception type and name (never its message), and the function names where it was thrown and on the crashing thread, from this app's crash report",
+        "After a crash: the signal and its code, and for each step on the crashing thread the file it ran in (like chrome or libc.so.6) and the position inside that file, with the build IDs of Ardia's own files, read from the crash dump Chromium's crash handler keeps on this computer. Never the dump itself, which can hold page content",
+      ],
+      [
+        "plus the version that crashed, how long the process had run, the total size of its writable memory regions, and how the system ended it (its termination reason, like a signal or a code-signing kill)",
+        "plus the engine version that crashed, how long the process had run, and the signal that ended it",
+      ],
       ["A random install ID, made on this Mac once", "A random install ID, made on this computer once"],
       ["App version and build, macOS version, chip", "App version and build, operating system version, chip"],
       [
