@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [brave-history-10000-extras-shaped-maximized]
+        mode: [kill-main-share-on, kill-main-share-off, kill-tree-share-on, kill-tree-share-off, early-share-on, early-share-off, endsession-share-on, endsession-share-off]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         env:
           MODE: ${{ matrix.mode }}
-        run: scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/setup/Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -Out "${{ runner.temp }}/relaunch" -FinishOnboarding -NoUpdates -KeepLingering -Import:($env:MODE -like '*history*') -SeedEngine $(if ($env:MODE -like 'visits*' -or $env:MODE -in @('malformed','huge')) { $env:MODE } else { '' }) -TesterShape:($env:MODE -like '*shaped*') -ComingFrom $(if ($env:MODE -like 'brave*') { 'Brave' } else { 'Edge' }) -Sharing -Maximize:($env:MODE -like '*maximized') -FirstSettle $(if ($env:MODE -like '*history*') { 120 } else { 20 })
+        run: scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/setup/Ardia-0.2.47-nightly.3-windows-x64-setup.exe" -Out "${{ runner.temp }}/relaunch" -FinishOnboarding -NoUpdates -KeepLingering -Import:($env:MODE -like '*history*') -SeedEngine $(if ($env:MODE -like 'visits*' -or $env:MODE -in @('malformed','huge')) { $env:MODE } else { '' }) -TesterShape:($env:MODE -like '*shaped*' -or $env:MODE -like '*share-o*') -Unclean $(if ($env:MODE -match '^(kill-main|kill-tree|early|endsession)') { $Matches[1] } else { '' }) -ComingFrom $(if ($env:MODE -like 'brave*') { 'Brave' } else { 'Edge' }) -Sharing:($env:MODE -notlike '*share-off*') -Maximize:($env:MODE -like '*maximized') -FirstSettle $(if ($env:MODE -like '*history*') { 120 } else { 20 })
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:

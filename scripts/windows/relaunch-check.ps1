@@ -13,7 +13,8 @@ param(
   [int]$WatchSeconds = 25,
   [switch]$Import,
   [string]$SeedEngine,
-  [switch]$TesterShape
+  [switch]$TesterShape,
+  [ValidateSet("", "kill-main", "kill-tree", "early", "endsession")][string]$Unclean = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,6 +35,7 @@ public static class RelaunchInput {
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
   [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll", EntryPoint = "SendMessageTimeoutW")] public static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
 }
 "@
 
@@ -56,11 +58,67 @@ function Get-ArdiaProcesses {
   return @(Get-CimInstance Win32_Process -Filter "Name='Ardia.exe'" -ErrorAction SilentlyContinue)
 }
 
-function Get-BrowserProcess {
+$script:tracked = [ordered]@{}
+
+function Track-Ardia {
   foreach ($process in Get-ArdiaProcesses) {
-    if ($process.CommandLine -notmatch "--type=") { return Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue }
+    if ($script:tracked.Contains([string]$process.ProcessId)) { continue }
+    $live = Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue
+    if (-not $live) { continue }
+    try { $null = $live.Handle } catch { }
+    $kind = if ($process.CommandLine -match "--type=([a-z-]+)") { $Matches[1] } else { "browser" }
+    $script:tracked[[string]$process.ProcessId] = [pscustomobject]@{ Process = $live; Kind = $kind; Seen = Get-Date; Reported = $false }
+  }
+}
+
+function Report-Exits([string]$Name) {
+  Track-Ardia
+  foreach ($entry in $script:tracked.Values) {
+    if ($entry.Reported -or -not $entry.Process.HasExited) { continue }
+    $entry.Reported = $true
+    $code = try { $entry.Process.ExitCode } catch { "unknown" }
+    $hex = if ($code -is [int]) { "0x{0:X8}" -f $code } else { "" }
+    $lived = try { [int]($entry.Process.ExitTime - $entry.Process.StartTime).TotalMilliseconds } catch { "?" }
+    Write-Host "Relaunch ($Name): exit: $($entry.Kind) pid $($entry.Process.Id) ended with $code $hex after $lived ms"
+  }
+}
+
+function Get-BrowserProcess {
+  Track-Ardia
+  foreach ($process in Get-ArdiaProcesses) {
+    if ($process.CommandLine -notmatch "--type=") { $entry = $script:tracked[[string]$process.ProcessId]; if ($entry) { return $entry.Process } }
   }
   return $null
+}
+
+function Stop-Unclean([System.Diagnostics.Process]$Browser, [string]$Name, [string]$How) {
+  Track-Ardia
+  if ($How -eq "kill-main") {
+    Stop-Process -Id $Browser.Id -Force -ErrorAction SilentlyContinue
+  } elseif ($How -eq "endsession") {
+    $handles = @([IntPtr]$Browser.MainWindowHandle) + @(Get-OtherWindows $Browser.MainWindowHandle | ForEach-Object { [IntPtr]$_.Current.NativeWindowHandle })
+    foreach ($handle in $handles) {
+      $answer = [IntPtr]::Zero
+      $sent = [RelaunchInput]::SendMessageTimeout($handle, 0x0011, [IntPtr]::Zero, [IntPtr]::Zero, 2, 5000, [ref]$answer)
+      Write-Host "Relaunch ($Name): WM_QUERYENDSESSION to $handle answered $answer (sent: $sent)"
+    }
+    foreach ($handle in $handles) {
+      $answer = [IntPtr]::Zero
+      $sent = [RelaunchInput]::SendMessageTimeout($handle, 0x0016, [IntPtr]1, [IntPtr]::Zero, 2, 5000, [ref]$answer)
+      Write-Host "Relaunch ($Name): WM_ENDSESSION to $handle sent: $sent"
+    }
+    Start-Sleep -Seconds 5
+    foreach ($leftover in Get-ArdiaProcesses) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+  } else {
+    foreach ($leftover in Get-ArdiaProcesses) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+  }
+  $deadline = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $deadline -and @(Get-ArdiaProcesses).Count -gt 0) { Start-Sleep -Milliseconds 250 }
+  $left = @(Get-ArdiaProcesses)
+  Write-Host "Relaunch ($Name): ended uncleanly with $How; $($left.Count) Ardia processes left"
+  foreach ($leftover in $left) { Stop-Process -Id $leftover.ProcessId -Force -ErrorAction SilentlyContinue }
+  Start-Sleep -Seconds 1
+  Report-Exits $Name
 }
 
 function Save-DataFolder([string]$Name) {
@@ -81,7 +139,7 @@ function Save-DataFolder([string]$Name) {
   }
 }
 
-function Start-Ardia([string]$Name) {
+function Start-Ardia([string]$Name, [int]$KillAfterMs = 0) {
   $before = @(Get-ArdiaProcesses | ForEach-Object { $_.ProcessId })
   $at = Get-Date
   $process = Start-Process -FilePath $App -ArgumentList "--log-file=`"$(Join-Path $Out "$Name.log")`"" -PassThru
@@ -107,12 +165,19 @@ function Start-Ardia([string]$Name) {
     return $null
   }
   $shownAt = Get-Date
+  if ($KillAfterMs -gt 0) {
+    Start-Sleep -Milliseconds $KillAfterMs
+    Save-Screenshot (Join-Path $Out "$Name-before-kill.png")
+    Stop-Unclean $window $Name "kill-tree"
+    return $null
+  }
   $watchUntil = $shownAt.AddSeconds($WatchSeconds)
   $shots = 0
   $peakMb = 0
   while ((Get-Date) -lt $watchUntil -and -not $window.HasExited) {
     Start-Sleep -Milliseconds 250
     try { $window.Refresh(); $peakMb = [Math]::Max($peakMb, [int]($window.PrivateMemorySize64 / 1MB)) } catch { }
+    Track-Ardia
     if ($shots -lt 8 -and ((Get-Date) - $shownAt).TotalSeconds -ge $shots) { Save-Screenshot (Join-Path $Out "$Name-at-$($shots)s.png"); $shots++ }
   }
   if ($window.HasExited) {
@@ -120,6 +185,8 @@ function Start-Ardia([string]$Name) {
     Save-Screenshot (Join-Path $Out "$Name-gone.png")
     $left = @(Get-ArdiaProcesses)
     Write-Host "Relaunch ($Name): a window showed after $ms ms, then the browser process (pid $($window.Id)) ended with exit code $($window.ExitCode) (0x$('{0:X8}' -f $window.ExitCode)) about $died ms after the window showed (peak $peakMb MB private); $($left.Count) Ardia processes left"
+    Start-Sleep -Seconds 2
+    Report-Exits $Name
     return $null
   }
   Save-Screenshot (Join-Path $Out "$Name-window.png")
@@ -315,6 +382,7 @@ function Close-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [strin
   Write-Host "Relaunch ($Name): closed with $How; the browser process ended with $exit; every Ardia process was gone after $ms ms ($($left.Count) left)"
   $left | ForEach-Object { Write-Host "  left: $($_.ProcessId) $($_.CommandLine)" }
   Save-Screenshot (Join-Path $Out "$Name-closed.png")
+  Report-Exits $Name
   return $left.Count -eq 0
 }
 
@@ -333,14 +401,29 @@ if ($NoUpdates) {
 }
 Save-DataFolder "0-before"
 
-$steps = @(
+$steps = if ($Unclean -eq "early") { @(
+  @{ Name = "1-first"; Wait = 0; Close = "alt-f4"; Settle = $FirstSettle },
+  @{ Name = "2-killed-early"; Wait = 0; KillAfterMs = 2000 },
+  @{ Name = "3-after-early-kill"; Wait = 0; Close = "alt-f4"; Settle = 10 },
+  @{ Name = "4-again"; Wait = 5; Close = "alt-f4"; Settle = 10 }
+) } elseif ($Unclean) { @(
+  @{ Name = "1-first"; Wait = 0; Close = $Unclean; Settle = $FirstSettle },
+  @{ Name = "2-after-unclean"; Wait = 0; Close = "alt-f4"; Settle = 10 },
+  @{ Name = "3-again"; Wait = 0; Close = "alt-f4"; Settle = 10 },
+  @{ Name = "4-after-60s"; Wait = 60; Close = "alt-f4"; Settle = 10 }
+) } else { @(
   @{ Name = "1-first"; Wait = 0; Close = "alt-f4"; Settle = $FirstSettle },
   @{ Name = "2-at-once"; Wait = 0; Close = "taskbar-close"; Settle = 10 },
   @{ Name = "3-after-5s"; Wait = 5; Close = "alt-f4"; Settle = 10 },
   @{ Name = "4-after-60s"; Wait = 60; Close = "alt-f4"; Settle = 10 }
-)
+) }
 foreach ($step in $steps) {
   if ($step.Wait) { Start-Sleep -Seconds $step.Wait }
+  if ($step.KillAfterMs) {
+    Start-Ardia $step.Name $step.KillAfterMs | Out-Null
+    Save-DataFolder "$($step.Name)-killed"
+    continue
+  }
   $browser = Start-Ardia $step.Name
   if (-not $browser) {
     $failures += "start $($step.Name): no lasting window"
@@ -351,6 +434,11 @@ foreach ($step in $steps) {
   }
   Use-Ardia $browser $step.Name ($step.Name -eq "1-first")
   Start-Sleep -Seconds $step.Settle
+  if ($step.Close -in @("kill-main", "kill-tree", "endsession")) {
+    Stop-Unclean $browser $step.Name $step.Close
+    Save-DataFolder "$($step.Name)-closed"
+    continue
+  }
   if (-not (Close-Ardia $browser $step.Name $step.Close)) {
     $failures += "close $($step.Name): Ardia processes were still running 60 s after the last window closed"
     if ($KeepLingering) {
