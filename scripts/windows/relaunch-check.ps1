@@ -168,13 +168,28 @@ function Get-EngineHistoryCount {
   return 0
 }
 
+function Get-OtherWindows([IntPtr]$Handle) {
+  Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+  $owner = [System.Windows.Automation.AutomationElement]::FromHandle($Handle).Current.ProcessId
+  $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $owner)
+  return @([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $condition) | Where-Object { $_.Current.NativeWindowHandle -ne [int]$Handle })
+}
+
 function Start-Import([IntPtr]$Handle, [string]$Name) {
   $opened = Click-NameLike $Handle "Import*"
   Start-Sleep -Seconds 3
   Save-Screenshot (Join-Path $Out "$Name-import-1.png")
   Write-Host "Relaunch ($Name): import card button: $opened"
-  $started = Click-Named $Handle @("Import", "Import Everything", "Start Import", "Import Selected", "Continue")
-  Write-Host "Relaunch ($Name): import sheet button: $started"
+  $sheet = Get-OtherWindows $Handle | Select-Object -First 1
+  if (-not $sheet) { Write-Host "::warning::relaunch: no import window opened"; return }
+  $sheetHandle = [IntPtr]$sheet.Current.NativeWindowHandle
+  Write-Host "Relaunch ($Name): the import window is '$($sheet.Current.Name)' ($sheetHandle)"
+  [RelaunchInput]::SetForegroundWindow($sheetHandle) | Out-Null
+  Start-Sleep -Milliseconds 500
+  $started = Click-Named $sheetHandle @("Continue", "Import")
+  Write-Host "Relaunch ($Name): import window button: $started"
+  Start-Sleep -Seconds 3
+  Save-Screenshot (Join-Path $Out "$Name-import-started.png")
   $at = Get-Date
   $last = -1
   $stableSince = Get-Date
@@ -188,8 +203,15 @@ function Start-Import([IntPtr]$Handle, [string]$Name) {
   }
   Save-Screenshot (Join-Path $Out "$Name-import-done.png")
   Write-Host "Relaunch ($Name): the engine's history held $last pages $([int]((Get-Date) - $at).TotalSeconds) s after the import started"
-  $closed = Click-Named $Handle @("Done", "Close", "OK", "Got it")
-  if ($closed) { Start-Sleep -Seconds 2 }
+  foreach ($left in Get-OtherWindows $Handle) {
+    $leftHandle = [IntPtr]$left.Current.NativeWindowHandle
+    [RelaunchInput]::SetForegroundWindow($leftHandle) | Out-Null
+    $closed = Click-Named $leftHandle @("Done", "Close", "OK", "Got it", "Continue")
+    Write-Host "Relaunch ($Name): left the import window '$($left.Current.Name)' with $closed"
+    Start-Sleep -Seconds 2
+  }
+  [RelaunchInput]::SetForegroundWindow($Handle) | Out-Null
+  Start-Sleep -Milliseconds 500
 }
 
 function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$Onboarding) {
