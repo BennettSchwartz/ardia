@@ -1842,6 +1842,7 @@ public static class ArdiaContrast {
     $contrastProblems += @(Invoke-ContrastScenario "settings" -Settings -Pairs 2 -PauseMs 4000)
     $contrastProblems += @(Invoke-ContrastScenario "settings-fast" -Settings -Pairs 5 -PauseMs 300)
     $contrastProblems += @(Invoke-ContrastScenario "browser-fast" -Pairs 5 -PauseMs 300)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-many" -Settings -Pairs 15 -PauseMs 200)
   } finally {
     if ([ArdiaContrast]::IsOn()) { Write-Host "Contrast: final cleanup, $(Set-Contrast $false)" }
     if ($dumpsOn) { Remove-Item -Path $dumpKey -Force -ErrorAction SilentlyContinue }
