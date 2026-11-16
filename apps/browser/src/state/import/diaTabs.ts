@@ -27,3 +27,8 @@ export function diaProfilesFor(dia: DiaTabsResult, profiles: { id: string; name:
   });
   return out;
 }
+
+export function diaProfilesWithoutFolder(dia: DiaTabsResult, profiles: { id: string; name: string }[]): DiaTabsProfile[] {
+  const matched = new Set([...diaProfilesFor(dia, profiles).values()].map((d) => d.id));
+  return dia.profiles.filter((d) => !matched.has(d.id) && (d.pinned.length > 0 || d.tabs.length > 0));
+}

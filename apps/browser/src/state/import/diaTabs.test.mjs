@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-const { diaProfilesFor } = await import("./diaTabs.ts");
+const { diaProfilesFor, diaProfilesWithoutFolder } = await import("./diaTabs.ts");
 
 const dia = (profiles) => ({ profiles: profiles.map(([name, index]) => ({ id: `${index}:${name}`, name, index, pinned: [], tabs: [] })), windowCount: 1, skipped: 0, duplicates: 0, favicons: [] });
 const onDisk = [
@@ -24,4 +24,10 @@ test("profiles sharing a name each get their own Dia profile, by position", () =
     { id: "Profile 2", name: "personal" },
   ];
   assert.deepEqual(ids(diaProfilesFor(dia([["Personal", 1], ["Personal", 2]]), twins)), { Default: "1:Personal", "Profile 2": "2:Personal" });
+});
+
+test("a Dia profile with tabs and no folder on disk is left for a new profile, an empty one isn't", () => {
+  const result = dia([["Personal", 1], ["Work", 2], ["Side project", 3], ["Empty", 4]]);
+  result.profiles[2].pinned = [{ url: "https://a.example/", title: "A", pinned: true }];
+  assert.deepEqual(diaProfilesWithoutFolder(result, onDisk).map((d) => d.id), ["3:Side project"]);
 });
