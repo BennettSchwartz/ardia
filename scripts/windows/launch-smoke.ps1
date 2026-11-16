@@ -1160,6 +1160,269 @@ public static class ArdiaSnapKeys {
   $env:ARDIA_CONFIG_DIR = ""
 }
 
+if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput) {
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaFirstFrames").Type) {
+    Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class ArdiaFirstFrames {
+  public delegate bool EnumProc(IntPtr window, IntPtr data);
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct BitmapInfoHeader { public uint Size; public int Width, Height; public ushort Planes, BitCount; public uint Compression, SizeImage; public int XPels, YPels; public uint Used, Important; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window, ref Point point);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")] static extern bool GetLayeredWindowAttributes(IntPtr window, out uint key, out byte alpha, out uint flags);
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int fromX, int fromY, uint operation);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BitmapInfoHeader header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+
+  public class Frame {
+    public long Ms;
+    public int Alpha = 255;
+    public double White;
+    public bool Uniform;
+    public int R, G, B;
+    public int Width, Height;
+    public byte[] Pixels;
+    public string Kind = "";
+  }
+
+  public class Launch {
+    public Process Process;
+    public List<Frame> Frames = new List<Frame>();
+  }
+
+  static IntPtr Find(uint process) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((window, data) => {
+      uint owner;
+      GetWindowThreadProcessId(window, out owner);
+      if (owner != process || !IsWindowVisible(window)) return true;
+      StringBuilder name = new StringBuilder(64);
+      GetClassName(window, name, 64);
+      if (name.ToString() != "Microsoft.UI.Windowing.Window") return true;
+      found = window;
+      return false;
+    }, IntPtr.Zero);
+    return found;
+  }
+
+  static int AlphaOf(IntPtr window) {
+    long extended = GetWindowLongPtr(window, -20).ToInt64();
+    if ((extended & 0x80000) == 0) return 255;
+    uint key, flags;
+    byte alpha;
+    if (!GetLayeredWindowAttributes(window, out key, out alpha, out flags) || (flags & 2) == 0) return 255;
+    return alpha;
+  }
+
+  static byte[] Grab(int x, int y, int width, int height) {
+    IntPtr screen = GetDC(IntPtr.Zero);
+    IntPtr memory = CreateCompatibleDC(screen);
+    BitmapInfoHeader header = new BitmapInfoHeader();
+    header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
+    header.Width = width;
+    header.Height = -height;
+    header.Planes = 1;
+    header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    byte[] pixels = null;
+    if (section != IntPtr.Zero) {
+      IntPtr previous = SelectObject(memory, section);
+      if (BitBlt(memory, 0, 0, width, height, screen, x, y, 0x40CC0020)) {
+        pixels = new byte[width * height * 4];
+        Marshal.Copy(bits, pixels, 0, pixels.Length);
+      }
+      SelectObject(memory, previous);
+      DeleteObject(section);
+    }
+    DeleteDC(memory);
+    ReleaseDC(IntPtr.Zero, screen);
+    return pixels;
+  }
+
+  static string KindOf(Frame frame) {
+    if (frame.Alpha == 0) return "hidden";
+    if (frame.Pixels == null && frame.Width == 0) return "unread";
+    if (frame.Uniform && frame.White > 0.9) return "white";
+    if (frame.Uniform) return "plain";
+    return "content";
+  }
+
+  static Frame Capture(IntPtr window, bool keep) {
+    Frame frame = new Frame();
+    frame.Alpha = AlphaOf(window);
+    Rect client;
+    GetClientRect(window, out client);
+    Point origin = new Point();
+    ClientToScreen(window, ref origin);
+    int width = client.Right - client.Left, height = client.Bottom - client.Top;
+    if (width < 8 || height < 8) { frame.Kind = KindOf(frame); return frame; }
+    byte[] pixels = Grab(origin.X, origin.Y, width, height);
+    if (pixels == null) { frame.Kind = KindOf(frame); return frame; }
+    frame.Width = width;
+    frame.Height = height;
+    int white = 0, count = 0;
+    int minR = 255, minG = 255, minB = 255, maxR = 0, maxG = 0, maxB = 0;
+    long sumR = 0, sumG = 0, sumB = 0;
+    for (int row = 0; row < 24; row++) {
+      for (int column = 0; column < 40; column++) {
+        int x = (int)((column + 0.5) * width / 40), y = (int)((row + 0.5) * height / 24);
+        int at = (y * width + x) * 4;
+        int b = pixels[at], g = pixels[at + 1], r = pixels[at + 2];
+        count++;
+        if (r >= 240 && g >= 240 && b >= 240) white++;
+        minR = Math.Min(minR, r); minG = Math.Min(minG, g); minB = Math.Min(minB, b);
+        maxR = Math.Max(maxR, r); maxG = Math.Max(maxG, g); maxB = Math.Max(maxB, b);
+        sumR += r; sumG += g; sumB += b;
+      }
+    }
+    frame.White = white / (double)count;
+    frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
+    frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
+    if (keep) frame.Pixels = pixels;
+    frame.Kind = KindOf(frame);
+    return frame;
+  }
+
+  public static Launch Run(string app, string arguments, int milliseconds) {
+    Launch launch = new Launch();
+    Stopwatch clock = Stopwatch.StartNew();
+    ProcessStartInfo start = new ProcessStartInfo(app, arguments);
+    start.UseShellExecute = false;
+    launch.Process = Process.Start(start);
+    IntPtr window = IntPtr.Zero;
+    string last = "";
+    int kept = 0;
+    while (clock.ElapsedMilliseconds < milliseconds && !launch.Process.HasExited) {
+      if (window == IntPtr.Zero) {
+        window = Find((uint)launch.Process.Id);
+        if (window == IntPtr.Zero) { Thread.Sleep(1); continue; }
+      }
+      long at = clock.ElapsedMilliseconds;
+      Frame frame = Capture(window, kept < 16);
+      frame.Ms = at;
+      if (frame.Kind != last && kept < 16) { kept++; last = frame.Kind; }
+      else frame.Pixels = null;
+      launch.Frames.Add(frame);
+    }
+    return launch;
+  }
+}
+"@
+  }
+
+  function Get-FrameKind($Frame) {
+    return $Frame.Kind
+  }
+
+  function Save-Frame($Frame, [string]$Path) {
+    $bitmap = New-Object System.Drawing.Bitmap $Frame.Width, $Frame.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+    try {
+      $bits = $bitmap.LockBits((New-Object System.Drawing.Rectangle 0, 0, $Frame.Width, $Frame.Height), [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+      [System.Runtime.InteropServices.Marshal]::Copy($Frame.Pixels, 0, $bits.Scan0, $Frame.Pixels.Length)
+      $bitmap.UnlockBits($bits)
+      $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+      $bitmap.Dispose()
+    }
+  }
+
+  function Measure-FirstFrames([string]$Label, [switch]$Onboarded, [bool]$Dark) {
+    $themes = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+    New-Item -Path $themes -Force | Out-Null
+    Set-ItemProperty -Path $themes -Name AppsUseLightTheme -Value ([int](-not $Dark)) -Type DWord
+    Start-Sleep -Milliseconds 800
+    $data = New-DataDirectory "first-frames-$Label-data"
+    if ($Onboarded) { Set-Content -Path (Join-Path $data "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM }
+    $log = Join-Path $Out "first-frames-$Label.log"
+    $env:ARDIA_DATA_DIR = $data
+    $env:ARDIA_CONFIG_DIR = $data
+    $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000)
+    $env:ARDIA_CONFIG_DIR = ""
+    try {
+      $frames = @($launch.Frames)
+      $savedCount = 0
+      foreach ($frame in $frames) {
+        if (-not $frame.Pixels) { continue }
+        $savedCount++
+        Save-Frame $frame (Join-Path $Out ("first-frames-$Label-{0:00}-{1}ms-{2}.png" -f $savedCount, $frame.Ms, $frame.Kind))
+      }
+      $shownIndex = -1
+      for ($i = 0; $i -lt $frames.Count; $i++) { if ((Get-FrameKind $frames[$i]) -in @("white", "plain", "content")) { $shownIndex = $i; break } }
+      $contentIndex = -1
+      for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) { if ((Get-FrameKind $frames[$i]) -eq "content") { $contentIndex = $i; break } }
+      $spacing = if ($frames.Count -gt 1) { [int](($frames[-1].Ms - $frames[0].Ms) / ($frames.Count - 1)) } else { 0 }
+      $firstWindow = if (Test-Path $log) { (Select-String -Path $log -Pattern "\[ardia windows\] first window" | Select-Object -First 1).Line } else { "" }
+      $windowLines = if (Test-Path $log) { @(Select-String -Path $log -Pattern "^\w+ \d+ (window|opened)| first window" | Select-Object -First 6 | ForEach-Object { $_.Line }) } else { @() }
+      if ($shownIndex -lt 0) {
+        Write-Host "First frames ($Label): the window never showed in 9 s ($($frames.Count) captures)."
+        return @("first frames ($Label): the window never showed")
+      }
+      $shown = $frames[$shownIndex]
+      $until = if ($contentIndex -ge 0) { $contentIndex } else { $frames.Count }
+      $white = @()
+      $plain = @()
+      for ($i = $shownIndex; $i -lt $until; $i++) {
+        $kind = Get-FrameKind $frames[$i]
+        if ($kind -eq "white") { $white += $frames[$i] }
+        if ($kind -eq "plain") { $plain += $frames[$i] }
+      }
+      $endMs = if ($contentIndex -ge 0) { $frames[$contentIndex].Ms } else { $frames[-1].Ms }
+      $whiteMs = if ($white.Count) { $endMs - $white[0].Ms } else { 0 }
+      $plainColours = ($plain | ForEach-Object { "rgb($($_.R),$($_.G),$($_.B))" } | Select-Object -Unique) -join ", "
+      $content = if ($contentIndex -ge 0) { $frames[$contentIndex] } else { $null }
+      $contentText = if ($content) { "at $($content.Ms) ms, mean rgb($($content.R),$($content.G),$($content.B)), $([int]($content.White * 100))% white" } else { "never within 9 s" }
+      Write-Host "First frames ($Label): $($frames.Count) captures about every $spacing ms; the window first shows at $($shown.Ms) ms as $(Get-FrameKind $shown) (mean rgb($($shown.R),$($shown.G),$($shown.B))); $($white.Count) plain white captures over $whiteMs ms before the first UI frame; $($plain.Count) captures of another plain colour ($plainColours); the first UI frame is $contentText."
+      if ($firstWindow) { Write-Host "First frames ($Label) log: $firstWindow" }
+      foreach ($line in $windowLines) { Write-Host "First frames ($Label) log: $line" }
+      $sequence = @()
+      $last = ""
+      foreach ($frame in $frames) {
+        $kind = Get-FrameKind $frame
+        if ($kind -ne $last) { $sequence += "$($frame.Ms) ms $kind"; $last = $kind }
+      }
+      Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
+      if ($white.Count -gt 2) { return @("first frames ($Label): the window showed plain white in $($white.Count) captures over $whiteMs ms before the UI's first frame") }
+      return @()
+    } finally {
+      if (-not $launch.Process.HasExited) {
+        Stop-Process -Id $launch.Process.Id -Force
+        $launch.Process.WaitForExit(10000) | Out-Null
+      }
+    }
+  }
+
+  $themesKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+  $savedTheme = (Get-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
+  try {
+    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true | ForEach-Object { $failures += $_ }
+  } finally {
+    if ($null -ne $savedTheme) { Set-ItemProperty -Path $themesKey -Name AppsUseLightTheme -Value $savedTheme -Type DWord }
+    else { Remove-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
+  }
+}
+
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
