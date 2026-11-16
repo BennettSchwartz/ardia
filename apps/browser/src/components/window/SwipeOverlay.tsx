@@ -146,6 +146,15 @@ export function SwipeOverlay({ tabId }: { tabId: string }) {
     setShown((s) => (s ? { ...s, list, selected: 0 } : s));
   };
 
+  const withdrawList = () => {
+    g.list = null;
+    g.selected = 0;
+    v.nudge.setValue(0);
+    Animated.timing(v.list, { toValue: 0, ...SWIPE_MOTION.list, useNativeDriver: true }).start();
+    setShown((s) => (s ? { ...s, list: null, selected: 0 } : s));
+    setConfirmed(false);
+  };
+
   const select = (dy: number) => {
     const { index, nudge } = listSelection(dy - g.listY, g.list!.length);
     v.nudge.setValue(nudge);
@@ -194,6 +203,7 @@ export function SwipeOverlay({ tabId }: { tabId: string }) {
     }
 
     const progress = swipeProgress(e.distance);
+    if (g.list && progress < 1) withdrawList();
     if (g.list) select(e.dy);
     else setConfirmed(progress >= 1);
     v.x.setValue(capsuleOffset(progress, g.width));
