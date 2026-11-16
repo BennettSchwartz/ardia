@@ -17,7 +17,7 @@ import { ExpoSpacesSheet } from "./components/sync/ExpoSpaces";
 import { SettingsView } from "./components/settings/SettingsView";
 import { SpacesView } from "./components/sync/SpacesView";
 import { ToastHost } from "./components/toasts/ToastHost";
-import { appDesign, tabsMotion, useTheme, DEFAULT_PROFILE_COLOR, FrostSource, FullSheet, OverlayHost, PROFILE_PRESETS, ProfileLookContext, Shade, SheetBackground, SURFACES_FROST } from "./components/ui";
+import { appDesign, tabsMotion, useTheme, DEFAULT_PROFILE_COLOR, FrostSource, FullSheet, OverlayHost, PROFILE_PRESETS, ProfileLookContext, Shade, SheetBackground, SteadyInsets, SURFACES_FROST } from "./components/ui";
 import { useLook } from "./state/sync/hooks";
 import { startSettingsSources } from "./state/settings/actions";
 import { startSync } from "./state/sync/actions";
@@ -83,10 +83,12 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root} onLayout={(event) => setRootSize(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}>
       <SafeAreaProvider>
-        <ProfileLookContext.Provider value={look}>
-          <OverlayHost>{ready ? <Surfaces /> : importFailed ? <ImportFailedView /> : null}</OverlayHost>
-          {interactionPerfEnabled() ? <FrameProbe /> : null}
-        </ProfileLookContext.Provider>
+        <SteadyInsets>
+          <ProfileLookContext.Provider value={look}>
+            <OverlayHost>{ready ? <Surfaces /> : importFailed ? <ImportFailedView /> : null}</OverlayHost>
+            {interactionPerfEnabled() ? <FrameProbe /> : null}
+          </ProfileLookContext.Provider>
+        </SteadyInsets>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

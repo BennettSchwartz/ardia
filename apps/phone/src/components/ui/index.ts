@@ -10,6 +10,7 @@ export { Favicon } from "./Favicon";
 export { LoadingLine, type LoadWatch } from "./LoadingLine";
 export { deckChromeMotion, duration, iPhoneOr, moveTo, pageMenuMotion, poofMs, trayLandingDelayMs, settingsMotion, spring, springs, startMotion, tabsCurve, tabsMotion, toastMotion, trayMotion } from "./motion";
 export { ConfirmDialog, Dialog, showActionSheet, type Confirmation, type DialogButton } from "./Dialog";
+export { INSET_DROP_HOLD_MS, SteadyInsets } from "./SteadyInsets";
 export { FloatingMenu, Menu, type MenuItem } from "./Menu";
 export { Shade } from "./Shade";
 export { measureAnchor, OverlayHost, Portal } from "./Overlay";
