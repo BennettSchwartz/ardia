@@ -14,10 +14,10 @@
 		36087538CB5DDC5F75967B7A /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 988A1C28E98E1E7E3DB2F376 /* SceneDelegate.swift */; };
 		3E3DD82057CABEECD46CCA24 /* ArdiaDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 29A8DF82757F0B98305E30AD /* ArdiaDesign */; };
 		462385C8073E08D7879C5C9D /* ArdiaBrowser in Frameworks */ = {isa = PBXBuildFile; productRef = 995BCC861D01B3C0852D7F9F /* ArdiaBrowser */; };
+		535D84865FAB8111E1D8C88B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 96B09BD390DD34980A7938C1 /* Assets.xcassets */; };
 		596222949C2FF1F2331D3FF8 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2F4DDAC9D3853A29800877EF /* WidgetKit.framework */; };
 		6F0FEF273337CB5893C689D7 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 4CB1152D27B6DB022221EC1B /* Expo.plist */; };
 		9FB587F662537416C9270B8F /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 8BA01EFB947C5DEA183FF11E /* AppIcon.icon */; };
-		535D84865FAB8111E1D8C88B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 96B09BD390DD34980A7938C1 /* Assets.xcassets */; };
 		B91E47E39B3312246CF1D125 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C2E36794E1C4D02A24A90498 /* PrivacyInfo.xcprivacy */; };
 		BF185DCBD38D8A6E913708C4 /* ArdiaDesign in Frameworks */ = {isa = PBXBuildFile; productRef = DFF5F15EFEB2D7F87112ED60 /* ArdiaDesign */; };
 		C366317EC7AD23D44CB4771D /* ArdiaDesign in Frameworks */ = {isa = PBXBuildFile; productRef = 0BFA1A32F8AADE8672E62A39 /* ArdiaDesign */; };
