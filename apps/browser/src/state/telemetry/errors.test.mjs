@@ -52,6 +52,37 @@ test("a native crash names its exception and the app's images at the top level, 
   assert.equal(props.$geoip_disable, true);
 });
 
+test("a Linux crash keeps chrome's GNU build id and offsets, and names the signal without a Mach exception", async () => {
+  stub.shellNativeModules.ArdiaApp.crashReports = async () => [
+    {
+      incidentId: "89747b7c-1ee8-49d8-8e5a-ba71046b4683",
+      time: Date.now(),
+      fileTime: Date.now(),
+      process: "renderer",
+      engineVersion: "157.0.8103.50",
+      signal: "SIGSEGV",
+      exceptionSubtype: "SEGV_MAPERR",
+      terminationNamespace: "SIGNAL",
+      uptimeSeconds: 4,
+      frames: [{ image: "chrome", offset: 0x4e10320 }, { image: "libc.so.6", offset: 0x29ca8 }],
+      images: [{ name: "chrome", uuid: "c1b96add39548a6390cf940731feb816940d279b" }, { name: "libc.so.6", uuid: "0123456789abcdef0123456789abcdef01234567" }],
+    },
+  ];
+  await reportNativeCrashes();
+  const props = queued().at(-1).properties;
+  assert.equal(props.source, "helper_crash");
+  assert.equal(props.crash_process, "renderer");
+  assert.equal(props.crash_signal, "SIGSEGV");
+  assert.equal(props.crash_subtype, "SEGV_MAPERR");
+  assert.equal(props.crashed_engine_version, "157.0.8103.50");
+  assert.deepEqual(props.$exception_values, ["Crash (SIGSEGV)"]);
+  assert.deepEqual(props.crash_images, [{ name: "chrome", uuid: "c1b96add39548a6390cf940731feb816940d279b" }]);
+  const frames = props.$exception_list[0].stacktrace.frames;
+  assert.equal(frames.at(-1).function, "chrome + 0x4e10320");
+  assert.equal(frames.at(-1).in_app, true);
+  assert.equal(frames[0].in_app, false);
+});
+
 test("a native crash carries the built-in page its session was on as ctx_webui_page, null for a web page or an older sample", async () => {
   const later = Date.now() + 60 * 60_000;
   let n = 0;

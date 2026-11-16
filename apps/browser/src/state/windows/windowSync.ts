@@ -44,7 +44,7 @@ export function createWindowSync({ port, getState, isQuitting, lightsCenter, isU
       if (e.type === "focus") s.setFocusedWindow(e.id);
       if (e.type === "frame") s.setWindowFrame(e.id, e.frame, e.restored);
       if (e.type === "maximized" && !isQuitting()) s.setWindowMaximized(e.id, e.on);
-      if (e.type === "fullScreen" && !isQuitting()) s.setWindowFullScreen(e.id, e.on);
+      if (e.type === "fullScreen" && !isQuitting()) s.setWindowFullScreen(e.id, e.on, e.display);
       if (e.type === "close") {
         if (isQuitting()) return;
         open.delete(e.id);
@@ -69,7 +69,7 @@ export function createWindowSync({ port, getState, isQuitting, lightsCenter, isU
       const under = behind ?? (w.kind === "main" ? w.opensBehind : undefined);
       port.open(
         id,
-        { frame: w.restoredFrame ?? w.frame, ...(w.maximized && w.kind !== "small" ? { maximized: true } : {}), incognito: w.kind === "private", title: titles.get(id), focus, profile, ...(under ? { behind: under } : {}), ...(prev && w.kind !== "small" && !w.chromeWindow ? { animated: true } : {}), ...small, ...made },
+        { frame: w.restoredFrame ?? w.frame, ...(w.maximized && w.kind !== "small" ? { maximized: true } : {}), incognito: w.kind === "private", title: titles.get(id), focus, profile, ...(w.display ? { display: w.display } : {}), ...(under ? { behind: under } : {}), ...(prev && w.kind !== "small" && !w.chromeWindow ? { animated: true } : {}), ...small, ...made },
         lightsCenter(s, id),
       );
     }
