@@ -6,7 +6,7 @@ import { useSidebarSide, useWindowId, useWindowUi } from "../../state/browser/ho
 import { useActiveTabIdWhile, useTabHasUrlWhile } from "../../state/omnibox/hooks";
 import { isCentred } from "../../state/omnibox/barPlacement";
 import { usePage } from "../../state/tabs/pageState";
-import { dismissHover, setRowsCovered } from "../../state/sidebar/hover";
+import { dismissHover, holdRowsCovered, panelCoversRows } from "../../state/sidebar/hover";
 import { useAddressBarInSidebar, useCardAnchors, useUrlAnchors, useWindowControlsBottom } from "../../state/windows/layout";
 import { useSidebarField } from "../../state/sidebar/chrome";
 import { barWidth } from "../ntp/NewTabPage";
@@ -48,11 +48,11 @@ export function CommandPanel({ windowWidth }: { windowWidth: number }) {
   const toolbarRow = useToolbarRow();
   const controlsBottom = useWindowControlsBottom();
   const sidebarRight = useSidebarSide(windowId) === "right";
-  const overRows = panel.open && !panel.newTab && !centred && !!anchor?.sidebar;
+  const overRows = panelCoversRows({ open: panel.open, newTab: !!panel.newTab, centred: centred && !!card, hasActiveTab: !!activeId, sidebarAnchor: !!anchor?.sidebar });
   useEffect(() => {
     if (panel.open) dismissHover();
-    setRowsCovered(windowId, overRows);
   }, [panel.open, overRows, windowId]);
+  useEffect(() => holdRowsCovered(windowId, overRows), [overRows, windowId]);
   if (!panel.open || !activeId) return null;
   if (panel.newTab) return card ? <CentredBar windowId={windowId} tabId={activeId} target={panel.newTab} card={card} /> : null;
 
