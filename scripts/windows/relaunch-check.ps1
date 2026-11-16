@@ -10,7 +10,8 @@ param(
   [string]$ComingFrom = "Edge",
   [switch]$Sharing,
   [switch]$Maximize,
-  [int]$WatchSeconds = 25
+  [int]$WatchSeconds = 25,
+  [switch]$Import
 )
 
 $ErrorActionPreference = "Stop"
@@ -161,6 +162,36 @@ function Click-NameLike([IntPtr]$Handle, [string]$Pattern) {
   return $null
 }
 
+function Get-EngineHistoryCount {
+  $line = python (Join-Path $PSScriptRoot "probe\count-history.py") (Join-Path $data "User Data\Default\History") 2>&1 | Out-String
+  if ($line -match ": (\d+) pages") { return [int]$Matches[1] }
+  return 0
+}
+
+function Start-Import([IntPtr]$Handle, [string]$Name) {
+  $opened = Click-NameLike $Handle "Import*"
+  Start-Sleep -Seconds 3
+  Save-Screenshot (Join-Path $Out "$Name-import-1.png")
+  Write-Host "Relaunch ($Name): import card button: $opened"
+  $started = Click-Named $Handle @("Import", "Import Everything", "Start Import", "Import Selected", "Continue")
+  Write-Host "Relaunch ($Name): import sheet button: $started"
+  $at = Get-Date
+  $last = -1
+  $stableSince = Get-Date
+  $shot = 2
+  while (((Get-Date) - $at).TotalSeconds -lt 300) {
+    Start-Sleep -Seconds 5
+    $count = Get-EngineHistoryCount
+    if ($count -ne $last) { $last = $count; $stableSince = Get-Date }
+    if ([int](((Get-Date) - $at).TotalSeconds) % 30 -lt 5) { Save-Screenshot (Join-Path $Out "$Name-import-$shot.png"); $shot++ }
+    if ($count -gt 10 -and ((Get-Date) - $stableSince).TotalSeconds -ge 25) { break }
+  }
+  Save-Screenshot (Join-Path $Out "$Name-import-done.png")
+  Write-Host "Relaunch ($Name): the engine's history held $last pages $([int]((Get-Date) - $at).TotalSeconds) s after the import started"
+  $closed = Click-Named $Handle @("Done", "Close", "OK", "Got it")
+  if ($closed) { Start-Sleep -Seconds 2 }
+}
+
 function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$Onboarding) {
   Add-Type -AssemblyName System.Windows.Forms
   $Browser.Refresh()
@@ -171,6 +202,7 @@ function Use-Ardia([System.Diagnostics.Process]$Browser, [string]$Name, [bool]$O
     $clicked = @()
     $picked = Click-Named $handle @($ComingFrom)
     if ($picked) { $clicked += $picked; Start-Sleep -Seconds 1 }
+    if ($Import) { Start-Import $handle $Name; $clicked += "import" }
     $shared = $false
     foreach ($page in 1..14) {
       $settings = @(Get-Process SystemSettings -ErrorAction SilentlyContinue)
