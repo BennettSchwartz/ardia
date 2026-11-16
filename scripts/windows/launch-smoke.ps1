@@ -1160,7 +1160,7 @@ public static class ArdiaSnapKeys {
   $env:ARDIA_CONFIG_DIR = ""
 }
 
-if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput) {
+if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesUp) {
   if (-not ([System.Management.Automation.PSTypeName]"ArdiaFirstFrames").Type) {
     Add-Type @"
 using System;
@@ -1191,6 +1191,13 @@ public static class ArdiaFirstFrames {
   [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
   [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int fromX, int fromY, uint operation);
   [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BitmapInfoHeader header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+
+  static byte[] desktop;
+  static int desktopWidth, desktopHeight;
 
   public class Frame {
     public long Ms;
@@ -1206,6 +1213,10 @@ public static class ArdiaFirstFrames {
   public class Launch {
     public Process Process;
     public List<Frame> Frames = new List<Frame>();
+    public long VisibleMs = -1;
+    public long ForegroundMs = -1;
+    public long ClickedMs = -1;
+    public string ClickedOn = "";
   }
 
   static IntPtr Find(uint process) {
@@ -1258,9 +1269,10 @@ public static class ArdiaFirstFrames {
     return pixels;
   }
 
-  static string KindOf(Frame frame) {
-    if (frame.Alpha == 0) return "hidden";
-    if (frame.Pixels == null && frame.Width == 0) return "unread";
+  static string KindOf(Frame frame, bool behind) {
+    if (frame.Alpha <= 8) return "hidden";
+    if (frame.Width == 0) return "unread";
+    if (behind) return "behind";
     if (frame.Uniform && frame.White > 0.9) return "white";
     if (frame.Uniform) return "plain";
     return "content";
@@ -1274,9 +1286,10 @@ public static class ArdiaFirstFrames {
     Point origin = new Point();
     ClientToScreen(window, ref origin);
     int width = client.Right - client.Left, height = client.Bottom - client.Top;
-    if (width < 8 || height < 8) { frame.Kind = KindOf(frame); return frame; }
+    if (width < 8 || height < 8) { frame.Kind = KindOf(frame, false); return frame; }
     byte[] pixels = Grab(origin.X, origin.Y, width, height);
-    if (pixels == null) { frame.Kind = KindOf(frame); return frame; }
+    if (pixels == null) { frame.Kind = KindOf(frame, false); return frame; }
+    int same = 0, compared = 0;
     frame.Width = width;
     frame.Height = height;
     int white = 0, count = 0;
@@ -1292,18 +1305,27 @@ public static class ArdiaFirstFrames {
         minR = Math.Min(minR, r); minG = Math.Min(minG, g); minB = Math.Min(minB, b);
         maxR = Math.Max(maxR, r); maxG = Math.Max(maxG, g); maxB = Math.Max(maxB, b);
         sumR += r; sumG += g; sumB += b;
+        int screenX = origin.X + x, screenY = origin.Y + y;
+        if (desktop != null && screenX >= 0 && screenY >= 0 && screenX < desktopWidth && screenY < desktopHeight) {
+          int then = (screenY * desktopWidth + screenX) * 4;
+          compared++;
+          if (Math.Abs(desktop[then] - b) <= 12 && Math.Abs(desktop[then + 1] - g) <= 12 && Math.Abs(desktop[then + 2] - r) <= 12) same++;
+        }
       }
     }
     frame.White = white / (double)count;
     frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
     frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
     if (keep) frame.Pixels = pixels;
-    frame.Kind = KindOf(frame);
+    frame.Kind = KindOf(frame, compared > 0 && same >= compared * 0.9);
     return frame;
   }
 
-  public static Launch Run(string app, string arguments, int milliseconds) {
+  public static Launch Run(string app, string arguments, int milliseconds, bool click) {
     Launch launch = new Launch();
+    desktopWidth = GetSystemMetrics(0);
+    desktopHeight = GetSystemMetrics(1);
+    desktop = Grab(0, 0, desktopWidth, desktopHeight);
     Stopwatch clock = Stopwatch.StartNew();
     ProcessStartInfo start = new ProcessStartInfo(app, arguments);
     start.UseShellExecute = false;
@@ -1315,16 +1337,42 @@ public static class ArdiaFirstFrames {
       if (window == IntPtr.Zero) {
         window = Find((uint)launch.Process.Id);
         if (window == IntPtr.Zero) { Thread.Sleep(1); continue; }
+        launch.VisibleMs = clock.ElapsedMilliseconds;
       }
       long at = clock.ElapsedMilliseconds;
+      if (launch.ForegroundMs < 0 && GetForegroundWindow() == window) launch.ForegroundMs = at;
       Frame frame = Capture(window, kept < 16);
       frame.Ms = at;
+      if (click && launch.ClickedMs < 0) {
+        Rect client;
+        GetClientRect(window, out client);
+        Point middle = new Point();
+        middle.X = (client.Right - client.Left) / 2;
+        middle.Y = (client.Bottom - client.Top) / 2;
+        ClientToScreen(window, ref middle);
+        SetCursorPos(middle.X, middle.Y);
+        mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+        launch.ClickedMs = clock.ElapsedMilliseconds;
+        launch.ClickedOn = frame.Kind;
+      }
       if (frame.Kind != last && kept < 16) { kept++; last = frame.Kind; }
       else frame.Pixels = null;
       launch.Frames.Add(frame);
     }
     return launch;
   }
+}
+"@
+  }
+
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaFirstFramesFront").Type) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class ArdiaFirstFramesFront {
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
 }
 "@
   }
@@ -1345,7 +1393,7 @@ public static class ArdiaFirstFrames {
     }
   }
 
-  function Measure-FirstFrames([string]$Label, [switch]$Onboarded, [bool]$Dark) {
+  function Measure-FirstFrames([string]$Label, [switch]$Onboarded, [bool]$Dark, [switch]$Click) {
     $themes = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
     New-Item -Path $themes -Force | Out-Null
     Set-ItemProperty -Path $themes -Name AppsUseLightTheme -Value ([int](-not $Dark)) -Type DWord
@@ -1355,7 +1403,7 @@ public static class ArdiaFirstFrames {
     $log = Join-Path $Out "first-frames-$Label.log"
     $env:ARDIA_DATA_DIR = $data
     $env:ARDIA_CONFIG_DIR = $data
-    $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000)
+    $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000, [bool]$Click)
     $env:ARDIA_CONFIG_DIR = ""
     try {
       $frames = @($launch.Frames)
@@ -1371,7 +1419,7 @@ public static class ArdiaFirstFrames {
       for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) { if ((Get-FrameKind $frames[$i]) -eq "content") { $contentIndex = $i; break } }
       $spacing = if ($frames.Count -gt 1) { [int](($frames[-1].Ms - $frames[0].Ms) / ($frames.Count - 1)) } else { 0 }
       $firstWindow = if (Test-Path $log) { (Select-String -Path $log -Pattern "\[ardia windows\] first window" | Select-Object -First 1).Line } else { "" }
-      $windowLines = if (Test-Path $log) { @(Select-String -Path $log -Pattern "^\w+ \d+ (window|opened)| first window" | Select-Object -First 6 | ForEach-Object { $_.Line }) } else { @() }
+      $windowLines = if (Test-Path $log) { @(Select-String -Path $log -Pattern "^window \d+ (opened|window \S+ (shown|shows|fades))| first window" | Select-Object -First 6 | ForEach-Object { $_.Line }) } else { @() }
       if ($shownIndex -lt 0) {
         Write-Host "First frames ($Label): the window never showed in 9 s ($($frames.Count) captures)."
         return @("first frames ($Label): the window never showed")
@@ -1391,6 +1439,12 @@ public static class ArdiaFirstFrames {
       $content = if ($contentIndex -ge 0) { $frames[$contentIndex] } else { $null }
       $contentText = if ($content) { "at $($content.Ms) ms, mean rgb($($content.R),$($content.G),$($content.B)), $([int]($content.White * 100))% white" } else { "never within 9 s" }
       Write-Host "First frames ($Label): $($frames.Count) captures about every $spacing ms; the window first shows at $($shown.Ms) ms as $(Get-FrameKind $shown) (mean rgb($($shown.R),$($shown.G),$($shown.B))); $($white.Count) plain white captures over $whiteMs ms before the first UI frame; $($plain.Count) captures of another plain colour ($plainColours); the first UI frame is $contentText."
+      $foreground = [ArdiaSnapKeys]::GetForegroundWindow()
+      $frontOwner = [uint32]0
+      [ArdiaFirstFramesFront]::GetWindowThreadProcessId($foreground, [ref]$frontOwner) | Out-Null
+      $ours = $frontOwner -eq $launch.Process.Id
+      Write-Host "First frames ($Label): the window is visible to Windows (taskbar, Alt+Tab) from $($launch.VisibleMs) ms and in front from $($launch.ForegroundMs) ms; at the end the foreground window is ours: $ours."
+      if ($launch.ClickedMs -ge 0) { Write-Host "First frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms, while it was $($launch.ClickedOn), left the foreground with the app: $ours." }
       if ($firstWindow) { Write-Host "First frames ($Label) log: $firstWindow" }
       foreach ($line in $windowLines) { Write-Host "First frames ($Label) log: $line" }
       $sequence = @()
@@ -1400,8 +1454,11 @@ public static class ArdiaFirstFrames {
         if ($kind -ne $last) { $sequence += "$($frame.Ms) ms $kind"; $last = $kind }
       }
       Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
-      if ($white.Count -gt 2) { return @("first frames ($Label): the window showed plain white in $($white.Count) captures over $whiteMs ms before the UI's first frame") }
-      return @()
+      $problems = @()
+      if ($white.Count -gt 0) { $problems += "first frames ($Label): the window showed plain white in $($white.Count) captures over $whiteMs ms before the UI's first frame" }
+      if ($launch.ForegroundMs -lt 0 -or ($launch.ForegroundMs - $launch.VisibleMs) -gt 100) { $problems += "first frames ($Label): the window was visible from $($launch.VisibleMs) ms but in front only from $($launch.ForegroundMs) ms" }
+      if ($launch.ClickedMs -ge 0 -and -not $ours) { $problems += "first frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms ($($launch.ClickedOn)) went to the window behind; the foreground window is $(Get-SnapDescription $foreground)" }
+      return $problems
     } finally {
       if (-not $launch.Process.HasExited) {
         Stop-Process -Id $launch.Process.Id -Force
@@ -1415,8 +1472,8 @@ public static class ArdiaFirstFrames {
   try {
     Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
     Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
-    Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false | ForEach-Object { $failures += $_ }
-    Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false -Click | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true -Click | ForEach-Object { $failures += $_ }
   } finally {
     if ($null -ne $savedTheme) { Set-ItemProperty -Path $themesKey -Name AppsUseLightTheme -Value $savedTheme -Type DWord }
     else { Remove-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
