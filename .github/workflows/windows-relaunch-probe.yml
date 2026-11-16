@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [brave-history-10000-shaped-maximized, shaped-maximized]
+        mode: [brave-history-10000-extras-shaped-maximized]
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -43,8 +43,12 @@ jobs:
         env:
           MODE: ${{ matrix.mode }}
         run: |
-          $count = [int]($env:MODE -replace '.*history-', '')
+          $count = [int]([regex]::Match($env:MODE, 'history-(\d+)').Groups[1].Value)
           python scripts/windows/probe/seed-chromium-history.py $count "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\History"
+          if ($env:MODE -like '*extras*') {
+            python -m pip install --quiet cryptography
+            python scripts/windows/probe/seed-chromium-extras.py "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data" 5000 300
+          }
       - name: Fetch the released installer
         shell: pwsh
         env:
