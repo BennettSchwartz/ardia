@@ -32,10 +32,38 @@
 #include "WindowFade.h"
 #include "WindowPlacement.h"
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shcore.lib")
 
 namespace Ardia {
+
+struct ThemedErase {
+  static constexpr UINT_PTR kSubclassId = 0xA2D1C;
+  static constexpr COLORREF kDark = RGB(32, 32, 32);
+  static constexpr COLORREF kLight = RGB(243, 243, 243);
+
+  static LRESULT CALLBACK Erase(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR dark) noexcept {
+    if (message == WM_ERASEBKGND) {
+      RECT client{};
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      if (dc && GetClientRect(hwnd, &client)) {
+        SetDCBrushColor(dc, dark ? kDark : kLight);
+        FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+      }
+      return 1;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(hwnd, &Erase, kSubclassId);
+    return DefSubclassProc(hwnd, message, wParam, lParam);
+  }
+
+  static void Apply(HWND hwnd, bool dark) noexcept {
+    if (!hwnd) return;
+    SetWindowSubclass(hwnd, &Erase, kSubclassId, dark ? 1 : 0);
+    InvalidateRect(hwnd, nullptr, TRUE);
+  }
+};
 
 struct OpenWindowRequest {
   std::string id;
@@ -233,6 +261,7 @@ struct WindowManager {
       HWND openedFrom = request.focusWhenFront.empty() ? nullptr : Hwnd(request.focusWhenFront);
       bool entrance = request.animated || entry.kind != "browser";
       bool fades = entrance && WindowMotion::SystemAnimates();
+      bool waitsForFirstFrame = !fades && !Background();
       HWND hwnd = entry.hwnd;
       auto appWindow = entry.appWindow;
       m_order.push_back(entry.id);
@@ -242,7 +271,7 @@ struct WindowManager {
           if (ManagedWindow *found = Find(id); found && found->window == window) Mount(*found);
         });
       }
-      if (fades) BeginEntrance(placed->second);
+      if (fades || waitsForFirstFrame) BeginEntrance(placed->second, fades);
       bool quietPopup = !activate && placed->second.kind == "popup";
       if (quietPopup) ShowAboveOpener(hwnd, openedFrom);
       if (maximize) ShowMaximized(placed->second, activate);
@@ -260,7 +289,7 @@ struct WindowManager {
       }
       if (m_activeId.empty()) m_activeId = request.id;
       LaunchLog::Write(L"window", std::wstring(L"opened ").append(Paths::Wide(request.id)));
-      if (entrance && !fades) LaunchLog::Write(L"window", std::wstring(L"window ").append(Paths::Wide(request.id)).append(L" shown at once: animations are off in Windows"));
+      if (entrance && !fades) LaunchLog::Write(L"window", std::wstring(L"window ").append(Paths::Wide(request.id)).append(L" shows without a fade: animations are off in Windows"));
     } catch (winrt::hresult_error const &error) {
       LaunchLog::Write(L"error", std::wstring(L"window could not open: ").append(error.message()));
     } catch (...) {
@@ -818,6 +847,7 @@ struct WindowManager {
     static constexpr DWORD kUseImmersiveDarkMode = 20;
     BOOL useDark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(entry.hwnd, kUseImmersiveDarkMode, &useDark, sizeof(useDark));
+    ThemedErase::Apply(entry.hwnd, dark);
     try {
       entry.appWindow.TitleBar().PreferredTheme(
           dark ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark : winrt::Microsoft::UI::Windowing::TitleBarTheme::Light);
@@ -1624,21 +1654,31 @@ struct WindowManager {
     }
   }
 
-  void BeginEntrance(ManagedWindow &entry) noexcept {
+  void BeginEntrance(ManagedWindow &entry, bool fadesIn) noexcept {
     auto fade = std::make_shared<WindowFade>();
     fade->phase = WindowFade::Phase::Revealing;
     fade->hwnd = entry.hwnd;
-    fade->opacity = 0;
+    fade->fadesIn = fadesIn;
+    fade->revealTimeout = fadesIn ? WindowMotion::kRevealTimeout : WindowMotion::kFirstFrameTimeout;
+    fade->opacity = fadesIn ? 0 : WindowMotion::kWaitingOpacity;
     fade->started = std::chrono::steady_clock::now();
-    fade->layered.Hold(entry.hwnd, 0, false);
+    fade->layered.Hold(entry.hwnd, WindowMotion::Alpha(fade->opacity), false);
     entry.fade = fade;
     if (StartFadeTimer(entry.id, fade)) return;
     entry.fade.reset();
     LogFade(entry.id, L" shown at once: no timer");
   }
 
-  void Reveal(ManagedWindow &entry) noexcept {
+  void Reveal(ManagedWindow &entry, bool drawn) noexcept {
     WindowFade &fade = *entry.fade;
+    if (!fade.fadesIn) {
+      std::wstring after = std::to_wstring(fade.Elapsed(std::chrono::steady_clock::now()).count());
+      LogFade(entry.id, drawn ? std::wstring(L" shown with its first frame ").append(after).append(L" ms after it opened")
+                              : std::wstring(L" shown without a first frame: none came in ").append(after).append(L" ms"));
+      EndFade(entry);
+      RunRevealWaiters(entry);
+      return;
+    }
     fade.phase = WindowFade::Phase::Entering;
     fade.from = 0;
     fade.opacity = 0;
@@ -1726,7 +1766,7 @@ struct WindowManager {
     switch (fade->phase) {
       case WindowFade::Phase::Revealing:
         HoldOpacity(*fade, true, false);
-        if (HasContent(*entry) || fade->Elapsed(now) >= WindowMotion::kRevealTimeout) Reveal(*entry);
+        if (bool drawn = HasContent(*entry); drawn || fade->Elapsed(now) >= fade->revealTimeout) Reveal(*entry, drawn);
         return;
       case WindowFade::Phase::Entering: {
         double progress = fade->Progress(now);

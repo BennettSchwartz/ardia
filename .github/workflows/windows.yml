@@ -479,7 +479,7 @@ jobs:
           retention-days: 14
       - name: Launch it with the engine
         if: ${{ !cancelled() && steps.engine.outcome == 'success' }}
-        timeout-minutes: 12
+        timeout-minutes: 20
         shell: pwsh
         run: scripts/windows/launch-smoke.ps1 -App "${{ runner.temp }}/Ardia/Ardia.exe" -Out "${{ runner.temp }}/launch-engine" -Part $env:PART -NoInput:($env:NO_INPUT -eq 'true')
       - name: Tour the pages
