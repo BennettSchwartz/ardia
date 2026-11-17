@@ -13,6 +13,7 @@ const BURST_LAST = { title: "Burst 999", position: 99.9 };
 const MOST_BURST_REPORTS = 15;
 const BURST_MS = 5000;
 const STILL_PAUSED_MS = 1500;
+const REWIND_SETTLES_MS = 1000;
 
 async function playFrame(key: string, windowId: string) {
   await show(key, windowId, LEFT);
@@ -128,6 +129,17 @@ const nowPlayingChecks: Check[] = [
         expectEqual({ paused: isPaused(later), title: later?.title }, { paused: true, title: SONG.title }, "the ended media is still reported paused");
         await evaluate(key, 'm.removeAttribute("src"); m.load(); post("result", "true");');
         await reported(reports, "the session ends once the page drops its media", (now) => now === null);
+      }),
+  },
+  {
+    name: "engine now playing: a page that seeks its own track back to the start is not reported as looping",
+    run: () =>
+      withReports("np-rewind", "nowplaying?plain&once&rewind", TITLE, async (key, reports) => {
+        await startPlaying(key);
+        await reported(reports, "the page reports playing", isPlaying);
+        await until("the page seeks itself back to the start near the end", SETTLE_MS, () => evaluate(key, 'post("result", JSON.stringify(window.rewound));'), (rewound) => rewound === true);
+        await pause(REWIND_SETTLES_MS);
+        expectEqual(reports.reports.filter((report) => report?.loop === true).length, 0, "reports marked loop after the page's own seek back");
       }),
   },
   {
