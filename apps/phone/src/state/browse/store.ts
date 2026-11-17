@@ -76,6 +76,7 @@ let started = false;
 export function startBrowser(beforeOpening: () => void = () => undefined) {
   if (started) return;
   started = true;
+  useTabs.subscribe(followTabs);
   loadPreferences();
   followColorInWidgets();
   beforeOpening();
@@ -594,7 +595,7 @@ export async function savePageStates() {
 
 let hidesFromRecents = false;
 
-useTabs.subscribe((tabs) => {
+function followTabs(tabs: ReturnType<typeof useTabs.getState>) {
   const hides = isPrivateOnScreen(tabs, tabs.incognito);
   if (hides !== hidesFromRecents) {
     hidesFromRecents = hides;
@@ -608,7 +609,7 @@ useTabs.subscribe((tabs) => {
     clearTimeout(snapshotTimers.get(id));
     snapshotTimers.delete(id);
   }
-});
+}
 
 export function goBackToStartIfEmpty() {
   if (useBrowse.getState().surface === "browsing" && !selectedTab(currentTabs())) show("start");

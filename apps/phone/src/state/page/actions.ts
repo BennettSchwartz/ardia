@@ -393,6 +393,12 @@ let started = false;
 export function startPageUi() {
   if (started) return;
   started = true;
+  useBrowse.subscribe((browse, previous) => {
+    if (browse.surface !== previous.surface) closePageLayers();
+  });
+  useTabs.subscribe((tabs, previous) => {
+    if (tabs.selectedId !== previous.selectedId) closePageLayers();
+  });
   listenToPages(pageEvent);
   try {
     downloads.addListener(downloadEvent);
@@ -481,11 +487,3 @@ function closePageLayers() {
     usePageUi.setState({ menuOpen: false, readerTabId: null, press: null });
   }
 }
-
-useBrowse.subscribe((browse, previous) => {
-  if (browse.surface !== previous.surface) closePageLayers();
-});
-
-useTabs.subscribe((tabs, previous) => {
-  if (tabs.selectedId !== previous.selectedId) closePageLayers();
-});
