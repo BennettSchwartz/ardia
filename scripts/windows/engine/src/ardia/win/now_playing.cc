@@ -159,9 +159,37 @@ std::optional<NowPlayingState> NowPlaying::Held() {
   return held_;
 }
 
+void NowPlaying::FollowRoutedPlayer() {
+  content::MediaSession* session =
+      web_contents() ? content::MediaSession::GetIfExists(web_contents())
+                     : nullptr;
+  content::RenderFrameHost* routed = session ? session->GetRoutedFrame() : nullptr;
+  if (!routed) {
+    return;
+  }
+  const content::GlobalRenderFrameHostId frame = routed->GetGlobalId();
+  const auto in_routed = [&frame](const content::MediaPlayerId& id) {
+    return id.frame_routing_id == frame;
+  };
+  if (represented_ && heard_.contains(*represented_) &&
+      in_routed(*represented_) && playing_.contains(*represented_)) {
+    return;
+  }
+  std::optional<content::MediaPlayerId> chosen;
+  for (const content::MediaPlayerId& id : heard_) {
+    if (in_routed(id) && (!chosen || playing_.contains(id))) {
+      chosen = id;
+    }
+  }
+  if (chosen) {
+    represented_ = chosen;
+  }
+}
+
 std::optional<NowPlayingState> NowPlaying::Current() {
   if (SessionLive()) {
     held_.reset();
+    FollowRoutedPlayer();
     return FromSession();
   }
   return Held();

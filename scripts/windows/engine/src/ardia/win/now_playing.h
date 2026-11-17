@@ -87,6 +87,7 @@ class NowPlaying : public content::WebContentsObserver,
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
   bool OnPrimaryPage(const content::MediaPlayerId& id) const;
   content::RenderFrameHost* RepresentedFrame() const;
+  void FollowRoutedPlayer();
   MediaCommandResult RunCommand(const MediaCommandArgs& command);
   MediaCommandResult RunInRepresentedFrame(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
