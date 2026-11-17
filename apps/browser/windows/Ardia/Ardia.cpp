@@ -156,7 +156,10 @@ static int Prepare(const ArdiaEngineApi *engine) {
 static void ShutDown(Ardia::Host &host) {
   const ULONGLONG flushing = GetTickCount64();
   Ardia::TelemetryLocalStore::Drain();
-  const bool documentsWritten = Ardia::DocumentStore::Flush(false);
+  Ardia::LaunchLog::Write(L"launch", std::wstring(L"telemetry drained in ") + std::to_wstring(GetTickCount64() - flushing) + L" ms");
+  const bool documentsWritten = Ardia::DocumentStore::Flush(false, [](std::wstring const &name, size_t bytes, ULONGLONG milliseconds) {
+    Ardia::LaunchLog::Write(L"launch", std::wstring(L"document ").append(name).append(L" of ").append(std::to_wstring(bytes)).append(L" bytes written at quit in ").append(std::to_wstring(milliseconds)).append(L" ms"));
+  });
   Ardia::LaunchLog::Write(L"launch", std::wstring(L"telemetry and documents written in ") + std::to_wstring(GetTickCount64() - flushing) + L" ms" + (documentsWritten ? L"" : L", some documents still staged"));
   Ardia::Materials::ReportGradientFailuresTo(nullptr);
   host.engine = nullptr;
