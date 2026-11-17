@@ -2,6 +2,7 @@ import { requireNativeViewManager, requireOptionalNativeModule } from "expo-modu
 import { createElement, type ComponentType, type ReactNode, type Ref } from "react";
 import { View, type NativeSyntheticEvent, type ViewProps } from "react-native";
 import type { LookColors } from "./look";
+import type { MaterialRole } from "./material";
 
 export type MenuItem = {
   id: string;
@@ -15,7 +16,7 @@ export type MenuItem = {
   children?: MenuItem[];
 };
 
-export type MenuAppearance = LookColors & { dark?: boolean };
+export type MenuAppearance = LookColors & { dark?: boolean; scheme?: Partial<Record<MaterialRole, string>> };
 
 export type ContextMenuHandle = { show(pressX?: number, pressY?: number): Promise<void> };
 

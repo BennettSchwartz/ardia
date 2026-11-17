@@ -9,8 +9,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import expo.modules.kotlin.modules.Module
@@ -65,7 +67,144 @@ internal object MaterialScheme {
         return mapOf("light" to roles(dynamicLightColorScheme(context)), "dark" to roles(dynamicDarkColorScheme(context)))
     }
 
+    fun parse(hex: String?): Color? {
+        val digits = hex?.removePrefix("#")?.takeIf { it.length == 6 } ?: return null
+        return digits.toLongOrNull(16)?.let { Color(0xFF000000L or it) }
+    }
+
+    private fun pick(given: Map<String, String>, role: String, base: Color): Color = parse(given[role]) ?: base
+
+    fun withRoles(base: ColorScheme, given: Map<String, String>): ColorScheme = base.copy(
+        primary = pick(given, "primary", base.primary),
+        onPrimary = pick(given, "onPrimary", base.onPrimary),
+        primaryContainer = pick(given, "primaryContainer", base.primaryContainer),
+        onPrimaryContainer = pick(given, "onPrimaryContainer", base.onPrimaryContainer),
+        inversePrimary = pick(given, "inversePrimary", base.inversePrimary),
+        secondary = pick(given, "secondary", base.secondary),
+        onSecondary = pick(given, "onSecondary", base.onSecondary),
+        secondaryContainer = pick(given, "secondaryContainer", base.secondaryContainer),
+        onSecondaryContainer = pick(given, "onSecondaryContainer", base.onSecondaryContainer),
+        tertiary = pick(given, "tertiary", base.tertiary),
+        onTertiary = pick(given, "onTertiary", base.onTertiary),
+        tertiaryContainer = pick(given, "tertiaryContainer", base.tertiaryContainer),
+        onTertiaryContainer = pick(given, "onTertiaryContainer", base.onTertiaryContainer),
+        background = pick(given, "background", base.background),
+        onBackground = pick(given, "onBackground", base.onBackground),
+        surface = pick(given, "surface", base.surface),
+        onSurface = pick(given, "onSurface", base.onSurface),
+        surfaceVariant = pick(given, "surfaceVariant", base.surfaceVariant),
+        onSurfaceVariant = pick(given, "onSurfaceVariant", base.onSurfaceVariant),
+        surfaceTint = pick(given, "surfaceTint", base.surfaceTint),
+        surfaceBright = pick(given, "surfaceBright", base.surfaceBright),
+        surfaceDim = pick(given, "surfaceDim", base.surfaceDim),
+        surfaceContainer = pick(given, "surfaceContainer", base.surfaceContainer),
+        surfaceContainerHigh = pick(given, "surfaceContainerHigh", base.surfaceContainerHigh),
+        surfaceContainerHighest = pick(given, "surfaceContainerHighest", base.surfaceContainerHighest),
+        surfaceContainerLow = pick(given, "surfaceContainerLow", base.surfaceContainerLow),
+        surfaceContainerLowest = pick(given, "surfaceContainerLowest", base.surfaceContainerLowest),
+        inverseSurface = pick(given, "inverseSurface", base.inverseSurface),
+        inverseOnSurface = pick(given, "inverseOnSurface", base.inverseOnSurface),
+        error = pick(given, "error", base.error),
+        onError = pick(given, "onError", base.onError),
+        errorContainer = pick(given, "errorContainer", base.errorContainer),
+        onErrorContainer = pick(given, "onErrorContainer", base.onErrorContainer),
+        outline = pick(given, "outline", base.outline),
+        outlineVariant = pick(given, "outlineVariant", base.outlineVariant),
+        scrim = pick(given, "scrim", base.scrim),
+    )
+
+    fun fallback(dark: Boolean): ColorScheme =
+        if (dark) withRoles(darkColorScheme(), MaterialFallback.dark) else withRoles(lightColorScheme(), MaterialFallback.light)
+
+    fun colorScheme(context: Context, dark: Boolean, given: Map<String, String>?): ColorScheme {
+        val base = when {
+            dynamic -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            else -> fallback(dark)
+        }
+        return if (given.isNullOrEmpty()) base else withRoles(base, given)
+    }
+
     fun nightOf(configuration: Configuration): Int = configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+}
+
+internal object MaterialFallback {
+    val light: Map<String, String> = linkedMapOf(
+        "primary" to "#1E6B4F",
+        "onPrimary" to "#FFFFFF",
+        "primaryContainer" to "#A7F2CF",
+        "onPrimaryContainer" to "#005139",
+        "inversePrimary" to "#8CD5B4",
+        "secondary" to "#4C6358",
+        "onSecondary" to "#FFFFFF",
+        "secondaryContainer" to "#CFE9DA",
+        "onSecondaryContainer" to "#354B41",
+        "tertiary" to "#3E6374",
+        "onTertiary" to "#FFFFFF",
+        "tertiaryContainer" to "#C1E8FC",
+        "onTertiaryContainer" to "#254B5B",
+        "background" to "#F5FBF5",
+        "onBackground" to "#171D1A",
+        "surface" to "#F5FBF5",
+        "onSurface" to "#171D1A",
+        "surfaceVariant" to "#DBE5DE",
+        "onSurfaceVariant" to "#404944",
+        "surfaceTint" to "#1E6B4F",
+        "inverseSurface" to "#2C322E",
+        "inverseOnSurface" to "#ECF2ED",
+        "error" to "#BA1A1A",
+        "onError" to "#FFFFFF",
+        "errorContainer" to "#FFDAD6",
+        "onErrorContainer" to "#93000A",
+        "outline" to "#707973",
+        "outlineVariant" to "#BFC9C2",
+        "scrim" to "#000000",
+        "surfaceBright" to "#F5FBF5",
+        "surfaceContainer" to "#EAEFEA",
+        "surfaceContainerHigh" to "#E4EAE4",
+        "surfaceContainerHighest" to "#DEE4DE",
+        "surfaceContainerLow" to "#EFF5EF",
+        "surfaceContainerLowest" to "#FFFFFF",
+        "surfaceDim" to "#D6DBD6",
+    )
+
+    val dark: Map<String, String> = linkedMapOf(
+        "primary" to "#8CD5B4",
+        "onPrimary" to "#003827",
+        "primaryContainer" to "#005139",
+        "onPrimaryContainer" to "#A7F2CF",
+        "inversePrimary" to "#1E6B4F",
+        "secondary" to "#B3CCBE",
+        "onSecondary" to "#1F352B",
+        "secondaryContainer" to "#354B41",
+        "onSecondaryContainer" to "#CFE9DA",
+        "tertiary" to "#A6CCDF",
+        "onTertiary" to "#083544",
+        "tertiaryContainer" to "#254B5B",
+        "onTertiaryContainer" to "#C1E8FC",
+        "background" to "#0F1512",
+        "onBackground" to "#DEE4DE",
+        "surface" to "#0F1512",
+        "onSurface" to "#DEE4DE",
+        "surfaceVariant" to "#404944",
+        "onSurfaceVariant" to "#BFC9C2",
+        "surfaceTint" to "#8CD5B4",
+        "inverseSurface" to "#DEE4DE",
+        "inverseOnSurface" to "#2C322E",
+        "error" to "#FFB4AB",
+        "onError" to "#690005",
+        "errorContainer" to "#93000A",
+        "onErrorContainer" to "#FFDAD6",
+        "outline" to "#8A938D",
+        "outlineVariant" to "#404944",
+        "scrim" to "#000000",
+        "surfaceBright" to "#353B37",
+        "surfaceContainer" to "#1B211E",
+        "surfaceContainerHigh" to "#252B28",
+        "surfaceContainerHighest" to "#303633",
+        "surfaceContainerLow" to "#171D1A",
+        "surfaceContainerLowest" to "#0A0F0D",
+        "surfaceDim" to "#0F1512",
+    )
 }
 
 class MaterialModule : Module() {

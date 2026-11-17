@@ -30,6 +30,25 @@ class MaterialSchemeTest {
     }
 
     @Test
+    fun theSchemeTheAppPassesWinsRoleByRoleOverTheBase() {
+        val scheme = MaterialScheme.withRoles(lightColorScheme(), mapOf("primary" to "#123456", "error" to "#ABCDEF", "surface" to "nonsense"))
+        val roles = MaterialScheme.roles(scheme)
+        assertEquals("#123456", roles["primary"])
+        assertEquals("#ABCDEF", roles["error"])
+        assertEquals(MaterialScheme.roles(lightColorScheme())["surface"], roles["surface"])
+    }
+
+    @Test
+    @Config(sdk = [30])
+    fun belowAndroid12MenusUseArdiasSeededFallbackInBothModes() {
+        val app = RuntimeEnvironment.getApplication()
+        assertEquals(MaterialFallback.light, MaterialScheme.roles(MaterialScheme.colorScheme(app, dark = false, given = null)))
+        assertEquals(MaterialFallback.dark, MaterialScheme.roles(MaterialScheme.colorScheme(app, dark = true, given = null)))
+        assertEquals(36, MaterialFallback.light.size)
+        assertEquals(MaterialFallback.light.keys, MaterialFallback.dark.keys)
+    }
+
+    @Test
     fun valuesAreHexWithoutAlpha() {
         val roles = MaterialScheme.roles(darkColorScheme(primary = Color(0x80123456)))
         assertEquals("#123456", roles["primary"])
