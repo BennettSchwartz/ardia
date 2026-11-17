@@ -71,6 +71,7 @@ function Quit-Writes([string]$file) {
     if ($line -match 'process started inside the engine') { $closed = $null; $parts.Clear() }
     elseif ($line -match '^window (\d+) closed ') { $closed = [int]$Matches[1] }
     elseif ($line -match '^launch (\d+) quitting' -and $null -ne $closed) { $parts.Add("quit began $([int]$Matches[1] - $closed) ms after the last window closed") }
+    elseif ($line -match '\[quit\] last saves: (.+)$') { $parts.Add("the UI's last saves: $($Matches[1])") }
     elseif ($line -match 'telemetry drained in (\d+) ms') { $parts.Add("telemetry drained in $($Matches[1]) ms") }
     elseif ($line -match 'document (.+) of (\d+) bytes written at quit in (\d+) ms') { $parts.Add("$($Matches[1]) of $($Matches[2]) bytes in $($Matches[3]) ms") }
     elseif ($line -match 'telemetry and documents written in (\d+) ms(.*)$') { $parts.Add("all writes in $($Matches[1]) ms$($Matches[2])") }

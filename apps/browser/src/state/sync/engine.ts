@@ -374,7 +374,7 @@ export function startSync() {
         publishUi({ status: "stalled", error: errorText(error) });
       });
   }
-  saveBeforeQuit(checkpoint);
+  saveBeforeQuit("sync", checkpoint);
   onProfilesOpened(() => {
     if (!doc.enabled || !doc.deviceId) return;
     watchExtensions();
