@@ -14,6 +14,7 @@ import type {
   DrmDiagnostic,
   FairPlayReport,
   FindResult,
+  FocusRestoreOutcome,
   LoadError,
   MediaAccess,
   MediaFault,
@@ -67,11 +68,13 @@ type NativeEvents = {
   onCommand: PageCommand;
   onPageFocus: object;
   onPagePress: { refused?: boolean };
+  onFocusRestore: { outcome?: string };
   onSelection: { selection: PageSelection | null };
   onScroll: { state: ScrollState };
   onProtectedMedia: ProtectedMediaRequest;
   onDrmDiagnostic: DrmDiagnostic;
   onFairPlay: FairPlayReport;
+  onAutoplayBlocked: { count?: number };
   onReady: object;
   onDiscarded: { url: string; reason?: DiscardReason | "" };
   onPasswordPrompt: PasswordPrompt;
@@ -84,6 +87,8 @@ type NativeEvents = {
 export type Handlers = keyof NativeEvents;
 export type PageEvent = { name: string; data: unknown };
 export type NativeProps = Omit<WebViewProps, Handlers> & { pageEvents: string[]; onPageEvent: (e: NativeSyntheticEvent<PageEvent>) => void };
+
+const FOCUS_RESTORE_OUTCOMES: readonly FocusRestoreOutcome[] = ["focused", "kept", "refused", "gaveUp"];
 
 const PAGE_EVENTS = {
   onNavigationChange: "navigation",
@@ -118,11 +123,13 @@ const PAGE_EVENTS = {
   onCommand: "command",
   onPageFocus: "focus",
   onPagePress: "pagePress",
+  onFocusRestore: "focusRestore",
   onSelection: "selection",
   onScroll: "scroll",
   onProtectedMedia: "protectedMedia",
   onDrmDiagnostic: "drmDiagnostic",
   onFairPlay: "fairPlay",
+  onAutoplayBlocked: "autoplayBlocked",
   onReady: "ready",
   onDiscarded: "discarded",
   onPasswordPrompt: "passwordPrompt",
@@ -169,11 +176,13 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onCommand: (e) => [e],
   onPageFocus: () => [],
   onPagePress: (e) => [e.refused === true],
+  onFocusRestore: (e) => [FOCUS_RESTORE_OUTCOMES.find((o) => o === e.outcome) ?? "unknown"],
   onSelection: (e) => [e.selection],
   onScroll: (e) => [e.state],
   onProtectedMedia: (e) => [e],
   onDrmDiagnostic: (e) => [e],
   onFairPlay: (e) => [e],
+  onAutoplayBlocked: (e) => [Number.isInteger(e.count) ? Math.min(Math.max(e.count!, 1), 20) : 1],
   onReady: () => [],
   onDiscarded: (e) => [toAppUrl(e.url), e.reason || null],
   onPasswordPrompt: (e) => [e],

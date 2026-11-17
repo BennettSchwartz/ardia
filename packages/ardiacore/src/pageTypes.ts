@@ -164,6 +164,7 @@ export type ExtensionActionResult = "none" | "popup" | "sidePanel";
 
 export type PageSelection = { text: string; rect: { x: number; y: number; width: number; height: number } };
 export type ScrollState = "down" | "up" | "top";
+export type FocusRestoreOutcome = "focused" | "kept" | "refused" | "gaveUp" | "unknown";
 export type ProtectedMediaRequest = { keySystem: string; main: boolean };
 export type DrmDiagnostic = {
   host: string;
@@ -193,6 +194,7 @@ export type WebViewProps = ViewProps & {
   standalone?: boolean;
   extensionHost?: "popup" | "sidePanel";
   visible?: boolean;
+  selected?: boolean;
   warm?: boolean;
   neighbour?: boolean;
   pageBackgroundColor?: string;
@@ -232,11 +234,13 @@ export type WebViewProps = ViewProps & {
   onCommand?: (command: PageCommand) => void;
   onPageFocus?: () => void;
   onPagePress?: (refused: boolean) => void;
+  onFocusRestore?: (outcome: FocusRestoreOutcome) => void;
   onSelection?: (selection: PageSelection | null) => void;
   onScroll?: (state: ScrollState) => void;
   onProtectedMedia?: (request: ProtectedMediaRequest) => void;
   onDrmDiagnostic?: (diagnostic: DrmDiagnostic) => void;
   onFairPlay?: (report: FairPlayReport) => void;
+  onAutoplayBlocked?: (count: number) => void;
   onReady?: () => void;
   onDiscarded?: (url: string, reason: DiscardReason | null) => void;
   onPasswordPrompt?: (prompt: PasswordPrompt) => void;

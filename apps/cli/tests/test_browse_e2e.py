@@ -1,4 +1,5 @@
 from datetime import datetime
+import http.server
 import json
 import re
 import os
@@ -7,8 +8,10 @@ import socket
 import statistics
 import subprocess
 import sys
+import threading
 import time
 import unittest
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -192,7 +195,7 @@ class BrowseEndToEnd(unittest.TestCase):
     def test_no_humanize_is_instant(self):
         session = "instant"
         self.browse("open", self.url("probe.html"), "--show", session=session)
-        self.browse("fill", "#field", "abc", session=session)
+        self.browse("type", "#field", "abc", "--no-humanize", session=session)
         self.browse("click", "#target", "--no-humanize", session=session)
         events = self.report(session)["events"]
         down = next(index for index, event in enumerate(events) if event["type"] == "mousedown")
@@ -993,6 +996,152 @@ class BrowseEndToEnd(unittest.TestCase):
         out = self.browse("read", self.url("late.html"), session="late-read").stdout
         self.assertIn("Result card 12", out)
 
+    def test_read_scope_waits_for_late_content_and_says_when_it_stays_empty(self):
+        session = "late-scope"
+        self.browse("open", self.url("latescope.html"), "--show", session=session)
+        self.assertIn("Claims trainee, remote", self.browse("read", "-s", "main", session=session).stdout)
+        blank = self.browse("read", "-s", "#blank", session=session)
+        self.assertEqual(blank.returncode, 0)
+        self.assertIn("#blank matched 1 element with no text", blank.stdout)
+        missing = self.browse("read", "-s", "#nowhere", session=session, check=False)
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("Nothing on the page matches #nowhere", missing.stderr)
+
+    def test_read_waits_for_results_a_page_is_still_fetching(self):
+        class SlowJobs(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                time.sleep(1.2)
+                body = json.dumps(["Claims trainee, remote", "Sales associate, on site"]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), SlowJobs)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            api = f"http://127.0.0.1:{server.server_address[1]}/jobs"
+            out = self.browse("read", self.url("searchfetch.html") + "?api=" + urllib.parse.quote(api, safe=""), session="fetch-read").stdout
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertIn("Claims trainee, remote", out)
+
+    def test_read_keeps_what_a_stalled_page_sent(self):
+        class Stalls(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b"<!doctype html><html><head><title>Slow listing</title></head><body><h1>Openings</h1>"
+                                 b"<p>Claims trainee, remote</p><p>Sales associate, on site</p>" + b" " * 4096)
+                self.wfile.flush()
+                time.sleep(8)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stalls)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            done = self.browse("read", f"http://127.0.0.1:{server.server_address[1]}/slow", "--timeout", "2500", session="stalled-read")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertIn("Claims trainee, remote", done.stdout)
+        self.assertIn("the page was still loading after 2.5 s; this is the part that had arrived", done.stdout)
+
+    def test_settling_sees_results_drawn_inside_shadow_roots(self):
+        from ardia_cli.browse.readpages import SETTLE_PROBE
+
+        session = "shadow-settle"
+        self.browse("open", self.url("shadowresults.html"), "--show", session=session)
+        probe = f"({SETTLE_PROBE})()"
+        before = json.loads(self.browse("eval", probe, session=session).stdout)[1]
+        self.browse("eval", "document.querySelector('search-app').shadowRoot.append(Object.assign(document.createElement('result-tile'), "
+                    "{textContent: 'Sales associate guide, 2004'}))", session=session)
+        after = json.loads(self.browse("eval", probe, session=session).stdout)[1]
+        self.assertNotEqual(before, after)
+
+    def test_read_scope_ignores_a_number_and_a_word_on_separate_lines(self):
+        out = self.browse("read", self.url("scopebadge.html"), session="scope-badge").stdout
+        self.assertIn("Kombucha starter kit", out)
+        self.assertNotIn("page says", out)
+
+    def test_read_takes_in_the_text_of_a_same_origin_frame(self):
+        session = "frame-jobs"
+        page = self.url("framejobs.html")
+        for out in (self.browse("read", page, session=session).stdout,
+                    self.browse("open", page, session=session).stdout and self.browse("read", session=session).stdout,
+                    self.browse("read", "-s", "#board", session=session).stdout):
+            self.assertIn('[frame "Job board"]', out)
+            self.assertIn("Field Service Technician | Oklahoma City", out)
+            self.assertNotIn("Tiny tracker", out)
+            self.assertNotIn("Buy the Pro plan", out)
+            self.assertNotIn("Empty widget", out)
+        self.assertIn('[frame "Partner board" from another site, not read here: read http://localhost:', self.browse("read", session=session).stdout)
+
+    def test_a_read_of_the_tab_says_when_it_read_it(self):
+        session = "read-time"
+        self.browse("open", self.url("scopebadge.html"), session=session)
+        last = self.browse("read", session=session).stdout.rstrip().splitlines()[-1]
+        self.assertRegex(last, r"^\[read \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC\]$")
+        self.assertIn("readAt", self.browse("read", "--json", session=session).stdout)
+
+    def test_scroll_read_waits_at_the_bottom_for_a_feed_that_loads_slowly(self):
+        session = "slow-feed"
+        self.browse("open", self.url("slowfeed.html"), "--show", session=session)
+        out = self.browse("read", "-s", "#feed", "--scroll", "--timeout", "60000", session=session).stdout
+        self.assertIn("Maker 500", out)
+        self.assertIn("[500 rows; scrolled to the end of the list]", out)
+
+    def test_a_page_stuck_in_its_own_scripts_fails_fast_after_the_first_wait(self):
+        import time
+
+        session = "busy-page"
+        self.browse("open", self.url("busypage.html"), session=session)
+        time.sleep(2.5)
+        first = self.browse("snapshot", session=session, check=False)
+        self.assertIn("isn't answering", first.stdout + first.stderr)
+        started = time.monotonic()
+        second = self.browse("read", session=session, check=False)
+        self.assertLess(time.monotonic() - started, 12)
+        self.assertIn("isn't answering", second.stdout + second.stderr)
+
+    def test_a_click_declines_a_survey_invite_in_its_way(self):
+        session = "survey"
+        self.browse("open", self.url("surveyinvite.html"), "--show", session=session)
+        out = self.browse("click", "#go", session=session).stdout
+        self.assertIn("No thanks", out)
+        self.assertEqual(self.report(session), {"clicked": ["go"], "survey": "declined"})
+
+    def test_a_click_closes_an_open_menu_in_its_way(self):
+        session = "open-menu"
+        self.browse("open", self.url("openmenu.html"), "--show", session=session)
+        out = self.browse("click", "#save", session=session).stdout
+        self.assertIn("Escape was pressed", out)
+        self.assertEqual(self.report(session), {"clicked": ["save"], "closed": True})
+
+    def test_a_click_closes_a_site_popup_in_its_way_through_its_close_button(self):
+        session = "site-popup"
+        self.browse("open", self.url("sitepopup.html"), "--show", session=session)
+        out = self.browse("click", "#next", session=session).stdout
+        self.assertIn("A popup was in the way", out)
+        self.assertEqual(self.report(session), {"clicked": ["next"], "closed": True})
+
+    def test_text_with_half_an_emoji_still_reads(self):
+        session = "surrogate"
+        out = self.browse("read", self.url("surrogate.html"), session=session).stdout
+        self.assertIn("Handshake \ufffd then Tue Botanicals \U0001f91d", out)
+        self.browse("open", self.url("surrogate.html"), session=session)
+        self.assertIn("\ufffd", self.browse("get", "text", "#team", session=session).stdout)
+
     def test_read_runs_beside_a_session_busy_with_a_script(self):
         session = "busy"
         self.browse("open", self.url("picker.html"), session=session)
@@ -1161,7 +1310,7 @@ class BrowseEndToEnd(unittest.TestCase):
         out = self.browse("read", self.url("results.html"), self.url("picker.html"), session=session).stdout
         self.assertIn('(scope: page says "1–20 of 340 results"; has a Next page link, pages up to 17)', out)
         self.browse("open", self.url("results.html"), session=session)
-        self.assertTrue(self.browse("read", session=session).stdout.rstrip().endswith('[scope: page says "1–20 of 340 results"; has a Next page link, pages up to 17]'))
+        self.assertEqual(self.browse("read", session=session).stdout.rstrip().splitlines()[-2], '[scope: page says "1–20 of 340 results"; has a Next page link, pages up to 17]')
 
     def test_click_falls_back_to_a_dom_click_off_the_page(self):
         session = "carousel"
