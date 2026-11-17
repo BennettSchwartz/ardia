@@ -3,6 +3,7 @@ import { onExtensionsChanged } from "../../platform/extensions";
 import { currentAppIcon, onAppEvent } from "../../platform/app";
 import { useTranslate } from "../site/translate";
 import { useBrowser } from "../browser/store";
+import { keysOf } from "../browser/changes";
 import { takeOpenTabSyncCounts, takeSnapshotWrites, useSync } from "../sync/engine";
 import { takeSyncCodeCounts } from "../sync/recoveryKit";
 import { capture, endSession, flush, isSharing, markSettingsSnapshot, settingsSnapshotDay, startClient, watchConsentBoundary, withHourlyExtras } from "./usageClient";
@@ -213,7 +214,7 @@ export const noteSettingsSearch = (event: "started" | "empty") => void counts[ev
 
 export const noteTabStripPeek = () => void (counts.tabStripPeeks++, !useBrowser.getState().settings.autoHideTabs && counts.tabPeeksWithAutoHideOff++);
 export const noteTabStripMenu = (menu: "tabs" | "overflow") => void counts[menu === "tabs" ? "tabStripMenuOpens" : "tabStripOverflowOpens"]++;
-const size = (o: object) => Object.keys(o).length;
+const size = (o: object) => keysOf(o).length;
 
 function watchStore() {
   let tabCount = size(useBrowser.getState().tabs);
