@@ -18,7 +18,7 @@ const sent = () => {
 };
 
 test("a long press loop sends which loop, whether it was still open and whether a button was down, once per report", () => {
-  stub.emitEvent("engine.pressLoopLong", { loop: "windowDragRegion", inner: "windowMove", open: true, buttonsHeld: false });
+  stub.emitEvent("engine.pressLoopLong", { loop: "windowDragRegion", inner: "windowMove", open: true, buttonsHeld: false, epoch: client.consentEpoch() });
   const events = sent();
   assert.equal(events.length, 1, "watching twice still sends once");
   assert.deepEqual(
@@ -28,7 +28,7 @@ test("a long press loop sends which loop, whether it was still open and whether 
 });
 
 test("an unknown loop name is sent as other, never as given", () => {
-  stub.emitEvent("engine.pressLoopLong", { loop: "https://private.example/page", inner: "Inbox", open: "yes", buttonsHeld: 1 });
+  stub.emitEvent("engine.pressLoopLong", { loop: "https://private.example/page", inner: "Inbox", open: "yes", buttonsHeld: 1, epoch: client.consentEpoch() });
   const event = sent().at(-1);
   assert.equal(event.properties.loop, "other");
   assert.equal(event.properties.inner, "other");
@@ -39,6 +39,6 @@ test("an unknown loop name is sent as other, never as given", () => {
 });
 
 test("at most 10 are sent in a session", () => {
-  for (let i = 0; i < 20; i++) stub.emitEvent("engine.pressLoopLong", { loop: "windowMove", inner: "windowMove", open: false, buttonsHeld: true });
+  for (let i = 0; i < 20; i++) stub.emitEvent("engine.pressLoopLong", { loop: "windowMove", inner: "windowMove", open: false, buttonsHeld: true, epoch: client.consentEpoch() });
   assert.equal(sent().length, 10);
 });

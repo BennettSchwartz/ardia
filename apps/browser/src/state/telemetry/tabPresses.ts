@@ -1,5 +1,5 @@
 import { pressesWithoutRelease, pressRepeated } from "../../platform/focus";
-import { capture, consentToken, stillValid, useTelemetry } from "./client";
+import { capture, consentNow, consentToken, stillValid, useTelemetry, type ConsentToken } from "./client";
 import { takeHoverCardCounts } from "./hoverCardCounts";
 import { percentile } from "./transport";
 
@@ -61,7 +61,7 @@ export function noteRowPress(shownTabEmpty: boolean): Promise<void> {
   });
 }
 
-useTelemetry.subscribe((s, prev) => prev.sharing !== s.sharing && forgetPresses());
+useTelemetry.subscribe((s, prev) => (prev.sharing !== s.sharing || prev.epoch !== s.epoch) && (emitTabPresses(null), forgetPresses()));
 
 export function notePressStarted(switchedOnPress = false) {
   if (pending) tally.unanswered++;
@@ -100,7 +100,7 @@ export const notePagePressRefused = () => void tally.page_refused++;
 
 export const noteDragWithoutDrop = () => void tally.drags_without_drop++;
 
-export function emitTabPresses() {
+export function emitTabPresses(consent: ConsentToken | null = consentNow()) {
   const counts = tally;
   const samples = toPageClick.sort((a, b) => a - b);
   const held = heldMs.sort((a, b) => a - b);
@@ -129,7 +129,7 @@ export function emitTabPresses() {
     held_ms_p75: at(held, 0.75),
     held_n: held.length,
     ...hoverCards,
-  });
+  }, consent);
 }
 
 export const devTabPresses = () => ({ ...tally, pending, toPageClick: toPageClick.length, held: heldMs.length });

@@ -1,6 +1,6 @@
 import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTabId } from "../browser/model";
-import { capture, isSharing, useTelemetry } from "./client";
+import { capture, consentNow, isSharing, useTelemetry } from "./client";
 import { appInfo, percentile } from "./transport";
 import { jsStartedAt } from "./jsStart";
 import { fieldTiming } from "../../platform/fieldTiming";
@@ -41,7 +41,7 @@ export function emitJourneys(final = false) {
   props.tabs = Object.keys(useBrowser.getState().tabs).length;
   samples.clear();
   counts.clear();
-  if (on && isSharing()) capture("perf_journeys", props);
+  if (on && isSharing()) capture("perf_journeys", props, consentNow());
 }
 
 function lastInput(now = Date.now()): number | null {
@@ -280,7 +280,7 @@ function sendLaunch(l: Launch, content: number | null, paints: number[]) {
     launched_hidden: typeof launchedHidden === "boolean" ? launchedHidden : null,
     launch_source: typeof launchSource === "string" && LAUNCH_SOURCES.has(launchSource) ? launchSource : null,
     since_boot: bootTime ? bucket(l.t0 - bootTime, [[2 * MINUTE, "<2m"], [10 * MINUTE, "<10m"], [HOUR, "<1h"], [DAY, "<1d"]], "1d+") : "unknown",
-  });
+  }, consentNow());
 }
 
 function watchStore(s: BrowserState, prev: BrowserState) {

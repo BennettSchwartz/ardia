@@ -1,5 +1,5 @@
 import { crashReports } from "../../platform/app";
-import { advanceCrashCursor, capture, consentToken, crashCursor, loadChoice, saveQueueNow } from "./client";
+import { advanceCrashCursor, capture, consentNow, consentToken, crashCursor, loadChoice, saveQueueNow } from "./client";
 import { contextAt, contextProperties, recentWebuiPages, sessionStart } from "./diagnostics";
 import type { SavedContext } from "./savedContext";
 import { recordLog } from "./logs";
@@ -43,6 +43,7 @@ export function captureException(error: unknown, mechanism: Mechanism, { fatal =
     capture(
       "$exception",
       { $exception_level: fatal ? "fatal" : "error", source: mechanism, error_code: code },
+      consentNow(),
       { urgent: true, persist: true, raw: exceptionProperties([{ type, value, frames }], mechanism, handled) },
     );
   } catch {}
@@ -165,10 +166,10 @@ export async function reportNativeCrashes(contexts: (SavedContext | null)[] = []
         ...contextProperties(context, "ctx_", report.time),
         ctx_webui_pages: recentWebuiPages(context, report.time),
       },
+      consent,
       {
         urgent: true,
         persist: true,
-        consent,
         raw: { ...exceptionProperties(exceptions, mechanism, false), crash_images: images },
       },
     );

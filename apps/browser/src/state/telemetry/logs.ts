@@ -1,4 +1,4 @@
-import { queueLog } from "./client";
+import { consentNow, queueLog } from "./client";
 import { knownErrorCode, knownErrorMessage } from "./knownErrors";
 import { LOG_TEMPLATES } from "./logTemplates";
 import { errorType } from "./sanitize";
@@ -23,5 +23,5 @@ export function recordLog(level: "warn" | "error", args: unknown[]) {
   if (template) attributes.log_template = template[0];
   if (reason) attributes.error_message = reason;
   if (code) attributes.error_code = code;
-  queueLog(level, template?.[1] ?? UNLISTED, attributes, first);
+  queueLog(level, template?.[1] ?? UNLISTED, attributes, consentNow(), first);
 }

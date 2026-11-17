@@ -1,5 +1,5 @@
 import { anonymousIdentity, type AnonymousAvatar } from "@ardia/core";
-import { capture, replaceInstallId } from "./client";
+import { capture, consentNow, replaceInstallId } from "./client";
 import { ensureInstallId } from "./installId";
 import { savedChoice, sessionId } from "./choice";
 import { uuidv4 } from "./ids";
@@ -34,6 +34,6 @@ export async function resetAnonymousId(): Promise<string> {
   stopWatch();
   await clearLocalCopy();
   const installId = replaceInstallId();
-  capture("anonymous_id_reset");
+  capture("anonymous_id_reset", {}, consentNow());
   return installId;
 }

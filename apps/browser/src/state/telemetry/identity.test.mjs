@@ -59,7 +59,7 @@ test("sharing on uses the same install id; the identity shows its name and avata
 
 test("Reset makes a new id, empties the queue and deletes the local copy", async () => {
   const old = savedId();
-  client.capture("before_reset");
+  client.capture("before_reset", {}, client.consentNow());
   local.flushLocal();
   assert.ok(stub.telemetryLocal.lines().length > 0);
   const fresh = await identity.resetAnonymousId();
@@ -78,7 +78,7 @@ test("Reset starts a new session id, so events under the old and new ids share n
   await identity.resetAnonymousId();
   const after = identity.telemetryIdentity().sessionId;
   assert.notEqual(after, before);
-  client.capture("after_reset");
+  client.capture("after_reset", {}, client.consentNow());
   local.flushLocal();
   const last = stub.telemetryLocal.records().at(-1);
   assert.equal(last.properties?.$session_id ?? last.$session_id, after);

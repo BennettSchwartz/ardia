@@ -421,11 +421,11 @@ test("a lost-hover episode sends only its enums, flags and duration, capped per 
 test("an unpainted window sends its enums, flags, counts and reason bits, capped per session", async () => {
   const { useBrowser } = await import("../browser/store.ts");
   const record = { window: "private", trigger: "seen", seen: true, occlusion: "visible", overruled: false, appActive: true, windows: 2, views: 3, unpainted: 2, reasons: (1 << 0) | (1 << 4) | (1 << 7) };
-  diagnostics.trackWindowUnpainted(record);
-  diagnostics.trackWindowUnpainted({ window: "https://private.example", trigger: "Title of a page", seen: 1, occlusion: 7, overruled: "yes", appActive: "yes", windows: 1e9, views: -4, unpainted: 1e9, reasons: "all", url: "https://private.example", title: "Inbox", profile: "Work" });
+  diagnostics.trackWindowUnpainted({ ...record, epoch: client.consentEpoch() });
+  diagnostics.trackWindowUnpainted({ epoch: client.consentEpoch(), window: "https://private.example", trigger: "Title of a page", seen: 1, occlusion: 7, overruled: "yes", appActive: "yes", windows: 1e9, views: -4, unpainted: 1e9, reasons: "all", url: "https://private.example", title: "Inbox", profile: "Work" });
   const settings = useBrowser.getState().settings;
   useBrowser.setState({ settings: { ...settings, shareTabsAcrossWindows: true } });
-  diagnostics.trackWindowUnpainted(record);
+  diagnostics.trackWindowUnpainted({ ...record, epoch: client.consentEpoch() });
   useBrowser.setState({ settings });
   await new Promise((resolve) => setTimeout(resolve, 1100));
   await client.saveQueueNow();
@@ -463,7 +463,7 @@ test("an unpainted window sends its enums, flags, counts and reason bits, capped
   assert.equal(JSON.stringify(odd).includes("private.example"), false);
   assert.equal(JSON.stringify(odd).includes("Inbox"), false);
   assert.equal(JSON.stringify(odd).includes("Work"), false);
-  for (let i = 0; i < 30; i++) diagnostics.trackWindowUnpainted(record);
+  for (let i = 0; i < 30; i++) diagnostics.trackWindowUnpainted({ ...record, epoch: client.consentEpoch() });
   await new Promise((resolve) => setTimeout(resolve, 1100));
   await client.saveQueueNow();
   assert.equal(events("window_unpainted").length, 20);

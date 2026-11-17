@@ -1,5 +1,5 @@
 import type { NotificationPostResult } from "../../platform/notifications";
-import { consentToken, stillValid, type ConsentToken } from "./choice";
+import { consentToken, type ConsentToken } from "./choice";
 import { capture } from "./client";
 import { errorType } from "./sanitize";
 
@@ -33,13 +33,12 @@ export function webNotificationFailureProperties(sent: SentWebNotification, resu
 }
 
 export function recordWebNotificationPost(posted: Promise<NotificationPostResult | string | null | undefined>, sent: SentWebNotification, token: ConsentToken | null = consentToken()): Promise<void> {
-  const consented = () => stillValid(token);
   return posted.then(
     (result) => {
-      if (consented() && result && typeof result === "object" && !result.id) capture(WEB_NOTIFICATION_FAILED, webNotificationFailureProperties(sent, result));
+      if (result && typeof result === "object" && !result.id) capture(WEB_NOTIFICATION_FAILED, webNotificationFailureProperties(sent, result), token);
     },
     (error: unknown) => {
-      if (consented()) capture(WEB_NOTIFICATION_FAILED, webNotificationFailureProperties(sent, null, { error }));
+      capture(WEB_NOTIFICATION_FAILED, webNotificationFailureProperties(sent, null, { error }), token);
       throw error;
     },
   );

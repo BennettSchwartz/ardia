@@ -1,5 +1,5 @@
 import { webviews } from "../../platform/webviews";
-import { consentToken, stillValid } from "./choice";
+import { capture, consentToken, counted } from "./client";
 
 const SETTLE_MS = 2000;
 const NONE = { bar_loads: 0, bar_loads_page_focused: 0, link_tab_loads: 0, link_tab_loads_page_focused: 0 };
@@ -11,13 +11,16 @@ function noteLoad(tabId: string, loads: Count, focusedLoads: Count) {
   const token = consentToken();
   if (!tabId || token === null) return;
   setTimeout(() => {
-    if (!stillValid(token)) return;
     void webviews.get(tabId)?.evaluate("document.hasFocus()").then(
-      (focused) => {
-        if (!stillValid(token)) return;
-        counts[loads]++;
-        if (focused === true) counts[focusedLoads]++;
-      },
+      (focused) =>
+        counted(
+          token,
+          () => {
+            counts[loads]++;
+            if (focused === true) counts[focusedLoads]++;
+          },
+          () => capture("usage_counts", { [loads]: 1, [focusedLoads]: focused === true ? 1 : 0 }, null),
+        ),
       () => {},
     );
   }, SETTLE_MS);

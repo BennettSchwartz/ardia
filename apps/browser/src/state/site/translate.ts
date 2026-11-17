@@ -10,7 +10,7 @@ import { translatorCall } from "./pageTranslator";
 import { stopDocumentWatch, watchDocument } from "./documentWatch";
 import { drainPassages, type PageBatch, type Passage, type Translated } from "./translateDrain";
 import { errorText } from "../../lib/errors";
-import { capture } from "../telemetry/client";
+import { capture, consentToken, type ConsentToken } from "../telemetry/client";
 
 export { translation } from "../../platform/text";
 
@@ -196,6 +196,7 @@ function toast(tabId: string, title: string, message?: string, progress = false)
 }
 
 export async function translatePage(tabId: string, target = defaultTarget()) {
+  const consent = consentToken();
   const tab = useBrowser.getState().tabs[tabId];
   if (!translation || !tab || !webviews.get(tabId)) return;
   await revertPage(tabId, { quiet: true });
@@ -229,14 +230,14 @@ export async function translatePage(tabId: string, target = defaultTarget()) {
     if (!done) {
       if (holds(tabId, mine)) toIdle(tabId);
       if (shown && stateOf(tabId).status === "idle") hideKeyedToast(tab.windowId, PROGRESS_TOAST);
-      return void reportFirstPass("stopped", started, progress);
+      return void reportFirstPass("stopped", started, progress, consent);
     }
-    reportFirstPass("done", started, progress);
+    reportFirstPass("done", started, progress, consent);
     if (holds(tabId, mine)) set(tabId, { status: "translated", source, target, token: mine });
     toast(tabId, `Translated to ${languageName(target)}`);
     void follow(tabId, mine);
   } catch (error) {
-    if (started) reportFirstPass("failed", started, progress);
+    if (started) reportFirstPass("failed", started, progress, consent);
     const replaced = token !== null && !holds(tabId, token);
     if (shown && (!replaced || stateOf(tabId).status === "idle")) hideKeyedToast(tab.windowId, PROGRESS_TOAST);
     if (replaced) return;
@@ -246,14 +247,14 @@ export async function translatePage(tabId: string, target = defaultTarget()) {
   }
 }
 
-function reportFirstPass(outcome: "done" | "stopped" | "failed", started: number, progress: Progress) {
+function reportFirstPass(outcome: "done" | "stopped" | "failed", started: number, progress: Progress, consent: ConsentToken | null) {
   capture("translate_finished", {
     outcome,
     first_pass_ms: Date.now() - started,
     first_text_ms: progress.firstAppliedAt === null ? null : progress.firstAppliedAt - started,
     passages: progress.applied,
     unlinked_passages: progress.unlinked,
-  });
+  }, consent);
 }
 
 export async function revertPage(tabId: string, { quiet = false } = {}) {

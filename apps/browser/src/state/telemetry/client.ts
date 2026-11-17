@@ -11,7 +11,7 @@ import { uuidv4, uuidv7 } from "./ids";
 import { parseSaved, versionedJson } from "../../lib/savedDocument";
 import { withDeadline } from "../../lib/deadline";
 import { isFields, isString } from "../../lib/decode";
-import { beganBeforeChange, consentGeneration, consentToken, dismissAsk, isSharing, loadChoice, NO_WATCH, resumeSession, save, savedChoice as saved, sessionId, startNewSession, stillValid, useTelemetry } from "./choice";
+import { consentEpoch, consentNow, consentToken, counted, dismissAsk, isSharing, loadChoice, NO_WATCH, resumeSession, save, savedChoice as saved, savedOff, sessionId, startNewSession, stillValid, useTelemetry, type ConsentToken } from "./choice";
 import { flushLocalNow, LOCAL_KEEP_DAYS, recordLocal } from "./localStore";
 
 const QUEUE_DOC = "telemetry-queue.json";
@@ -24,7 +24,7 @@ const FLUSH_DELAY_MS = 30_000;
 const URGENT_FLUSH_DELAY_MS = 3_000;
 const MAX_BACKOFF_MS = 30 * 60_000;
 
-export { beganBeforeChange, consentGeneration, consentToken, dismissAsk, isSharing, loadChoice, stillValid, useTelemetry };
+export { consentEpoch, consentNow, consentToken, counted, dismissAsk, isSharing, loadChoice, stillValid, useTelemetry, type ConsentToken };
 
 let engineVersion: string | null = null;
 
@@ -66,8 +66,11 @@ const isEvent = (v: unknown): v is QueuedEvent =>
   isFields(v) && isString(v.uuid) && isString(v.event) && isString(v.distinct_id) && isString(v.timestamp) && isFields(v.properties);
 const isLog = (v: unknown): v is OtlpLogRecord => isFields(v) && isString(v.timeUnixNano) && isFields(v.body) && Array.isArray(v.attributes);
 
+const queueDoc = () => versionedJson({ ...queue, epoch: saved().epoch }, QUEUE_VERSION);
+
 function storedQueue(): Queue {
   const doc = parseSaved(readDocument(QUEUE_DOC), QUEUE_VERSION);
+  if (doc?.epoch !== saved().epoch) return { events: [], logs: [] };
   return {
     events: Array.isArray(doc?.events) ? doc.events.filter(isEvent) : [],
     logs: Array.isArray(doc?.logs) ? doc.logs.filter(isLog) : [],
@@ -90,7 +93,7 @@ function persistQueue(now = false) {
   const write = () => {
     try {
       loadQueue();
-      const json = versionedJson(queue, QUEUE_VERSION);
+      const json = queueDoc();
       queueChars = json.length;
       writeDocument(QUEUE_DOC, json);
     } catch {}
@@ -108,7 +111,7 @@ export function saveQueueNow(timeoutMs = 1000): Promise<void> {
   persistTimer = undefined;
   try {
     loadQueue();
-    const landed = saveDocument(QUEUE_DOC, versionedJson(queue, QUEUE_VERSION)).catch(() => {});
+    const landed = saveDocument(QUEUE_DOC, queueDoc()).catch(() => {});
     return withDeadline(landed, timeoutMs, undefined);
   } catch {
     return Promise.resolve();
@@ -127,15 +130,12 @@ let droppedWhileOff = 0;
 
 export type { CaptureOptions };
 
-const consented = (consent: CaptureOptions["consent"]) => (consent === undefined ? isSharing() : stillValid(consent));
-
-export function capture(event: string, props: Record<string, unknown> = {}, options: CaptureOptions = {}) {
-  const { consent, ...rest } = options;
+export function capture(event: string, props: Record<string, unknown>, consent: ConsentToken | null, options: CaptureOptions = {}) {
   const relay = telemetryRelay();
-  if (relay) return void (consented(consent) && relay.capture(event, props, rest));
+  if (relay) return relay.capture(event, props, consent, options);
   try {
     const { installId } = saved();
-    const sharing = consented(consent);
+    const sharing = stillValid(consent);
     const at = Date.now();
     const record: QueuedEvent = {
       uuid: uuidv7(),
@@ -157,11 +157,11 @@ export function capture(event: string, props: Record<string, unknown> = {}, opti
   } catch {}
 }
 
-export function queueLog(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>, text = message) {
+export function queueLog(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>, consent: ConsentToken | null, text = message) {
   const relay = telemetryRelay();
-  if (relay) return void (isSharing() && relay.log(level, message, attributes));
+  if (relay) return relay.log(level, message, attributes, consent);
   try {
-    const sharing = saved().sharing;
+    const sharing = stillValid(consent);
     const at = Date.now();
     const withSession = { ...attributes, $session_id: sessionId() };
     recordLocal("log", sharing, { level, message, ...(text === message ? {} : { text }), attributes: withSession }, at);
@@ -275,12 +275,15 @@ export async function flush() {
 
 export type { AskPlacement, SharingSource };
 
-export function setSharing(on: boolean, source: SharingSource, placement?: AskPlacement) {
+export function setSharing(on: boolean, source: SharingSource, placement?: AskPlacement): Promise<boolean> {
   const relay = telemetryRelay();
-  if (relay) return relay.change({ kind: "sharing", on, source, ...(placement ? { placement } : {}) });
+  if (relay) return Promise.resolve(void relay.change({ kind: "sharing", on, source, ...(placement ? { placement } : {}) })).then(() => true);
   const now = Date.now();
   const current = saved();
-  if (on === current.sharing) return save({ decidedAt: now, askDoneAt: current.askDoneAt ?? now });
+  if (on === current.sharing) {
+    save({ decidedAt: now, askDoneAt: current.askDoneAt ?? now });
+    return on ? Promise.resolve(true) : savedOff();
+  }
   generation++;
   failures = 0;
   retryAt = 0;
@@ -289,8 +292,8 @@ export function setSharing(on: boolean, source: SharingSource, placement?: AskPl
     inflight.clear();
     save({ sharing: false, installId: current.installId, context: null, decidedAt: now, askDoneAt: current.askDoneAt ?? now, ...NO_WATCH, watchEndedNotice: current.watchEndedNotice });
     clearQueue();
-    capture("sharing_turned_off", { source });
-    return;
+    capture("sharing_turned_off", { source }, consentNow());
+    return savedOff();
   }
   save({
     sharing: true,
@@ -303,7 +306,8 @@ export function setSharing(on: boolean, source: SharingSource, placement?: AskPl
     decidedAt: now,
     askDoneAt: current.askDoneAt ?? now,
   });
-  capture("sharing_turned_on", { source, ...placement });
+  capture("sharing_turned_on", { source, ...placement }, consentNow());
+  return Promise.resolve(true);
 }
 
 export function replaceInstallId(): string {

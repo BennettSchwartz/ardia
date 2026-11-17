@@ -4,8 +4,8 @@ const MAX_HELD = 500;
 const MAX_ANSWERS = 100;
 
 export type Relayed =
-  | { kind: "capture"; event: string; props: Record<string, unknown>; options: Record<string, unknown>; consent?: number }
-  | { kind: "log"; level: "warn" | "error"; message: string; attributes: Record<string, string | number | boolean>; consent?: number };
+  | { kind: "capture"; event: string; props: Record<string, unknown>; options: Record<string, unknown>; consent: string | null }
+  | { kind: "log"; level: "warn" | "error"; message: string; attributes: Record<string, string | number | boolean>; consent: string | null };
 
 export type TelemetryOp = "reset" | "end" | "reopen" | "choice";
 
@@ -30,7 +30,6 @@ export type TelemetryLeadershipDeps = {
   channel: LeaderChannel | null;
   relay(next: ((message: Relayed) => void) | null): void;
   deliver(message: Relayed): void;
-  consented?(stamp: number | undefined): boolean;
   handle(op: TelemetryOp, arg?: string): Promise<unknown>;
   lead(): Promise<void>;
   changed?(): void;
@@ -38,13 +37,13 @@ export type TelemetryLeadershipDeps = {
   newId?: () => string;
 };
 
-export type TelemetryLeadership = { leading(): boolean; request(op: TelemetryOp, timeoutMs: number, arg?: string): Promise<unknown>; announce(): void; forget(): void };
+export type TelemetryLeadership = { leading(): boolean; request(op: TelemetryOp, timeoutMs: number, arg?: string): Promise<unknown>; announce(): void };
 
 const isFields = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const OPS: readonly string[] = ["reset", "end", "reopen", "choice"];
 
 export function isRelayed(value: unknown): value is Relayed {
-  if (!isFields(value) || (value.consent !== undefined && typeof value.consent !== "number")) return false;
+  if (!isFields(value) || (value.consent !== null && typeof value.consent !== "string")) return false;
   if (value.kind === "capture") return typeof value.event === "string" && isFields(value.props) && isFields(value.options);
   if (value.kind === "log") return (value.level === "warn" || value.level === "error") && typeof value.message === "string" && isFields(value.attributes);
   return false;
@@ -74,9 +73,7 @@ export function startTelemetryLeadership(deps: TelemetryLeadershipDeps): Telemet
   const newId = deps.newId ?? (() => crypto.randomUUID());
   const channel = deps.channel;
   const post = (message: Wire) => channel?.postMessage(message);
-  const deliver = (message: Relayed) => {
-    if (!deps.consented || deps.consented(message.consent)) deps.deliver(message);
-  };
+  const deliver = (message: Relayed) => deps.deliver(message);
   let role: "pending" | "follower" | "becoming" | "leader" = "pending";
   const held: Relayed[] = [];
   const unacked = new Map<string, Relayed>();
@@ -185,11 +182,6 @@ export function startTelemetryLeadership(deps: TelemetryLeadershipDeps): Telemet
     leading: () => role === "leader",
     announce: () => {
       if (role === "leader") post({ kind: "choice" });
-    },
-    forget: () => {
-      held.length = 0;
-      heard.length = 0;
-      unacked.clear();
     },
     request: (op, timeoutMs, arg) => {
       if (role === "leader") return withTimeout(deps.handle(op, arg), timeoutMs);

@@ -103,6 +103,12 @@ export async function pruneLocalStore(now = Date.now(), take = true): Promise<Lo
   return reading;
 }
 
+export function resetLocalStoreMeters() {
+  Object.assign(meter, { lines: 0, chars: 0, oversize: 0, flushes: 0, flushMs: [], bufferedMax: buffer.length, failures: 0 });
+  carried = { writeMs: [], droppedLines: 0 };
+  void pruneLocalStore(Date.now(), false).then(() => void (carried = { writeMs: [], droppedLines: 0 }), () => {});
+}
+
 export function localEventsSince(ms: number): Promise<TelemetryLocalExport | null> {
   flushLocal();
   return exportLocalForReport(ms).catch(() => null);

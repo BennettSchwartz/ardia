@@ -173,18 +173,14 @@ test("F4 a web notification received while sharing was off isn't reported as fai
   assert.deepEqual(await queued("web_notification_failed"), []);
 });
 
-test("F6 a press loop that began before sharing went off and on again isn't reported", async () => {
-  mock.timers.enable({ apis: ["Date"], now: 5_000_000 });
-  try {
-    client.setSharing(true, "onboarding");
-    offAndOn();
-    mock.timers.tick(3_000);
-    pressLoops.trackPressLoopLong({ loop: "windowMove", inner: "windowMove", open: true, buttonsHeld: true, seconds: 5.1 });
-    mock.timers.tick(30_000);
-    pressLoops.trackPressLoopLong({ loop: "windowDragRegion", inner: "windowDragRegion", open: true, buttonsHeld: false, seconds: 5.1 });
-  } finally {
-    mock.timers.reset();
-  }
+test("F6 a press loop stamped with an earlier consent period isn't sent, and one stamped with the current period is", async () => {
+  client.setSharing(true, "onboarding");
+  const earlier = client.consentEpoch();
+  offAndOn();
+  pressLoops.trackPressLoopLong({ loop: "windowMove", inner: "windowMove", open: true, buttonsHeld: true, epoch: earlier });
+  pressLoops.trackPressLoopLong({ loop: "windowMove", inner: "windowMove", open: true, buttonsHeld: true, epoch: "" });
+  pressLoops.trackPressLoopLong({ loop: "windowMove", inner: "windowMove", open: true, buttonsHeld: true });
+  pressLoops.trackPressLoopLong({ loop: "windowDragRegion", inner: "windowDragRegion", open: true, buttonsHeld: false, epoch: client.consentEpoch() });
   assert.deepEqual((await queued("press_loop_long")).map((p) => p.loop), ["windowDragRegion"]);
 });
 
@@ -202,33 +198,22 @@ test("F6 the focus hand-off counts learn each new consent epoch, so native drops
   assert.notEqual(epochs.at(-1), epochs.at(-2));
 });
 
-const unpaintedRecord = (seconds) => ({ window: "regular", trigger: "key", seen: true, occlusion: "visible", overruled: false, appActive: true, windows: 1, views: 1, unpainted: 1, reasons: 2, seconds });
+const unpaintedRecord = (epoch) => ({ window: "regular", trigger: "key", seen: true, occlusion: "visible", overruled: false, appActive: true, windows: 1, views: 1, unpainted: 1, reasons: 2, epoch });
 
-test("F6 a paint check triggered before sharing went off and on again isn't reported", async () => {
-  mock.timers.enable({ apis: ["Date"], now: 9_000_000 });
-  try {
-    client.setSharing(true, "onboarding");
-    offAndOn();
-    mock.timers.tick(300);
-    diagnostics.trackWindowUnpainted(unpaintedRecord(0.5));
-  } finally {
-    mock.timers.reset();
-  }
+test("F6 a paint check stamped with an earlier consent period isn't reported", async () => {
+  client.setSharing(true, "onboarding");
+  const earlier = client.consentEpoch();
+  offAndOn();
+  diagnostics.trackWindowUnpainted(unpaintedRecord(earlier));
+  diagnostics.trackWindowUnpainted(unpaintedRecord(""));
   assert.deepEqual(await queued("window_unpainted"), []);
 });
 
 test("F6 the unpainted-window cap starts over when sharing goes off and on again", async () => {
-  mock.timers.enable({ apis: ["Date"], now: 19_000_000 });
-  try {
-    client.setSharing(true, "onboarding");
-    mock.timers.tick(5_000);
-    for (let i = 0; i < 25; i++) diagnostics.trackWindowUnpainted(unpaintedRecord(0.5));
-    offAndOn();
-    mock.timers.tick(5_000);
-    diagnostics.trackWindowUnpainted(unpaintedRecord(0.5));
-  } finally {
-    mock.timers.reset();
-  }
+  client.setSharing(true, "onboarding");
+  for (let i = 0; i < 25; i++) diagnostics.trackWindowUnpainted(unpaintedRecord(client.consentEpoch()));
+  offAndOn();
+  diagnostics.trackWindowUnpainted(unpaintedRecord(client.consentEpoch()));
   assert.equal((await queued("window_unpainted")).length, 1);
 });
 
@@ -252,15 +237,15 @@ test("F8 sync sends the total time spent applying bookmarks and history, as What
   assert.equal(typeof taken.sync_history_apply_ms_total, "number");
 });
 
-test("F5 a window that relays telemetry doesn't forward events captured while sharing is off", () => {
+test("F5 a window that relays telemetry forwards events captured while sharing is off with no consent, so the leader only keeps them locally", () => {
   client.setSharing(false, "settings");
   const forwarded = [];
-  relay.setTelemetryRelay({ capture: (event) => forwarded.push(event), log: (_level, message) => forwarded.push(message), resetId: async () => "", change: () => {}, installId: () => null });
+  relay.setTelemetryRelay({ capture: (event, _props, consent) => forwarded.push([event, consent]), log: (_level, message, _attributes, consent) => forwarded.push([message, consent]), resetId: async () => "", change: () => {}, installId: () => null });
   try {
-    client.capture("relayed_while_off", {});
-    client.queueLog("warn", "relayed log while off", {});
+    client.capture("relayed_while_off", {}, client.consentNow());
+    client.queueLog("warn", "relayed log while off", {}, client.consentNow());
   } finally {
     relay.setTelemetryRelay(null);
   }
-  assert.deepEqual(forwarded, []);
+  assert.deepEqual(forwarded, [["relayed_while_off", null], ["relayed log while off", null]]);
 });

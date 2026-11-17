@@ -2,7 +2,7 @@ import { APP_INGEST_KEY } from "@ardia/core";
 import { installErrorReporting, resetAnonymousId, startTelemetry } from "../../browser/src/state/telemetry/index.ts";
 import { captureException } from "../../browser/src/state/telemetry/errors";
 import { capture, devState, endSession, flush, loadChoice, queueLog, saveQueueNow, setSharing } from "../../browser/src/state/telemetry/client";
-import { dismissAsk, reloadChoice, savedChoice, useTelemetry } from "../../browser/src/state/telemetry/choice";
+import { dismissAsk, reloadChoice, savedChoice, useTelemetry, type ConsentToken } from "../../browser/src/state/telemetry/choice";
 import { DAILY_DOC } from "../../browser/src/state/telemetry/daily";
 import { requestLog } from "../../browser/src/state/telemetry/requestLog";
 import { adoptInstallId } from "../../browser/src/state/telemetry/installId";
@@ -121,10 +121,7 @@ async function refreshState() {
   if (savedChoice().installId) offeredInstallId = null;
 }
 
-const consentStamp = () => {
-  const choice = savedChoice();
-  return choice.sharing && choice.decidedAt !== null ? choice.decidedAt : null;
-};
+const relayedConsent = (consent: unknown) => (typeof consent === "string" && consent ? (consent as ConsentToken) : null);
 
 export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolean; locks?: LeaderLocks; channel?: LeaderChannel | null }) {
   const { host, candidate } = options;
@@ -139,14 +136,8 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
     locks: options.locks,
     channel,
     relay: (forward) => setTelemetryRelay(forward && {
-      capture: (event, props, captureOptions) => {
-        const consent = consentStamp();
-        if (consent !== null) forward({ kind: "capture", event, props, options: { ...captureOptions }, consent });
-      },
-      log: (level, message, attributes) => {
-        const consent = consentStamp();
-        if (consent !== null) forward({ kind: "log", level, message, attributes, consent });
-      },
+      capture: (event, props, consent, captureOptions) => forward({ kind: "capture", event, props, options: { ...captureOptions }, consent }),
+      log: (level, message, attributes, consent) => forward({ kind: "log", level, message, attributes, consent }),
       resetId: async () => {
         const installId = await current.request("reset", RESET_TIMEOUT_MS);
         await refreshState();
@@ -166,8 +157,7 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
         return id;
       },
     }),
-    deliver: (message) => message.kind === "capture" ? capture(message.event, message.props, message.options) : queueLog(message.level, message.message, message.attributes),
-    consented: (stamp) => stamp !== undefined && stamp === consentStamp(),
+    deliver: (message) => message.kind === "capture" ? capture(message.event, message.props, relayedConsent(message.consent), message.options) : queueLog(message.level, message.message, message.attributes, relayedConsent(message.consent)),
     handle: handleTelemetryOp,
     lead: async () => {
       await Promise.all(TELEMETRY_DOCUMENTS.map((name) => refreshDocument(name).catch(report)));
@@ -183,8 +173,7 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
   });
   leadership = current;
   let announced = shownChoice();
-  useTelemetry.subscribe((shown, previous) => {
-    if (shown.sharing !== previous.sharing) current.forget();
+  useTelemetry.subscribe(() => {
     const next = shownChoice();
     if (next === announced) return;
     announced = next;

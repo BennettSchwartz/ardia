@@ -36,7 +36,7 @@ final class FocusHandoff {
     weak var resigned: NSView?
     var restoresSource = true
     var deadline: CFTimeInterval = 0
-    var epoch = 0
+    var epoch = ""
     var timer: DispatchWorkItem?
     var generations: [Generation] = []
     var held: [Held] = []
@@ -238,7 +238,7 @@ final class FocusHandoff {
 
   func takeOutcomes() -> [String: Int] { outcomes.take() }
 
-  func setConsentEpoch(_ epoch: Int) { outcomes.epoch = epoch }
+  func setConsentEpoch(_ epoch: String) { outcomes.epoch = epoch }
 
   private func releases(_ up: NSEvent, in gate: Gate?) -> Bool {
     guard let release = releases.removeValue(forKey: up.keyCode) else { return false }
@@ -362,7 +362,7 @@ final class FocusHandoff {
     gates.values.first { $0.generations.contains { $0.id == id } }
   }
 
-  private func replay(_ held: [Held], into destination: NSView, in window: NSWindow, since epoch: Int) {
+  private func replay(_ held: [Held], into destination: NSView, in window: NSWindow, since epoch: String) {
     guard !held.isEmpty else { return }
     note("replay \(held.count) into \(type(of: destination))")
     for entry in held { if case .key(let down, _) = entry.input { noteTyped(down, in: window) } }
@@ -395,7 +395,7 @@ final class FocusHandoff {
     beep(gone, since: gate.epoch)
   }
 
-  private func beep(_ held: [Held], since epoch: Int) {
+  private func beep(_ held: [Held], since epoch: String) {
     guard !held.isEmpty else { return }
     note("drop \(held.count)")
     outcomes.add("dropped", held.count, since: epoch)
@@ -427,20 +427,20 @@ final class FocusHandoff {
 final class HandoffOutcomes {
   private let lock = NSLock()
   private var counts: [String: Int] = [:]
-  private var current = 0
+  private var current = ""
 
-  var epoch: Int {
+  var epoch: String {
     get { lock.lock(); defer { lock.unlock() }; return current }
     set { lock.lock(); current = newValue; counts = [:]; lock.unlock() }
   }
 
-  func add(_ outcome: String, _ by: Int = 1, since epoch: Int) {
+  func add(_ outcome: String, _ by: Int = 1, since epoch: String) {
     lock.lock()
-    if epoch == current { counts[outcome, default: 0] += by }
+    if !current.isEmpty, epoch == current { counts[outcome, default: 0] += by }
     lock.unlock()
   }
 
-  func delivered(after seconds: CFTimeInterval, since epoch: Int) {
+  func delivered(after seconds: CFTimeInterval, since epoch: String) {
     add("delivered", since: epoch)
     add(seconds < 0.4 ? "pickupUnder400ms" : seconds < 1 ? "pickup400To1000ms" : "pickupOver1s", since: epoch)
   }

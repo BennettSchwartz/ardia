@@ -6,7 +6,7 @@ import { withDeadline } from "../../lib/deadline";
 import { hermesHeapMegabytes } from "../../lib/hermesHeap";
 import { activeTab } from "../browser/model";
 import { useBrowser } from "../browser/store";
-import { beganBeforeChange, capture, isSharing, saveContext, useTelemetry } from "./client";
+import { capture, consentNow, consentToken, counted, isSharing, saveContext, stillValid, useTelemetry, type ConsentToken } from "./client";
 import { formatRecentPages, readRecentPages, type RecentPage, type SavedContext } from "./savedContext";
 import { noteDragsEnded } from "./stuckDrags";
 import { noteWindowlessPages } from "./cliCounts";
@@ -81,14 +81,15 @@ function noteWebuiPage(page: string, at: number) {
 export const noteAppMemory = (totalMb: number) => (appMemoryMb = totalMb);
 
 export async function recordContext(): Promise<SavedContext | null> {
-  if (!isSharing()) return null;
-  void cliControlStatus().then((status) => {
+  const consent = consentToken();
+  if (!consent) return null;
+  void cliControlStatus().then((status) => counted(consent, () => {
     noteDragsEnded(status.dragsEnded);
     noteWindowlessPages(status.windowlessPages);
-  }, () => {});
+  }), () => {});
   const epoch = contextEpoch;
   const [sample, pressure] = await Promise.all([diagnosticsSample().catch(() => ({ footprintMB: undefined, freeDiskGB: undefined })), memoryPressure()]);
-  if (!isSharing() || epoch !== contextEpoch) return null;
+  if (!stillValid(consent) || epoch !== contextEpoch) return null;
   const now = Date.now();
   const page = activeWebuiPage();
   if (page) noteWebuiPage(page, now);
@@ -145,7 +146,7 @@ function forgetContext() {
 }
 
 useTelemetry.subscribe((s, prev) => {
-  if (prev.sharing === s.sharing) return;
+  if (prev.sharing === s.sharing && prev.epoch === s.epoch) return;
   forgetContext();
   windowUnpaintedEvents = 0;
 });
@@ -248,6 +249,7 @@ const GONE_REASONS = new Set(["abnormal", "killed", "crashed", "oom", "launchFai
 export type PageTranslateContext = { translate: string; translate_stage: string | null; translating_tabs: number; translated_tabs: number };
 
 export function trackPageProcessGone(info: { reason: string; code: number }, visible: boolean, translate?: PageTranslateContext) {
+  const consent = consentNow();
   pageProcessesGone++;
   if (pageProcessEvents >= MAX_PAGE_PROCESS_EVENTS) return;
   pageProcessEvents++;
@@ -262,7 +264,7 @@ export function trackPageProcessGone(info: { reason: string; code: number }, vis
     session_min: sessionMinutes(),
     gone_this_session: pageProcessesGone,
   };
-  void memoryPressure().then((memory_pressure) => capture("page_process_gone", { ...props, memory_pressure }));
+  void memoryPressure().then((memory_pressure) => capture("page_process_gone", { ...props, memory_pressure }, consent));
 }
 
 const HOVER_REASONS = new Set(["halfActive", "staleMenu", "notKeyOrMain", "coveredByView", "responderLost", "coveredByWindow"]);
@@ -304,7 +306,7 @@ export function hoverLostProperties(e: HoverLostEpisode) {
 export function trackHoverLost(e: HoverLostEpisode) {
   if (hoverLostEvents >= MAX_HOVER_LOST_EVENTS) return;
   hoverLostEvents++;
-  capture("page_hover_lost", hoverLostProperties(e));
+  capture("page_hover_lost", hoverLostProperties(e), consentNow());
 }
 
 const UNPAINTED_WINDOWS = new Set(["regular", "private"]);
@@ -339,9 +341,10 @@ export function windowUnpaintedProperties(r: WindowUnpaintedRecord) {
 }
 
 export function trackWindowUnpainted(r: WindowUnpaintedRecord) {
-  if (windowUnpaintedEvents >= MAX_WINDOW_UNPAINTED_EVENTS || beganBeforeChange(r.seconds)) return;
-  windowUnpaintedEvents++;
-  capture("window_unpainted", windowUnpaintedProperties(r));
+  const consent = (r.epoch ?? null) as ConsentToken | null;
+  if (windowUnpaintedEvents >= MAX_WINDOW_UNPAINTED_EVENTS) return;
+  if (stillValid(consent)) windowUnpaintedEvents++;
+  capture("window_unpainted", windowUnpaintedProperties(r), consent);
 }
 
 export function watchEngineReports() {

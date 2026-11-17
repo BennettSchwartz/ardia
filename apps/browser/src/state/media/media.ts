@@ -10,7 +10,7 @@ import { activeTabId } from "../browser/model";
 import { peekTabId } from "../peek/peek";
 import { splitOf, splitTabIdsOf } from "../splits/splits";
 import { hostOf } from "@ardia/core";
-import { capture } from "../telemetry/client";
+import { capture, consentNow } from "../telemetry/client";
 import { noteMediaPositionReport, noteNowPlayingLoopRestart } from "../telemetry/mediaCardCounts";
 import { isSleeping } from "../tabs/sleepingTabs";
 
@@ -40,7 +40,7 @@ const PER_TAB = Object.keys(noMedia()) as (keyof Store)[];
 export const useMedia = create<Store>()(noMedia);
 
 export function setPictureInPictureState(tabId: string, { kind, active, fullScreenSpaces, leftApp, leftTab }: PictureInPictureState) {
-  if (active && fullScreenSpaces !== undefined) capture("pip_shown", { kind, full_screen_spaces: fullScreenSpaces, left_app: !!leftApp, left_tab: !!leftTab });
+  if (active && fullScreenSpaces !== undefined) capture("pip_shown", { kind, full_screen_spaces: fullScreenSpaces, left_app: !!leftApp, left_tab: !!leftTab }, consentNow());
   useMedia.setState((s) => {
     if (active ? s.pipOpen[tabId] === kind : !s.pipOpen[tabId]) return s;
     const pipOpen = { ...s.pipOpen };

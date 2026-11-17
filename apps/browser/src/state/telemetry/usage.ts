@@ -5,7 +5,7 @@ import { useTranslate } from "../site/translate";
 import { useBrowser } from "../browser/store";
 import { takeOpenTabSyncCounts, takeSnapshotWrites, useSync } from "../sync/engine";
 import { takeSyncCodeCounts } from "../sync/recoveryKit";
-import { capture, consentToken, endSession, flush, isSharing, markSettingsSnapshot, settingsSnapshotDay, startClient, watchConsentBoundary, withHourlyExtras } from "./usageClient";
+import { capture, consentNow, consentToken, counted, endSession, flush, isSharing, markSettingsSnapshot, settingsSnapshotDay, startClient, stillValid, watchConsentBoundary, withHourlyExtras, type ConsentToken } from "./usageClient";
 import { reportLocalStore, startLocalStore } from "./localStoreReport";
 import { startWatchChecks } from "./watch";
 import { appIconSetting, currentThemeFileSnapshot, customColorProfiles, narrowWindows, openTabSyncProfiles, SETTINGS_SNAPSHOT_EVENT, settingsSnapshot } from "./settingsSnapshot";
@@ -59,11 +59,11 @@ const startedAt = Date.now();
 const NO_COUNTS = { tabs: 0, windows: 0, fullScreens: 0, sidebarPeeks: 0, sidebarPeekBounces: 0, cliTabEdits: 0, cliGroupEdits: 0, cliEditFailures: 0, popoverPressCloses: 0, popoverEscapeCloses: 0, siteAutoplayBlocks: 0, siteAutoplayAllows: 0, autoplayPlaysBlocked: 0, siteSettingsOpens: 0, sidebarFieldSiteControlsOpens: 0, siteManageExtensionsOpens: 0, tabSwitcherOpens: 0, tabSwitcherClosedLeftOut: 0, tabSwitcherUnseenLast: 0, approvalNoticesDeferred: 0, reopenedPages: 0, reopenedPagesWithBack: 0, backClosesToOpener: 0, groupTabsKept: 0, groupHeaderHides: 0, peekPinchOpens: 0, peekPinchCloses: 0, peeksShownAgain: 0, littleArdiaPinchOpens: 0, littleArdiaPinchCloses: 0, littleArdiaSwipeCloses: 0, littleArdiaSwipeCloseCancels: 0, externalLinksTabSettingOff: 0, externalLinksTabSettingOn: 0, externalLinksLittleSettingOn: 0, externalLinksLittleSettingOff: 0, autoHideTabsToggles: 0, windowsRealignedToAutoHideTabs: 0, tabStripPeeks: 0, tabStripMenuOpens: 0, tabStripOverflowOpens: 0, tabPeeksWithAutoHideOff: 0, toolbarScrollHides: 0, toolbarScrollHideBounces: 0, cardResizeLayouts: 0, cardResizeLayoutsApplied: 0, importedPinnedRows: 0, importedSplits: 0, importedSpaces: 0, importedContainerSpaces: 0, importedDataProfiles: 0, importedEssentials: 0, importedStartersNamed: 0, splitPaneCloses: 0, splitViewCloses: 0, splitDividerResets: 0, windowCloseTabsKept: 0, sharesPickedTab: 0, sharesPickedWindow: 0, sharesPickedScreen: 0, screenRecordingMissing: 0, screenRecordingAsked: 0, extensionInstallPrompts: 0, extensionInstallPromptsStale: 0, extensionProfilePageOpens: 0, extensionProfilePageReroutes: 0, privateWindowExtensionOpens: 0, sidePanelsKeptOnSwitch: 0, emptyTabSidebarExtensionPresses: 0, toolbarExtensionMoves: 0, toolbarExtensionMenuMoves: 0, toolbarAnchorMoves: 0, toolbarAnchorMisses: 0, contentBlockerUnavailable: 0, contentBlockerPagesBehind: 0, contentBlockerWriteFailures: 0, contentBlockerCustomListsAdded: 0, contentBlockerCustomListAddFailures: 0, contentBlockerCustomListsRemoved: 0, newTabNoticesShown: 0, newTabNoticePresses: 0, statusBubbleTopShows: 0, loadingFieldShows: 0, loadingPillShows: 0, loadingPillLongShows: 0, loadingPillSkips: 0, dockReopens: 0, dockReopensPastFloating: 0, sidebarMotionMerges: 0, sidebarSlideOverruns: 0, webKitPagesKeptHidden: 0, newTabBarKeeps: 0, newTabBarLaunchShows: 0, newTabLingers: 0, newTabLeavesForWebKit: 0, barSplitOpens: 0, barSplitFullTabs: 0, settingsSearchKeyboardReveals: 0, settingsSearchClickReveals: 0, settingsSearches: 0, settingsSearchesEmpty: 0, settingsSearchTopPicks: 0, settingsSearchTop3Picks: 0, settingsSearchLowerPicks: 0, settingsSearchUnshownReveals: 0, autoPictureInPictureKept: 0, autoPictureInPictureStayedOnAppSwitch: 0, selectionCloseKeys: 0, selectionCloseKeyTabs: 0, onboardingImports: 0, onboardingHeliumImports: 0, onboardingListedOnlyImports: 0, onboardingGlassPicks: 0, onboardingClassicPicks: 0, onboardingTintedGlassPicks: 0, onboardingStepsCompleted: 0, onboardingStepsSkipped: 0, onboardingRedoOpened: 0, onboardingRedoCompleted: 0, onboardingRedoCancelled: 0, updateChannelSwitches: 0, updateChannelSwitchOffers: 0, updateChannelSwitchUpToDate: 0, updateChannelSwitchCheckFailures: 0, cleanUpSuggestionShows: 0, cleanUpSuggestionOnce: 0, cleanUpSuggestionDaily: 0, cleanUpSuggestionNotNow: 0, cleanUpSuggestionNeverAgain: 0, cleanUpUndos: 0, linkTabsMatched: 0, linkTabWaitsSkipped: 0, linkTabWaitTimeouts: 0, historySearchFocusRequests: 0, historySearchFocused: 0 , selectedRowPillShows: 0, selectedRowPillPresses: 0 };
 let counts = { ...NO_COUNTS }, countsSince = Date.now();
 
-function emitCounts(send = true) {
+function emitCounts(consent: ConsentToken | null = consentNow()) {
   const snapshots = takeSnapshotWrites(), tornOffKept = takeTornOffWindowsKeptAutoHide(), switcherOpensInWebKit = takeTabSwitcherOpensInWebKit(), switcherRowCloses = takeTabSwitcherRowCloses(), switcherMenuReleases = takeTabSwitcherMenuReleases(), stuckDrags = takeStuckDragCounts(), urlCopies = takeUrlCopyCounts(), configProblemToasts = takeConfigProblemToastCounts(), stripHoverCards = takeStripHoverCardCounts(), externalAppRequests = takeExternalAppRequests(), tabSleeps = takeTabSleepCounts(), syncCodes = takeSyncCodeCounts(), openTabSync = takeOpenTabSyncCounts(), escapeCloses = takeLittleArdiaEscapeCloses(), liveCompletedTabsClosed = takeLiveCompletedTabsClosed(), liveHides = takeLiveHideCounts(), tidyTabs = takeTidyTabsCounts(), mediaCard = takeMediaCardCounts(), bookmarkMoves = takeBookmarkMoveCounts(), downloadsPanel = takeDownloadsPanelCounts(), downloadWork = takeDownloadWork(), webKitFaults = takeWebKitMediaFaultCounts(), airTraffic = takeAirTrafficCounts(), cliCounts = takeCliCounts(), dock = takeDockCounts(), tabStrip = takeTabStripCounts(), sidebarResizes = takeSidebarResizeCounts(), bookmarklets = takeBookmarkletCounts(), windowPlacement = takeWindowPlacementCounts(), notificationRequests = takeNotificationRequestCounts(), recentlyClosed = takeRecentlyClosedCounts(), historyRemovals = takeHistoryRemovalCounts(), popupTabs = takePopupTabCounts(), focusFeatures = takeFocusFeatureCounts(), work = takeWorkCounts();
   const { nothingPlaying: autoPictureInPictureNothingPlaying, backToTab, drags: pipDrags, clickSkips } = takePictureInPictureCounts();
   counts.autoHideTabsToggles += takeAutoHideTabsChoices();
-  if (send && (Object.values(work).some(Boolean) || Object.values(counts).some(Boolean) || Object.values(dock).some(Boolean) || tornOffKept > 0 || Object.values(tabSleeps).some(Boolean) || Object.values(syncCodes).some(Boolean) || Object.values(openTabSync).some(Boolean) || Object.values(stuckDrags).some(Boolean) || Object.values(escapeCloses).some(Boolean) || Object.values(liveHides).some(Boolean) || Object.values(tidyTabs).some(Boolean) || Object.values(mediaCard).some(Boolean) || bookmarkMoves.bookmark_moves || Object.values(downloadsPanel).some(Boolean) || Object.values(downloadWork).some(Boolean) || Object.values(tabStrip).some(Boolean) || Object.values(sidebarResizes).some(Boolean) || Object.values(bookmarklets).some(Boolean) || Object.keys(webKitFaults).length || Object.values(airTraffic).some(Boolean) || Object.values(cliCounts).some(Boolean) || Object.values(externalAppRequests).some(Boolean) || urlCopies.url_copies || configProblemToasts.config_problem_toasts || configProblemToasts.config_problem_toast_dismissals || stripHoverCards.tab_strip_hover_cards || liveCompletedTabsClosed || snapshots.count || snapshots.cycles || snapshots.removedProfiles || snapshots.removedDevices || switcherOpensInWebKit || switcherRowCloses || switcherMenuReleases || autoPictureInPictureNothingPlaying || backToTab.chromium || backToTab.webkit || pipDrags.moved || clickSkips.back || clickSkips.ahead || Object.values(windowPlacement).some(Boolean) || Object.values(popupTabs).some(Boolean) || Object.values(notificationRequests).some(Boolean) || recentlyClosed.recently_closed_clears || Object.values(historyRemovals).some(Boolean) || Object.values(focusFeatures).some(Boolean))) {
+  if ((Object.values(work).some(Boolean) || Object.values(counts).some(Boolean) || Object.values(dock).some(Boolean) || tornOffKept > 0 || Object.values(tabSleeps).some(Boolean) || Object.values(syncCodes).some(Boolean) || Object.values(openTabSync).some(Boolean) || Object.values(stuckDrags).some(Boolean) || Object.values(escapeCloses).some(Boolean) || Object.values(liveHides).some(Boolean) || Object.values(tidyTabs).some(Boolean) || Object.values(mediaCard).some(Boolean) || bookmarkMoves.bookmark_moves || Object.values(downloadsPanel).some(Boolean) || Object.values(downloadWork).some(Boolean) || Object.values(tabStrip).some(Boolean) || Object.values(sidebarResizes).some(Boolean) || Object.values(bookmarklets).some(Boolean) || Object.keys(webKitFaults).length || Object.values(airTraffic).some(Boolean) || Object.values(cliCounts).some(Boolean) || Object.values(externalAppRequests).some(Boolean) || urlCopies.url_copies || configProblemToasts.config_problem_toasts || configProblemToasts.config_problem_toast_dismissals || stripHoverCards.tab_strip_hover_cards || liveCompletedTabsClosed || snapshots.count || snapshots.cycles || snapshots.removedProfiles || snapshots.removedDevices || switcherOpensInWebKit || switcherRowCloses || switcherMenuReleases || autoPictureInPictureNothingPlaying || backToTab.chromium || backToTab.webkit || pipDrags.moved || clickSkips.back || clickSkips.ahead || Object.values(windowPlacement).some(Boolean) || Object.values(popupTabs).some(Boolean) || Object.values(notificationRequests).some(Boolean) || recentlyClosed.recently_closed_clears || Object.values(historyRemovals).some(Boolean) || Object.values(focusFeatures).some(Boolean))) {
     capture("usage_counts", {
       ...work, tabs_opened: counts.tabs, windows_opened: counts.windows,
       full_screens_entered: counts.fullScreens,
@@ -116,13 +116,13 @@ function emitCounts(send = true) {
       auto_pip_kept_visible: counts.autoPictureInPictureKept, auto_pip_stayed_on_app_switch: counts.autoPictureInPictureStayedOnAppSwitch, selection_close_keys: counts.selectionCloseKeys, selection_close_key_tabs: counts.selectionCloseKeyTabs,
       onboarding_imports: counts.onboardingImports, onboarding_helium_imports: counts.onboardingHeliumImports, onboarding_listed_only_imports: counts.onboardingListedOnlyImports, onboarding_glass_picks: counts.onboardingGlassPicks, onboarding_classic_picks: counts.onboardingClassicPicks, onboarding_tinted_glass_picks: counts.onboardingTintedGlassPicks, onboarding_steps_completed: counts.onboardingStepsCompleted, onboarding_steps_skipped: counts.onboardingStepsSkipped, onboarding_redo_opened: counts.onboardingRedoOpened, onboarding_redo_completed: counts.onboardingRedoCompleted, onboarding_redo_cancelled: counts.onboardingRedoCancelled,
       update_channel_switches: counts.updateChannelSwitches, update_channel_switch_offers: counts.updateChannelSwitchOffers, update_channel_switch_up_to_date: counts.updateChannelSwitchUpToDate, update_channel_switch_check_failures: counts.updateChannelSwitchCheckFailures, clean_up_suggestion_shows: counts.cleanUpSuggestionShows, clean_up_suggestion_once: counts.cleanUpSuggestionOnce, clean_up_suggestion_daily: counts.cleanUpSuggestionDaily, clean_up_suggestion_not_now: counts.cleanUpSuggestionNotNow, clean_up_suggestion_never_again: counts.cleanUpSuggestionNeverAgain, clean_up_undos: counts.cleanUpUndos, link_tabs_matched: counts.linkTabsMatched, link_tab_waits_skipped: counts.linkTabWaitsSkipped, link_tab_wait_timeouts: counts.linkTabWaitTimeouts, history_search_focus_requests: counts.historySearchFocusRequests, history_search_focused: counts.historySearchFocused, period_minutes: Math.round((Date.now() - countsSince) / 60_000),
-    });
+    }, consent);
   }
   counts = { ...NO_COUNTS };
   countsSince = Date.now();
 }
 
-watchConsentBoundary(() => emitCounts(false));
+watchConsentBoundary(() => emitWindowUsage(null));
 export const noteImportedPins = (made: { rows: number; splits: number }) => void ((counts.importedPinnedRows += made.rows), (counts.importedSplits += made.splits));
 
 export const noteImportedSpaces = (made: { spaces: number; containerSpaces: number; dataProfiles: number; essentials: number; startersNamed: number }) => void ((counts.importedSpaces += made.spaces), (counts.importedContainerSpaces += made.containerSpaces), (counts.importedDataProfiles += made.dataProfiles), (counts.importedEssentials += made.essentials), (counts.importedStartersNamed += made.startersNamed));
@@ -157,7 +157,7 @@ export const noteToolbarExtensionMove = (via: "drag" | "menu") => void (counts.t
 
 export const noteContentBlockerUnavailable = () => counts.contentBlockerUnavailable++;
 export const noteContentBlockerWriteFailure = () => counts.contentBlockerWriteFailures++, noteBlockedPageBehind = () => counts.contentBlockerPagesBehind++;
-export const noteCustomFilterList = (event: "added" | "addFailed" | "removed") => void counts[({ added: "contentBlockerCustomListsAdded", addFailed: "contentBlockerCustomListAddFailures", removed: "contentBlockerCustomListsRemoved" } as const)[event]]++;
+export const noteCustomFilterList = (event: "added" | "addFailed" | "removed", consent: ConsentToken | null) => counted(consent, () => void counts[({ added: "contentBlockerCustomListsAdded", addFailed: "contentBlockerCustomListAddFailures", removed: "contentBlockerCustomListsRemoved" } as const)[event]]++);
 
 export function noteCliEdits(tabEdits: number, groupEdits: number, failures: number) {
   counts.cliTabEdits += tabEdits;
@@ -237,10 +237,10 @@ function watchStore() {
     }
     if (s.groups !== prev.groups) counts.groupTabsKept += keptTabsAdded(s.groups, prev.groups);
     if (s.splits !== prev.splits) {
-      for (const id in s.splits) if (!prev.splits[id]) capture("split_view_opened", { panes: splitTabIds(s.splits[id]!).length });
+      for (const id in s.splits) if (!prev.splits[id]) capture("split_view_opened", { panes: splitTabIds(s.splits[id]!).length }, consentNow());
     }
     if (s.windowUi !== prev.windowUi) {
-      for (const id in s.windowUi) if (s.windowUi[id]?.panel.open && !prev.windowUi[id]?.panel.open) capture("command_bar_opened", { placement: commandBarPlacementLabel(s.windowUi[id]!.panel) });
+      for (const id in s.windowUi) if (s.windowUi[id]?.panel.open && !prev.windowUi[id]?.panel.open) capture("command_bar_opened", { placement: commandBarPlacementLabel(s.windowUi[id]!.panel) }, consentNow());
     }
   });
 }
@@ -261,20 +261,20 @@ function watchSync() {
     const was = last;
     last = status;
     if (was === status) return;
-    if (was === "off" && status !== "unavailable") capture("sync_toggled", { on: true });
-    else if (status === "off" && was !== "unavailable") capture("sync_toggled", { on: false });
+    if (was === "off" && status !== "unavailable") capture("sync_toggled", { on: true }, consentNow());
+    else if (status === "off" && was !== "unavailable") capture("sync_toggled", { on: false }, consentNow());
   });
 }
 
 function watchTranslate() {
   useTranslate.subscribe((s, prev) => {
-    for (const tabId in s) if (s[tabId]?.status === "translating" && prev[tabId]?.status !== "translating") capture("translate_used");
+    for (const tabId in s) if (s[tabId]?.status === "translating" && prev[tabId]?.status !== "translating") capture("translate_used", {}, consentNow());
   });
 }
 
 function watchExtensions() {
   onExtensionsChanged((e) => {
-    if (e.event === "installed" && Date.now() - startedAt > EXTENSION_SETTLE_MS) capture("extension_installed");
+    if (e.event === "installed" && Date.now() - startedAt > EXTENSION_SETTLE_MS) capture("extension_installed", {}, consentNow());
   });
 }
 
@@ -297,7 +297,7 @@ async function sampleMemory(consent = consentToken()) {
       else if (t.type === "renderer") renderers++;
     }
     if (!total) return;
-    noteAppMemory(mb(total));
+    if (stillValid(consent)) noteAppMemory(mb(total));
     capture("perf_memory", { ...(await takeMainProcessWork()), ...(await takeContentDriftCounts()),
       total_mb: mb(total),
       browser_mb: mb(browser),
@@ -305,26 +305,25 @@ async function sampleMemory(consent = consentToken()) {
       renderer_processes: renderers,
       tabs: size(useBrowser.getState().tabs),
       uptime_hours: Math.round((Date.now() - startedAt) / HOUR_MS),
-    }, { consent });
+    }, consent);
   } catch {}
 }
 
-function emitOmniboxLatency() {
+function emitOmniboxLatency(consent: ConsentToken | null = consentNow()) {
   const samples = takeOmniboxLatency().sort((a, b) => a - b);
   if (!samples.length) return;
   const at = (p: number) => percentile(samples, p);
-  capture("perf_omnibox", { ...takeSearchSuggests(), samples: samples.length, p50_ms: at(0.5), p95_ms: at(0.95), max_ms: samples.at(-1)! });
+  capture("perf_omnibox", { ...takeSearchSuggests(), samples: samples.length, p50_ms: at(0.5), p95_ms: at(0.95), max_ms: samples.at(-1)! }, consent);
 }
 
 function snapshotSettings(consent = consentToken()) {
   const today = utcDay(Date.now());
   if (settingsSnapshotDay() === today) return;
-  markSettingsSnapshot(today);
   const state = useBrowser.getState();
   const settings = { ...settingsSnapshot(state.settings), ...customColorProfiles(state.profiles), ...openTabSyncProfiles(state.profiles), ...narrowWindows(state.windows, state.settings.sidebarWidth), ...airTrafficSnapshot(), ...currentThemeFileSnapshot() };
   void currentAppIcon()
     .catch(() => null)
-    .then((icon) => capture(SETTINGS_SNAPSHOT_EVENT, { ...settings, ...appIconSetting(icon) }, { consent }));
+    .then((icon) => (capture(SETTINGS_SNAPSHOT_EVENT, { ...settings, ...appIconSetting(icon) }, consent), stillValid(consent) && markSettingsSnapshot(today)));
 }
 
 let previousContext: SavedContext | null = null;
@@ -332,10 +331,8 @@ let launchCrashRead: ReturnType<typeof setTimeout> | undefined;
 
 function hourly() {
   snapshotSettings();
-  withHourlyExtras(emitCounts);
-  emitOmniboxLatency();
+  emitWindowUsage(consentNow());
   emitJourneys();
-  emitTabPresses();
   void sampleMemory();
   void reportNativeCrashes([previousContext, ...contextSamples()]).then(() => recordContext());
   void reportLocalStore();
@@ -346,11 +343,11 @@ const rebootedSince = (lastLaunchAt: number | null) => {
   return lastLaunchAt != null && boot != null ? boot > lastLaunchAt : null;
 };
 
-async function launchEvents(session: ReturnType<typeof startClient>) {
+async function launchEvents(session: ReturnType<typeof startClient>, consent = consentToken()) {
   const hardware = await hardwareProperties();
   const previous = session.previous === "unclean" ? { ...contextProperties(session.context, "prev_", Date.now()), rebooted_since: rebootedSince(session.lastLaunchAt) } : {};
-  capture("app_launched", { previous_session: session.previous, ...hardware, ...previous, ...launchGuardProperties() });
-  if (session.updatedFrom) capture("app_updated", { from_version: session.updatedFrom });
+  capture("app_launched", { previous_session: session.previous, ...hardware, ...previous, ...launchGuardProperties() }, consent);
+  if (session.updatedFrom) capture("app_updated", { from_version: session.updatedFrom }, consent);
 }
 
 export function startUsage(continuing = false) {
@@ -382,12 +379,12 @@ export function startUsage(continuing = false) {
   });
 }
 
-export const emitWindowUsage = () => [() => withHourlyExtras(emitCounts), emitOmniboxLatency, emitTabPresses].forEach((emit) => emit());
+export const emitWindowUsage = (consent: ConsentToken | null = consentNow()) => [() => withHourlyExtras(() => emitCounts(consent), consent), () => emitOmniboxLatency(consent), () => emitTabPresses(consent)].forEach((emit) => emit());
 
 export function sessionEnding() {
   emitWindowUsage();
   journeysEnding();
-  capture("app_session_ended", { duration_minutes: Math.round((Date.now() - startedAt) / 60_000) });
+  capture("app_session_ended", { duration_minutes: Math.round((Date.now() - startedAt) / 60_000) }, consentNow());
   endSession();
 }
 

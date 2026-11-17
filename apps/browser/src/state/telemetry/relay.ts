@@ -1,8 +1,9 @@
+import type { ConsentToken } from "./choice";
+
 export type CaptureOptions = {
   raw?: Record<string, unknown>;
   urgent?: boolean;
   persist?: boolean;
-  consent?: number | null;
 };
 
 export type SharingSource = "settings" | "onboarding" | "ask" | "watch" | "watch_ended";
@@ -18,8 +19,8 @@ export type ChoiceChange =
   | { kind: "installId"; id: string };
 
 export type TelemetryRelay = {
-  capture(event: string, props: Record<string, unknown>, options: CaptureOptions): void;
-  log(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>): void;
+  capture(event: string, props: Record<string, unknown>, consent: ConsentToken | null, options: CaptureOptions): void;
+  log(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>, consent: ConsentToken | null): void;
   resetId(): Promise<string>;
   change(change: ChoiceChange): void;
   installId(): string;

@@ -8,6 +8,7 @@ NS_ASSUME_NONNULL_BEGIN
         forDomain:(NSString *)domain NS_SWIFT_NAME(setSender(_:forDomain:));
 + (BOOL)listens:(NSString *)domain;
 + (void)emit:(NSString *)name data:(NSDictionary<NSString *, id> *)data NS_SWIFT_NAME(emit(_:data:));
+@property(class, nonatomic, copy) NSString *consentEpoch;
 
 @end
 

@@ -67,7 +67,7 @@ function window({ locks, channel, candidate = true, lead = async () => {}, handl
     report: (error) => assert.fail(String(error)),
     newId: () => `id-${++ids}`,
   });
-  const capture = (event) => relay ? relay({ kind: "capture", event, props: {}, options: {} }) : delivered.push({ kind: "capture", event, local: true });
+  const capture = (event) => relay ? relay({ kind: "capture", event, props: {}, options: {}, consent: null }) : delivered.push({ kind: "capture", event, local: true });
   return { delivered, handled, changes, capture, leadership, channel, relaying: () => relay !== null };
 }
 
@@ -106,8 +106,9 @@ test("other windows forward their events to the leader, and a utility window nev
 });
 
 test("messages that aren't relayed telemetry are ignored", () => {
-  assert.equal(isRelayed({ kind: "capture", event: "x", props: {}, options: {} }), true);
-  assert.equal(isRelayed({ kind: "log", level: "error", message: "m", attributes: {} }), true);
+  assert.equal(isRelayed({ kind: "capture", event: "x", props: {}, options: {}, consent: null }), true);
+  assert.equal(isRelayed({ kind: "log", level: "error", message: "m", attributes: {}, consent: "period" }), true);
+  assert.equal(isRelayed({ kind: "capture", event: "x", props: {}, options: {}, consent: 3 }), false);
   assert.equal(isRelayed({ kind: "capture", event: 1, props: {}, options: {} }), false);
   assert.equal(isRelayed({ kind: "log", level: "info", message: "m", attributes: {} }), false);
   assert.equal(isRelayed("capture"), false);
@@ -261,18 +262,16 @@ test("a request with no leader to answer it fails after its deadline", async () 
   await assert.rejects(settings.leadership.request("end", 20), { code: "ERR_TELEMETRY_OWNER" });
 });
 
-test("the leader drops relayed telemetry stamped with a sharing period that has ended, and a window clears what it held when sharing changes", async () => {
+test("relayed telemetry reaches the leader with the consent token its window took when the work began", async () => {
   const locks = fakeLocks();
   const bus = fakeBus();
-  let consent = 2;
   const delivered = [];
   startTelemetryLeadership({
     candidate: true,
     locks,
     channel: bus(),
     relay: () => {},
-    deliver: (message) => delivered.push(message.event),
-    consented: (stamp) => stamp === consent,
+    deliver: (message) => delivered.push([message.event, message.consent]),
     handle: async (op) => op,
     lead: async () => {},
     report: (error) => assert.fail(String(error)),
@@ -280,7 +279,7 @@ test("the leader drops relayed telemetry stamped with a sharing period that has 
   });
   await turn();
   let relay = null;
-  const follower = startTelemetryLeadership({
+  startTelemetryLeadership({
     candidate: false,
     channel: bus(),
     relay: (next) => (relay = next),
@@ -290,10 +289,9 @@ test("the leader drops relayed telemetry stamped with a sharing period that has 
     report: (error) => assert.fail(String(error)),
     newId: () => `consent-${++ids}`,
   });
-  relay({ kind: "capture", event: "stale", props: {}, options: {}, consent: 1 });
-  relay({ kind: "capture", event: "current", props: {}, options: {}, consent: 2 });
+  relay({ kind: "capture", event: "old", props: {}, options: {}, consent: "earlier-period" });
+  relay({ kind: "capture", event: "off", props: {}, options: {}, consent: null });
   await turn();
   await turn();
-  assert.deepEqual(delivered, ["current"]);
-  assert.equal(typeof follower.forget, "function");
+  assert.deepEqual(delivered, [["old", "earlier-period"], ["off", null]]);
 });

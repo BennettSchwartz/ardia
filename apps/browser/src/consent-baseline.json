@@ -1,0 +1,22 @@
+{
+  "apps/browser/src/state/telemetry/animationBursts.ts | count after onBurst | bursts += 1;": "counts an animation burst the native side reports as it ends; burst counts are drained at every sharing change",
+  "apps/browser/src/state/telemetry/animationBursts.ts | count after onBurst | longFrames += burst.long;": "counts an animation burst the native side reports as it ends; burst counts are drained at every sharing change",
+  "apps/browser/src/state/telemetry/client.ts | count after await | failures++;": "the send retry counter, never uploaded",
+  "apps/browser/src/state/telemetry/daily.ts | count after await | if (!(await saveDailyState(state))) return (failures++, \"failed\");": "the daily ping's own retry counter, never uploaded; the ping is independent of sharing by design",
+  "apps/browser/src/state/telemetry/daily.ts | count after await | if (result === \"retry\" || result === \"split\") return (failures++, \"failed\");": "the daily ping's own retry counter, never uploaded; the ping is independent of sharing by design",
+  "apps/browser/src/state/telemetry/daily.ts | count after await | } else if (unsaved && !(await saveDailyState(state))) return (failures++, \"failed\");": "the daily ping's own retry counter, never uploaded; the ping is independent of sharing by design",
+  "apps/browser/src/state/telemetry/identity.ts | consentNow after await | capture(\"anonymous_id_reset\", {}, consentNow());": "reports the identity reset made synchronously just before, in the new consent period; the await before it is unrelated",
+  "apps/browser/src/state/telemetry/pageCursorCounts.ts | count after onCursorRestored | counts.page_pointer_restores++;": "counts a pointer restore the native side reports as it happens; drained at every sharing change",
+  "apps/browser/src/state/telemetry/pageCursorCounts.ts | count after onCursorRestored | if (hidden) counts.page_pointer_hidden_restores++;": "counts a pointer restore the native side reports as it happens; drained at every sharing change",
+  "apps/browser/src/state/telemetry/passwordSaves.ts | count after await | else counts.other++;": "a per-import tally whose event is sent with the token taken when the import began",
+  "apps/browser/src/state/telemetry/passwordSaves.ts | count after await | else if (failure === \"not-landed-in-time\") counts.not_landed++;": "a per-import tally whose event is sent with the token taken when the import began",
+  "apps/browser/src/state/telemetry/passwordSaves.ts | count after await | if (failure === \"refused-or-already-saved\") counts.refused++;": "a per-import tally whose event is sent with the token taken when the import began",
+  "apps/browser/src/state/telemetry/passwordSaves.ts | count after await | if (saved) counts.saved++;": "a per-import tally whose event is sent with the token taken when the import began",
+  "apps/browser/src/state/telemetry/transport.ts | count after await | else posted.failed++;": "counts Ardia's own uploads, which only run while sharing is on",
+  "apps/browser/src/state/telemetry/transport.ts | count after await | if (entry.status >= 200 && entry.status < 300) posted.bytes += body.length;": "counts Ardia's own uploads, which only run while sharing is on",
+  "apps/browser/src/state/telemetry/transport.ts | count after await | posted.requests++;": "counts Ardia's own uploads, which only run while sharing is on",
+  "apps/browser/src/state/telemetry/usage.ts | consentNow after onExtensionsChanged | if (e.event === \"installed\" && Date.now() - startedAt > EXTENSION_SETTLE_MS) capture(\"extension_installed\", {}, consentNow());": "the native event reports an install that just finished",
+  "apps/browser/src/state/telemetry/windowPlacementCounts.ts | count after onAppEvent | if (e.type === \"centeredResize\") centeredResizes++;": "counts a window event as it happens, and only while sharing is on; drained at every sharing change",
+  "apps/browser/src/state/telemetry/windowPlacementCounts.ts | count after onAppEvent | if (e.type === \"windowDragLoop\") dragLoops++;": "counts a window event as it happens, and only while sharing is on; drained at every sharing change",
+  "apps/browser/src/state/telemetry/windowPlacementCounts.ts | count after onAppEvent | if (e.type === \"windowTitleRead\") titlesRead++;": "counts a window event as it happens, and only while sharing is on; drained at every sharing change"
+}
