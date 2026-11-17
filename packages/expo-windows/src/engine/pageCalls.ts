@@ -41,38 +41,21 @@ const UNWRAPPED: Record<string, (reply: Reply) => unknown> = {
   getSecurityInfo: (reply) => (!reply || reply.info === null ? null : reply),
   clearSiteData: (reply) => reply ?? { cookies: false, storage: false },
   downloadImage: (reply) => (typeof reply?.uri === "string" ? { uri: reply.uri, width: Number(reply.width) || 0, height: Number(reply.height) || 0 } : null),
-  mediaCommand: (reply) => (reply ? { done: reply.done === true, ...(reply.byScript === true ? { byScript: true } : {}) } : null),
+  mediaCommand: (reply) => (reply ? { done: reply.done === true, ...(reply.byScript === true ? { byScript: true } : {}), ...(reply.recorded === true ? { recorded: true } : {}) } : null),
 };
 export const MISSING_ANSWERS: Record<string, unknown> = {
   requestPictureInPicture: false,
   takeControlPress: false,
 };
 const REFUSALS_ANSWER_NOTHING = new Set(["mediaCommand"]);
-const IN_ORDER = new Set(["mediaCommand"]);
-
-const queues = new Map<string, Promise<unknown>>();
-
-function inOrder<T>(key: string, run: () => Promise<T>): Promise<T> {
-  const next = (queues.get(key) ?? Promise.resolve()).then(run, run);
-  const settled = next.then(
-    () => undefined,
-    () => undefined,
-  );
-  queues.set(key, settled);
-  void settled.then(() => {
-    if (queues.get(key) === settled) queues.delete(key);
-  });
-  return next;
-}
 
 export function pageMethod(call: PageCall, key: string, method: string): ((...values: unknown[]) => Promise<unknown>) | null {
   const names = ARGUMENTS[method];
   if (!names) return null;
   const unwrap = UNWRAPPED[method];
-  const ask = async (values: unknown[]) => {
+  return async (...values: unknown[]) => {
     const asked = call<Record<string, unknown>>(key, method, Object.fromEntries(names.map((name, index) => [name, values[index] ?? null])));
     const reply = await (REFUSALS_ANSWER_NOTHING.has(method) ? asked.catch(() => null) : asked);
     return unwrap ? unwrap(reply) : undefined;
   };
-  return IN_ORDER.has(method) ? (...values: unknown[]) => inOrder(`${method} ${key}`, () => ask(values)) : (...values: unknown[]) => ask(values);
 }

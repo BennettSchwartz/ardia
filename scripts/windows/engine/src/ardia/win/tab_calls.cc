@@ -30,7 +30,6 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/common/chrome_isolated_world_ids.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/devtools/devtools_toggle_action.h"
@@ -116,27 +115,16 @@ constexpr char kWokenPageMediaChoice[] =
     "m.querySelector('source[src]');"
     "return all.find(playing) || all.find(playable) || null;";
 
-constexpr char kWokenPageSeeksStart[] =
-    "((seconds) => {"
-    "const el = (() => {";
-
-constexpr char kWokenPageSeeksEnd[] =
-    "})();"
-    "globalThis.ardiaWokenMedia = el;"
-    "if (el) el.currentTime = seconds;"
-    "})(";
-
 constexpr char kWokenPagePlaysStart[] =
-    "(() => {"
-    "const chosen = Object.prototype.hasOwnProperty.call(globalThis, "
-    "'ardiaWokenMedia');"
-    "const el = chosen ? globalThis.ardiaWokenMedia : (() => {";
+    "((from) => {"
+    "const el = (() => {";
 
 constexpr char kWokenPagePlaysEnd[] =
     "})();"
-    "delete globalThis.ardiaWokenMedia;"
-    "if (el && el.isConnected) el.play();"
-    "})()";
+    "if (!el) return;"
+    "if (Number.isFinite(from) && from >= 0) el.currentTime = from;"
+    "el.play();"
+    "})(";
 
 using DevToolsReply =
     base::OnceCallback<void(std::optional<base::DictValue> result,
@@ -614,7 +602,8 @@ void MediaCommand(content::WebContents* contents,
   }
   ThawHiddenPage(contents);
   base::DictValue answer = Ok();
-  switch (NowPlaying::Command(contents, *parsed)) {
+  const MediaCommandOutcome outcome = NowPlaying::Command(contents, *parsed);
+  switch (outcome.result) {
     case MediaCommandResult::kDone:
       answer.Set("done", true);
       std::move(reply).Run(std::move(answer));
@@ -626,20 +615,19 @@ void MediaCommand(content::WebContents* contents,
     case MediaCommandResult::kRefused:
       std::move(reply).Run(Error("the page's media session does not take that"));
       return;
+    case MediaCommandResult::kSeekRecorded:
+      answer.Set("done", true);
+      answer.Set("recorded", true);
+      std::move(reply).Run(std::move(answer));
+      return;
     case MediaCommandResult::kPlayByScript:
-      RunMediaCommand(contents, std::string(kWokenPagePlaysStart) +
-                                    kWokenPageMediaChoice + kWokenPagePlaysEnd);
-      break;
-    case MediaCommandResult::kSeekByScript:
-      if (content::RenderFrameHost* frame = contents->GetPrimaryMainFrame();
-          frame && frame->IsRenderFrameLive()) {
-        frame->ExecuteJavaScriptInIsolatedWorld(
-            base::UTF8ToUTF16(std::string(kWokenPageSeeksStart) +
-                              kWokenPageMediaChoice + kWokenPageSeeksEnd +
-                              base::NumberToString(parsed->seconds) + ")"),
-            content::RenderFrameHost::JavaScriptResultCallback(),
-            ISOLATED_WORLD_ID_CHROME_INTERNAL);
-      }
+      RunMediaCommand(
+          contents,
+          std::string(kWokenPagePlaysStart) + kWokenPageMediaChoice +
+              kWokenPagePlaysEnd +
+              (outcome.play_from ? base::NumberToString(*outcome.play_from)
+                                 : std::string("null")) +
+              ")");
       break;
   }
   answer.Set("done", true);

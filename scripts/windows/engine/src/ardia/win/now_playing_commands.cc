@@ -184,28 +184,30 @@ bool NowPlaying::PageHandles(Action action) const {
          content::ArdiaWinPageHandlesMediaSessionAction(web_contents(), action);
 }
 
-MediaCommandResult NowPlaying::TakeWakeCommand(
+MediaCommandOutcome NowPlaying::TakeWakeCommand(
     const MediaCommandArgs& command) {
   const bool usable = WakeUsable();
-  if (command.action == MediaAction::kPlay) {
+  if (command.action == MediaAction::kPlay ||
+      command.action == MediaAction::kToggle) {
+    const std::optional<double> play_from = wake_play_from_;
     EndWake();
-    return usable ? MediaCommandResult::kPlayByScript
-                  : MediaCommandResult::kNotDone;
+    if (!usable) {
+      return MediaCommandOutcome();
+    }
+    return {MediaCommandResult::kPlayByScript, play_from};
   }
   if (usable && command.action == MediaAction::kSeekTo &&
-      wake_stage_ == WakeStage::kLoaded && std::isfinite(command.seconds) &&
-      command.seconds >= 0) {
-    wake_stage_ = WakeStage::kSeeked;
-    return MediaCommandResult::kSeekByScript;
+      std::isfinite(command.seconds) && command.seconds >= 0) {
+    wake_play_from_ = command.seconds;
+    return {MediaCommandResult::kSeekRecorded, std::nullopt};
   }
-  if (!usable && wake_stage_ != WakeStage::kArmed &&
-      wake_stage_ != WakeStage::kLoading) {
+  if (!usable && wake_stage_ == WakeStage::kLoaded) {
     EndWake();
   }
-  return MediaCommandResult::kNotDone;
+  return MediaCommandOutcome();
 }
 
-MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
+MediaCommandOutcome NowPlaying::RunCommand(const MediaCommandArgs& command) {
   content::MediaSession* session = LiveSession();
   if (!session) {
     return TakeWakeCommand(command);
@@ -234,21 +236,21 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
       break;
     case MediaAction::kNext:
       if (!PageHandles(Action::kNextTrack)) {
-        return MediaCommandResult::kRefused;
+        return {MediaCommandResult::kRefused};
       }
       session->NextTrack();
       break;
     case MediaAction::kPrevious:
       if (!PageHandles(Action::kPreviousTrack)) {
-        return MediaCommandResult::kRefused;
+        return {MediaCommandResult::kRefused};
       }
       session->PreviousTrack();
       break;
     case MediaAction::kSeekBy:
-      return SeekBy(session, command.seconds);
+      return {SeekBy(session, command.seconds)};
     case MediaAction::kSeekTo:
       if (!Lists(Action::kSeekTo)) {
-        return MediaCommandResult::kRefused;
+        return {MediaCommandResult::kRefused};
       }
       session->SeekTo(base::Seconds(command.seconds));
       break;
@@ -256,7 +258,7 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
       session->Stop(SuspendType::kUI);
       break;
   }
-  return MediaCommandResult::kDone;
+  return {MediaCommandResult::kDone};
 }
 
 MediaCommandResult NowPlaying::SeekBy(content::MediaSession* session,

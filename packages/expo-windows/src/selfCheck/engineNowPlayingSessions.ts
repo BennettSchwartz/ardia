@@ -1,29 +1,30 @@
 import { hostCall } from "../engine/host";
 import { expectEqual, expectTrue, type Check } from "./check";
-import { LOAD_MS, SETTLE_MS, origin, port, restore, setAutoplay } from "./engineAutoplayKit";
-import { LEFT, evaluate, heard, hide, listed, pause, show, until } from "./engineSleep";
-import { TITLE, activeSessionOf, commandReply, isPlaying, pausePage, reported, startPlaying, unaskedPlay, withReports, type Reports } from "./engineNowPlayingKit";
+import { LOAD_MS, SETTLE_MS, origin, port } from "./engineAutoplayKit";
+import { evaluate, heard, hide, listed, pause, until } from "./engineSleep";
+import { TITLE, activeSessionOf, commandReply, isPlaying, pausePage, reported, startPlaying, withReports, type Reports } from "./engineNowPlayingKit";
 
 const ELEMENT_UNMUTES_AFTER_MS = 2000;
 const FOCUS_SETTLES_MS = 1000;
 const NOTHING_PLAYS_MS = 1500;
 const NOT_DONE = { ok: true, done: false };
 const BY_SCRIPT = { ok: true, done: true, byScript: true };
+const RECORDED = { ok: true, done: true, recorded: true };
 const RESUME_AT = 20;
-const SEEK_ONLY_AT = 5;
-const SEEK_SLACK = 1;
+const EARLIER_SEEK = 5;
+const STARTED_FROM_ZERO_BY = 3;
+const HELD_RELOAD_MS = 800;
+const REPOST_SETTLES_MS = 1500;
 
-type Answer = { ok?: boolean; done?: boolean; byScript?: boolean; refused?: string };
+type Answer = { ok?: boolean; done?: boolean; byScript?: boolean; recorded?: boolean; refused?: string };
 type Media = { paused?: boolean; time?: number; played?: number };
 
 const answerOf = async (key: string, action: string, seconds: number | null = null): Promise<Answer> => {
   const reply = await commandReply(key, action, seconds);
   if (reply.startsWith("refused")) return { refused: reply };
   const answer = JSON.parse(reply) as Answer;
-  return { ok: answer.ok, done: answer.done, ...(answer.byScript === undefined ? {} : { byScript: answer.byScript }) };
+  return { ok: answer.ok, done: answer.done, ...(answer.byScript === undefined ? {} : { byScript: answer.byScript }), ...(answer.recorded === undefined ? {} : { recorded: answer.recorded }) };
 };
-type BothMedia = { m?: Media; n?: Media };
-const bothOf = async (key: string) => ((await evaluate(key, 'const read = (e) => ({ paused: e.paused, time: e.currentTime, played: e.played.length }); post("result", JSON.stringify({ m: read(m), n: read(n) }));')) ?? {}) as BothMedia;
 const mediaOf = async (key: string) => ((await evaluate(key, 'post("result", JSON.stringify({ paused: m.paused, time: m.currentTime, played: m.played.length }));')) ?? {}) as Media;
 const setMuted = (key: string, muted: boolean) => hostCall("tab.call", { key, method: "setMuted", muted });
 const loadedAt = (key: string, marker: string) => until(`the page with ${marker} loads`, LOAD_MS, () => listed(key), (tab) => String(tab?.url).includes(marker) && tab?.title === TITLE && tab.loading === false && tab.discarded !== true);
@@ -34,12 +35,21 @@ async function neverPlayed(key: string, what: string) {
   expectEqual({ paused: media.paused, played: media.played }, { paused: true, played: 0 }, `${what}: the page's idle player never played (${JSON.stringify(media)})`);
 }
 
-async function discardedAndReloaded(key: string, windowId: string, method = "reloadToPlay") {
+async function discarded(key: string, windowId: string) {
   await hide(key, windowId);
   const outcome = (await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome;
   expectEqual(outcome, "discarded", "the hidden page is discarded");
+}
+
+async function discardedAndReloaded(key: string, windowId: string, method = "reloadToPlay") {
+  await discarded(key, windowId);
   await hostCall("tab.call", { key, method });
   await loadedAt(key, "wake");
+}
+
+async function dropsItsMedia(key: string, reports: Reports) {
+  await evaluate(key, 'm.pause(); m.removeAttribute("src"); m.load(); post("result", "true");');
+  await reported(reports, "the session ends once the page drops its media", (now) => now === null);
 }
 
 async function onlyNullAfter(reports: Reports, from: number, what: string) {
@@ -111,15 +121,15 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a sleeping tab woken to play (reloadToPlay) plays once through the wake allowance, and a second play with no session does nothing",
+    name: "engine now playing: a sleeping tab woken to play (reloadToPlay) plays from the start through the wake allowance, and a second play with no session does nothing",
     run: () =>
       withReports("np-wake", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
         await discardedAndReloaded(key, windowId);
-        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the first play after the wake");
-        await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (media) => media.paused === false);
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the first play after the wake, with no seek before it");
+        const media = await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false);
+        expectTrue((media.time ?? Infinity) < STARTED_FROM_ZERO_BY, `with no seek recorded the woken player starts at zero (${JSON.stringify(media)})`);
         await reported(reports, "the woken page reports playing", isPlaying);
-        await evaluate(key, 'm.pause(); m.removeAttribute("src"); m.load(); post("result", "true");');
-        await reported(reports, "the session ends once the page drops its media", (now) => now === null);
+        await dropsItsMedia(key, reports);
         expectEqual(await answerOf(key, "play"), NOT_DONE, "a second play, with no session and the allowance used");
       }),
   },
@@ -136,17 +146,33 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a sleeping tab woken to play resumes where it was: one seek, then the play, through the wake allowance, and a second seek does nothing",
+    name: "engine now playing: a sleeping tab woken to play resumes where it was: the seek is only recorded, the latest wins, and the play seeks and plays in one script run",
     run: () =>
       withReports("np-wake-seek", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
         await discardedAndReloaded(key, windowId);
-        expectEqual(await answerOf(key, "seekTo", RESUME_AT), BY_SCRIPT, "the resume seek after the wake");
-        expectEqual(await answerOf(key, "seekTo", 5), NOT_DONE, "a second seek before the play");
-        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play after the resume seek");
-        const media = await until("the woken page plays from where it was", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false && (now.time ?? 0) >= RESUME_AT);
+        expectEqual(await answerOf(key, "seekTo", EARLIER_SEEK), RECORDED, "a seek after the wake, which the host only records");
+        expectEqual(await answerOf(key, "seekTo", RESUME_AT), RECORDED, "a later seek, which replaces the recorded one");
+        await pause(NOTHING_PLAYS_MS);
+        const untouched = await mediaOf(key);
+        expectEqual({ paused: untouched.paused, time: untouched.time, played: untouched.played }, { paused: true, time: 0, played: 0 }, "the recorded seeks ran nothing in the page");
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play, the one script run that seeks and plays");
+        const media = await until("the woken page plays from the latest recorded seek", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false && (now.time ?? 0) >= RESUME_AT);
         await reported(reports, "the woken page reports playing", isPlaying);
+        await dropsItsMedia(key, reports);
         expectEqual(await answerOf(key, "seekTo", 1), NOT_DONE, "a seek after the play, with the allowance used and no session");
-        console.info(`[ardia windows] self-check note: a woken tab resumed at ${media.time} s after a seek to ${RESUME_AT} s`);
+        console.info(`[ardia windows] self-check note: a woken tab resumed at ${media.time} s after recorded seeks to ${EARLIER_SEEK} s and ${RESUME_AT} s`);
+      }),
+  },
+  {
+    name: "engine now playing: a toggle after a wake uses the allowance up, so a later play with no session does nothing",
+    run: () =>
+      withReports("np-wake-toggle", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
+        await discardedAndReloaded(key, windowId);
+        expectEqual(await answerOf(key, "toggle"), BY_SCRIPT, "a toggle after the wake plays through the allowance");
+        await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false);
+        await reported(reports, "the woken page reports playing", isPlaying);
+        await dropsItsMedia(key, reports);
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a play after the toggle, with the allowance used and no session");
       }),
   },
   {
@@ -160,16 +186,45 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a wake whose reload a navigation replaces before it commits leaves no allowance for the page that loads instead",
+    name: "engine now playing: a wake whose reload the host's own navigation replaces before it commits leaves no allowance for the page that loads instead",
     run: () =>
       withReports("np-wake-replaced", "nowplaying?plain&long&wake", TITLE, async (key, _reports, windowId) => {
-        await hide(key, windowId);
-        expectEqual((await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome, "discarded", "the hidden page is discarded");
+        await discarded(key, windowId);
         await hostCall("tab.call", { key, method: "reloadToPlay" });
         await hostCall("tab.call", { key, method: "loadUrl", url: `${origin}/nowplaying?plain&long&replaced` });
         await loadedAt(key, "replaced");
         expectEqual(await answerOf(key, "play"), NOT_DONE, "a play on the page that replaced the wake's reload");
         await neverPlayed(key, "on the page that replaced the wake's reload");
+      }),
+  },
+  {
+    name: "engine now playing: a second reloadToPlay while the first wake's reload is still waiting for its page keeps the engine up, and only the second reload's document can use the allowance",
+    run: () =>
+      withReports("np-wake-twice", `nowplaying?plain&long&wake&holdonce=w${Date.now()}`, TITLE, async (key, reports, windowId) => {
+        await discarded(key, windowId);
+        await hostCall("tab.call", { key, method: "reloadToPlay" });
+        await pause(HELD_RELOAD_MS);
+        const waiting = await listed(key);
+        await hostCall("tab.call", { key, method: "reloadToPlay" });
+        await loadedAt(key, "wake");
+        console.info(`[ardia windows] self-check note: while the first wake's reload waited for its held page the tab was ${JSON.stringify({ loading: waiting?.loading, discarded: waiting?.discarded })}`);
+        expectEqual((await listed(key))?.title, TITLE, "the engine still answers for the tab after the first reload was replaced");
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play on the second reload's document");
+        await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false);
+        await reported(reports, "the woken page reports playing", isPlaying);
+      }),
+  },
+  {
+    name: "engine now playing: a wake whose reload Chromium holds back behind its form resubmission warning arms nothing",
+    run: () =>
+      withReports("np-wake-repost", "nowplaying?plain&long&wake&repost", TITLE, async (key, _reports, windowId) => {
+        await loadedAt(key, "posted");
+        await discarded(key, windowId);
+        await hostCall("tab.call", { key, method: "reloadToPlay" });
+        await pause(REPOST_SETTLES_MS);
+        const held = await listed(key);
+        console.info(`[ardia windows] self-check note: after reloadToPlay of a discarded page that came from a form post, the tab is ${JSON.stringify({ loading: held?.loading, discarded: held?.discarded, url: held?.url })}`);
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a play after a reload that started no navigation");
       }),
   },
   {
@@ -182,41 +237,9 @@ const sessionChecks: Check[] = [
         await pausePage(key);
         expectEqual(await answerOf(key, "play"), { ok: true, done: true }, "a card play the live session takes, not the script");
         await until("the session's play plays the page", SETTLE_MS, () => mediaOf(key), (media) => media.paused === false);
-        await evaluate(key, 'm.pause(); m.removeAttribute("src"); m.load(); post("result", "true");');
-        await reported(reports, "the session ends once the page drops its media", (now) => now === null);
+        await dropsItsMedia(key, reports);
         expectEqual(await answerOf(key, "play"), NOT_DONE, "a later play with no session, the allowance already used by the session's play");
       }),
-  },
-  {
-    name: "engine now playing: the wake's seek and play reach the same element, even when another starts playing in between",
-    run: () =>
-      withReports("np-wake-same", "nowplaying?plain&long&second&wake", TITLE, async (key, _reports, windowId) => {
-        await discardedAndReloaded(key, windowId);
-        expectEqual(await answerOf(key, "seekTo", RESUME_AT), BY_SCRIPT, "the resume seek after the wake");
-        await until("the seek lands on the first player", SETTLE_MS, () => bothOf(key), (both) => Math.abs((both.m?.time ?? -1) - RESUME_AT) < SEEK_SLACK);
-        expectEqual(await evaluate(key, 'n.muted = true; n.play().then(() => "played", (error) => error.name).then((result) => post("result", JSON.stringify(result)));', true), "played", "the other player starts playing, muted, so a fresh choice would pick it");
-        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play after the resume seek");
-        const both = await until("the player the seek chose plays", SETTLE_MS, () => bothOf(key), (now) => now.m?.paused === false);
-        console.info(`[ardia windows] self-check note: after the wake's seek and play, the chosen player ${JSON.stringify(both.m)}, the other ${JSON.stringify(both.n)}`);
-        expectTrue((both.m?.time ?? 0) >= RESUME_AT && (both.n?.time ?? Infinity) < RESUME_AT, `the seek and the play both reached the first player and not the other (${JSON.stringify(both)})`);
-      }),
-  },
-  {
-    name: "engine now playing: the wake's seek alone does not make the page count as asked on a site that blocks autoplay",
-    run: async () => {
-      try {
-        await setAutoplay("block");
-        await withReports("np-wake-seek-unasked", "nowplaying?plain&long&wake", TITLE, async (key, _reports, windowId) => {
-          await discardedAndReloaded(key, windowId);
-          expectEqual(await answerOf(key, "seekTo", SEEK_ONLY_AT), BY_SCRIPT, "the resume seek after the wake");
-          await until("the seek lands", SETTLE_MS, () => mediaOf(key), (media) => Math.abs((media.time ?? -1) - SEEK_ONLY_AT) < SEEK_SLACK);
-          await show(key, windowId, LEFT);
-          expectEqual(await unaskedPlay(key), "NotAllowedError", "a play() the page makes itself after the wake's seek, on a site that blocks autoplay");
-        });
-      } finally {
-        await restore();
-      }
-    },
   },
 ];
 

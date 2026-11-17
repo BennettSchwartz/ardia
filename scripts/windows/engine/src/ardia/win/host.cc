@@ -563,6 +563,7 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
     TabEvents::Attach(existing);
   }
   if (existing) {
+    NowPlaying::CancelWake(existing);
     NowPlaying::Resend(existing);
     if (!PlaceTab(existing, parent)) {
       std::move(reply).Run(Error("the tab could not move to this window"));
@@ -889,8 +890,7 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
   } else if (method == "reload") {
     controller.Reload(content::ReloadType::NORMAL, true);
   } else if (method == "reloadToPlay") {
-    NowPlaying::WakingToPlay(contents);
-    controller.Reload(content::ReloadType::NORMAL, true);
+    NowPlaying::ReloadToPlay(contents);
   } else if (method == "forceReload") {
     controller.Reload(content::ReloadType::BYPASSING_CACHE, true);
   } else if (method == "stopLoading") {

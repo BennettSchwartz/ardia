@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page.h"
 #include "content/public/browser/reload_type.h"
@@ -64,20 +65,23 @@ void NowPlaying::End(content::WebContents* contents) {
   }
 }
 
-void NowPlaying::WakingToPlay(content::WebContents* contents) {
-  if (!contents || !contents->WasDiscarded()) {
-    return;
-  }
+void NowPlaying::ReloadToPlay(content::WebContents* contents) {
   Watch(contents);
   NowPlaying* now = FromWebContents(contents);
-  const TabState* tab = TabState::FromWebContents(contents);
+  const bool wake_pending = now->wake_stage_ == WakeStage::kLoading;
   now->EndWake();
-  if (!tab || tab->key().empty()) {
-    return;
+  const TabState* tab = TabState::FromWebContents(contents);
+  const bool wakes = (contents->WasDiscarded() || wake_pending) && tab &&
+                     !tab->key().empty();
+  if (wakes) {
+    now->wake_key_ = tab->key();
+    now->wake_reload_starting_ = true;
   }
-  now->wake_stage_ = WakeStage::kArmed;
-  now->wake_until_ = base::TimeTicks::Now() + kWakeToPlay;
-  now->wake_key_ = tab->key();
+  contents->GetController().Reload(content::ReloadType::NORMAL, true);
+  now->wake_reload_starting_ = false;
+  if (now->wake_stage_ != WakeStage::kLoading) {
+    now->EndWake();
+  }
 }
 
 void NowPlaying::CancelWake(content::WebContents* contents) {
@@ -92,10 +96,11 @@ void NowPlaying::EndWake() {
   wake_navigation_ = 0;
   wake_document_ = content::WeakDocumentPtr();
   wake_key_.clear();
+  wake_play_from_.reset();
 }
 
 bool NowPlaying::WakeUsable() const {
-  if (wake_stage_ != WakeStage::kLoaded && wake_stage_ != WakeStage::kSeeked) {
+  if (wake_stage_ != WakeStage::kLoaded) {
     return false;
   }
   content::WebContents* contents = web_contents();
@@ -108,10 +113,10 @@ bool NowPlaying::WakeUsable() const {
          base::TimeTicks::Now() < wake_until_;
 }
 
-MediaCommandResult NowPlaying::Command(content::WebContents* contents,
-                                       const MediaCommandArgs& command) {
+MediaCommandOutcome NowPlaying::Command(content::WebContents* contents,
+                                        const MediaCommandArgs& command) {
   NowPlaying* now = contents ? FromWebContents(contents) : nullptr;
-  return now ? now->RunCommand(command) : MediaCommandResult::kNotDone;
+  return now ? now->RunCommand(command) : MediaCommandOutcome();
 }
 
 void NowPlaying::DownloadArtwork(content::WebContents* contents,
@@ -254,18 +259,20 @@ void NowPlaying::PrimaryPageChanged(content::Page& page) {
 }
 
 void NowPlaying::DidStartNavigation(content::NavigationHandle* navigation) {
-  if (wake_stage_ == WakeStage::kNone || !navigation->IsInPrimaryMainFrame() ||
-      navigation->IsSameDocument()) {
+  if (!navigation->IsInPrimaryMainFrame() || navigation->IsSameDocument()) {
     return;
   }
-  if (wake_stage_ == WakeStage::kArmed &&
+  if (wake_reload_starting_ && wake_stage_ == WakeStage::kNone &&
       navigation->GetReloadType() != content::ReloadType::NONE &&
       !navigation->IsRendererInitiated()) {
     wake_stage_ = WakeStage::kLoading;
     wake_navigation_ = navigation->GetNavigationId();
+    wake_until_ = base::TimeTicks::Now() + kWakeToPlay;
     return;
   }
-  EndWake();
+  if (wake_stage_ != WakeStage::kNone) {
+    EndWake();
+  }
 }
 
 void NowPlaying::DidFinishNavigation(content::NavigationHandle* navigation) {
@@ -273,9 +280,12 @@ void NowPlaying::DidFinishNavigation(content::NavigationHandle* navigation) {
       navigation->GetNavigationId() != wake_navigation_) {
     return;
   }
+  if (!navigation->HasCommitted() || navigation->IsErrorPage()) {
+    EndWake();
+    return;
+  }
   content::RenderFrameHost* committed = navigation->GetRenderFrameHost();
-  if (!navigation->HasCommitted() || navigation->IsErrorPage() || !committed ||
-      !committed->IsInPrimaryMainFrame()) {
+  if (!committed || !committed->IsInPrimaryMainFrame()) {
     EndWake();
     return;
   }

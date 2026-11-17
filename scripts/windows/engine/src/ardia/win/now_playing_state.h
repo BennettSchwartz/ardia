@@ -40,7 +40,12 @@ enum class MediaCommandResult {
   kNotDone,
   kRefused,
   kPlayByScript,
-  kSeekByScript
+  kSeekRecorded
+};
+
+struct MediaCommandOutcome {
+  MediaCommandResult result = MediaCommandResult::kNotDone;
+  std::optional<double> play_from;
 };
 
 std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args);

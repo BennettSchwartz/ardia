@@ -39,10 +39,10 @@ class NowPlaying : public content::WebContentsObserver,
   static void Watch(content::WebContents* contents);
   static void Resend(content::WebContents* contents);
   static void End(content::WebContents* contents);
-  static void WakingToPlay(content::WebContents* contents);
+  static void ReloadToPlay(content::WebContents* contents);
   static void CancelWake(content::WebContents* contents);
-  static MediaCommandResult Command(content::WebContents* contents,
-                                    const MediaCommandArgs& command);
+  static MediaCommandOutcome Command(content::WebContents* contents,
+                                     const MediaCommandArgs& command);
   static void DownloadArtwork(content::WebContents* contents,
                               const base::DictValue& args,
                               Reply reply);
@@ -84,8 +84,8 @@ class NowPlaying : public content::WebContentsObserver,
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
   void EndWake();
   bool WakeUsable() const;
-  MediaCommandResult TakeWakeCommand(const MediaCommandArgs& command);
-  MediaCommandResult RunCommand(const MediaCommandArgs& command);
+  MediaCommandOutcome TakeWakeCommand(const MediaCommandArgs& command);
+  MediaCommandOutcome RunCommand(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
   std::optional<NowPlayingState> Current() const;
   void Update();
@@ -95,12 +95,14 @@ class NowPlaying : public content::WebContentsObserver,
   std::optional<NowPlayingState> sent_;
   bool force_report_ = false;
   base::TimeTicks sent_at_;
-  enum class WakeStage { kNone, kArmed, kLoading, kLoaded, kSeeked };
+  enum class WakeStage { kNone, kLoading, kLoaded };
   WakeStage wake_stage_ = WakeStage::kNone;
+  bool wake_reload_starting_ = false;
   base::TimeTicks wake_until_;
   int64_t wake_navigation_ = 0;
   content::WeakDocumentPtr wake_document_;
   std::string wake_key_;
+  std::optional<double> wake_play_from_;
   base::OneShotTimer coalesce_;
   base::OneShotTimer seek_report_;
   NowPlayingArtwork artwork_;
