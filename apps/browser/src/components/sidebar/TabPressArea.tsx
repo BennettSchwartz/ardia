@@ -8,6 +8,7 @@ import { middleClickTab } from "../../state/sidebar/clearTabs";
 import { dismissHover } from "../../state/sidebar/hover";
 import { openTabMenu } from "../../state/sidebar/menus";
 import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from "../../state/sidebar/heldTabPress";
+import { tabSwitchTag } from "../../state/tabs/tabReveal";
 import { ContextMenuArea, MouseArea } from "../ui";
 
 export function TabPressArea({
@@ -45,6 +46,8 @@ export function TabPressArea({
           onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
           onPressOut={(e) => pressOutTabPress(press.current, e)}
           style={pressStyle}
+          nativeID={tabSwitchTag(tab.id)}
+          collapsable={false}
           hitSlop={hitSlop}
           tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
         >

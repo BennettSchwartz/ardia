@@ -35,6 +35,7 @@ export const releaseTabTransfer = (tabId: string) => Tabs.releaseTransfer(tabId)
 export const claimLaunchTab = (tabId: string, url: string, profile: string) => Tabs.claimLaunchTab(tabId, url, profile);
 export const revealTab = (tabId: string) => Tabs.revealTab(tabId);
 export const dropTabReveals = (tabId: string) => Tabs.dropTabReveals(tabId);
+export const setNativeTabSwitch = (enabled: boolean) => Tabs.setNativeTabSwitch(enabled);
 export const revealOffered = (adoptId: string, overTabId: string) => Tabs.revealOffered(adoptId, overTabId);
 export const discardOffered = (adoptId: string) => Tabs.discardOffered(adoptId);
 export const routeLinkTabs = (urls: string[]) => call("tabs.routeLinkTabs", { urls });

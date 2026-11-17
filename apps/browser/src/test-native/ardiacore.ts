@@ -282,6 +282,7 @@ export const stagingRemovals = { ok: true };
 export const deletedProfileData: string[] = [];
 export const profileDataLeft = new Map<string, string[]>();
 export const revealedTabs: string[] = [];
+export const nativeTabSwitches: boolean[] = [];
 export const discardedOffers: string[] = [];
 export const installedCrx: { path: string; profile: string }[] = [];
 export const crxInstallFailure: { next: string | null } = { next: null };
@@ -365,6 +366,7 @@ const fakeModules = {
       claimLaunchTab: () => {},
       revealTab: (key: string) => void revealedTabs.push(key),
       dropTabReveals: (key: string) => void revealedTabs.push(`drop over ${key}`),
+      setNativeTabSwitch: (enabled: boolean) => void nativeTabSwitches.push(enabled),
       revealOffered: (adoptId: string, key: string) => void revealedTabs.push(`${adoptId} over ${key}`),
       discardOffered: async (adoptId: string) => (discardedOffers.push(adoptId), true),
     },

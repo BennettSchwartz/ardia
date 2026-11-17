@@ -20,6 +20,7 @@ export const engineModules: Record<string, Record<string, unknown>> = {
     claimLaunchTab: () => {},
     revealTab: () => {},
     dropTabReveals: () => {},
+    setNativeTabSwitch: () => {},
     revealOffered: () => {},
     discardOffered: (adoptId: string) => discardOffered(adoptId),
     followKeyboard: (tabId: string, windowId?: string) => followPage(tabId, windowId),

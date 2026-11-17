@@ -1,11 +1,46 @@
 #import "ArdiaWebViewInternal.h"
 #import "ArdiaTabParking.h"
+#import "ArdiaFieldTiming.h"
 
 using namespace ardia_web_view;
 
 namespace {
 
 constexpr CFTimeInterval kRevealBackstopSeconds = 5;
+constexpr NSEventModifierFlags kClickModifiers =
+    NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift | NSEventModifierFlagControl;
+
+BOOL gNativeTabSwitch = NO;
+
+NSString *const kTabSwitchTag = @"tab-switch:";
+
+BOOL IsRowControl(NSView *view) {
+  if ([view isKindOfClass:NSControl.class] || [view isKindOfClass:NSText.class]) return YES;
+  NSAccessibilityRole role = view.accessibilityRole;
+  return [role isEqualToString:NSAccessibilityButtonRole] || [role isEqualToString:NSAccessibilityTextFieldRole] ||
+         [role isEqualToString:NSAccessibilityTextAreaRole] || [role isEqualToString:NSAccessibilityCheckBoxRole] ||
+         [role isEqualToString:NSAccessibilityPopUpButtonRole] || [role isEqualToString:NSAccessibilityMenuButtonRole];
+}
+
+NSString *TabSwitchKeyOf(NSView *view) {
+  if (![view respondsToSelector:NSSelectorFromString(@"nativeId")]) return nil;
+  id tag = [view valueForKey:@"nativeId"];
+  if (![tag isKindOfClass:NSString.class] || ![tag hasPrefix:kTabSwitchTag]) return nil;
+  NSString *key = [tag substringFromIndex:kTabSwitchTag.length];
+  return key.length ? key : nil;
+}
+
+NSString *PressedTabKey(NSEvent *event) {
+  NSView *content = event.window.contentView;
+  NSView *outer = content.superview;
+  if (!content || !outer) return nil;
+  NSView *hit = [content hitTest:[outer convertPoint:event.locationInWindow fromView:nil]];
+  for (NSView *view = hit; view && view != content; view = view.superview) {
+    if (NSString *key = TabSwitchKeyOf(view)) return key;
+    if (IsRowControl(view)) return nil;
+  }
+  return nil;
+}
 
 void OnMain(void (^block)(void)) {
   if (NSThread.isMainThread) block();
@@ -47,6 +82,25 @@ static ArdiaWebView *ViewForKey(NSString *key) {
     [ArdiaWebView dropRevealsInWindow:view.window except:view];
     [view revealAhead];
   });
+}
+
++ (void)setNativeTabSwitch:(BOOL)enabled {
+  gNativeTabSwitch = enabled;
+}
+
++ (BOOL)revealForPress:(NSEvent *)event {
+  if (!gNativeTabSwitch || event.type != NSEventTypeLeftMouseDown || event.clickCount > 1 || (event.modifierFlags & kClickModifiers)) return NO;
+  NSWindow *window = event.window;
+  NSString *key = window ? PressedTabKey(event) : nil;
+  ArdiaWebView *view = key ? ViewForKey(key) : nil;
+  if (!view || view.window != window || !view.revealsFirst) return NO;
+  [ArdiaWebView dropRevealsInWindow:window except:view];
+  [view revealAhead];
+  if (!view->_reveal.active) return NO;
+  view->_reveal.native = YES;
+  ArdiaFieldMarkNow(key, @"nativeReveal");
+  ArdiaFieldMarkAtCommit(key, @"view");
+  return YES;
 }
 
 + (void)dropTabReveals:(NSString *)transferKey {
@@ -127,6 +181,15 @@ static ArdiaWebView *ViewForKey(NSString *key) {
   if (fronted.superview == self) [fronted removeFromSuperview];
 }
 
+- (BOOL)revealsFirst {
+  if (!_tab || _tab.closed || _tab.discarded || _reports.crashed || _life.closed() || _visible || _reveal.active || _warm || _standalone) return NO;
+  NSString *url = _tab.url;
+  if (![url hasPrefix:@"https:"] && ![url hasPrefix:@"http:"] && ![url hasPrefix:@"file:"]) return NO;
+  for (ArdiaWebView *other in LiveViews().allObjects)
+    if (other != self && other.window == self.window && other->_visible) return other->_tab.profile == _tab.profile;
+  return NO;
+}
+
 - (void)revealAhead {
   NSWindow *window = self.window;
   NSView *page = _tab.view;
@@ -164,6 +227,7 @@ static ArdiaWebView *ViewForKey(NSString *key) {
 - (void)endReveal {
   if (!_reveal.active) return;
   _reveal.active = NO;
+  _reveal.native = NO;
   _reveal.generation++;
   if (NSView *pane = _reveal.loweredPane) pane.layer.zPosition = _reveal.loweredPaneZ;
   _reveal.loweredPane = nil;
@@ -171,6 +235,7 @@ static ArdiaWebView *ViewForKey(NSString *key) {
 
 - (void)dropReveal {
   if (!_reveal.active) return;
+  if (_reveal.native) ArdiaFieldMarkNow(_transferKey, @"nativeRevealDropped");
   [self endReveal];
   [self schedulePainting];
 }

@@ -72,6 +72,7 @@ struct ArdiaReveal {
   CGFloat loweredPaneZ{};
   __weak NSView *frontedPage;
   NSUInteger frontGeneration{};
+  BOOL native{};
 };
 
 struct ArdiaPageReports {
@@ -261,6 +262,7 @@ typedef NS_ENUM(NSInteger, ArdiaTransfer) {
 - (BOOL)onlyShownInWindow;
 - (void)frontPage:(NSView *)page profile:(ArdiaCoreProfile *)profile;
 - (void)dropFront;
+- (BOOL)revealsFirst;
 - (void)revealAhead;
 - (void)endReveal;
 - (void)dropReveal;

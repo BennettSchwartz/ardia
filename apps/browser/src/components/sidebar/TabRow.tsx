@@ -125,6 +125,8 @@ export const TabRow = memo(function TabRow({
                   onPressIn={pinActionMotion.onPressIn}
                   onPressOut={pinActionMotion.onPressOut}
                   tooltip={withShortcut("Back to Pinned URL", backToPinHint)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Pinned URL"
                 >
                   <Animated.View pointerEvents="none" style={pinActionScale}>
                     {resetting ? (
@@ -197,6 +199,8 @@ function StatusIconButton({ icon, color, tooltip, onPress }: { icon: string; col
       onPressOut={pressMotion.onPressOut}
       style={{ marginLeft: space.s }}
       tooltip={tooltip}
+      accessibilityRole="button"
+      accessibilityLabel={tooltip}
     >
       <Animated.View style={[glyphFrame, scaleStyle]}>
         <Symbol name={icon} size={ROW_GLYPH.symbol} color={color} style={glyphFrame} />

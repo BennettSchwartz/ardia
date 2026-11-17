@@ -11,6 +11,7 @@ export type ArdiaCoreNativeModules = {
     claimLaunchTab(tabId: string, url: string, profile: string): void;
     revealTab(tabId: string): void;
     dropTabReveals(tabId: string): void;
+    setNativeTabSwitch(enabled: boolean): void;
     revealOffered(adoptId: string, overTabId: string): void;
     discardOffered(adoptId: string): Promise<boolean>;
   };
