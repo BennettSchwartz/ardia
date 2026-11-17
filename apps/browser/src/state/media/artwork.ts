@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { webviews } from "../../platform/webviews";
 import { useBrowser } from "../browser/store";
+import { noteArtworkAnswer } from "../telemetry/mediaCardCounts";
 
 const MAX_PIXELS = 256;
 const MAX_ENTRIES = 24;
@@ -23,6 +24,7 @@ function load(tabId: string, url: string) {
     .catch(() => null)
     .then((image) => {
       inflight.delete(key);
+      noteArtworkAnswer(image?.uri);
       useArtworks.setState((s) => {
         const entries = { ...s.entries, [key]: { uri: image?.uri ?? null, at: Date.now() } };
         const keys = Object.keys(entries).sort((a, b) => entries[a]!.at - entries[b]!.at);

@@ -1,4 +1,6 @@
+import type { AppNative } from "@ardia/shell";
 import { hostCall, onEngineTopic } from "../engine/host";
+import { requireNativeModule } from "../modules";
 import { expectEqual, expectTrue } from "./check";
 import { SETTLE_MS, withMedia } from "./engineAutoplayKit";
 import { evaluate, LEFT, show, until } from "./engineSleep";
@@ -74,6 +76,15 @@ export async function withReports(name: string, path: string, title: string, run
     reports.stop();
   }
 }
+
+export const testPort = (name: string) => {
+  const value = requireNativeModule<Pick<AppNative, "launchConfig">>("ArdiaApp").launchConfig().test?.[name];
+  return typeof value === "string" && /^\d+$/.test(value) ? value : null;
+};
+
+export type ActiveSession = { any?: boolean; active?: boolean };
+
+export const activeSessionOf = async (key: string) => ((await hostCall<ActiveSession>("tab.call", { key, method: "activeSessionForTest" })) ?? {}) as ActiveSession;
 
 export async function downloaded(key: string, url: string): Promise<Image | null> {
   return (await hostCall<Image>("tab.call", { key, method: "downloadImage", url, maxPixels: ART_PIXELS })) ?? null;

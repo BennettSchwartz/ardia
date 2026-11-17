@@ -14,9 +14,11 @@
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/media_session_service.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/media_session/public/cpp/media_session_service.h"
 #include "services/media_session/public/mojom/audio_focus.mojom.h"
+#include "services/media_session/public/mojom/media_controller.mojom.h"
 
 namespace content {
 CONTENT_EXPORT bool ArdiaWinPageHandlesMediaSessionAction(
@@ -87,6 +89,65 @@ void AnswerFocusRequests(
   std::move(reply).Run(std::move(result));
 }
 
+class ActiveSessionProbe : public media_session::mojom::MediaControllerObserver {
+ public:
+  static void Ask(const base::UnguessableToken& request_id, Reply reply) {
+    auto* probe = new ActiveSessionProbe(request_id, std::move(reply));
+    content::GetMediaSessionService().BindMediaControllerManager(
+        probe->manager_.BindNewPipeAndPassReceiver());
+    probe->manager_->CreateActiveMediaController(
+        probe->controller_.BindNewPipeAndPassReceiver());
+    probe->controller_->AddObserver(probe->receiver_.BindNewPipeAndPassRemote());
+    probe->receiver_.set_disconnect_handler(base::BindOnce(
+        &ActiveSessionProbe::Answer, base::Unretained(probe), std::nullopt));
+  }
+
+  void MediaSessionInfoChanged(
+      media_session::mojom::MediaSessionInfoPtr info) override {}
+  void MediaSessionMetadataChanged(
+      const std::optional<media_session::MediaMetadata>& metadata) override {}
+  void MediaSessionActionsChanged(
+      const std::vector<media_session::mojom::MediaSessionAction>& actions)
+      override {}
+  void MediaSessionPositionChanged(
+      const std::optional<media_session::MediaPosition>& position) override {}
+  void MediaSessionChanged(
+      const std::optional<base::UnguessableToken>& request_id) override {
+    Answer(request_id);
+  }
+
+ private:
+  ActiveSessionProbe(const base::UnguessableToken& request_id, Reply reply)
+      : request_id_(request_id), reply_(std::move(reply)) {}
+
+  void Answer(std::optional<base::UnguessableToken> active) {
+    base::DictValue result;
+    result.Set("ok", true);
+    result.Set("any", active.has_value());
+    result.Set("active", active.has_value() && *active == request_id_);
+    std::move(reply_).Run(std::move(result));
+    delete this;
+  }
+
+  const base::UnguessableToken request_id_;
+  Reply reply_;
+  mojo::Remote<media_session::mojom::MediaControllerManager> manager_;
+  mojo::Remote<media_session::mojom::MediaController> controller_;
+  mojo::Receiver<media_session::mojom::MediaControllerObserver> receiver_{this};
+};
+
+}
+
+void NowPlaying::ActiveSessionForTest(content::WebContents* contents,
+                                      const base::DictValue& args,
+                                      Reply reply) {
+  if (!ardiacore::TestInstance()) {
+    std::move(reply).Run(Error("activeSessionForTest is for test instances"));
+    return;
+  }
+  ActiveSessionProbe::Ask(
+      content::MediaSession::GetRequestIdFromWebContents(contents),
+      std::move(reply));
 }
 
 void NowPlaying::AudioFocusForTest(content::WebContents* contents,
@@ -122,20 +183,24 @@ bool NowPlaying::PageHandles(Action action) const {
          content::ArdiaWinPageHandlesMediaSessionAction(web_contents(), action);
 }
 
+bool NowPlaying::TakeWakePlay(const MediaCommandArgs& command) {
+  const bool allowed = command.action == MediaAction::kPlay &&
+                       !wake_load_pending_ &&
+                       base::TimeTicks::Now() < wake_play_until_;
+  if (allowed) {
+    wake_play_until_ = base::TimeTicks();
+  }
+  return allowed;
+}
+
 MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
-  content::MediaSession* session =
-      web_contents() ? content::MediaSession::GetIfExists(web_contents())
-                     : nullptr;
-  media_session::mojom::MediaSessionInfoPtr info;
-  if (session) {
-    info = session->GetMediaSessionInfoSync();
+  content::MediaSession* session = LiveSession();
+  if (!session) {
+    return TakeWakePlay(command) ? MediaCommandResult::kPlayByScript
+                                 : MediaCommandResult::kNotDone;
   }
-  if (!info ||
-      info->state ==
-          media_session::mojom::MediaSessionInfo::SessionState::kInactive) {
-    return reported_on_page_ ? MediaCommandResult::kNothingDone
-                             : MediaCommandResult::kNoSession;
-  }
+  media_session::mojom::MediaSessionInfoPtr info =
+      session->GetMediaSessionInfoSync();
   const bool playing =
       info->playback_state == media_session::mojom::MediaPlaybackState::kPlaying;
   switch (command.action) {

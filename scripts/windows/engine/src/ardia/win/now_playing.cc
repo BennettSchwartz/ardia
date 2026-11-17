@@ -7,20 +7,26 @@
 #include "ardia/win/tab_state.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
+#include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/page.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+
+namespace content {
+CONTENT_EXPORT bool ArdiaWinMediaSessionOnPrimaryPage(WebContents* contents);
+}
 
 namespace ardia_win {
 
 namespace {
 
 using Action = media_session::mojom::MediaSessionAction;
+using SessionState = media_session::mojom::MediaSessionInfo::SessionState;
 
 constexpr size_t kActionLimit = 32;
 constexpr int kMostImagePixels = 512;
 constexpr base::TimeDelta kReportGap = base::Milliseconds(100);
+constexpr base::TimeDelta kWakeToPlay = base::Seconds(20);
 
 }
 
@@ -52,10 +58,20 @@ void NowPlaying::End(content::WebContents* contents) {
   }
 }
 
+void NowPlaying::WakingToPlay(content::WebContents* contents) {
+  if (!contents || !contents->WasDiscarded()) {
+    return;
+  }
+  Watch(contents);
+  NowPlaying* now = FromWebContents(contents);
+  now->wake_play_until_ = base::TimeTicks::Now() + kWakeToPlay;
+  now->wake_load_pending_ = true;
+}
+
 MediaCommandResult NowPlaying::Command(content::WebContents* contents,
                                        const MediaCommandArgs& command) {
   NowPlaying* now = contents ? FromWebContents(contents) : nullptr;
-  return now ? now->RunCommand(command) : MediaCommandResult::kNoSession;
+  return now ? now->RunCommand(command) : MediaCommandResult::kNotDone;
 }
 
 void NowPlaying::DownloadArtwork(content::WebContents* contents,
@@ -82,39 +98,56 @@ void NowPlaying::ObserveSession(content::MediaSession* session) {
   session->AddObserver(receiver_.BindNewPipeAndPassRemote());
 }
 
-bool NowPlaying::SessionLive() const {
-  return session_.active && !awaiting_page_player_;
+content::MediaSession* NowPlaying::LiveSession() const {
+  content::WebContents* contents = web_contents();
+  content::MediaSession* session =
+      contents ? content::MediaSession::GetIfExists(contents) : nullptr;
+  if (!session || !content::ArdiaWinMediaSessionOnPrimaryPage(contents)) {
+    return nullptr;
+  }
+  media_session::mojom::MediaSessionInfoPtr info =
+      session->GetMediaSessionInfoSync();
+  if (!info || info->state == SessionState::kInactive ||
+      !info->is_controllable) {
+    return nullptr;
+  }
+  return session;
 }
 
-bool NowPlaying::OnPrimaryPage(const content::MediaPlayerId& id) const {
-  content::RenderFrameHost* frame =
-      content::RenderFrameHost::FromID(id.frame_routing_id);
-  return frame && frame->GetPage().IsPrimary();
-}
-
-std::optional<NowPlayingState> NowPlaying::FromSession() const {
+std::optional<NowPlayingState> NowPlaying::Current() const {
+  content::MediaSession* session = LiveSession();
+  if (!session) {
+    return std::nullopt;
+  }
+  media_session::mojom::MediaSessionInfoPtr info =
+      session->GetMediaSessionInfoSync();
+  const media_session::MediaMetadata& metadata =
+      session->GetMediaSessionMetadata();
   NowPlayingState state;
   state.timestamp = NowMs();
-  state.title = BoundedText(session_.title);
-  state.artist = BoundedText(session_.artist);
-  state.album = BoundedText(session_.album);
-  state.artwork = LargestArtwork(artwork_.images());
-  state.playback_state = session_.playing ? "playing" : "paused";
-  if (session_.position) {
-    const double position =
-        session_.position->GetPositionAtTime(base::TimeTicks::Now())
-            .InSecondsF();
-    state.position = std::isfinite(position) ? std::max(0.0, position) : 0;
-    const base::TimeDelta duration = session_.position->duration();
+  state.title = BoundedText(metadata.title);
+  state.artist = BoundedText(metadata.artist);
+  state.album = BoundedText(metadata.album);
+  state.artwork = LargestArtwork(artwork_.Declared());
+  state.playback_state =
+      info->playback_state == media_session::mojom::MediaPlaybackState::kPlaying
+          ? "playing"
+          : "paused";
+  if (const std::optional<media_session::MediaPosition> position =
+          session->GetMediaSessionPosition()) {
+    const double at =
+        position->GetPositionAtTime(base::TimeTicks::Now()).InSecondsF();
+    state.position = std::isfinite(at) ? std::max(0.0, at) : 0;
+    const base::TimeDelta duration = position->duration();
     if (!duration.is_max() && duration.is_positive()) {
       state.duration = duration.InSecondsF();
       state.position = std::min(state.position, *state.duration);
     }
-    const double rate = session_.position->playback_rate();
+    const double rate = position->playback_rate();
     state.playback_rate = std::isfinite(rate) && rate != 0 ? rate : 1;
   }
-  state.has_video = session_.has_video;
-  for (const Action action : actions_) {
+  state.has_video = SessionHasVideo(*info);
+  for (const Action action : session->GetMediaSessionActionsSync()) {
     if (state.actions.size() >= kActionLimit) {
       break;
     }
@@ -123,12 +156,8 @@ std::optional<NowPlayingState> NowPlaying::FromSession() const {
       state.actions.emplace_back(*name);
     }
   }
-  state.controllable = session_.controllable;
+  state.controllable = info->is_controllable;
   return state;
-}
-
-std::optional<NowPlayingState> NowPlaying::Current() const {
-  return SessionLive() ? FromSession() : std::nullopt;
 }
 
 void NowPlaying::Update() {
@@ -159,9 +188,6 @@ void NowPlaying::Send(const std::optional<NowPlayingState>& state) {
   force_report_ = false;
   sent_ = state;
   sent_at_ = base::TimeTicks::Now();
-  if (state) {
-    reported_on_page_ = true;
-  }
   TabState* tab =
       web_contents() ? TabState::FromWebContents(web_contents()) : nullptr;
   if (!tab) {
@@ -179,18 +205,12 @@ void NowPlaying::MediaSessionCreated(content::MediaSession* session) {
 }
 
 void NowPlaying::PrimaryPageChanged(content::Page& page) {
-  reported_on_page_ = false;
   artwork_.PageChanged();
-  awaiting_page_player_ = true;
-  Update();
-}
-
-void NowPlaying::MediaStartedPlaying(const MediaPlayerInfo& info,
-                                     const content::MediaPlayerId& id) {
-  if (!info.has_audio || !awaiting_page_player_ || !OnPrimaryPage(id)) {
-    return;
+  if (wake_load_pending_) {
+    wake_load_pending_ = false;
+  } else {
+    wake_play_until_ = base::TimeTicks();
   }
-  awaiting_page_player_ = false;
   Update();
 }
 
@@ -203,46 +223,27 @@ void NowPlaying::WebContentsDestroyed() {
 
 void NowPlaying::MediaSessionInfoChanged(
     media_session::mojom::MediaSessionInfoPtr info) {
-  if (!info) {
-    return;
-  }
-  session_.active = info->state !=
-                    media_session::mojom::MediaSessionInfo::SessionState::kInactive;
-  session_.playing =
-      info->playback_state == media_session::mojom::MediaPlaybackState::kPlaying;
-  session_.controllable = info->is_controllable;
-  session_.has_video = SessionHasVideo(*info);
   Update();
 }
 
 void NowPlaying::MediaSessionMetadataChanged(
     const std::optional<media_session::MediaMetadata>& metadata) {
-  session_.title = metadata ? metadata->title : std::u16string();
-  session_.artist = metadata ? metadata->artist : std::u16string();
-  session_.album = metadata ? metadata->album : std::u16string();
   Update();
 }
 
 void NowPlaying::MediaSessionActionsChanged(
     const std::vector<media_session::mojom::MediaSessionAction>& actions) {
-  actions_ = actions;
   Update();
 }
 
 void NowPlaying::MediaSessionImagesChanged(
     const base::flat_map<media_session::mojom::MediaSessionImageType,
                          std::vector<media_session::MediaImage>>& images) {
-  const auto artwork =
-      images.find(media_session::mojom::MediaSessionImageType::kArtwork);
-  artwork_.ImagesChanged(artwork != images.end()
-                             ? artwork->second
-                             : std::vector<media_session::MediaImage>());
   Update();
 }
 
 void NowPlaying::MediaSessionPositionChanged(
     const std::optional<media_session::MediaPosition>& position) {
-  session_.position = position;
   Update();
 }
 

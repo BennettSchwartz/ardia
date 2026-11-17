@@ -23,3 +23,5 @@ chromium chromium-win-hosted-theme-change.patch
 chromium chromium-win-media-session-asks.patch
 chromium chromium-win-media-session-page-actions.patch
 chromium chromium-win-media-session-keeps-players.patch
+chromium chromium-win-media-session-muted-ignored.patch
+chromium chromium-win-media-session-page-state.patch

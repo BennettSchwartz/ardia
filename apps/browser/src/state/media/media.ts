@@ -11,7 +11,7 @@ import { peekTabId } from "../peek/peek";
 import { splitOf, splitTabIdsOf } from "../splits/splits";
 import { hostOf } from "@ardia/core";
 import { capture } from "../telemetry/client";
-import { noteMediaPositionReport, noteNowPlayingLoopRestart } from "../telemetry/mediaCardCounts";
+import { noteMediaCommandAnswer, noteMediaPositionReport, noteNowPlayingLoopRestart } from "../telemetry/mediaCardCounts";
 import { isSleeping } from "../tabs/sleepingTabs";
 
 export type Session = NowPlaying & {
@@ -125,7 +125,7 @@ export function formatTime(seconds: number): string {
 }
 
 export function mediaCommand(tabId: string, action: MediaCommand, seconds?: number) {
-  if (!isSleeping(tabId)) return void webviews.get(tabId)?.mediaCommand(action, seconds);
+  if (!isSleeping(tabId)) return void webviews.get(tabId)?.mediaCommand(action, seconds).then(noteMediaCommandAnswer);
   if (action === "play" || action === "toggle") wakeToPlay(tabId);
 }
 
@@ -150,7 +150,7 @@ function wakeToPlay(tabId: string) {
   };
   const resume = (after: NowPlaying | null) => {
     finish();
-    for (const [action, seconds] of resumeCommands(before, after)) void webviews.get(tabId)?.mediaCommand(action, seconds);
+    for (const [action, seconds] of resumeCommands(before, after)) void webviews.get(tabId)?.mediaCommand(action, seconds).then(noteMediaCommandAnswer);
   };
   const deadline = setTimeout(finish, WAKE_TO_PLAY_MS);
   unsubscribe.push(

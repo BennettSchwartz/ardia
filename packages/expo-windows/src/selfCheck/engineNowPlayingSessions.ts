@@ -1,0 +1,131 @@
+import { hostCall } from "../engine/host";
+import { expectEqual, expectTrue, type Check } from "./check";
+import { LOAD_MS, SETTLE_MS, origin, port } from "./engineAutoplayKit";
+import { evaluate, hide, listed, pause, until } from "./engineSleep";
+import { TITLE, activeSessionOf, commandReply, isPlaying, reported, startPlaying, withReports, type Reports } from "./engineNowPlayingKit";
+
+const ELEMENT_UNMUTES_AFTER_MS = 2000;
+const FOCUS_SETTLES_MS = 1000;
+const NOTHING_PLAYS_MS = 1500;
+const NOT_DONE = { ok: true, done: false };
+
+type Answer = { ok?: boolean; done?: boolean; byScript?: boolean; refused?: string };
+type Media = { paused?: boolean; time?: number; played?: number };
+
+const answerOf = async (key: string, action: string): Promise<Answer> => {
+  const reply = await commandReply(key, action);
+  return reply.startsWith("refused") ? { refused: reply } : (JSON.parse(reply) as Answer);
+};
+const mediaOf = async (key: string) => ((await evaluate(key, 'post("result", JSON.stringify({ paused: m.paused, time: m.currentTime, played: m.played.length }));')) ?? {}) as Media;
+const setMuted = (key: string, muted: boolean) => hostCall("tab.call", { key, method: "setMuted", muted });
+const loadedAt = (key: string, marker: string) => until(`the page with ${marker} loads`, LOAD_MS, () => listed(key), (tab) => String(tab?.url).includes(marker) && tab?.title === TITLE && tab.loading === false && tab.discarded !== true);
+
+async function neverPlayed(key: string, what: string) {
+  await pause(NOTHING_PLAYS_MS);
+  const media = await mediaOf(key);
+  expectEqual({ paused: media.paused, played: media.played }, { paused: true, played: 0 }, `${what}: the page's idle player never played (${JSON.stringify(media)})`);
+}
+
+async function discardedAndReloaded(key: string, windowId: string) {
+  await hide(key, windowId);
+  const outcome = (await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome;
+  expectEqual(outcome, "discarded", "the hidden page is discarded");
+  await hostCall("tab.call", { key, method: "reload" });
+  await loadedAt(key, "wake");
+}
+
+async function onlyNullAfter(reports: Reports, from: number, what: string) {
+  await pause(NOTHING_PLAYS_MS);
+  const after = reports.reports.slice(from);
+  expectEqual(after.filter((state) => state !== null).length, 0, `${what}: nothing of the page navigated away from is reported (${JSON.stringify(after.map((state) => state?.playbackState ?? null))})`);
+}
+
+const sessionChecks: Check[] = [
+  {
+    name: "engine now playing: a muted tab never takes the hardware media keys or the system media controls from a tab that is heard, even when focused, and is eligible again once unmuted",
+    run: () =>
+      withReports("np-keys-heard", "nowplaying?plain&long", TITLE, (heard, heardReports) =>
+        withReports("np-keys-muted", "nowplaying?plain&long", TITLE, async (muted, mutedReports) => {
+          await startPlaying(heard);
+          await reported(heardReports, "the heard tab reports playing", isPlaying);
+          await startPlaying(muted);
+          await reported(mutedReports, "the second tab reports playing", isPlaying);
+          const bothHeard = { heard: await activeSessionOf(heard), muted: await activeSessionOf(muted) };
+          await setMuted(muted, true);
+          await until("the heard tab's session is the active one once the other tab is muted", SETTLE_MS, () => activeSessionOf(heard), (state) => state.active === true);
+          expectEqual((await activeSessionOf(muted)).active, false, "the muted tab's session is not the active one");
+          const mutedCard = await mutedReports.latest();
+          expectTrue(isPlaying(mutedCard) && mutedCard?.controllable === true, `the muted tab's card still reports its session, playing and controllable (${JSON.stringify(mutedCard)})`);
+          const mayMove = (await hostCall<{ keyboardMayMove?: unknown }>("host.info")).keyboardMayMove === true;
+          await hostCall("tab.call", { key: muted, method: "focus", ...(mayMove ? {} : { background: true }) });
+          await pause(FOCUS_SETTLES_MS);
+          const focused = await hostCall<{ keyboardPage?: unknown }>("host.info");
+          expectEqual({ heard: (await activeSessionOf(heard)).active, muted: (await activeSessionOf(muted)).active }, { heard: true, muted: false }, "after the muted tab's page is focused, the heard tab's session is still the active one");
+          await setMuted(muted, false);
+          await until("the unmuted tab, on top of the focus stack, is the active session again", SETTLE_MS, () => activeSessionOf(muted), (state) => state.active === true);
+          console.info(`[ardia windows] self-check note: active session with both heard ${JSON.stringify(bothHeard)}; the focus call ${mayMove ? "could" : "could not"} move the keyboard, keyboard page after it ${JSON.stringify(focused.keyboardPage ?? null)}; once unmuted, the unmuted tab is the active session`);
+        }),
+      ),
+  },
+  {
+    name: "engine now playing: a page that starts its track muted on the element and unmutes it while playing gets its card",
+    run: () =>
+      withReports("np-element-muted", "nowplaying?plain&long", TITLE, async (key, reports) => {
+        const started = await evaluate(key, 'm.muted = true; m.play().then(() => "played", (error) => error.name).then((result) => post("result", JSON.stringify(result)));', true);
+        expectEqual(started, "played", "the page plays its track muted on the element");
+        await pause(ELEMENT_UNMUTES_AFTER_MS);
+        const whileMuted = reports.reports.filter((state) => state?.controllable === true).length;
+        await evaluate(key, 'm.muted = false; post("result", "true");');
+        const state = await reported(reports, "the unmuted track is reported playing and controllable", (now) => isPlaying(now) && now?.controllable === true);
+        console.info(`[ardia windows] self-check note: ${whileMuted} controllable reports while the element was muted; after unmuting ${JSON.stringify({ playbackState: state?.playbackState, duration: state?.duration })}`);
+      }),
+  },
+  {
+    name: "engine now playing: a card play sent right after navigating to a page with an idle player and no session does nothing, no script plays the player, and the page navigated away from is not reported",
+    run: () =>
+      withReports("np-nav-play", "nowplaying?long", TITLE, async (key, reports) => {
+        await startPlaying(key);
+        await reported(reports, "the page reports playing", isPlaying);
+        await hostCall("tab.call", { key, method: "loadUrl", url: `${origin}/nowplaying?plain&long&next` });
+        await until("the next page commits", LOAD_MS, () => listed(key), (tab) => String(tab?.url).includes("next"));
+        const early = await answerOf(key, "play");
+        await loadedAt(key, "next");
+        const from = reports.reports.length;
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a card play once the next page loaded, with no session there");
+        await neverPlayed(key, "after the card's plays");
+        await onlyNullAfter(reports, from, "after the next page loaded");
+        await hostCall("tab.call", { key, method: "reload" });
+        await loadedAt(key, "next");
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a card play after an ordinary reload of a tab that was never asleep");
+        await neverPlayed(key, "after the reload");
+        console.info(`[ardia windows] self-check note: a card play just after the next page committed answered ${JSON.stringify(early)}`);
+      }),
+  },
+  {
+    name: "engine now playing: a sleeping tab woken by a reload plays once through the wake allowance, and a second play with no session does nothing",
+    run: () =>
+      withReports("np-wake", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
+        await discardedAndReloaded(key, windowId);
+        expectEqual(await answerOf(key, "play"), { ok: true, done: true, byScript: true }, "the first play after the wake");
+        await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (media) => media.paused === false);
+        await reported(reports, "the woken page reports playing", isPlaying);
+        await evaluate(key, 'm.pause(); m.removeAttribute("src"); m.load(); post("result", "true");');
+        await reported(reports, "the session ends once the page drops its media", (now) => now === null);
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a second play, with no session and the allowance used");
+      }),
+  },
+  {
+    name: "engine now playing: a sleeping tab woken by a reload that then navigates loses the wake allowance",
+    run: () =>
+      withReports("np-wake-moved", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
+        await discardedAndReloaded(key, windowId);
+        await hostCall("tab.call", { key, method: "loadUrl", url: `${origin}/nowplaying?plain&long&moved` });
+        await loadedAt(key, "moved");
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a play after the woken page navigated");
+        await neverPlayed(key, "after the woken page navigated");
+        expectEqual((await reports.latest()) ?? null, null, "no session is reported for the moved page");
+      }),
+  },
+];
+
+export const checks: Check[] = port ? sessionChecks : [];

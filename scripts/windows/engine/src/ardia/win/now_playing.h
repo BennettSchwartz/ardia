@@ -12,7 +12,6 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
-#include "content/public/browser/media_player_id.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -20,6 +19,10 @@
 #include "services/media_session/public/cpp/media_metadata.h"
 #include "services/media_session/public/cpp/media_position.h"
 #include "services/media_session/public/mojom/media_session.mojom.h"
+
+namespace content {
+class MediaSession;
+}
 
 namespace ardia_win {
 
@@ -34,6 +37,7 @@ class NowPlaying : public content::WebContentsObserver,
   static void Watch(content::WebContents* contents);
   static void Resend(content::WebContents* contents);
   static void End(content::WebContents* contents);
+  static void WakingToPlay(content::WebContents* contents);
   static MediaCommandResult Command(content::WebContents* contents,
                                     const MediaCommandArgs& command);
   static void DownloadArtwork(content::WebContents* contents,
@@ -42,27 +46,17 @@ class NowPlaying : public content::WebContentsObserver,
   static void AudioFocusForTest(content::WebContents* contents,
                                 const base::DictValue& args,
                                 Reply reply);
+  static void ActiveSessionForTest(content::WebContents* contents,
+                                   const base::DictValue& args,
+                                   Reply reply);
 
  private:
   friend class content::WebContentsUserData<NowPlaying>;
-
-  struct Sample {
-    bool active = false;
-    bool playing = false;
-    bool controllable = false;
-    bool has_video = false;
-    std::u16string title;
-    std::u16string artist;
-    std::u16string album;
-    std::optional<media_session::MediaPosition> position;
-  };
 
   explicit NowPlaying(content::WebContents* contents);
 
   void MediaSessionCreated(content::MediaSession* session) override;
   void PrimaryPageChanged(content::Page& page) override;
-  void MediaStartedPlaying(const MediaPlayerInfo& info,
-                           const content::MediaPlayerId& id) override;
   void WebContentsDestroyed() override;
 
   void MediaSessionInfoChanged(
@@ -80,25 +74,22 @@ class NowPlaying : public content::WebContentsObserver,
       const std::optional<media_session::MediaPosition>& position) override;
 
   void ObserveSession(content::MediaSession* session);
-  bool SessionLive() const;
+  content::MediaSession* LiveSession() const;
   bool Lists(media_session::mojom::MediaSessionAction action) const;
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
-  bool OnPrimaryPage(const content::MediaPlayerId& id) const;
+  bool TakeWakePlay(const MediaCommandArgs& command);
   MediaCommandResult RunCommand(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
-  std::optional<NowPlayingState> FromSession() const;
   std::optional<NowPlayingState> Current() const;
   void Update();
   void ForceReport();
   void Send(const std::optional<NowPlayingState>& state);
 
-  Sample session_;
-  std::vector<media_session::mojom::MediaSessionAction> actions_;
   std::optional<NowPlayingState> sent_;
-  bool awaiting_page_player_ = false;
-  bool reported_on_page_ = false;
   bool force_report_ = false;
   base::TimeTicks sent_at_;
+  base::TimeTicks wake_play_until_;
+  bool wake_load_pending_ = false;
   base::OneShotTimer coalesce_;
   base::OneShotTimer seek_report_;
   NowPlayingArtwork artwork_;

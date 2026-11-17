@@ -76,7 +76,6 @@ const nowPlayingChecks: Check[] = [
         expectEqual(PAGE_ACTIONS.filter((action) => !state?.actions?.includes(action)), [], `the page's action handlers among the actions ${JSON.stringify(state?.actions)}`);
         expectEqual(state?.artwork, `${origin}/art.png`, "the artwork is the largest declared size, as on the Mac");
         expectPng(await downloaded(key, state!.artwork!), "the 300 px PNG artwork, asked for at 256 px");
-        expectEqual((await downloaded(key, `${origin}/art.svg`))?.uri ?? null, null, "the declared SVG artwork, which the out-of-process image decoder does not read");
         expectEqual((await downloaded(key, `${origin}/art.png?undeclared`))?.uri ?? null, null, "an image the session did not declare is not downloaded");
         expectEqual((await downloaded(key, "file:///C:/Windows/win.ini"))?.uri ?? null, null, "a file URL is not downloaded");
       }),

@@ -100,8 +100,8 @@ constexpr char kEvaluationEnd[] =
     "\n})((kind, json) => {if (kind === 'result') "
     "resolve(typeof json === 'string' ? json : 'null');});})";
 
-constexpr char kMediaCommandStart[] =
-    "((command) => {"
+constexpr char kWokenPagePlays[] =
+    "(() => {"
     "const all = [];"
     "const collect = (doc) => {"
     "all.push(...doc.querySelectorAll('video,audio'));"
@@ -115,24 +115,8 @@ constexpr char kMediaCommandStart[] =
     "const playable = (m) => m.currentSrc || m.srcObject || m.src || "
     "m.querySelector('source[src]');"
     "const el = all.find(playing) || all.find(playable) || null;"
-    "if (!el) return;"
-    "const seconds = Number(command.seconds) || 0;"
-    "switch (command.action) {"
-    "case 'play': el.play(); break;"
-    "case 'pause': case 'stop': el.pause(); break;"
-    "case 'toggle':"
-    "if (navigator.mediaSession?.playbackState === 'playing' || !el.paused)"
-    " el.pause(); else el.play();"
-    "break;"
-    "case 'seekBy':"
-    "el.currentTime = Math.max(0, Math.min(el.duration || Infinity, "
-    "el.currentTime + seconds));"
-    "break;"
-    "case 'seekTo': el.currentTime = seconds; break;"
-    "}"
-    "})(";
-
-constexpr char kMediaCommandEnd[] = ")";
+    "if (el) el.play();"
+    "})()";
 
 using DevToolsReply =
     base::OnceCallback<void(std::optional<base::DictValue> result,
@@ -615,22 +599,18 @@ void MediaCommand(content::WebContents* contents,
       answer.Set("done", true);
       std::move(reply).Run(std::move(answer));
       return;
-    case MediaCommandResult::kNothingDone:
+    case MediaCommandResult::kNotDone:
       answer.Set("done", false);
       std::move(reply).Run(std::move(answer));
       return;
     case MediaCommandResult::kRefused:
       std::move(reply).Run(Error("the page's media session does not take that"));
       return;
-    case MediaCommandResult::kNoSession:
+    case MediaCommandResult::kPlayByScript:
       break;
   }
-  base::DictValue command;
-  command.Set("action", Text(args, "action"));
-  command.Set("seconds", parsed->seconds);
-  if (std::optional<std::string> json = base::WriteJson(command)) {
-    RunMediaCommand(contents, kMediaCommandStart + *json + kMediaCommandEnd);
-  }
+  RunMediaCommand(contents, kWokenPagePlays);
+  answer.Set("done", true);
   answer.Set("byScript", true);
   std::move(reply).Run(std::move(answer));
 }
@@ -1142,6 +1122,7 @@ constexpr NamedMethod kMethods[] = {
     {"reattachLinksForTest", &ReattachLinksForTest},
     {"mediaSessionActionForTest", &MediaSessionActionForTest},
     {"audioFocusForTest", &NowPlaying::AudioFocusForTest},
+    {"activeSessionForTest", &NowPlaying::ActiveSessionForTest},
     {"testClient", &TestClientForTest},
     {"discardEligibilityForTest", &DiscardEligibilityForTest},
     {"setFrozen", &SetFrozen},

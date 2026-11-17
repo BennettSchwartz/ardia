@@ -12,6 +12,7 @@ const STILL_PAUSED_MS = 1500;
 const SHORT_SOUND_SETTLES_MS = 1500;
 const NEXT_TITLE = "Next Song";
 const LAST_TITLE = "Last Song";
+const MUTE_SETTLES_MS = 1000;
 
 type Focus = { held?: boolean; type?: string; state?: string; requests?: number };
 
@@ -57,7 +58,31 @@ async function switchedTrack(key: string, reports: Reports, title: string, query
   return reports.reports.slice(from).filter((state) => state === null).length;
 }
 
+const followsThePlayingOne = (state: NowPlaying | null | undefined) => isPlaying(state) && Math.abs((state?.duration ?? 0) - TRACK_SECONDS) <= AT_END_SLACK && (state?.position ?? Infinity) < PLAY_FROM;
+
 const endedChecks: Check[] = [
+  {
+    name: "engine now playing: with two players, a track that ends while the other plays stays out of the session through a mute toggle, and the card follows the one still playing",
+    run: () =>
+      withReports("np-ended-two", "nowplaying?plain&second&long", TITLE, async (key, reports) => {
+        expectEqual(await evaluate(key, 'n.play().then(() => "played", (error) => error.name).then((result) => post("result", JSON.stringify(result)));', true), "played", "the other player plays with sound first");
+        await until(`the ${TRACK_SECONDS} s track's length is known`, SETTLE_MS, () => mediaState(key), (state) => typeof state.duration === "number" && Math.abs(state.duration - TRACK_SECONDS) < AT_END_SLACK);
+        await evaluate(key, `m.currentTime = ${PLAY_FROM}; post("result", "true");`);
+        await startPlaying(key);
+        await until("the first track plays to its end while the other plays", SETTLE_MS, () => pageState(key), (state) => state.ended === true);
+        const following = await reported(reports, "the card follows the player still playing, with its own length and position", followsThePlayingOne);
+        const before = await focusOf(key);
+        await hostCall("tab.call", { key, method: "setMuted", muted: true });
+        await pause(MUTE_SETTLES_MS);
+        await hostCall("tab.call", { key, method: "setMuted", muted: false });
+        await pause(MUTE_SETTLES_MS);
+        const after = await focusOf(key);
+        const last = await reports.latest();
+        console.info(`[ardia windows] self-check note: two players, one ended: before the mute toggle ${JSON.stringify(positionOf(following))} focus ${JSON.stringify(before)}; after it ${JSON.stringify(positionOf(last))} focus ${JSON.stringify(after)}`);
+        expectTrue(followsThePlayingOne(last), `after the mute toggle the card still follows only the player still playing, so the ended one was not added back (${JSON.stringify(positionOf(last))})`);
+        expectEqual({ held: after.held ?? null, requests: after.requests ?? null }, { held: true, requests: before.requests ?? null }, "the audio focus requests did not grow with the mute toggle");
+      }),
+  },
   {
     name: "engine now playing: a track that plays to its end stays reported paused at its end, as on the Mac, and the card's play starts it again from the start (page handles play)",
     run: () => withReports("np-ended", "nowplaying?long&once", TITLE, (key, reports) => endsAndStartsAgain(key, reports, SONG.title)),
