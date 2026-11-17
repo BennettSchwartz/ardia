@@ -1483,6 +1483,7 @@ public static class ArdiaFirstFrames {
     int width = client.Right - client.Left, height = client.Bottom - client.Top;
     if (width < 8 || height < 8) { frame.Kind = KindOf(frame, 1); return frame; }
     byte[] pixels = Grab(origin.X, origin.Y, width, height);
+    frame.Alpha = Math.Max(frame.Alpha, AlphaOf(window));
     if (pixels == null) { frame.Kind = KindOf(frame, 1); return frame; }
     int same = 0, compared = 0;
     frame.Width = width;
