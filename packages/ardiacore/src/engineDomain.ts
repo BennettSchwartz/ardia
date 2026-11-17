@@ -62,7 +62,7 @@ type CliServer = { connections: number; generation: number; file: string; reason
 export type PopupProtectedMedia = { family: "widevine" | "playready" | "fairplay" | "other" | "none"; listed: boolean };
 
 export type HoverLostEpisode = {
-  reason: "halfActive" | "staleMenu" | "notKeyOrMain" | "coveredByView" | "responderLost";
+  reason: "halfActive" | "staleMenu" | "notKeyOrMain" | "coveredByView" | "responderLost" | "coveredByWindow";
   trigger: "move" | "click";
   keyWindow: string;
   mainWindow: string;
@@ -77,6 +77,8 @@ export type HoverLostEpisode = {
   overPage: boolean;
   cover: "none" | "reactNative" | "chromium" | "other";
   coverClear: boolean;
+  responder?: "none" | "window" | "otherWindow" | "page" | "control";
+  coverWindow?: string;
   healed: boolean;
   healWorked: boolean | null;
   endedBy: "hover" | "heal" | "appInactive" | "windowClosed";
