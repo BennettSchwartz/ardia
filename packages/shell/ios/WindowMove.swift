@@ -130,9 +130,11 @@ enum WindowMove {
     else { return false }
     following = true
     moving = window
+    ArdiaHost.beginPressLoop("windowMove")
     ShellEvents.send(.app, ["type": "windowDragLoop"])
     if holdsPlacement { placements.setObject(Placements(), forKey: window) }
     defer {
+      ArdiaHost.endPressLoop()
       following = false
       moving = nil
       placements.object(forKey: window)?.drainsUntil = CACurrentMediaTime() + echoDrain

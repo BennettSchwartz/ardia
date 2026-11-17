@@ -86,6 +86,8 @@ export type HoverLostEpisode = {
   episode: number;
 };
 
+export type PressLoopLongReport = { loop: string; inner: string; open: boolean; buttonsHeld: boolean };
+
 export type CliTabTarget = { targetId: string | null; pageGeneration: number };
 
 export type CliDragsEnded = { ownerGone: number; debuggerUnowned: number; nativeRefused: number; sourceGone?: number };
