@@ -1,8 +1,8 @@
 import { hostCall } from "../engine/host";
 import { expectEqual, expectTrue, type Check } from "./check";
 import { LOAD_MS, SETTLE_MS, origin, port } from "./engineAutoplayKit";
-import { click, evaluate, firstWindow, LEFT, listed, pause, show, until } from "./engineSleep";
-import { FRAME_BUTTON, FRAME_TITLE, SONG, TITLE, called, command, downloaded, expectPng, isPaused, isPlaying, pageState, reported, reportsOf, startPlaying, withReports } from "./engineNowPlayingKit";
+import { evaluate, firstWindow, LEFT, listed, pause, show, until } from "./engineSleep";
+import { FRAME_TITLE, SONG, TITLE, called, command, commandReply, downloaded, expectPng, isPaused, isPlaying, mediaState, pageState, reported, reportsOf, startPlaying, withReports } from "./engineNowPlayingKit";
 
 const PAGE_ACTIONS = ["play", "pause", "nexttrack", "previoustrack", "seekto"];
 const DECLARED_DURATION = 120;
@@ -18,8 +18,8 @@ const REWIND_SETTLES_MS = 1000;
 async function playFrame(key: string, windowId: string) {
   await show(key, windowId, LEFT);
   await until("the cross-site iframe reports", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
-  await click(key, FRAME_BUTTON.x, FRAME_BUTTON.y);
-  await until("a click in the iframe plays its media", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
+  await evaluate(key, 'document.querySelector("iframe").contentWindow.postMessage("np-play", "*"); post("result", "true");', true);
+  await until("the iframe plays its media when the page, which the user activated, asks it to (allow=autoplay)", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
 }
 
 const nowPlayingChecks: Check[] = [
@@ -71,8 +71,8 @@ const nowPlayingChecks: Check[] = [
         await command(key, "pause");
         await until("the media pauses", SETTLE_MS, () => pageState(key), (state) => state.paused === true);
         await reported(reports, "the page reports paused", isPaused);
-        await command(key, "seekTo", 1);
-        await until("the media seeks", SETTLE_MS, () => pageState(key), (state) => Math.abs((state.time ?? -1) - 1) < 0.3);
+        const answer = await commandReply(key, "seekTo", 1);
+        await until(`the media seeks to 1 s (mediaCommand answered ${answer}; seekable, readyState and duration below)`, SETTLE_MS, () => mediaState(key), (state) => Math.abs((state.time ?? -1) - 1) < 0.3);
         await command(key, "play");
         await until("the media plays again", SETTLE_MS, () => pageState(key), (state) => state.paused === false);
         expectEqual((await pageState(key)).calls?.filter((call) => !call.startsWith("play:")) ?? [], [], "no page handler was involved");

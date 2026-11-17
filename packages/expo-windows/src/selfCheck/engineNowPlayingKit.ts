@@ -11,7 +11,6 @@ export const TITLE = "now playing page";
 export const FRAME_TITLE = "now playing frame";
 export const SONG = { title: "Ardia Song", artist: "Ardia Band", album: "Ardia Album" };
 export const ART_PIXELS = 256;
-export const FRAME_BUTTON = { x: 100, y: 100 };
 const PNG_DATA = "data:image/png;base64,";
 
 export function reportsOf(key: string) {
@@ -37,6 +36,20 @@ export const pageState = async (key: string) =>
     key,
     'const media = typeof m === "undefined" ? null : m; post("result", JSON.stringify({ paused: media ? media.paused : null, time: media ? media.currentTime : null, ended: media ? media.ended : null, calls: window.calls || [], ad: window.adState || null, frame: window.frameState || null, burstDone: !!window.burstDone }));',
   )) ?? {}) as PageState;
+
+export type MediaState = { time?: number; paused?: boolean; readyState?: number; networkState?: number; duration?: number | string; seekable?: number[][] };
+
+export const mediaState = async (key: string) =>
+  ((await evaluate(
+    key,
+    'const seekable = []; for (let i = 0; i < m.seekable.length; i++) seekable.push([m.seekable.start(i), m.seekable.end(i)]); post("result", JSON.stringify({ time: m.currentTime, paused: m.paused, readyState: m.readyState, networkState: m.networkState, duration: Number.isFinite(m.duration) ? m.duration : String(m.duration), seekable }));',
+  )) ?? {}) as MediaState;
+
+export const commandReply = (key: string, action: string, seconds: number | null = null) =>
+  command(key, action, seconds).then(
+    (reply) => JSON.stringify(reply),
+    (error: unknown) => `refused: ${error instanceof Error ? error.message : String(error)}`,
+  );
 
 export const startPlaying = async (key: string) => {
   const started = await evaluate(key, 'm.play().then(() => "played", (error) => error.name).then((result) => post("result", JSON.stringify(result)));', true);
