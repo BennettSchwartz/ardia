@@ -3324,10 +3324,6 @@ void ShellHostView::HideCaptionButtons() {
   }
 }
 
-// Chromium's frame was laid out before this window was in Hosts(), so it still holds the border, shadow and corner
-// insets it had then. Now that g_ardia_linux_borderless_frame answers true for the window, have the widget re-read its
-// frame type, which also refreshes the input and opaque regions, and lay the frame out and paint it again. A frame the
-// widget replaced has its caption buttons back, so they are hidden once more.
 void ShellHostView::RefreshEngineFrame() {
   if (!browser_view_ || !browser_view_->browser_widget()) return;
   GetWidget()->FrameTypeChanged();

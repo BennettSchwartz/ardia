@@ -660,7 +660,8 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   Settings, Import): `g_ardia_linux_borderless_frame` answers true for them, and the frame view and its layout then
   report no border, input or shadow insets and no corner radius, and paint no frame, so the client area is the whole
   window. The host calls `RefreshEngineFrame` once the window is its own, because Chromium laid the frame out before
-  that. Edge resizing stays: a thin band along the edges answers as a resize border (`NonClientHitTest`). Whatever
+  that. Edge resizing stays: in a window that can be resized, a thin band along the edges answers as a resize border
+  (`NonClientHitTest`); Import, which can't be resized, keeps its edges for its content. Whatever
   corners, shadow or outline the compositor draws are its own. `windowCornerRadius` still answers a fixed 19 on Linux
   (`apps/linux/src/shellMethods.ts`); it was not changed with the frame.
 - **Menu button.** Linux has no global menu bar, so a hamburger in the header stands in for the Mac one. It lists

@@ -12,8 +12,6 @@ FRAMELESS = PATCHES / 'chromium-linux-frameless-utility-windows.patch'
 FRAME = 'chrome/browser/ui/views/frame/'
 BROWSER_VIEW = FRAME + 'browser_view.cc'
 
-# browser_view.cc as Chromium 157 has it before the frameless patch. The borderless patch is made against the file
-# that patch leaves, so it is applied on top of it.
 GLOBALS_157 = '''int (*g_ardia_linux_window_tab_count)(const BrowserWindowInterface*) = nullptr;
 bool (*g_ardia_linux_shell_passes_point)(gfx::NativeView child,
                                          const gfx::Point& location) = nullptr;
@@ -35,7 +33,6 @@ bool BrowserView::ShouldShowWindowTitle() const {
 bool BrowserView::ShouldShowWindowIcon() const {
 '''
 
-# The frame files of Chromium 157.0.8103.50 the patch edits, as (first line, text) fragments at their real line numbers.
 LAYOUT_CC = [
     (10, r'''#include "ui/gfx/geometry/insets.h"
 #include "ui/views/window/frame_view_utils_linux.h"
@@ -169,7 +166,6 @@ class BorderlessFrameTests(unittest.TestCase):
         self.assertTrue(needle in text, f'missing from the text: {needle!r}')
 
     def patched(self):
-        """Applies the frameless patch, then the borderless one, to the Chromium 157 fragments."""
         if shutil.which('git') is None:
             self.skipTest('git is unavailable')
         self.assertTrue(PATCH.exists(), f'{PATCH.name} is missing')
@@ -206,7 +202,6 @@ class BorderlessFrameTests(unittest.TestCase):
                       '  const BrowserWindowInterface* browser = browser_view->browser();\n'
                       '  return browser && (ArdiaLinuxFramelessApp(browser) ||\n'
                       '                     g_ardia_linux_borderless_frame(browser));\n}\n', view)
-        # Next to the frameless hook, after the function it extends, and the frameless hook is kept.
         self.assertLess(view.index('bool ArdiaLinuxFramelessApp(const BrowserWindowInterface* browser) {'),
                         view.index('bool ArdiaLinuxBorderlessFrame(const BrowserView* browser_view) {'))
 
@@ -222,7 +217,7 @@ class BorderlessFrameTests(unittest.TestCase):
                       '  return view_ && ArdiaLinuxBorderlessFrame(view_->GetBrowserView());\n}\n', layout)
         header = files['browser_frame_view_layout_linux.h']
         self.contains('  int NonClientExtraTopThickness() const override;\n\n'
-                      '  // True in a window the Ardia host owns', header)
+                      '  bool ArdiaBorderless() const;\n', header)
         self.assertLess(header.index('bool ArdiaBorderless() const;'), header.index(' private:'))
         native = files['browser_frame_view_layout_linux_native.cc']
         self.contains('BrowserFrameViewLayoutLinuxNative::RestoredFrameBorderInsets()\n    const {\n'
@@ -253,9 +248,9 @@ class BorderlessFrameTests(unittest.TestCase):
         self.contains('ArdiaLinuxBorderlessFrame(GetBrowserView()) && !IsFrameCondensed()', hit)
         self.contains('browser_widget()->widget_delegate()', hit)
         self.contains('point, gfx::Insets(kResizeTopBorderThickness)', hit)
-        self.contains('delegate->CanResize()', hit)
+        self.contains('if (delegate && delegate->CanResize()) {', hit)
+        self.contains('kResizeAreaCornerSize, kResizeAreaCornerSize, true);', hit)
         self.contains('if (edge != HTNOWHERE) {\n        return edge;\n      }', hit)
-        # The band is tried before Chromium's own answer, which would call the whole top edge caption.
         self.assertLess(hit.index('GetHTComponentForFrame('), hit.index('OpaqueBrowserFrameView::NonClientHitTest(point)'))
 
     def test_the_host_names_every_window_it_owns(self):

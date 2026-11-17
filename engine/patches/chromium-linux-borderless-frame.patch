@@ -50,12 +50,10 @@ still answers as a resize border so a window can be resized where the compositor
 +}
 --- a/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.h
 +++ b/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.h
-@@ -36,6 +36,10 @@
+@@ -36,6 +36,8 @@
    gfx::Insets RestoredFrameEdgeInsets() const override;
    int NonClientExtraTopThickness() const override;
  
-+  // True in a window the Ardia host owns: it draws its own edge, so the frame
-+  // has no border, shadow or resize band outside the client area.
 +  bool ArdiaBorderless() const;
 +
   private:
@@ -105,20 +103,17 @@ still answers as a resize border so a window can be resized where the compositor
    return static_cast<BrowserNativeWidgetAuraLinux*>(
               browser_widget()->browser_native_widget())
        ->ShouldDrawRestoredFrameShadow();
-@@ -114,6 +122,21 @@
+@@ -114,6 +122,18 @@
  }
  
  int BrowserFrameViewLinux::NonClientHitTest(const gfx::Point& point) {
-+  // An Ardia window has no frame to resize from, so the client area gives up
-+  // a thin band along its edges.
 +  if (ArdiaLinuxBorderlessFrame(GetBrowserView()) && !IsFrameCondensed()) {
-+    if (views::WidgetDelegate* delegate = browser_widget()->widget_delegate()) {
-+      // The same 16 dip corner size as OpaqueBrowserFrameView uses.
++    views::WidgetDelegate* delegate = browser_widget()->widget_delegate();
++    if (delegate && delegate->CanResize()) {
 +      constexpr int kResizeAreaCornerSize = 16;
 +      const int edge = GetHTComponentForFrame(
 +          point, gfx::Insets(kResizeTopBorderThickness),
-+          kResizeAreaCornerSize, kResizeAreaCornerSize,
-+          delegate->CanResize());
++          kResizeAreaCornerSize, kResizeAreaCornerSize, true);
 +      if (edge != HTNOWHERE) {
 +        return edge;
 +      }
@@ -127,7 +122,7 @@ still answers as a resize border so a window can be resized where the compositor
    int frame_component = OpaqueBrowserFrameView::NonClientHitTest(point);
    // Allow resizing at the top of the caption area. This is only done when
    // shadows are not drawn, since the resize area is on the shadows otherwise.
-@@ -125,6 +148,9 @@
+@@ -125,6 +145,9 @@
  }
  
  float BrowserFrameViewLinux::GetRestoredCornerRadiusDip() const {
