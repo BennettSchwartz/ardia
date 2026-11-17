@@ -58,6 +58,11 @@ export type CrashReport = {
   build?: string;
   engineVersion?: string;
   terminationNamespace?: string;
+  terminationCode?: number;
+  terminationIndicator?: string;
+  exceptionCodes?: number[];
+  crashThread?: string;
+  crashQueue?: string;
   uptimeSeconds?: number;
   vmWritableMB?: number;
   jsFatal?: string;
