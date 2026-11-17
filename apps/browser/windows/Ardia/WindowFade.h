@@ -166,7 +166,7 @@ struct LayeredWindows {
       LONG_PTR extended = GetWindowLongPtrW(kept.window, GWL_EXSTYLE);
       SetWindowLongPtrW(kept.window, GWL_EXSTYLE, extended & ~kept.added);
     }
-    if (kept.added & WS_EX_LAYERED) RedrawWindow(kept.window, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+    if (kept.added & WS_EX_LAYERED) RedrawWindow(kept.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
   }
 
   std::vector<Kept> m_kept;

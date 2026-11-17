@@ -31,10 +31,38 @@
 #include "WindowFade.h"
 #include "WindowPlacement.h"
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shcore.lib")
 
 namespace Ardia {
+
+struct ThemedErase {
+  static constexpr UINT_PTR kSubclassId = 0xA2D1C;
+  static constexpr COLORREF kDark = RGB(32, 32, 32);
+  static constexpr COLORREF kLight = RGB(243, 243, 243);
+
+  static LRESULT CALLBACK Erase(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR dark) noexcept {
+    if (message == WM_ERASEBKGND) {
+      RECT client{};
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      if (dc && GetClientRect(hwnd, &client)) {
+        SetDCBrushColor(dc, dark ? kDark : kLight);
+        FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+      }
+      return 1;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(hwnd, &Erase, kSubclassId);
+    return DefSubclassProc(hwnd, message, wParam, lParam);
+  }
+
+  static void Apply(HWND hwnd, bool dark) noexcept {
+    if (!hwnd) return;
+    SetWindowSubclass(hwnd, &Erase, kSubclassId, dark ? 1 : 0);
+    InvalidateRect(hwnd, nullptr, TRUE);
+  }
+};
 
 struct OpenWindowRequest {
   std::string id;
@@ -800,6 +828,7 @@ struct WindowManager {
     static constexpr DWORD kUseImmersiveDarkMode = 20;
     BOOL useDark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(entry.hwnd, kUseImmersiveDarkMode, &useDark, sizeof(useDark));
+    ThemedErase::Apply(entry.hwnd, dark);
     try {
       entry.appWindow.TitleBar().PreferredTheme(
           dark ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark : winrt::Microsoft::UI::Windowing::TitleBarTheme::Light);
