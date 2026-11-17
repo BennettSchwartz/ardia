@@ -201,16 +201,14 @@ a window manager that honours the property sees none. Wayland has no X11 extensi
  void BrowserDesktopWindowTreeHostLinux::TabDraggingKindChanged(
 --- a/ui/ozone/platform/x11/x11_window.cc
 +++ b/ui/ozone/platform/x11/x11_window.cc
-@@ -1340,6 +1340,12 @@
+@@ -1340,6 +1340,10 @@
  
  bool X11Window::IsWmSyncActiveForTest() {
    return bounds_wm_sync_.get();
 +}
 +
 +void X11Window::RefreshDecorationInsets() {
-+  if (CanSetDecorationInsets()) {
-+    UpdateDecorationInsets();
-+  }
++  UpdateDecorationInsets();
  }
  
  bool X11Window::HandleAsAtkEvent(const x11::Event& event) {

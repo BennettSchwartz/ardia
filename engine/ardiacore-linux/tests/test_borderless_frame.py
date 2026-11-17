@@ -312,7 +312,7 @@ class BorderlessFrameTests(unittest.TestCase):
         self.assertLess(extension.index('virtual void RefreshDecorationInsets() {}'), extension.index(' protected:'))
         self.contains('  void RefreshDecorationInsets() override;\n', files['ui/ozone/platform/x11/x11_window.h'])
         self.contains('void X11Window::RefreshDecorationInsets() {\n'
-                      '  if (CanSetDecorationInsets()) {\n    UpdateDecorationInsets();\n  }\n}\n',
+                      '  UpdateDecorationInsets();\n}\n',
                       files['ui/ozone/platform/x11/x11_window.cc'])
         self.contains('void BrowserDesktopWindowTreeHostLinux::FrameTypeChanged() {\n'
                       '  DesktopWindowTreeHostPlatform::FrameTypeChanged();\n  UpdateFrameHints();\n'
