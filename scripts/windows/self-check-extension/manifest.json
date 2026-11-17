@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Ardia self-check extension",
+  "version": "1.0",
+  "permissions": ["tabs"],
+  "action": { "default_title": "Ardia self-check" }
+}

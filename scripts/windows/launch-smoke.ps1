@@ -961,6 +961,7 @@ if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesU
 $env:ARDIA_CONFIG_DIR = ""
 
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
+Copy-Item -Recurse -Force -Path (Join-Path $PSScriptRoot "self-check-extension") -Destination (Join-Path $env:ARDIA_DATA_DIR "self-check-extension")
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
 foreach ($fixture in @(@("firefox", "Firefox\Profiles\abcd1234.default-release"), @("work", "Firefox\Profiles\zzzz9999.work"), @("zen", "zen\Profiles\zen12345.Default (release)"), @("chrome", "Google\Chrome\Default"))) {
