@@ -4,7 +4,7 @@ import { LinkBubble } from "../components/onboarding/LinkBubble";
 import { OnboardingView } from "../components/onboarding/OnboardingView";
 import { AppIcon } from "../components/ui";
 import { showOnboarding } from "../state/onboarding/store";
-import { renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
 
 beforeEach(() => {
   jest.useFakeTimers();
@@ -53,7 +53,7 @@ test("the default browser step's art ends at the 60-point app icon with its shad
 
 test("the welcome step's Get Started is the native apps' primary action: SwiftUI's capsule on iPhone and Compose's 14-point corners on Android, #0F182C with white text in light, and each platform's height (SwiftUI's 63⅓, Compose's 50)", () => {
   showOnboarding();
-  const root = renderSurface(<OnboardingView />);
+  const root = renderSurface(classicOnAndroid(<OnboardingView />));
   const button = root.root.findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button" && textOfNode(node) === "Get Started")[0]!;
   const style = StyleSheet.flatten(button.props.style);
   expect(style.borderRadius).toBeCloseTo(Platform.OS === "ios" ? 190 / 6 : 14);

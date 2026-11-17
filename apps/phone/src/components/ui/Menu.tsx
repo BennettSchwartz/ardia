@@ -8,6 +8,8 @@ import { tabsMotion } from "./motion";
 import { Symbol } from "./Symbol";
 import type { SymbolName } from "./symbolPaths";
 import { useTheme } from "./theme";
+import { useDesign } from "./design";
+import { MaterialMenuPanel, type MaterialMenuEntry } from "./MaterialSurfaces";
 import { font, ink, menuShadow, radius, space, tabsLayout } from "./tokens";
 
 export type MenuAction = { label: string; icon?: SymbolName; systemImage?: string; destructive?: boolean; checked?: boolean; disabled?: boolean; onPress: () => void };
@@ -22,7 +24,47 @@ export const submenuPage = (submenu: MenuSubmenu): MenuItem[] => [{ heading: sub
 
 type Props = { items: MenuItem[]; place: ViewStyle; onDismiss: () => void };
 
-export function Menu({ items, place, onDismiss }: Props) {
+export function Menu(props: Props) {
+  return useDesign() === "material" ? <MaterialMenu {...props} /> : <ClassicMenu {...props} />;
+}
+
+function MaterialMenu({ items, place, onDismiss }: Props) {
+  const [page, setPage] = useState<MenuSubmenu | null>(null);
+  const shown = page ? submenuPage(page) : items;
+  const panel = useRef<ViewInstance>(null);
+  useCoverFocus(panel);
+  useEffect(() => {
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (page) setPage(null);
+      else onDismiss();
+      return true;
+    });
+    return () => back.remove();
+  }, [onDismiss, page]);
+  const entries: MaterialMenuEntry[] = shown.map((item) => {
+    if (item === "divider" || "heading" in item) return item;
+    if (isSubmenu(item)) return { label: item.label, icon: item.icon, disabled: item.disabled, submenu: true, onPress: () => setPage(item) };
+    return {
+      label: item.label,
+      icon: item.icon,
+      destructive: item.destructive,
+      checked: item.checked,
+      disabled: item.disabled,
+      onPress: () => {
+        onDismiss();
+        item.onPress();
+      },
+    };
+  });
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onDismiss} />
+      <MaterialMenuPanel key={page?.label ?? "root"} entries={entries} place={place} panel={panel} />
+    </View>
+  );
+}
+
+function ClassicMenu({ items, place, onDismiss }: Props) {
   const theme = useTheme();
   const [page, setPage] = useState<MenuSubmenu | null>(null);
   const shown = page ? submenuPage(page) : items;

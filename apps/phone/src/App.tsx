@@ -51,6 +51,7 @@ import { countUsage, reportLaunch, startTelemetry } from "./state/telemetry/tele
 import { useIncognito, useSelectedTab } from "./state/tabs/hooks";
 import { setRootSize } from "./state/app/rootSize";
 import { syncOffered } from "./state/sync/offer";
+import { followDynamicScheme } from "./state/app/dynamicScheme";
 
 export default function App() {
   useState(() =>
@@ -58,6 +59,7 @@ export default function App() {
       offerSyncPages(syncOffered);
       setSpacesDesign(appDesign);
       setAppearanceDesign(appDesign);
+      if (appDesign === "material") followDynamicScheme();
       startTelemetry();
       startBrowser(applyLaunchSettings);
       startPageUi();

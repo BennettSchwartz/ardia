@@ -4,7 +4,7 @@ import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-han
 import * as Reanimated from "react-native-reanimated";
 import { act } from "react-test-renderer";
 import { FullSheet, Sheet } from "../components/ui";
-import { renderSurface, unmount, updateSurface } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, unmount, updateSurface } from "../../test/render/harness";
 
 const mockMotion = { reduced: false };
 jest.mock("../state/app/systemLook", () => ({ ...jest.requireActual("../state/app/systemLook"), useReduceMotion: () => mockMotion.reduced }));
@@ -64,9 +64,11 @@ test("with Reduce Motion the sheet leaves on a short timing instead of its sprin
   const timing = jest.spyOn(Reanimated, "withTiming");
   const spring = jest.spyOn(Reanimated, "withSpring");
   const root = renderSurface(
-    <Sheet open={false} onDismiss={() => undefined} onHidden={() => undefined}>
-      <Text>Menu</Text>
-    </Sheet>,
+    classicOnAndroid(
+      <Sheet open={false} onDismiss={() => undefined} onHidden={() => undefined}>
+        <Text>Menu</Text>
+      </Sheet>,
+    ),
   );
   expect(timing).toHaveBeenCalledWith(0, expect.objectContaining({ duration: Platform.OS === "android" ? 0 : 200 }), expect.any(Function));
   expect(spring.mock.calls.filter(([to]) => to === 0)).toHaveLength(0);
@@ -79,15 +81,19 @@ test("with Remove animations on Android the Settings sheet comes up and goes at 
   const timing = jest.spyOn(Reanimated, "withTiming");
   const progress = { value: 0 } as never;
   const root = renderSurface(
-    <FullSheet sheet={null} progress={progress} onDismiss={() => undefined}>
-      {() => <Text>Settings</Text>}
-    </FullSheet>,
+    classicOnAndroid(
+      <FullSheet sheet={null} progress={progress} onDismiss={() => undefined}>
+        {() => <Text>Settings</Text>}
+      </FullSheet>,
+    ),
   );
   updateSurface(
     root,
-    <FullSheet sheet="settings" progress={progress} onDismiss={() => undefined}>
-      {() => <Text>Settings</Text>}
-    </FullSheet>,
+    classicOnAndroid(
+      <FullSheet sheet="settings" progress={progress} onDismiss={() => undefined}>
+        {() => <Text>Settings</Text>}
+      </FullSheet>,
+    ),
   );
   expect(timing).toHaveBeenCalledWith(0, expect.objectContaining({ duration: Platform.OS === "android" ? 0 : 200 }));
   unmount(root);
@@ -98,9 +104,11 @@ test("with Remove animations on Android the Settings sheet comes up and goes at 
 test("on iPhone the Settings sheet starts at the safe area and its bottom corners follow the display's, as main's iOS sheet does; on Android it keeps Compose's 10-point gap and square bottom", () => {
   const progress = { value: 0 } as never;
   const root = renderSurface(
-    <FullSheet sheet="settings" progress={progress} onDismiss={() => undefined}>
-      {() => <Text>Settings</Text>}
-    </FullSheet>,
+    classicOnAndroid(
+      <FullSheet sheet="settings" progress={progress} onDismiss={() => undefined}>
+        {() => <Text>Settings</Text>}
+      </FullSheet>,
+    ),
   );
   const panel = root.root.findAll((node) => typeof node.type === "string" && node.props.accessibilityViewIsModal === true)[0]!;
   const style = StyleSheet.flatten(panel.props.style);

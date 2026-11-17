@@ -4,6 +4,7 @@ import { queryPrefixLength, type TrayRow } from "../../state/search/omnibox";
 import { countRender } from "../../state/app/interactionPerf";
 import type { Design } from "../../lib/design";
 import { browseLayout, Favicon, font, radius, screenReaderActions, space, Symbol, tabsMotion, useDesign, type ColorRoles, type SymbolName } from "../ui";
+import { materialSize, materialType } from "../ui/materialTokens";
 
 const ROW_LOOK: Record<Design, { glyph: number; favicon: number; switchGlyph: boolean; title3: TextStyle; body: TextStyle; subheadline: TextStyle }> = {
   original: { glyph: 19, favicon: 20, switchGlyph: true, title3: font.title3, body: font.body, subheadline: font.subheadline },
@@ -15,6 +16,7 @@ const ROW_LOOK: Record<Design, { glyph: number; favicon: number; switchGlyph: bo
     body: { fontSize: font.body.fontSize },
     subheadline: { fontSize: font.subheadline.fontSize },
   },
+  material: { glyph: materialSize.icon, favicon: materialSize.icon, switchGlyph: false, title3: materialType.titleMedium, body: materialType.bodyLarge, subheadline: materialType.bodyMedium },
 };
 
 const LEADING: Record<TrayRow["kind"], SymbolName> = { query: "magnifyingglass", page: "globe", calc: "equalCircleFill", paste: "docOnDoc" };

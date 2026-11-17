@@ -5,7 +5,7 @@ import * as browse from "../state/browse/store";
 import { history } from "../state/history/store";
 import { feedSources, presentSearch, useSearch } from "../state/search/store";
 import { OFF_STATUS, useSync } from "../state/sync/store";
-import { renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
 
 type Offer = { query: string; completion: string } | null;
 
@@ -185,7 +185,7 @@ test("an answer for text the field has since typed past stays on offer, as main'
 
 test("a row for an open tab says Switch to Tab under its title, with main's glyph rules on each platform", () => {
   presentSearch("start", "");
-  const root = renderSurface(<SearchTray />);
+  const root = renderSurface(classicOnAndroid(<SearchTray />));
   const field = typingField(root);
   field.type("site 1");
   const symbols = root.root.findAll((node) => (node.type as { name?: string })?.name === "Symbol");

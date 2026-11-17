@@ -20,6 +20,8 @@ import { reducedMotionMs, tabsCurve, tabsMotion, trayMotion } from "./motion";
 import { useTheme } from "./theme";
 import { menuLayout } from "./tokens";
 import { useReduceMotion } from "./contrast";
+import { useDesign } from "./design";
+import { MaterialSheet } from "./MaterialSurfaces";
 
 const SHEET_REDUCED_MS = reducedMotionMs(trayMotion.reduced);
 
@@ -45,7 +47,11 @@ type Props = {
   children: ReactNode;
 };
 
-export function Sheet({ open, onDismiss, onHidden, fill, children }: Props) {
+export function Sheet(props: Props) {
+  return useDesign() === "material" ? <MaterialSheet open={props.open} onDismiss={props.onDismiss} onHidden={props.onHidden}>{props.children}</MaterialSheet> : <ClassicSheet {...props} />;
+}
+
+function ClassicSheet({ open, onDismiss, onHidden, fill, children }: Props) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();

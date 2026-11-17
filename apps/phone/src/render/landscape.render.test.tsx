@@ -17,7 +17,7 @@ import * as browse from "../state/browse/store";
 import { presentSearch } from "../state/search/store";
 import { currentTabs } from "../state/tabs/store";
 import * as telemetry from "../state/telemetry/telemetry";
-import { renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 const safeArea = require("react-native-safe-area-context") as { useSafeAreaInsets: () => { top: number; bottom: number; left: number; right: number } };
 
@@ -141,7 +141,7 @@ test("in landscape a sheet stops at the side insets and fits the shorter window,
   Dimensions.set({ window: { ...PORTRAIT, width: 393, height: 852 }, screen: { ...PORTRAIT, width: 393, height: 852 } });
   const upright = { top: 47, bottom: 34, left: 0, right: 0 };
   const insets = jest.spyOn(safeArea, "useSafeAreaInsets").mockImplementation(() => upright);
-  const root = renderSurface(<Sheet open onDismiss={() => undefined} onHidden={() => undefined}>{null}</Sheet>);
+  const root = renderSurface(classicOnAndroid(<Sheet open onDismiss={() => undefined} onHidden={() => undefined}>{null}</Sheet>));
   const before = flat(panel(root));
   expect(before).toMatchObject({ left: 0, right: 0 });
   insets.mockImplementation(() => INSETS);

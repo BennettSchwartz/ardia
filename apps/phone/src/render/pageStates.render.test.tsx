@@ -12,7 +12,7 @@ import { setPreference } from "../state/settings/store";
 import { currentTabs, useTabs } from "../state/tabs/store";
 import type { BrowserTab } from "../state/tabs/tabModels";
 import { launchTabs } from "../state/tabs/tabsState";
-import { renderSurface, someTabs, unmount, withTabs } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, someTabs, unmount, withTabs } from "../../test/render/harness";
 
 const onIPhone = Platform.OS === "ios";
 
@@ -47,7 +47,7 @@ const crashed = { kind: "crashed", reason: null, title: "This Page Stopped Worki
 
 test("a loading page with no saved picture shows main's placeholder centred on the page: a 44 point icon, the title in headline and the host in subheadline", () => {
   const tab = currentTabs().open[0]!;
-  const root = renderSurface(<BrowsingScreen tab={tab} />, { flushTimers: false });
+  const root = renderSurface(classicOnAndroid(<BrowsingScreen tab={tab} />), { flushTimers: false });
   const placeholder = node(root, "pageLoadingPlaceholder")!;
   expect(style(placeholder)).toMatchObject({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, alignItems: "center", justifyContent: "center", paddingHorizontal: 32 });
   expect(style(node(root, "pageLoadingContent")!)).toMatchObject({ alignItems: "center", gap: 12 });
