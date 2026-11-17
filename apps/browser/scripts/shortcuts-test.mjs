@@ -125,7 +125,7 @@ const shortcuts = [
   ["⇧⌘Z", cmd("Z", 6, "shift"), { title: "Redo" }, "⇧⌘Z"],
   ["⌘X", cmd("x", 7), { title: "Cut" }, "⌘X", "clipboard"],
   ["⌘C", cmd("c", 8), { title: "Copy" }, "⌘C", "clipboard"],
-  ["⇧⌘C", cmd("C", 8, "shift"), { command: "copyUrl" }, "⇧⌘C"],
+  ["⇧⌘C", cmd("C", 8, "shift"), { command: "copyUrl" }, "⇧⌘C", "devtools-own"],
   ["⌥⇧⌘C", cmd("C", 8, "shift", "option"), { command: "copyUrlAsMarkdown" }, "⌥⇧⌘C"],
   ["⌘V", cmd("v", 9), { title: "Paste" }, "⌘V", "clipboard"],
   ["⇧⌘V", cmd("V", 9, "shift"), { title: "Paste and Match Style" }, "⇧⌘V", "clipboard"],
@@ -738,6 +738,29 @@ await sleep(1000);
   check("New Tab rebound to ⌃⌥⌘K: the new keys are reserved and ⌘T goes to the page", by === "ardia.command.newTab" && !old, `⌃⌥⌘K ${by || "page"}, ⌘T ${old || "page"}`);
   await ac(`const { newTab, ...rest } = ac.store.getState().settings.shortcuts; ac.store.getState().updateSettings({ shortcuts: rest }); return 1;`);
   for (let i = 0; i < 30 && !(await reservedBy(cmd("t", 17))); i++) await sleep(100);
+}
+{
+  const optionC = K("c", 8, "option"), copyUrlKeys = cmd("C", 8, "shift");
+  await ac(`ac.store.getState().updateSettings({ shortcuts: { ...ac.store.getState().settings.shortcuts, copyUrl: ["c", "option"] } }); return 1;`);
+  let by = "", old = "x";
+  for (let i = 0; i < 30 && (by !== "ardia.command.copyUrl" || old); i++) {
+    await sleep(100);
+    [by, old] = [await reservedBy(optionC), await reservedBy(copyUrlKeys)];
+  }
+  check("Copy URL rebound to ⌥C: the Option-only keys are reserved and ⇧⌘C goes to the page", by === "ardia.command.copyUrl" && !old, `⌥C ${by || "page"}, ⇧⌘C ${old || "page"}`);
+  const url = await activeUrl();
+  await clipboard.set("before ⌥C");
+  await swallowKeys();
+  const r = await press(optionC, { focus: "page", asKey: true, send: true, wait: 600 });
+  const seen = await pageKeys(), copied = await clipboard.get();
+  const harness = r.error ? `harness: ${r.error}; ` : r.lostEvents ? "harness: a key event never came back from the app's event queue; " : r.keyWindow !== true ? "harness not key: NSApp.keyWindow wasn't the pressed window; " : "";
+  check(
+    "⌥C sent through AppKit to a page that cancels every keydown: Copy URL copies the page's address and the page gets no keydown",
+    !harness && (r.fired ?? []).some((f) => same(f, { command: "copyUrl" })) && copied === url && seen === 0,
+    `${harness}${describe(r)}, clipboard ${JSON.stringify(copied)} (page ${JSON.stringify(url)}), the page saw ${seen} keydown`,
+  );
+  await ac(`const { copyUrl, ...rest } = ac.store.getState().settings.shortcuts; ac.store.getState().updateSettings({ shortcuts: rest }); return 1;`);
+  for (let i = 0; i < 30 && !(await reservedBy(copyUrlKeys)); i++) await sleep(100);
 }
 {
   const fullScreenKey = cmd("f", 3, "control");

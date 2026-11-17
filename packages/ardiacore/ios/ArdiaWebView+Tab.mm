@@ -1,9 +1,5 @@
 #import "ArdiaWebViewInternal.h"
 #import "ArdiaEarlyWindow.h"
-#import "ArdiaFairPlay.h"
-#import "ArdiaProtectedVideo.h"
-#import "ArdiaHLSVideo.h"
-#import "ArdiaVideoMirror.h"
 
 #import <objc/runtime.h>
 
@@ -111,7 +107,10 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
   if (NSView *devtools = tab.devToolsView) [self devToolsChanged:devtools];
   [self layoutPage];
   [self applyPainting];
-  if (!shownEarly && (_life.creatingURL.length || tab.loading)) [self holdLittlePage];
+  const BOOL created = _firstPaint.created;
+  if (created) _firstPaint.settled = NO;
+  if (!shownEarly && (created || _life.creatingURL.length || tab.loading)) [self holdPageUntilPainted:created];
+  _firstPaint.created = created && !shownEarly && !_firstPaint.held && !_visible && !_reveal.active;
   if (_muted) tab.muted = YES;
   if (_pageBackgroundColor) tab.pageBackgroundColor = _pageBackgroundColor;
   if (_contentsBackgroundColor) tab.contentsBackgroundColor = _contentsBackgroundColor;
@@ -136,7 +135,8 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
 - (void)detach {
   if (!_tab) return;
   if (TraceVisibility()) NSLog(@"[ardiacore-vis] %@ detach tab=%d", _transferKey, (int)_tab.tabId);
-  [self revealLittlePage:NO];
+  [self showHeldPage:ArdiaHeldPageEnd::Detached];
+  _firstPaint.created = NO;
   if (_tab.delegate == self) _tab.delegate = nil;
   [ArdiaTabRegistry setView:nil forTab:_tab];
   [ArdiaWebView noteShown:_tab];
@@ -375,10 +375,6 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
 
 - (void)tabWillClose:(ArdiaCoreTab *)tab {
   [ArdiaEarlyWindow dropPage:tab];
-  [ArdiaFairPlay pageGoneFromTab:tab];
-  [ArdiaProtectedVideo pageGoneFromTab:tab];
-  [ArdiaHLSVideo pageGoneFromTab:tab];
-  [ArdiaVideoMirror pageGoneFromTab:tab];
   if (_life.closed() || tab != _tab) return;
   [self detach];
   [self emit:@"windowClose" payload:@{}];
@@ -432,9 +428,6 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
 }
 
 - (void)tabDidChangeDiscarded:(ArdiaCoreTab *)tab {
-  if (tab.discarded) [ArdiaProtectedVideo pageGoneFromTab:tab];
-  if (tab.discarded) [ArdiaHLSVideo pageGoneFromTab:tab];
-  if (tab.discarded) [ArdiaVideoMirror pageGoneFromTab:tab];
   if (tab.discarded) [self emit:@"discarded" payload:@{@"url" : tab.url ?: @"", @"reason" : tab.discardReason ?: @""}];
   else [self emit:@"ready" payload:@{}];
 }
