@@ -9,7 +9,8 @@ $lab = @{ Tile = 48; Slot = 64; Left = 24; Rows = @(96, 176); Rounds = 6; FadeMs
 $variants = @("plain", "blur", "layout", "blur+layout", "overlay", "plain later", "blur later", "layout later", "blur+layout later", "overlay later")
 $probes = @("state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex")
 $slots = $variants.Count + 1
-$captureMs = 15000
+$captureMs = 30000
+$labMs = 16000
 $whiteAt = 220
 $darkBelow = 30
 $shownWithinMs = 100
@@ -44,8 +45,11 @@ public static class ArdiaFadeCheck {
   [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
   [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
   [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dc, int x, int y, int width, int height, IntPtr source, int sx, int sy, uint op);
+  [DllImport("gdi32.dll")] static extern bool GdiFlush();
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
-  public class Sample { public long Ms; public int[] Values; }
+  public class Sample { public long Ms; public int[] Values; public bool Ours; }
   public class Shot { public long Ms; public int Width; public int Height; public byte[] Pixels; public string Front; }
   public class Run { public long WindowMs = -1; public double Scale = 1; public List<Sample> Samples = new List<Sample>(); public List<Shot> Shots = new List<Shot>(); public Process Process; }
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -82,6 +86,7 @@ public static class ArdiaFadeCheck {
     IntPtr previous = SelectObject(memory, section);
     if (BitBlt(memory, 0, 0, shot.Width, shot.Height, screen, origin.X, origin.Y, 0x40CC0020)) {
       shot.Pixels = new byte[shot.Width * shot.Height * 4];
+      GdiFlush();
       Marshal.Copy(bits, shot.Pixels, 0, shot.Pixels.Length);
     }
     SelectObject(memory, previous);
@@ -104,7 +109,14 @@ public static class ArdiaFadeCheck {
     return found;
   }
 
-  public static Run Capture(string app, string arguments, int milliseconds, int tiles, int left, int slot, int tile, int[] tops) {
+  static bool OursAt(Point point, uint process) {
+    IntPtr top = GetAncestor(WindowFromPoint(point), 2);
+    uint owner;
+    GetWindowThreadProcessId(top, out owner);
+    return owner == process;
+  }
+
+  public static Run Capture(string app, string arguments, int milliseconds, int afterWindowMs, int tiles, int left, int slot, int tile, int[] tops) {
     SetProcessDPIAware();
     Run run = new Run();
     Stopwatch clock = Stopwatch.StartNew();
@@ -121,8 +133,9 @@ public static class ArdiaFadeCheck {
     long[] shotsAt = new long[] { 300, 900, 1500, 2600, 4500 };
     int nextShot = 0;
     IntPtr shotMemory = CreateCompatibleDC(screen);
+    Point probe = new Point();
     try {
-      while (clock.ElapsedMilliseconds < milliseconds && !run.Process.HasExited) {
+      while (clock.ElapsedMilliseconds < milliseconds && (run.WindowMs < 0 || clock.ElapsedMilliseconds - run.WindowMs < afterWindowMs) && !run.Process.HasExited) {
         if (window == IntPtr.Zero) {
           window = Find((uint)run.Process.Id);
           if (window == IntPtr.Zero) { Thread.Sleep(1); continue; }
@@ -134,6 +147,8 @@ public static class ArdiaFadeCheck {
           width = (int)(tiles * slot * run.Scale);
           for (int r = 0; r < tops.Length; r++) ys[r] = origin.Y + (int)((tops[r] + tile / 2) * run.Scale);
           for (int i = 0; i < tiles; i++) xs[i] = (int)((i * slot + tile / 2) * run.Scale);
+          probe.X = x0 + width / 2;
+          probe.Y = (ys[0] + ys[ys.Length - 1]) / 2;
           BitmapInfoHeader header = new BitmapInfoHeader();
           header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
           header.Width = width;
@@ -154,8 +169,10 @@ public static class ArdiaFadeCheck {
         sample.Values = new int[tiles * ys.Length];
         int band = ys[ys.Length - 1] - ys[0] + 1;
         if (!BitBlt(memory, 0, 0, width, band, screen, x0, ys[0], 0x40CC0020)) { Thread.Sleep(1); continue; }
+        GdiFlush();
         byte[] rows = new byte[width * band * 4];
         Marshal.Copy(bits, rows, 0, rows.Length);
+        sample.Ours = OursAt(probe, (uint)run.Process.Id);
         for (int r = 0; r < ys.Length; r++) {
           int offset = (ys[r] - ys[0]) * width * 4;
           for (int i = 0; i < tiles; i++) {
@@ -166,6 +183,9 @@ public static class ArdiaFadeCheck {
         run.Samples.Add(sample);
         Thread.Sleep(2);
       }
+    } catch {
+      try { if (!run.Process.HasExited) run.Process.Kill(); } catch { }
+      throw;
     } finally {
       if (section != IntPtr.Zero) { SelectObject(memory, previous); DeleteObject(section); }
       DeleteDC(memory);
@@ -189,7 +209,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
   $env:ARDIA_BACKGROUND = ""
   $env:ARDIA_TEST = "fadeLab=1"
   try {
-    $run = [ArdiaFadeCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $slots, $lab.Left, $lab.Slot, $lab.Tile, [int[]]$lab.Rows)
+    $run = [ArdiaFadeCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $labMs, $slots, $lab.Left, $lab.Slot, $lab.Tile, [int[]]$lab.Rows)
   } finally {
     $env:ARDIA_TEST = ""
   }
@@ -212,13 +232,13 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
   Set-Content -LiteralPath (Join-Path $Out "fade-$Label-samples.csv") -Value $csv.ToString() -Encoding utf8NoBOM
   Start-Sleep -Milliseconds 800
   $problems = @()
-  $samples = @($run.Samples)
-  $shots = @($run.Shots)
-  $covered = @($shots | Where-Object { $_.Front -notmatch "\(ours\)" })
-  if ($shots.Count -and $covered.Count -eq $shots.Count) {
-    Write-Host "fades, $Label`: unverified, another window was in front for every shot ($($covered[0].Front))"
+  $all = @($run.Samples)
+  $samples = @($all | Where-Object { $_.Ours })
+  if ($all.Count -and -not $samples.Count) {
+    Write-Host "fades, $Label`: unverified, another program's window covered the lab in all $($all.Count) samples (in front at the first shot: $(@($run.Shots | Select-Object -First 1).Front))"
     return @()
   }
+  if ($samples.Count -lt $all.Count) { Write-Host "fades, $Label`: $($all.Count - $samples.Count) of $($all.Count) samples left out, another program's window covered the lab then" }
   Write-Host "fades, $Label`: window at $($run.WindowMs) ms, scale $($run.Scale), $($samples.Count) samples"
   if ($samples.Count -lt 100) { return @("fades, $Label`: only $($samples.Count) samples were captured") }
   $intervals = @()
@@ -228,7 +248,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
     if ($marked -and $null -eq $on) { $on = $sample.Ms }
     if (-not $marked -and $null -ne $on -and $sample.Values[0] -lt $darkBelow) { $intervals += , @($on, $sample.Ms); $on = $null }
   }
-  if ($null -ne $on) { $intervals += , @($on, $samples[-1].Ms) }
+  if ($null -ne $on) { Write-Host "fades, $Label`: the last round was still showing when the capture ended, so it isn't counted" }
   Write-Host "fades, $Label`: $($intervals.Count) rounds seen by the marker"
   if ($intervals.Count -lt $lab.Rounds) { $problems += "fades, $Label`: the marker showed $($intervals.Count) rounds, not $($lab.Rounds)" }
   $byRound = @($intervals | ForEach-Object { $from = $_[0]; $to = $_[1]; , @($samples | Where-Object { $_.Ms -ge $from -and $_.Ms -lt $to }) })
