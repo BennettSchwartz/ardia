@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory = $true)][string]$App,
   [Parameter(Mandatory = $true)][string]$Out,
   [int]$LaunchSeconds = 60,
-  [string[]]$Only = @()
+  [string[]]$Only = @(),
+  [string[]]$Required = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -2320,6 +2321,351 @@ function Invoke-PagesTour {
   Stop-Ardia $session
 }
 
+$script:TourPagesPort = 9363
+$script:TourPages = $null
+
+function Start-TourPages {
+  if ($script:TourPages -and -not $script:TourPages.HasExited) { return $true }
+  $folder = Join-Path $Out "pages"
+  New-Item -ItemType Directory -Force -Path $folder | Out-Null
+  $serve = Join-Path $folder "serve.ps1"
+  Set-Content -LiteralPath $serve -Encoding utf8NoBOM -Value @'
+param([int]$Port)
+$pages = @{
+  "/links" = "<!doctype html><meta charset=utf-8><title>tour links</title><style>body{margin:0;background:#fff}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/peeked'>peek this</a>"
+  "/peeked" = "<!doctype html><meta charset=utf-8><title>tour peeked</title><style>html,body{margin:0;height:100%;background:#2a7}</style>"
+  "/taba" = "<!doctype html><meta charset=utf-8><title>tour tab a</title><style>html,body{margin:0;height:100%;background:#3366cc}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/typed'>peek this</a><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='a got '+keys}});</script>"
+  "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
+  "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
+}
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+$listener.Start()
+while ($true) {
+  $client = $listener.AcceptTcpClient()
+  try {
+    $client.ReceiveTimeout = 2000
+    $stream = $client.GetStream()
+    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+    $request = $reader.ReadLine()
+    while ($line = $reader.ReadLine()) { }
+    $path = if ($request) { ($request.Split(" ")[1]) -replace '\?.*$', '' } else { "" }
+    $text = $pages[$path]
+    $status = if ($text) { "200 OK" } else { "404 Not Found" }
+    $body = [System.Text.Encoding]::UTF8.GetBytes([string]$text)
+    $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 $status`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n")
+    $stream.Write($head, 0, $head.Length)
+    $stream.Write($body, 0, $body.Length)
+    $stream.Flush()
+  } catch { } finally { $client.Close() }
+}
+'@
+  $script:TourPages = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-NonInteractive", "-File", "`"$serve`"", "-Port", $script:TourPagesPort -WindowStyle Hidden -PassThru
+  $by = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $by -and -not $script:TourPages.HasExited) {
+    $probe = New-Object System.Net.Sockets.TcpClient
+    try { if ($probe.ConnectAsync("127.0.0.1", $script:TourPagesPort).Wait(1000) -and $probe.Connected) { return $true } } catch { } finally { $probe.Dispose() }
+    Start-Sleep -Milliseconds 300
+  }
+  return $false
+}
+
+function Stop-TourPages {
+  if ($script:TourPages -and -not $script:TourPages.HasExited) { Stop-Process -Id $script:TourPages.Id -Force -ErrorAction SilentlyContinue }
+  $script:TourPages = $null
+}
+
+function Send-Address([string]$Address) {
+  foreach ($character in $Address.ToUpperInvariant().ToCharArray()) {
+    $shifted = $false
+    $key = [byte][char]$character
+    if ($character -eq '.') { $key = 0xBE }
+    elseif ($character -eq '/') { $key = 0xBF }
+    elseif ($character -eq ':') { $key = 0xBA; $shifted = $true }
+    if ($shifted) { Send-Key 0x10 0 }
+    Send-Key $key 0
+    Send-Key $key 2
+    if ($shifted) { Send-Key 0x10 2 }
+    Start-Sleep -Milliseconds 60
+  }
+  Start-Sleep -Milliseconds 300
+}
+
+if (-not ([System.Management.Automation.PSTypeName]"ArdiaTourScale").Type) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class ArdiaTourScale {
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] public static extern bool Get(uint action, uint parameter, ref int value, uint change);
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] public static extern bool Set(uint action, int parameter, IntPtr value, uint change);
+}
+"@
+}
+
+function Get-ScaleStep {
+  $value = 0
+  [ArdiaTourScale]::Get(0x9E, 0, [ref]$value, 0) | Out-Null
+  return $value
+}
+
+function Set-ScaleStep([int]$Step) {
+  $set = [ArdiaTourScale]::Set(0x9F, $Step, [IntPtr]::Zero, 3)
+  Start-Sleep -Milliseconds 2500
+  return $set
+}
+
+function Get-PageWindow($Session, [string]$TitlePattern) {
+  return @(Get-TopWindows $Session | Where-Object { $_.ClassName -match "^Chrome_" -and $_.Title -match $TitlePattern -and $_.Width -ge 100 -and $_.Height -ge 100 -and $_.Left -gt -5000 -and $_.Top -gt -5000 }) | Select-Object -First 1
+}
+
+function Measure-Colour([string]$Path, $Box, [int[]]$Colour) {
+  if (-not (Test-Path -LiteralPath $Path) -or -not $Box) { return $null }
+  $bitmap = [System.Drawing.Bitmap]::FromFile($Path)
+  try {
+    $left = [Math]::Max(0, $Box.Left + 4)
+    $top = [Math]::Max(0, $Box.Top + 4)
+    $right = [Math]::Min($bitmap.Width - 1, $Box.Left + $Box.Width - 5)
+    $bottom = [Math]::Min($bitmap.Height - 1, $Box.Top + $Box.Height - 5)
+    $total = 0
+    $other = 0
+    for ($y = $top; $y -le $bottom; $y += 4) {
+      for ($x = $left; $x -le $right; $x += 4) {
+        $pixel = $bitmap.GetPixel($x, $y)
+        $total++
+        if ([Math]::Abs($pixel.R - $Colour[0]) + [Math]::Abs($pixel.G - $Colour[1]) + [Math]::Abs($pixel.B - $Colour[2]) -gt 40) { $other++ }
+      }
+    }
+    if (-not $total) { return $null }
+    return [Math]::Round(100.0 * $other / $total, 1)
+  } finally {
+    $bitmap.Dispose()
+  }
+}
+
+function Get-Box($Window) {
+  if (-not $Window) { return $null }
+  return [pscustomobject]@{ Left = $Window.Left; Top = $Window.Top; Width = $Window.Width; Height = $Window.Height }
+}
+
+function Get-Overlap($A, $B) {
+  if (-not $A -or -not $B) { return $null }
+  $left = [Math]::Max($A.Left, $B.Left)
+  $top = [Math]::Max($A.Top, $B.Top)
+  $right = [Math]::Min($A.Left + $A.Width, $B.Left + $B.Width)
+  $bottom = [Math]::Min($A.Top + $A.Height, $B.Top + $B.Height)
+  if ($right -le $left -or $bottom -le $top) { return $null }
+  return [pscustomobject]@{ Left = $left; Top = $top; Width = $right - $left; Height = $bottom - $top }
+}
+
+function Open-TourPage($Session, $Stop, [string]$Path, [string]$TitlePattern) {
+  Focus-Window $Session $Session.Main $Stop | Out-Null
+  $mark = Get-LogCount $Session
+  Send-Chord @(0x11) 0x54
+  $opened = Wait-Command $Session $mark "newTab"
+  Start-Sleep -Milliseconds 700
+  Send-Address "127.0.0.1:$($script:TourPagesPort)$Path"
+  Send-Key 0x0D 0
+  Send-Key 0x0D 2
+  $loaded = Wait-Until $Session { $null -ne (Get-PageWindow $Session $TitlePattern) } 20000
+  Start-Sleep -Milliseconds 2000
+  $Stop.Facts.Add("opened $Path in a new tab (newTab logged: $opened, its page window shows: $loaded)")
+  return $loaded
+}
+
+function Switch-Tab($Session, $Stop, [string]$TitlePattern, [string]$Leaving, [string]$Row) {
+  Send-Chord @(0x11) 0x09
+  $shown = { $null -ne (Get-PageWindow $Session $TitlePattern) -and $null -eq (Get-PageWindow $Session $Leaving) }
+  $switched = Wait-Until $Session $shown 6000
+  $how = "Ctrl+Tab"
+  if (-not $switched) {
+    $rows = @(Find-Named $Session.Main $Row)
+    if ($rows.Count) {
+      Send-Click $rows[0].X $rows[0].Y
+      $switched = Wait-Until $Session $shown 6000
+      $how = "Ctrl+Tab, then a click on the tab's row"
+    }
+  }
+  Start-Sleep -Milliseconds 1500
+  $pages = @(Get-TopWindows $Session | Where-Object { $_.ClassName -match '^Chrome_' -and $_.Width -ge 100 } | ForEach-Object { "'$($_.Title)'" }) -join ", "
+  $Stop.Facts.Add("switched by $how (switched: $switched); page windows shown: $pages")
+  return $switched
+}
+
+function Note-Required($Stop, [string]$Part) {
+  if ($Required -contains $Part -and $Stop.Seen -ne "yes") {
+    $script:RequiredFailures.Add("$($Stop.Number) $($Stop.Slug): $($Stop.Seen)")
+  }
+}
+
+$script:RequiredFailures = [System.Collections.Generic.List[string]]::new()
+
+function Invoke-PeekTabsTour {
+  if (-not (Start-TourPages)) {
+    $script:Lines.Add("- The peek-tabs part found no loopback page server on port $($script:TourPagesPort).")
+    if ($Required -contains "peek-tabs") { $script:RequiredFailures.Add("peek-tabs: no page server") }
+    return
+  }
+  $blue = @(0x33, 0x66, 0xcc)
+  $red = @(0xc0, 0x39, 0x2b)
+  $session = Start-Ardia "peek-tabs" -Onboarded -Settings @{ appearance = "light" }
+  $state = [pscustomobject]@{ Card = $null; PageB = $null; PageA = $null }
+
+  $stop = Invoke-Stop $session "peek-tabs-open" "A Peek on tab A takes the keyboard" {
+    param($stop)
+    $stop.Did = "Opened a solid red page as tab B and a blue page with a link as tab A, Shift-clicked the link, then typed 'abc'."
+    $stop.Expected = "a Peek over tab A, and the letters reach the Peek's page, whose title then reads 'peek got abc'."
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
+    $b = Open-TourPage $session $stop "/tabb" "tour tab b"
+    $a = Open-TourPage $session $stop "/taba" "tour tab a"
+    $page = Get-PageWindow $session "tour tab a"
+    $client = Get-Client $session.Main
+    if (-not ($a -and $b -and $page -and $client)) {
+      $stop.Facts.Add("windows: $(Format-Windows (Get-TopWindows $session))")
+      Set-Seen $stop $false
+      return
+    }
+    $state.PageA = Get-Box $page
+    Send-Key 0x10 0
+    Start-Sleep -Milliseconds 80
+    Send-Click ($page.Left + [int](180 * $client.Scale)) ($page.Top + [int](50 * $client.Scale))
+    Send-Key 0x10 2
+    $peeked = Wait-Until $session { $null -ne (Get-PageWindow $session "tour typed|peek got") } 15000
+    Start-Sleep -Milliseconds 2000
+    $card = Get-PageWindow $session "tour typed|peek got"
+    $state.Card = Get-Box $card
+    if ($state.Card) {
+      $bar = [int](44 * $client.Scale)
+      $state.Card = [pscustomobject]@{ Left = $state.Card.Left - 8; Top = $state.Card.Top - $bar; Width = $state.Card.Width + 16; Height = $state.Card.Height + $bar + 8 }
+      $stop.Facts.Add("the Peek card spans $($state.Card.Width) by $($state.Card.Height) at $($state.Card.Left), $($state.Card.Top)")
+    }
+    Send-Text "abc"
+    $typed = Wait-Until $session { $null -ne (Get-PageWindow $session "peek got abc") } 5000
+    Save-Shot $stop $session.Main | Out-Null
+    $stop.Facts.Add("the Peek opened: $peeked; the Peek's page got 'abc': $typed; the Peek's page is titled '$((Get-PageWindow $session 'tour typed|peek got').Title)'; tab A's page is titled '$((Get-PageWindow $session 'tour tab a|a got').Title)'")
+    Set-Seen $stop ($peeked -and $typed)
+  }
+  Note-Required $stop "peek-tabs"
+
+  $stop = Invoke-Stop $session "peek-tabs-other-tab" "Tab B shows whole while tab A keeps its Peek" {
+    param($stop)
+    $stop.Did = "Switched to tab B with real input and shot the window."
+    $stop.Expected = "tab B's solid red page is whole where the Peek card was: no card-shaped hole, under 2% of its pixels there are not red."
+    if (-not $state.Card) { $stop.Facts.Add("no Peek card to compare with"); Set-Seen $stop $false; return }
+    $switched = Switch-Tab $session $stop "tour tab b" "tour tab a|a got" "tour tab b"
+    Save-Shot $stop $session.Main | Out-Null
+    $pageB = Get-PageWindow $session "tour tab b"
+    $state.PageB = Get-Box $pageB
+    $where = Get-Overlap $state.Card $state.PageB
+    $notRed = Measure-Colour $stop.Shot $where $red
+    $whole = Measure-Colour $stop.Shot $state.PageB $red
+    $stop.Facts.Add("where the card was, $notRed% of tab B's page is not red; over the whole page $whole%")
+    $stop.Facts.Add("Peek page windows still shown: $(@(Get-TopWindows $session | Where-Object { $_.ClassName -match '^Chrome_' -and $_.Title -match 'tour typed|peek got' }).Count)")
+    Set-Seen $stop ($switched -and $null -ne $notRed -and $notRed -lt 2)
+  }
+  Note-Required $stop "peek-tabs"
+
+  $stop = Invoke-Stop $session "peek-tabs-back" "Back on tab A the Peek shows and takes the keyboard again" {
+    param($stop)
+    $stop.Did = "Switched back to tab A with real input, shot the window, then typed 'def'."
+    $stop.Expected = "the Peek shows again, and the letters reach its page, whose title then reads 'peek got abcdef'."
+    $switched = Switch-Tab $session $stop "tour tab a|a got" "tour tab b" "tour tab a"
+    Start-Sleep -Milliseconds 800
+    $shown = $null -ne (Get-PageWindow $session "tour typed|peek got")
+    Save-Shot $stop $session.Main | Out-Null
+    Send-Text "def"
+    $typed = Wait-Until $session { $null -ne (Get-PageWindow $session "peek got abcdef") } 5000
+    $stop.Facts.Add("the Peek's page window shows: $shown; it got 'def': $typed; the Peek's page is titled '$((Get-PageWindow $session 'tour typed|peek got').Title)'; tab A's page is titled '$((Get-PageWindow $session 'tour tab a|a got').Title)'")
+    Set-Seen $stop ($switched -and $shown -and $typed)
+  }
+  Note-Required $stop "peek-tabs"
+
+  $stop = Invoke-Stop $session "peek-tabs-closed" "Closing the Peek leaves tab A whole and with the keyboard" {
+    param($stop)
+    $stop.Did = "Pressed Escape to close the Peek, shot the window, then typed 'xyz'."
+    $stop.Expected = "tab A's blue page is whole where the card was (under 2% not blue, the link aside), and the letters reach it: its title reads 'a got xyz'."
+    Send-Escape
+    $closed = Wait-Until $session { $null -eq (Get-PageWindow $session "tour typed|peek got") } 5000
+    Start-Sleep -Milliseconds 1200
+    Save-Shot $stop $session.Main | Out-Null
+    $pageA = Get-Box (Get-PageWindow $session "tour tab a|a got")
+    $client = Get-Client $session.Main
+    $where = Get-Overlap $state.Card $pageA
+    if ($where -and $client) {
+      $below = [int](90 * $client.Scale)
+      $where = [pscustomobject]@{ Left = $where.Left; Top = [Math]::Max($where.Top, $pageA.Top + $below); Width = $where.Width; Height = $where.Top + $where.Height - [Math]::Max($where.Top, $pageA.Top + $below) }
+    }
+    $notBlue = Measure-Colour $stop.Shot $where $blue
+    Send-Text "xyz"
+    $typed = Wait-Until $session { $null -ne (Get-PageWindow $session "a got xyz") } 5000
+    $stop.Facts.Add("the Peek closed: $closed; where the card was, $notBlue% of tab A's page is not blue; tab A got 'xyz': $typed; tab A's page is titled '$((Get-PageWindow $session 'tour tab a|a got').Title)'")
+    Set-Seen $stop ($closed -and $null -ne $notBlue -and $notBlue -lt 2 -and $typed)
+  }
+  Note-Required $stop "peek-tabs"
+  Stop-Ardia $session
+}
+
+function Invoke-PeekTour([string]$Name, [hashtable]$Settings, [string]$Look, [int]$Height = 0, [int]$ScaleSteps = 0) {
+  if (-not (Start-TourPages)) {
+    $script:Lines.Add("- The $Name part found no loopback page server on port $($script:TourPagesPort).")
+    return
+  }
+  $savedStep = $null
+  if ($ScaleSteps) {
+    $savedStep = Get-ScaleStep
+    $set = Set-ScaleStep ($savedStep + $ScaleSteps)
+    $script:Lines.Add("- The $Name part moved the display scale override from step $savedStep to $(Get-ScaleStep) (set: $set).")
+  }
+  $session = Start-Ardia $Name -Onboarded -Settings $Settings
+  Invoke-Stop $session $Name "A Peek over a page, $Look" {
+    param($stop)
+    $stop.Did = "Opened a loopback page with one link, then Shift-clicked the link."
+    $stop.Expected = "a Peek card over the page with all four corners rounded alike, its page green, the page behind dimmed."
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
+    if ($Height -gt 0) {
+      $frame = Get-Frame $session.Main
+      [ArdiaTour]::SetWindowPos($session.Main, [IntPtr]::Zero, $frame.Left, $frame.Top, $frame.Width, $Height, 0x0014) | Out-Null
+      Start-Sleep -Milliseconds 1200
+      $stop.Facts.Add("the main window was made $Height pixels tall")
+    }
+    Focus-Window $session $session.Main $stop | Out-Null
+    $mark = Get-LogCount $session
+    Send-Chord @(0x11) 0x54
+    $opened = Wait-Command $session $mark "newTab"
+    Start-Sleep -Milliseconds 700
+    Send-Address "127.0.0.1:$($script:TourPagesPort)/links"
+    Send-Key 0x0D 0
+    Send-Key 0x0D 2
+    $loaded = Wait-Title $session "tour links"
+    Start-Sleep -Milliseconds 2500
+    $stop.Facts.Add("newTab command logged: $opened; the links page loaded: $loaded")
+    $page = Get-PageWindow $session "tour links"
+    $client = Get-Client $session.Main
+    if (-not $page -or -not $client) {
+      $stop.Facts.Add("no page window for the links page: $(Format-Windows (Get-TopWindows $session))")
+      Set-Seen $stop $false
+      return
+    }
+    $x = $page.Left + [int](180 * $client.Scale)
+    $y = $page.Top + [int](50 * $client.Scale)
+    $stop.Facts.Add("the links page window is $($page.Width) by $($page.Height) at $($page.Left), $($page.Top); Shift-clicking at $x, $y")
+    Send-Key 0x10 0
+    Start-Sleep -Milliseconds 80
+    Send-Click $x $y
+    Send-Key 0x10 2
+    $peeked = Wait-Until $session { $null -ne (Get-PageWindow $session "tour peeked") } 15000
+    Start-Sleep -Milliseconds 2500
+    Save-Shot $stop $session.Main | Out-Null
+    $card = Get-PageWindow $session "tour peeked"
+    if ($card) { $stop.Facts.Add("the Peek's page window is $($card.Width) by $($card.Height) at $($card.Left), $($card.Top)") }
+    $stop.Facts.Add("main window client $($client.Width) by $($client.Height) at $($client.X), $($client.Y), scale $($client.Scale)")
+    Set-Seen $stop $peeked
+    Send-Escape
+    Start-Sleep -Milliseconds 800
+  } | Out-Null
+  Stop-Ardia $session
+  if ($null -ne $savedStep) { Set-ScaleStep $savedStep | Out-Null }
+}
+
 function Invoke-LayoutTour([string]$Name, [hashtable]$Settings, [string]$Title, [string]$Expected) {
   $session = Start-Ardia $Name -Onboarded -Settings $Settings
   Invoke-Stop $session $Name $Title {
@@ -2442,6 +2788,17 @@ if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
   $tours += @{ Name = "pages"; Run = { Invoke-PagesTour } }
   $tours += @{ Name = "first-run"; Run = { Invoke-FirstRunTour }; Required = $true }
   $tours += @{ Name = "typing"; Run = { Invoke-TypingTour }; Required = $true }
+  $tours += @{ Name = "peek"; Run = { Invoke-PeekTour "peek-light" @{ appearance = "light" } "light" } }
+  $tours += @{ Name = "peek-dark"; Run = { Invoke-PeekTour "peek-dark" @{ appearance = "dark" } "dark" } }
+  $tours += @{ Name = "peek-tabs"; Run = { Invoke-PeekTabsTour } }
+  $tours += @{ Name = "peek-layouts"; Run = {
+      Invoke-PeekTour "peek-sidebar-address" @{ appearance = "light"; addressBar = "sidebar" } "light, address bar in the sidebar"
+      Invoke-PeekTour "peek-borderless" @{ appearance = "light"; borderlessMode = $true } "light, Borderless"
+      Invoke-PeekTour "peek-top-tabs" @{ appearance = "light"; tabLayout = "top" } "light, tabs on top"
+      Invoke-PeekTour "peek-short" @{ appearance = "light" } "light, a 460 pixel tall window" 460
+      Invoke-PeekTour "peek-scale-up" @{ appearance = "light" } "light, the display scale one step up" 0 1
+      Invoke-PeekTour "peek-scale-up-dark" @{ appearance = "dark" } "dark, the display scale one step up" 0 1
+    } }
 }
 
 if ($Only.Count) {
@@ -2462,7 +2819,15 @@ foreach ($tour in $tours) {
   }
 }
 
+Stop-TourPages
 $env:ARDIA_DATA_DIR = ""
+foreach ($part in $Required) {
+  if (-not @($tours | Where-Object { $_.Name -eq $part }).Count) { $script:RequiredFailures.Add("$($part): not run") }
+}
+if ($script:RequiredFailures.Count) {
+  $script:Lines.Add("- Required stops that were not seen: $($script:RequiredFailures -join '; ').")
+  Set-Content -LiteralPath (Join-Path $Out "required-failed.txt") -Value ($script:RequiredFailures -join "`n") -Encoding utf8NoBOM
+}
 Write-Tour
 $elapsed = [Math]::Round(((Get-Date) - $script:Started).TotalSeconds)
 $crashed = @($script:Sessions | Where-Object { $_.Crashed })
