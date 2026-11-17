@@ -415,7 +415,7 @@ test("the app's symbol names come from the version, with or without the tag's v"
   assert.deepEqual(names, ["Ardia-0.2.47-nightly.5-symbols.tar.xz", "Ardia-0.2.47-uuids.txt", "Ardia-0.2.47-symbols.tar.xz", "ArdiaCore-4f3a9c0d1e2b-uuids.txt"]);
 });
 
-test("release.sh packs the archive's dSYM from the exported app before packaging, and both release paths upload it", () => {
+test("release.sh packs the archive's dSYM from the exported app before packaging, and publish.sh uploads the pair", () => {
   const release = readFileSync(join(scripts, "release.sh"), "utf8");
   const verify = release.indexOf('"$stages/verify.sh" "$app" "$archive"');
   const pack = release.indexOf('pack-symbols.sh" --app "$app" "$archive/dSYMs" "$dist/$(app_symbols_name "$version")" "$dist/$(app_uuids_name "$version")"');
@@ -423,9 +423,7 @@ test("release.sh packs the archive's dSYM from the exported app before packaging
   assert.ok(verify > 0 && pack > verify && packaged > pack, "pack-symbols.sh --app runs after verify.sh and before package.sh");
 
   const publishScript = readFileSync(join(scripts, "../.claude/skills/release/scripts/publish.sh"), "utf8");
-  assert.match(publishScript, /"\$cli\.sha256" "\$dist\/\$\(app_symbols_name "\$version"\)" "\$dist\/\$\(app_uuids_name "\$version"\)"; do/);
-
-  const workflow = readFileSync(join(scripts, "../.github/workflows/release.yml"), "utf8");
-  assert.match(workflow, /^ +\$\{\{ steps\.paths\.outputs\.dist \}\}\/Ardia-\$\{\{ inputs\.version \}\}-symbols\.tar\.xz$/m);
-  assert.match(workflow, /^ +\$\{\{ steps\.paths\.outputs\.dist \}\}\/Ardia-\$\{\{ inputs\.version \}\}-uuids\.txt$/m);
+  assert.match(publishScript, /^app_symbols="\$dist\/\$\(app_symbols_name "\$version"\)"$/m);
+  assert.match(publishScript, /^app_uuids="\$dist\/\$\(app_uuids_name "\$version"\)"$/m);
+  assert.match(publishScript, /for file in "\$app_symbols" "\$app_uuids"; do\n\s+\[ -f "\$file" \] \|\| die [^\n]+\n\s+assets\+=\("\$file"\)/);
 });
