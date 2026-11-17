@@ -142,6 +142,11 @@ export const consentNow = consentToken;
 export const stillValid = (token: ConsentToken | null | undefined) => typeof token === "string" && saved.sharing && token === saved.epoch;
 export const consentEpoch = () => (saved.sharing && saved.epoch ? saved.epoch : "");
 
+export const onConsentPeriodChange = (fn: () => void) =>
+  useTelemetry.subscribe((current, previous) => {
+    if (current.sharing !== previous.sharing || current.epoch !== previous.epoch) fn();
+  });
+
 export function counted(token: ConsentToken | null, count: () => void, local?: () => void) {
   if (stillValid(token)) count();
   else local?.();

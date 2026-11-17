@@ -3,7 +3,7 @@ import { after, mock, test } from "node:test";
 
 globalThis.__DEV__ = false;
 const stub = await import("../../test-native/index.ts");
-globalThis.fetch = async () => ({ status: 200 });
+globalThis.fetch = async () => ({ status: 503 });
 
 const client = await import("./client.ts");
 const usage = await import("./usage.ts");
@@ -89,7 +89,7 @@ test("F3 memory and settings snapshots started before sharing went off and on ag
   globalThis.acTestTasks = () => [{ type: "browser", memory: 300 * 1_048_576 }];
   const posted = [];
   const fetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => (posted.push(String(init?.body ?? "")), { status: 200 });
+  globalThis.fetch = async (_url, init) => (posted.push(String(init?.body ?? "")), { status: 503 });
   try {
     const hour = usage.devHourly();
     offAndOn();
@@ -98,9 +98,9 @@ test("F3 memory and settings snapshots started before sharing went off and on ag
     globalThis.acTestTasks = undefined;
     globalThis.fetch = fetch;
   }
-  const sent = [...posted, JSON.stringify(await queued("perf_memory")), JSON.stringify(await queued("settings_snapshot"))].join("\n");
-  assert.equal(sent.includes("perf_memory") || sent.includes("total_mb"), false);
-  assert.equal(sent.includes("settings_snapshot"), false);
+  assert.deepEqual(await queued("perf_memory"), []);
+  assert.deepEqual(await queued("settings_snapshot"), []);
+  assert.equal(posted.some((body) => body.includes("perf_memory") || body.includes("settings_snapshot")), false);
 });
 
 test("F3 a crash read started while sharing was off doesn't send crashes from before sharing was turned on", async () => {
@@ -124,27 +124,27 @@ test("F3 main-process work keeps the newest sample as its baseline when two read
   const app = stub.shellNativeModules.ArdiaApp;
   const original = app.diagnosticsSample;
   const pending = [];
+  let answered = 0;
+  const answer = async (read, sample) => {
+    let done = false;
+    read.then(() => (done = true), () => (done = true));
+    for (let i = 0; i < 200 && !done; i++) {
+      while (answered < pending.length) pending[answered++](sample);
+      await turn();
+    }
+    assert.ok(done, "the read never got its sample");
+    return read;
+  };
   app.diagnosticsSample = () => new Promise((resolve) => pending.push(resolve));
   mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
   try {
     const first = diagnostics.takeMainProcessWork();
     const second = diagnostics.takeMainProcessWork();
-    await turn();
-    if (pending.length === 2) {
-      pending[1]({ cpuMs: 200, wakeups: 0 });
-      await turn();
-      pending[0]({ cpuMs: 100, wakeups: 0 });
-    } else {
-      pending[0]({ cpuMs: 100, wakeups: 0 });
-      await turn();
-      pending[1]({ cpuMs: 200, wakeups: 0 });
-    }
-    await Promise.all([first, second]);
+    await answer(first, { cpuMs: 100, wakeups: 0 });
+    await answer(second, { cpuMs: 200, wakeups: 0 });
     mock.timers.tick(120_000);
-    const third = diagnostics.takeMainProcessWork();
-    await turn();
-    pending[2]({ cpuMs: 1400, wakeups: 0 });
-    assert.equal((await third).browser_cpu_pct, 1);
+    const third = await answer(diagnostics.takeMainProcessWork(), { cpuMs: 1400, wakeups: 0 });
+    assert.equal(third.browser_cpu_pct, 1);
   } finally {
     mock.timers.reset();
     app.diagnosticsSample = original;

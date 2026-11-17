@@ -21,6 +21,7 @@ import {
   type Rect,
   type SpringAxis,
 } from "./pipGeometry.ts";
+import { consentEpoch } from "../../browser/src/state/telemetry/client";
 import { notePictureInPictureClickSkip } from "../../browser/src/state/telemetry/pictureInPictureCounts";
 import { clickSkip, positionAt, savePlayerFrame, sendPlayerCommand, sendPlayerViewport, SKIP_SECONDS, usePipPlayer, type PlayerState } from "./pipPlayer.ts";
 
@@ -311,7 +312,7 @@ function PlayerFrame({ state, rect, area, hole, fade, onRect, interacting }: {
       const skip = clickSkip(current.start.x - current.rect.x, current.rect.width, travel);
       if (skip) {
         interacting.current = false;
-        notePictureInPictureClickSkip(skip);
+        notePictureInPictureClickSkip({ seconds: skip, epoch: consentEpoch() });
         command("seekBy", { seconds: skip });
         return;
       }

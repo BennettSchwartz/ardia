@@ -4,7 +4,7 @@ import { after, mock, test } from "node:test";
 globalThis.__DEV__ = false;
 globalThis.requestAnimationFrame ??= (callback) => setTimeout(() => callback(Date.now()), 0);
 const stub = await import("../../test-native/index.ts");
-globalThis.fetch = async () => ({ status: 200 });
+globalThis.fetch = async () => ({ status: 503 });
 
 const client = await import("./client.ts");
 const choice = await import("./choice.ts");
@@ -270,4 +270,103 @@ test("D a window focused while sharing is off is still checked into the local co
   const local = (await localRecords("usage_counts")).filter((r) => r.properties?.focused_window_checks === 1);
   assert.equal(local.length, 1);
   assert.equal(local[0].sent, false);
+});
+
+const transport = await import("./transport.ts");
+const identity = await import("./identity.ts");
+const localStore = await import("./localStore.ts");
+
+test("PRRT_kwDOS_pvMc64oe4k an anonymous ID reset begun while sharing was off isn't sent when sharing is turned on during it", async () => {
+  client.setSharing(false, "settings");
+  const local = stub.shellNativeModules.ArdiaTelemetryLocal;
+  const clear = local.clear;
+  let cleared;
+  local.clear = () => new Promise((resolve) => (cleared = resolve));
+  try {
+    const reset = identity.resetAnonymousId();
+    await turn();
+    client.setSharing(true, "settings");
+    cleared();
+    await reset;
+  } finally {
+    local.clear = clear;
+  }
+  assert.deepEqual(await queued("anonymous_id_reset"), []);
+});
+
+test("PRRT_kwDOS_pvMc64oe4k an anonymous ID reset made while sharing stays on is still sent", async () => {
+  client.setSharing(true, "onboarding");
+  await identity.resetAnonymousId();
+  assert.equal((await queued("anonymous_id_reset")).length, 1);
+});
+
+test("PRRT_kwDOS_pvMc64oe4G an upload that finishes after sharing went off and on again doesn't count in the new period's post stats", async () => {
+  client.setSharing(true, "onboarding");
+  transport.takePostStats();
+  const host = transport.telemetryHost();
+  let reply;
+  transport.setTelemetryHost({ ...host, send: () => new Promise((resolve) => (reply = resolve)) });
+  try {
+    const sent = transport.post("events", "{}", 1);
+    offAndOn();
+    reply(200);
+    await sent;
+  } finally {
+    transport.setTelemetryHost(host);
+  }
+  assert.deepEqual(transport.takePostStats(), { bytes: 0, failed: 0, requests: 0 });
+});
+
+test("PRRT_kwDOS_pvMc64oe4G uploads from an earlier consent period aren't reported in the next one", async () => {
+  client.setSharing(true, "onboarding");
+  transport.takePostStats();
+  const host = transport.telemetryHost();
+  transport.setTelemetryHost({ ...host, send: async () => 200 });
+  try {
+    await transport.post("events", "{}", 1);
+  } finally {
+    transport.setTelemetryHost(host);
+  }
+  offAndOn();
+  assert.deepEqual(transport.takePostStats(), { bytes: 0, failed: 0, requests: 0 });
+});
+
+test("PRRT_kwDOS_pvMc64oe4_ a local-store report begun while sharing was off doesn't consume the meters of the period after it", async () => {
+  client.setSharing(false, "settings");
+  const local = stub.shellNativeModules.ArdiaTelemetryLocal;
+  const prune = local.prune;
+  const held = [];
+  local.prune = (now) => new Promise((resolve) => held.push(() => resolve(prune(now))));
+  const release = () => held.splice(0).forEach((go) => go());
+  let stale;
+  try {
+    stale = localReport.reportLocalStore();
+    await turn();
+    client.setSharing(true, "settings");
+    for (let i = 0; i < 5; i++) client.capture("new_period_line", {}, client.consentNow());
+    release();
+    await stale;
+  } finally {
+    local.prune = prune;
+  }
+  const fresh = await localReport.reportLocalStore();
+  assert.ok((fresh?.lines_recorded ?? 0) >= 5, `lines_recorded ${fresh?.lines_recorded}`);
+  assert.deepEqual(await queued(localReport.LOCAL_STORE_EVENT).then((all) => all.filter((p) => p.lines_recorded >= 5).length), 1);
+});
+
+const extensionInstalls = await import("./extensionInstalls.ts");
+
+test("5 an extension install confirmed while sharing was off isn't sent when it finishes after sharing is on, and one confirmed while on is", async (t) => {
+  extensionInstalls.watchExtensionInstalls(Date.now());
+  mock.timers.enable({ apis: ["Date"], now: Date.now() + 60_000 });
+  t.after(() => mock.timers.reset());
+  const prompt = (id) => ({ requestId: `r-${id}`, profile: "", id, name: "x", version: "1", type: "install", icon: "", permissions: [], tabId: null });
+  client.setSharing(false, "settings");
+  stub.emitEvent("extensions.installPrompt", prompt("off-ext"));
+  client.setSharing(true, "settings");
+  stub.emitEvent("extensions.changed", { profile: "", id: "off-ext", event: "installed" });
+  assert.deepEqual(await queued("extension_installed"), []);
+  stub.emitEvent("extensions.installPrompt", prompt("on-ext"));
+  stub.emitEvent("extensions.changed", { profile: "", id: "on-ext", event: "installed" });
+  assert.equal((await queued("extension_installed")).length, 1);
 });

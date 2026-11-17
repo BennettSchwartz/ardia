@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
-test("every focus hand-off outcome is counted only if sharing hasn't changed since the hand-off began", () => {
+test("every focus hand-off outcome is counted under the consent epoch its hand-off began in", () => {
   const source = read("../ios/FocusHandoff.swift");
   const calls = source.match(/outcomes\.(?:add|delivered)\(.*\)$/gm) ?? [];
   assert.ok(calls.length >= 5, `found ${calls.length} outcome calls`);
@@ -12,12 +12,13 @@ test("every focus hand-off outcome is counted only if sharing hasn't changed sin
   assert.match(read("../ios/FocusModule.swift"), /Function\("setConsentEpoch"\)/);
 });
 
-test("the consent epoch is an opaque string, and nothing is counted before JS has set one", () => {
+test("the consent epoch is an opaque string, and outcomes are kept per epoch so JS sends only the current one's and keeps the rest locally", () => {
   const source = read("../ios/FocusHandoff.swift");
   assert.match(source, /func setConsentEpoch\(_ epoch: String\)/);
   assert.match(source, /var epoch = ""/);
   assert.match(source, /func add\(_ outcome: String, _ by: Int = 1, since epoch: String\)/);
-  assert.match(source, /if !current\.isEmpty, epoch == current \{/);
+  assert.match(source, /counts\[epoch, default: \[:\]\]\[outcome, default: 0\] \+= by/);
+  assert.match(source, /func take\(\) -> \[String: \[String: Int\]\]/);
   assert.doesNotMatch(source, /since epoch: Int/);
 });
 

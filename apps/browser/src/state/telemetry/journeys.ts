@@ -1,6 +1,6 @@
 import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTabId } from "../browser/model";
-import { capture, consentNow, isSharing, useTelemetry } from "./client";
+import { capture, consentNow, isSharing, onConsentPeriodChange } from "./client";
 import { appInfo, percentile } from "./transport";
 import { jsStartedAt } from "./jsStart";
 import { fieldTiming } from "../../platform/fieldTiming";
@@ -367,7 +367,10 @@ function setOn(next: boolean, initial = false) {
 export function startJourneys(previous: PreviousLaunch | null) {
   if (previous) previousLaunch = previous;
   setOn(isSharing(), true);
-  useTelemetry.subscribe((t) => setOn(t.sharing));
+  onConsentPeriodChange(() => {
+    setOn(false);
+    setOn(isSharing());
+  });
 }
 
 export function journeysEnding() {

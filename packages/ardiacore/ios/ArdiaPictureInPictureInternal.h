@@ -79,6 +79,7 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
   NSPoint _dragGrab;
   NSPoint _dragFrom;
   NSTimeInterval _dragBeganAt;
+  ArdiaConsentStamp *_dragStamp;
   NSInteger _dragOffCursor;
   double _dragMaxOff;
   double _dragSlowestMove;

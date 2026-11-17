@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 globalThis.__DEV__ = false;
 const stub = await import("../../test-native/index.ts");
-globalThis.fetch = async () => ({ status: 200 });
+globalThis.fetch = async () => ({ status: 503 });
 
 const queuedEvent = (event) => ({ uuid: `u-${event}`, event, distinct_id: "install", timestamp: new Date(0).toISOString(), properties: {} });
 

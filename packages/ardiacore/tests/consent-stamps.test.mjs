@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -15,7 +15,7 @@ test("ArdiaCore holds the consent epoch JS sets, empty until JS has set one", ()
 test("a press loop is stamped with the epoch when its outermost loop begins, and its report sends that stamp", () => {
   const focusState = read("../ios/ArdiaFocusState.mm");
   assert.match(focusState, /PointerTrace\(\)\.BeginLoop\(name\.UTF8String \?: "unnamed", Uptime\(\), ArdiaEvents\.consentEpoch\.UTF8String \?: ""\)/);
-  assert.match(focusState, /@"epoch" : @\(epoch\.c_str\(\)\)/);
+  assert.match(focusState, /\[\[\[ArdiaConsentStamp alloc\] initWithEpoch:@\(epoch\.c_str\(\)\)\] onto:/);
   assert.doesNotMatch(focusState, /seconds/);
   const trace = read("../ios/ArdiaPointerTrace.h");
   assert.match(trace, /unsigned long BeginLoop\(const std::string &name, double now, const std::string &epoch\)/);
@@ -27,9 +27,70 @@ test("a press loop is stamped with the epoch when its outermost loop begins, and
 test("a paint check is stamped with the epoch when it is scheduled, and its record sends that stamp", () => {
   const probe = read("../ios/ArdiaPaintProbe.mm");
   const schedule = probe.slice(probe.indexOf("void SchedulePaintCheck"), probe.indexOf("NSString *PaintProbeLine"));
-  assert.ok(schedule.indexOf("NSString *epoch = ArdiaEvents.consentEpoch;") >= 0, "SchedulePaintCheck reads the epoch");
-  assert.ok(schedule.indexOf("NSString *epoch = ArdiaEvents.consentEpoch;") < schedule.indexOf("dispatch_after"), "the epoch is read before the check is deferred");
-  assert.match(schedule, /CheckPainting\(checked, trigger, epoch\)/);
-  assert.match(probe, /@"epoch" : epoch,/);
+  assert.ok(schedule.indexOf("ArdiaConsentStamp *stamp = ArdiaConsentStamp.begin;") >= 0, "SchedulePaintCheck takes the stamp");
+  assert.ok(schedule.indexOf("ArdiaConsentStamp *stamp = ArdiaConsentStamp.begin;") < schedule.indexOf("dispatch_after"), "the stamp is taken before the check is deferred");
+  assert.match(schedule, /CheckPainting\(checked, trigger, stamp\)/);
+  assert.match(probe, /\[ArdiaEvents emit:@"engine\.windowUnpainted" data:\[stamp onto:record\]\]/);
   assert.doesNotMatch(probe, /@"seconds"/);
+});
+
+const IOS = new URL("../ios/", import.meta.url);
+const sources = () => readdirSync(IOS).filter((name) => /\.(mm|swift)$/.test(name)).map((name) => [name, readFileSync(new URL(name, IOS), "utf8")]);
+const STAMPED = ["engine.devToolsKeyKept", "engine.hoverLost", "engine.pressLoopLong", "engine.windowUnpainted", "engine.cursorRestored", "engine.popupProtectedMedia", "pictureInPictureDragged", "pictureInPictureSkip", "autoPictureInPictureKept"];
+
+test("ArdiaConsentStamp takes the epoch once, when an episode begins, and puts it on the payload sent later", () => {
+  const header = read("../ios/ArdiaEvents.h");
+  assert.match(header, /@interface ArdiaConsentStamp : NSObject/);
+  assert.match(header, /\+ \(instancetype\)begin NS_SWIFT_NAME\(begin\(\)\);/);
+  assert.match(header, /- \(NSDictionary<NSString \*, id> \*\)onto:\(NSDictionary<NSString \*, id> \*\)payload NS_SWIFT_NAME\(onto\(_:\)\);/);
+  const events = read("../ios/ArdiaEvents.mm");
+  assert.match(events, /\+ \(instancetype\)begin \{\s*return \[\[self alloc\] initWithEpoch:ArdiaEvents\.consentEpoch\];/);
+  assert.match(events, /stamped\[@"epoch"\] = _epoch;/);
+});
+
+test("every native telemetry event JS counts or captures is sent through a consent stamp, never with a hand-written epoch", () => {
+  for (const [name, text] of sources()) {
+    for (const line of text.split("\n")) {
+      const event = STAMPED.find((e) => (line.includes(`@"${e}"`) || line.includes(`emit("${e}"`)) && /emit/.test(line));
+      const sent = event && /(?:data|payload):(\w+)\]/.exec(line)?.[1];
+      const swiftStamped = /\.onto\(/.test(line);
+      const stampedBefore = sent && new RegExp(`\\b${sent} = [^;]*onto:`).test(text);
+      if (event) assert.ok(/onto:/.test(line) || swiftStamped || stampedBefore, `${name}: ${event} is sent without a consent stamp: ${line.trim()}`);
+      if (/emit.*@"pictureInPicture"/.test(line) && line.includes("fullScreenSpaces")) assert.match(line, /\[stamp onto:/, `${name}: a shown Picture in Picture window is sent without the stamp taken when it opened`);
+    }
+    assert.doesNotMatch(text, /@"epoch" :/, `${name} writes an epoch by hand instead of through ArdiaConsentStamp`);
+  }
+});
+
+test("a lost-hover episode is stamped when it opens, and its close sends that stamp", () => {
+  assert.match(read("../ios/ArdiaHoverProbeInternal.h"), /ArdiaConsentStamp \*stamp = nil;/);
+  const probe = read("../ios/ArdiaHoverProbe.mm");
+  const open = probe.slice(probe.indexOf("void OpenEpisode"), probe.indexOf("void HandleHoverCheck"));
+  assert.match(open, /gEpisode\.stamp = ArdiaConsentStamp\.begin;/);
+  const close = probe.slice(probe.indexOf("void CloseEpisode"), probe.indexOf("bool Recovered"));
+  assert.ok(close.indexOf("ArdiaConsentStamp *stamp = gEpisode.stamp;") < close.indexOf("gEpisode = HoverEpisode{};"), "the stamp is kept before the episode is cleared");
+  assert.match(close, /\[ArdiaEvents emit:@"engine\.hoverLost" data:\[stamp onto:payload\]\]/);
+  assert.doesNotMatch(close, /ArdiaConsentStamp\.begin/);
+});
+
+test("a Picture in Picture window is stamped when the page enters it, and the retries that find its window send that stamp", () => {
+  const view = read("../ios/ArdiaWebView+PictureInPicture.mm");
+  const changed = view.slice(view.indexOf("didChangePictureInPicture"), view.indexOf("requestsActivation"));
+  assert.match(changed, /ArdiaConsentStamp \*stamp = ArdiaConsentStamp\.begin;/);
+  assert.match(changed, /ardia_pip::VideoEntered\(self, [^;]*, stamp\)/);
+  assert.match(changed, /ardia_pip::DocumentEntered\(self, stamp\)/);
+  const pip = read("../ios/ArdiaPictureInPicture.mm");
+  assert.match(pip, /bool Attach\(ArdiaWebView \*view, NSString \*host, ArdiaConsentStamp \*stamp\)/);
+  assert.match(pip, /Attach\(strongView, host, stamp\)/);
+  assert.match(pip, /void DocumentEntered\(ArdiaWebView \*view, ArdiaConsentStamp \*stamp\)/);
+  assert.doesNotMatch(pip, /ArdiaConsentStamp\.begin/);
+  assert.match(read("../ios/ArdiaPictureInPicture.h"), /void VideoEntered\(ArdiaWebView \*view, NSString \*host, ArdiaConsentStamp \*stamp\);/);
+});
+
+test("a Picture in Picture drag is stamped when it begins and its report sends that stamp", () => {
+  assert.match(read("../ios/ArdiaPictureInPictureInternal.h"), /ArdiaConsentStamp \*_dragStamp;/);
+  const swipe = read("../ios/ArdiaPiPController+Swipe.mm");
+  const began = swipe.slice(swipe.indexOf("- (void)dragBegan:"), swipe.indexOf("- (void)dragBegan:") + 900);
+  assert.match(began, /_dragStamp = ArdiaConsentStamp\.begin;/);
+  assert.match(swipe, /emit:@"pictureInPictureDragged" payload:\[_dragStamp onto:/);
 });

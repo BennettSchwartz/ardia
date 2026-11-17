@@ -63,6 +63,24 @@ test("snapshot media state reaches the shared audio badge, player, capture and p
   assert.deepEqual(pageOf(h.tab).mediaAccess, { camera: true, microphone: false, screen: false });
 });
 
+test("a Picture in Picture window the engine reports as shown reaches the shared UI stamped with the consent epoch it arrived in", async () => {
+  const client = await import("../../browser/src/state/telemetry/client.ts");
+  client.loadChoice();
+  client.setSharing(true, "onboarding");
+  try {
+    const h = setup();
+    assert.ok(h.receiver.install({ lease, snapshot: { watermark: 1, events: [] } }));
+    h.send(message(2, "pictureInPicture", { kind: "video", active: true, fullScreenSpaces: false, leftTab: true }));
+    h.send(message(3, "pictureInPicture", { kind: "video", active: false }));
+    const states = h.calls.filter(([name]) => name === "pictureInPicture").map(([, state]) => state);
+    assert.equal(states[0].epoch, client.consentEpoch());
+    assert.ok(states[0].epoch);
+    assert.equal("epoch" in states[1], false);
+  } finally {
+    client.setSharing(false, "settings");
+  }
+});
+
 test("a playing video outside the media session offers the video controls but no player", () => {
   const h = setup();
   assert.ok(h.receiver.install({ lease, snapshot: { watermark: 1, events: [] } }));

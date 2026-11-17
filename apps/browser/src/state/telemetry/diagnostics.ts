@@ -6,7 +6,8 @@ import { withDeadline } from "../../lib/deadline";
 import { hermesHeapMegabytes } from "../../lib/hermesHeap";
 import { activeTab } from "../browser/model";
 import { useBrowser } from "../browser/store";
-import { capture, consentNow, consentToken, counted, isSharing, saveContext, stillValid, useTelemetry, type ConsentToken } from "./client";
+import { capture, consentNow, consentToken, counted, isSharing, saveContext, stillValid, onConsentPeriodChange } from "./client";
+import { nativeConsent } from "./nativeConsent";
 import { formatRecentPages, readRecentPages, type RecentPage, type SavedContext } from "./savedContext";
 import { noteDragsEnded } from "./stuckDrags";
 import { noteWindowlessPages } from "./cliCounts";
@@ -134,6 +135,20 @@ export const takeContentDriftCounts = (): Promise<Record<string, number>> =>
     return { content_layer_layouts: drift.layouts, content_layer_refits: drift.fits, content_layer_drift_max_pt: drift.maxPoints };
   });
 
+export const takeColdTabHoldCounts = (): Promise<Record<string, number>> =>
+  inTurn(async (): Promise<Record<string, number>> => {
+    const holds = await call("webView.takeFirstPaintHolds", {}).catch(() => null);
+    if (!holds) return {};
+    return {
+      cold_tab_holds: holds.held,
+      cold_tab_holds_painted: holds.painted,
+      cold_tab_holds_loaded: holds.loaded,
+      cold_tab_holds_pressed: holds.pressed,
+      cold_tab_holds_timed_out: holds.timedOut,
+      cold_tab_hold_ms: holds.heldMs,
+    };
+  });
+
 export const contextSamples = () => samples;
 
 function forgetContext() {
@@ -145,8 +160,7 @@ function forgetContext() {
   pageProcessesGone = 0;
 }
 
-useTelemetry.subscribe((s, prev) => {
-  if (prev.sharing === s.sharing && prev.epoch === s.epoch) return;
+onConsentPeriodChange(() => {
   forgetContext();
   windowUnpaintedEvents = 0;
 });
@@ -304,9 +318,10 @@ export function hoverLostProperties(e: HoverLostEpisode) {
 }
 
 export function trackHoverLost(e: HoverLostEpisode) {
+  const consent = nativeConsent(e);
   if (hoverLostEvents >= MAX_HOVER_LOST_EVENTS) return;
-  hoverLostEvents++;
-  capture("page_hover_lost", hoverLostProperties(e), consentNow());
+  if (stillValid(consent)) hoverLostEvents++;
+  capture("page_hover_lost", hoverLostProperties(e), consent);
 }
 
 const UNPAINTED_WINDOWS = new Set(["regular", "private"]);
@@ -341,7 +356,7 @@ export function windowUnpaintedProperties(r: WindowUnpaintedRecord) {
 }
 
 export function trackWindowUnpainted(r: WindowUnpaintedRecord) {
-  const consent = (r.epoch ?? null) as ConsentToken | null;
+  const consent = nativeConsent(r);
   if (windowUnpaintedEvents >= MAX_WINDOW_UNPAINTED_EVENTS) return;
   if (stillValid(consent)) windowUnpaintedEvents++;
   capture("window_unpainted", windowUnpaintedProperties(r), consent);

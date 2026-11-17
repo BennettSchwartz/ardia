@@ -2,6 +2,7 @@ import { toAppUrl } from "@ardia/core";
 import { deliverPageEvent, type PageEvent } from "../../../packages/ardiacore/src/pageEvents";
 import type { NavigationState, WebViewProps } from "../../../packages/ardiacore/src/pageTypes";
 import type { PageResetReason } from "./hostPageLifecycle";
+import { consentEpoch } from "../../browser/src/state/telemetry/client";
 
 export type PageLeaseMetadata = {
   claim: string;
@@ -56,6 +57,7 @@ function typedPageMessage(data: unknown): PageEvent | null {
 
 function appEvent(value: PageEvent): PageEvent | null {
   if (value.name === "pageMessage") return typedPageMessage(value.data);
+  if (value.name === "pictureInPicture" && record(value.data) && "fullScreenSpaces" in value.data) return { ...value, data: { ...value.data, epoch: consentEpoch() } };
   if (value.name !== "navigation" || !record(value.data)) return value;
   const data = value.data;
   return { ...value, data: { ...data,

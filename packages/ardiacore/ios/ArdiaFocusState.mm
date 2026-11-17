@@ -205,7 +205,7 @@ void ReportLongPressLoop(const std::string &names, bool stillOpen, const std::st
   NSLog(@"[ardiacore] press loop %@ %@ after %.0fs, pressed buttons 0x%lx", joined, stillOpen ? @"still open" : @"ended",
         ardia_pointer::kLongLoopSeconds, (unsigned long)buttons);
   NSArray<NSString *> *loops = [joined componentsSeparatedByString:@">"];
-  NSDictionary *payload = @{@"loop" : loops.firstObject ?: @"", @"inner" : loops.lastObject ?: @"", @"open" : @(stillOpen), @"buttonsHeld" : @(buttons != 0), @"epoch" : @(epoch.c_str())};
+  NSDictionary *payload = [[[ArdiaConsentStamp alloc] initWithEpoch:@(epoch.c_str())] onto:@{@"loop" : loops.firstObject ?: @"", @"inner" : loops.lastObject ?: @"", @"open" : @(stillOpen), @"buttonsHeld" : @(buttons != 0)}];
   dispatch_async(dispatch_get_main_queue(), ^{ [ArdiaEvents emit:@"engine.pressLoopLong" data:payload]; });
 }
 

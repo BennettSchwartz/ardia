@@ -1,5 +1,5 @@
 import type { FocusRestoreOutcome } from "../../platform/tabs";
-import { isSharing, useTelemetry } from "./choice";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 const empty = () => ({
   page_focus_returns_after_bar: 0,
@@ -14,9 +14,7 @@ let counts = empty();
 
 export const notePageFocusReturnAfterBar = () => void counts.page_focus_returns_after_bar++;
 
-useTelemetry.subscribe((state) => {
-  if (!state.sharing) counts.page_focus_return_requests_after_menu = 0;
-});
+onConsentPeriodChange(() => (counts.page_focus_return_requests_after_menu = 0));
 
 export function notePageFocusReturnRequestAfterMenu() {
   if (isSharing()) counts.page_focus_return_requests_after_menu++;

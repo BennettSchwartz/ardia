@@ -1,11 +1,9 @@
-import { isSharing, useTelemetry } from "./choice";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 let collapses = 0;
 let expands = 0;
 
-useTelemetry.subscribe((s, prev) => {
-  if (prev.sharing && !s.sharing) collapses = expands = 0;
-});
+onConsentPeriodChange(() => (collapses = expands = 0));
 
 export function notePinnedFoldToggled(collapsed: boolean) {
   if (!isSharing()) return;

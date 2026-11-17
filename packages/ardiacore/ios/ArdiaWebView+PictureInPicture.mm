@@ -201,7 +201,7 @@ BOOL TracingPictureInPicture() {
 - (void)noteStayedOnAppSwitch {
   if (!_tab || !_visible || _reports.inPictureInPicture || !self.seenByUser || !self.playsForAutoPictureInPicture) return;
   [self traceAutoPictureInPicture:@"app: the user left Ardia, the window server still shows the tab"];
-  [self emit:@"autoPictureInPictureKept" payload:@{@"appSwitch" : @YES}];
+  [self emit:@"autoPictureInPictureKept" payload:[ArdiaConsentStamp.begin onto:@{@"appSwitch" : @YES}]];
 }
 
 - (void)updateAutoPictureInPicture {
@@ -219,6 +219,7 @@ BOOL TracingPictureInPicture() {
 }
 
 - (void)tab:(ArdiaCoreTab *)tab didChangePictureInPicture:(NSDictionary<NSString *, id> *)state {
+  ArdiaConsentStamp *stamp = ArdiaConsentStamp.begin;
   if (![state[@"kind"] isEqual:@"document"]) {
     const BOOL active = [state[@"active"] boolValue];
     if (!active && !_reports.inPictureInPicture) return;
@@ -226,12 +227,12 @@ BOOL TracingPictureInPicture() {
     [self emit:@"pictureInPicture" payload:@{@"kind" : @"video", @"active" : @(active)}];
     if (!active) return;
     ardia_pip::WatchZoom();
-    ardia_pip::VideoEntered(self, [NSURL URLWithString:tab.url ?: @""].host ?: @"");
+    ardia_pip::VideoEntered(self, [NSURL URLWithString:tab.url ?: @""].host ?: @"", stamp);
     return;
   }
   _reports.inPictureInPicture = [state[@"active"] boolValue];
   [self emit:@"pictureInPicture" payload:@{@"kind" : @"document", @"active" : @([state[@"active"] boolValue])}];
-  if (_reports.inPictureInPicture) ardia_pip::DocumentEntered(self);
+  if (_reports.inPictureInPicture) ardia_pip::DocumentEntered(self, stamp);
 }
 
 - (void)tab:(ArdiaCoreTab *)tab requestsActivation:(NSString *)reason {

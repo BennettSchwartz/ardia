@@ -59,7 +59,9 @@ export const inputIdleSeconds = () => nativeModule("ArdiaEngine").inputIdleSecon
 
 type CliServer = { connections: number; generation: number; file: string; reason?: string };
 
-export type PopupProtectedMedia = { family: "widevine" | "playready" | "fairplay" | "other" | "none"; listed: boolean };
+export type PopupProtectedMedia = { family: "widevine" | "playready" | "fairplay" | "other" | "none"; listed: boolean; epoch: string };
+
+export type CursorRestore = { hidden: boolean; epoch: string };
 
 export type HoverLostEpisode = {
   reason: "halfActive" | "staleMenu" | "notKeyOrMain" | "coveredByView" | "responderLost" | "coveredByWindow";
@@ -84,6 +86,7 @@ export type HoverLostEpisode = {
   endedBy: "hover" | "heal" | "appInactive" | "windowClosed";
   seconds: number;
   episode: number;
+  epoch: string;
 };
 
 export type WindowUnpaintedRecord = {
@@ -97,10 +100,10 @@ export type WindowUnpaintedRecord = {
   views: number;
   unpainted: number;
   reasons: number;
-  epoch?: string;
+  epoch: string;
 };
 
-export type PressLoopLongReport = { loop: string; inner: string; open: boolean; buttonsHeld: boolean; epoch?: string };
+export type PressLoopLongReport = { loop: string; inner: string; open: boolean; buttonsHeld: boolean; epoch: string };
 
 export type CliTabTarget = { targetId: string | null; pageGeneration: number };
 

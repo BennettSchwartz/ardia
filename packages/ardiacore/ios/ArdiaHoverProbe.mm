@@ -329,13 +329,14 @@ void CloseEpisode(NSString *endedBy) {
     @"seconds" : @(lround(MAX(0, Uptime() - gEpisode.startedAt))),
     @"episode" : @(gEpisodeCount),
   };
+  ArdiaConsentStamp *stamp = gEpisode.stamp;
   gEpisode = HoverEpisode{};
   gPendingReason = HoverReason::fine;
   NoteFocusChange([@"hover episode ended by " stringByAppendingString:endedBy], nil);
   if (!gDevHoverEvents) gDevHoverEvents = [NSMutableArray array];
   [gDevHoverEvents addObject:payload];
   if (gDevHoverEvents.count > kDevHoverEventsKept) [gDevHoverEvents removeObjectAtIndex:0];
-  [ArdiaEvents emit:@"engine.hoverLost" data:payload];
+  [ArdiaEvents emit:@"engine.hoverLost" data:[stamp onto:payload]];
 }
 
 bool Recovered(const HoverCheck &check, HoverReason healed) {
@@ -413,6 +414,7 @@ void OpenEpisode(NSWindow *window, const HoverCheck &check, HoverTrigger trigger
   gEpisode.first = check;
   gEpisode.trigger = trigger;
   gEpisode.startedAt = Uptime();
+  gEpisode.stamp = ArdiaConsentStamp.begin;
   NoteFocusChange([@"hover lost: " stringByAppendingString:ReasonName(check.reason)], window);
 }
 

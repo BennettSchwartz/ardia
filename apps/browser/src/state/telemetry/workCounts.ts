@@ -1,5 +1,5 @@
 import type { Adapter } from "../../platform/sync";
-import { consentToken, isSharing, stillValid, useTelemetry } from "./choice";
+import { consentToken, isSharing, stillValid, onConsentPeriodChange } from "./choice";
 import { takePopupProtectedMediaCounts } from "./popupProtectedMedia";
 
 export type SyncWorkKind = "bookmark" | "history";
@@ -73,8 +73,9 @@ const none = () => ({
 
 let pending = none();
 
-useTelemetry.subscribe((current, previous) => {
-  if (current.sharing !== previous.sharing && !current.sharing) { syncPending = noSync(); pending = none(); }
+onConsentPeriodChange(() => {
+  syncPending = noSync();
+  pending = none();
 });
 
 const count = (key: keyof ReturnType<typeof none>) => {

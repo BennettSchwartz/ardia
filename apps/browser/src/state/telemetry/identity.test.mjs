@@ -4,7 +4,7 @@ import { test } from "node:test";
 globalThis.__DEV__ = false;
 const stub = await import("../../test-native/index.ts");
 Object.assign(stub.appInfo, { appVersion: "0.3.0", appBuild: "300", osVersion: "27.0.1", arch: "arm64", isolatedInstance: false });
-globalThis.fetch = async () => ({ status: 200 });
+globalThis.fetch = async () => ({ status: 503 });
 
 const client = await import("./client.ts");
 const identity = await import("./identity.ts");

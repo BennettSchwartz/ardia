@@ -11,7 +11,7 @@ import { uuidv4, uuidv7 } from "./ids";
 import { parseSaved, versionedJson } from "../../lib/savedDocument";
 import { withDeadline } from "../../lib/deadline";
 import { isFields, isString } from "../../lib/decode";
-import { consentEpoch, consentNow, consentToken, counted, dismissAsk, isSharing, loadChoice, NO_WATCH, resumeSession, save, savedChoice as saved, savedOff, sessionId, startNewSession, stillValid, useTelemetry, type ConsentToken } from "./choice";
+import { consentEpoch, consentNow, consentToken, counted, dismissAsk, onConsentPeriodChange, isSharing, loadChoice, NO_WATCH, resumeSession, save, savedChoice as saved, savedOff, sessionId, startNewSession, stillValid, useTelemetry, type ConsentToken } from "./choice";
 import { flushLocalNow, LOCAL_KEEP_DAYS, recordLocal } from "./localStore";
 
 const QUEUE_DOC = "telemetry-queue.json";
@@ -24,7 +24,7 @@ const FLUSH_DELAY_MS = 30_000;
 const URGENT_FLUSH_DELAY_MS = 3_000;
 const MAX_BACKOFF_MS = 30 * 60_000;
 
-export { consentEpoch, consentNow, consentToken, counted, dismissAsk, isSharing, loadChoice, stillValid, useTelemetry, type ConsentToken };
+export { consentEpoch, consentNow, consentToken, counted, dismissAsk, onConsentPeriodChange, isSharing, loadChoice, stillValid, useTelemetry, type ConsentToken };
 
 let engineVersion: string | null = null;
 

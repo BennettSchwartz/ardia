@@ -12,4 +12,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface ArdiaConsentStamp : NSObject
+
++ (instancetype)begin NS_SWIFT_NAME(begin());
+- (instancetype)initWithEpoch:(NSString *)epoch NS_DESIGNATED_INITIALIZER;
+- (instancetype)init NS_UNAVAILABLE;
+@property(nonatomic, readonly, copy) NSString *epoch;
+- (NSDictionary<NSString *, id> *)onto:(NSDictionary<NSString *, id> *)payload NS_SWIFT_NAME(onto(_:));
+
+@end
+
 NS_ASSUME_NONNULL_END

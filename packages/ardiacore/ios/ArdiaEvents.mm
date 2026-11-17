@@ -50,3 +50,22 @@ NSString *DomainOf(NSString *name) {
 }
 
 @end
+
+@implementation ArdiaConsentStamp
+
++ (instancetype)begin {
+  return [[self alloc] initWithEpoch:ArdiaEvents.consentEpoch];
+}
+
+- (instancetype)initWithEpoch:(NSString *)epoch {
+  if ((self = [super init])) _epoch = [epoch copy] ?: @"";
+  return self;
+}
+
+- (NSDictionary<NSString *, id> *)onto:(NSDictionary<NSString *, id> *)payload {
+  NSMutableDictionary *stamped = [payload mutableCopy] ?: [NSMutableDictionary dictionary];
+  stamped[@"epoch"] = _epoch;
+  return stamped;
+}
+
+@end

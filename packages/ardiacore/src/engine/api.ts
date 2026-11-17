@@ -10,7 +10,7 @@ import type { HistoryChangedBatch, HistoryWireRow } from "../history";
 import type { FaviconImage } from "../favicons";
 import type { Download, DownloadSettings } from "../downloads";
 import type {
-  BatterySaverMode, BatterySaverState, CliControlStatus, CliTabTarget, EngineComponent, EngineInfo, EngineTask, HoverLostEpisode, MemorySaverRequest, PressLoopLongReport, MemorySaverState, PopupProtectedMedia, SystemState, WindowUnpaintedRecord,
+  BatterySaverMode, BatterySaverState, CliControlStatus, CursorRestore, CliTabTarget, EngineComponent, EngineInfo, EngineTask, HoverLostEpisode, MemorySaverRequest, PressLoopLongReport, MemorySaverState, PopupProtectedMedia, SystemState, WindowUnpaintedRecord,
 } from "../engineDomain";
 import type { ExternalAppAllowance, PermissionRequest, PermissionResult } from "../permissions";
 import type { BrowsingDataType } from "../profiles";
@@ -193,6 +193,7 @@ export type EngineCalls = {
   "webView.setVideoUpscalingTestConditions": [{ lowPower?: boolean; thermalPressure?: boolean; capturing?: boolean }, null];
   "webView.videoUpscalingState": [{}, VideoUpscalingState | null];
   "webView.takeContentDrift": [{}, { layouts: number; fits: number; maxPoints: number }];
+  "webView.takeFirstPaintHolds": [{}, { held: number; painted: number; loaded: number; pressed: number; timedOut: number; heldMs: number }];
 
   "webKit.removeDownloadStaging": [{ path: string }, boolean];
   "webKit.endPrivateSession": [{ session: string }, null];
@@ -212,7 +213,8 @@ export type EngineEvents = {
   "engine.cliControl": CliControlStatus;
   "engine.hoverLost": HoverLostEpisode;
   "engine.popupProtectedMedia": PopupProtectedMedia;
-  "engine.cursorRestored": { hidden: boolean };
+  "engine.devToolsKeyKept": { epoch: string };
+  "engine.cursorRestored": CursorRestore;
   "engine.windowUnpainted": WindowUnpaintedRecord;
   "engine.pressLoopLong": PressLoopLongReport;
   "tabs.strips": TabStripTransaction;

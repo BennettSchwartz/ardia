@@ -6,7 +6,7 @@
   ArdiaWebView *view = _view;
   if (!view || !seconds) return NO;
   [view seekPictureInPictureBy:seconds];
-  [view emit:@"pictureInPictureSkip" payload:@{@"seconds" : @(seconds)}];
+  [view emit:@"pictureInPictureSkip" payload:[ArdiaConsentStamp.begin onto:@{@"seconds" : @(seconds)}]];
   _lastSkip = @{@"seconds" : @(seconds), @"point" : NSStringFromPoint(point), @"clickCount" : @(clickCount), @"count" : @(++_skips)};
   return YES;
 }

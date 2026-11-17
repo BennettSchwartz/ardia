@@ -41,7 +41,7 @@ public class FocusModule: Module {
     OnDestroy { self.lifetime.end() }
 
     Function("pressesWithoutRelease") { () -> Int in PressRelease.pressesWithoutRelease }
-    Function("takeFocusHandoffCounts") { () -> [String: Int] in FocusHandoff.shared.takeOutcomes() }
+    Function("takeFocusHandoffCounts") { () -> [String: [String: Int]] in FocusHandoff.shared.takeOutcomes() }
     Function("setConsentEpoch") { (epoch: String) in
       ArdiaEvents.consentEpoch = epoch
       FocusHandoff.shared.setConsentEpoch(epoch)
