@@ -269,8 +269,8 @@ test("extensions are listed in the app's shape, and a change is announced once t
   const extensions = calling(engine, "extensions");
   assert.deepEqual(await extensions("list"), {
     extensions: [
-      { id: "abc", location: "FROM_STORE", path: "C:\\ext", incognitoSplit: false, siteAccess: null, optionsUrl: null, homepageUrl: null, fromWebStore: true, webStoreUrl: "https://chromewebstore.google.com/detail/abc" },
-      { id: "def", location: "UNPACKED", incognitoSplit: false, siteAccess: null, optionsUrl: null, path: null, homepageUrl: null, fromWebStore: false, webStoreUrl: null },
+      { id: "abc", location: "FROM_STORE", path: "C:\\ext", hasAction: false, incognitoSplit: false, siteAccess: null, optionsUrl: null, homepageUrl: null, fromWebStore: true, webStoreUrl: "https://chromewebstore.google.com/detail/abc" },
+      { id: "def", location: "UNPACKED", hasAction: false, incognitoSplit: false, siteAccess: null, optionsUrl: null, path: null, homepageUrl: null, fromWebStore: false, webStoreUrl: null },
     ],
   });
   await extensions("setEnabled", { id: "abc", enabled: false }, "incognito1@work");
@@ -283,6 +283,32 @@ test("extensions are listed in the app's shape, and a change is announced once t
     { name: "extensions.changed", data: { profile: "", id: "abc", event: "configured" } },
     { name: "extensions.changed", data: { profile: "", id: "abc", event: "installed" } },
   ]);
+});
+
+test("listed extensions carry their toolbar action from the engine, and action states ask the page for at most 64 ids", async () => {
+  const list = { extensions: [{ id: "abc", location: "FROM_STORE" }, { id: "def", location: "UNPACKED" }] };
+  const engine = fakeEngine((name) => (name === "ac_extensions_list" ? JSON.stringify(list) : "{}"));
+  engine.host = async (verb, args = {}) => {
+    engine.hosted.push({ verb, args });
+    if (verb === "extensions.actions") return { actions: { abc: { hasAction: true, popup: "popup.html", actionTitle: "Abc", actionIcon: "data:image/png;base64,AA==" }, def: { hasAction: false } } };
+    if (verb === "tab.call") return { states: { abc: { title: "Abc", popup: "chrome-extension://abc/popup.html", enabled: true } } };
+    return {};
+  };
+  const extensions = calling(engine, "extensions");
+  const { extensions: listed } = await extensions("list", {}, "work");
+  assert.deepEqual(
+    listed.map(({ id, hasAction, popup, actionTitle, actionIcon }) => ({ id, hasAction, popup, actionTitle, actionIcon })),
+    [
+      { id: "abc", hasAction: true, popup: "popup.html", actionTitle: "Abc", actionIcon: "data:image/png;base64,AA==" },
+      { id: "def", hasAction: false, popup: undefined, actionTitle: undefined, actionIcon: undefined },
+    ],
+  );
+  assert.deepEqual(engine.hosted[0], { verb: "extensions.actions", args: { profile: "work" } });
+  const ids = Array.from({ length: 70 }, (_, index) => `id${index}`);
+  assert.deepEqual(await extensions("actionStates", { tabId: "t1", ids }), { abc: { title: "Abc", popup: "chrome-extension://abc/popup.html", enabled: true } });
+  assert.deepEqual(engine.hosted[1], { verb: "tab.call", args: { key: "t1", method: "extensionActionStates", ids: ids.slice(0, 64) } });
+  assert.deepEqual(await extensions("actionStates", { tabId: "t1", ids: [] }), {});
+  assert.equal(engine.hosted.length, 2);
 });
 
 test("engine topics reach the app under the Mac's event names, with a burst of the same event sent once", () => {

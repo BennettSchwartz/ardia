@@ -51,7 +51,7 @@ test("a page whose tab was refused opens again on the next reload, once, and tel
   await callPage("refused-once", "reload");
   assert.equal(creates("refused-once"), 2, "the reload tried tab.create again");
   assert.deepEqual(events, ["ready"]);
-  assert.deepEqual(calls.at(-1), { verb: "tab.call", args: { key: "refused-once", method: "reload" }, windowId: "" });
+  assert.deepEqual(calls.at(-1), { verb: "tab.call", args: { key: "refused-once", method: "reload" }, windowId: "w" });
   const retried = calls.filter((call) => call.verb === "tab.create" && call.args.key === "refused-once").at(-1);
   assert.deepEqual(retried.args, { key: "refused-once", url: "https://a.example/", profile: "incognito:w@", adopt: "" });
   await callPage("refused-once", "loadUrl", { url: "https://b.example/" });

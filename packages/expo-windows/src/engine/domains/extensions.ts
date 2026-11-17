@@ -4,8 +4,14 @@ const WEB_STORE = "https://chromewebstore.google.com/detail/";
 const ALWAYS_PRESENT = ["siteAccess", "optionsUrl", "path", "homepageUrl"];
 const OPTIONS = ["pinned", "incognito", "fileAccess", "userScripts", "siteAccess"];
 
-function listed(info: Fields): Fields {
+const ACTION_FIELDS = ["popup", "actionTitle", "actionIcon"];
+const MOST_ACTION_IDS = 64;
+
+function listed(info: Fields, actions: Fields): Fields {
   const item: Fields = Object.fromEntries(Object.entries(info).filter(([, value]) => value !== null));
+  const action = isFields(actions[String(info.id)]) ? (actions[String(info.id)] as Fields) : {};
+  item.hasAction = action.hasAction === true;
+  for (const key of ACTION_FIELDS) if (typeof action[key] === "string") item[key] = action[key];
   item.incognitoSplit = false;
   for (const key of ALWAYS_PRESENT) item[key] ??= null;
   const fromStore = info.location === "FROM_STORE";
@@ -37,7 +43,15 @@ export const extensionCalls: Handlers = {
   list: async (args, engine) => {
     const { extensions } = await served(engine, "ac_extensions_list", originalProfile(args.profile));
     if (!Array.isArray(extensions)) throw callError("ERR_ENGINE", "Unexpected extension list");
-    return ok({ extensions: extensions.filter(isFields).map(listed) });
+    const answer = await engine.host("extensions.actions", { profile: args.profile }).catch(() => ({}) as Fields);
+    const actions = isFields(answer.actions) ? answer.actions : {};
+    return ok({ extensions: extensions.filter(isFields).map((info) => listed(info, actions)) });
+  },
+  actionStates: async (args, engine) => {
+    const ids = args.strings("ids").slice(0, MOST_ACTION_IDS);
+    if (!ids.length) return ok({});
+    const answer = await engine.host("tab.call", { key: args.text("tabId"), method: "extensionActionStates", ids }).catch(() => ({}) as Fields);
+    return ok(isFields(answer.states) ? answer.states : {});
   },
   install: installing("ac_extensions_install"),
   installCrx: installing("ac_extensions_install_crx"),

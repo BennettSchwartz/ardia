@@ -32,6 +32,7 @@ import { notePrivateWindowExtensionOpen, noteExtensionInstallPromptStale, noteEx
 import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, pageProfile, shownIn, useExtensions, windowExtensions, readyTabOf, tabProfile, type Anchor } from "./store";
 import { errorText } from "../../lib/errors";
 import { noteUnpackedInstall } from "../telemetry/exportCounts";
+import { noteExtensionAction } from "../telemetry/extensionActionCounts";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
@@ -269,7 +270,7 @@ export async function activateExtension(
 ) {
   const current = useExtensions.getState().popup;
   if (current?.windowId === windowId && current.extensionId === ext.id) return closeExtensionPopup();
-  if (!ext.enabled) return void showExtensionMenu(windowId, ext);
+  if (!ext.enabled) return void (noteExtensionAction("menu"), showExtensionMenu(windowId, ext));
   if (!shownIn(windowId, ext.id)) return;
   if (isPrivate(useBrowser.getState(), windowId)) notePrivateWindowExtensionOpen();
   const web = tabId ? webviews.get(tabId) : undefined;
@@ -277,9 +278,10 @@ export async function activateExtension(
   const readyTab = readyTabOf(tabId);
   if (!state && result === "popup" && readyTab) state = (await extensionActionStates(readyTab, [ext.id], tabProfile(readyTab)))[ext.id];
   const url = state ? state.popup : ext.popup ? extensionPageUrl(ext.id, ext.popup) : "";
-  if (result === "none") return;
-  if (result === "sidePanel") return void toggleSidePanel(windowId, ext.id);
-  if (!url) return void (result === null && showExtensionMenu(windowId, ext));
+  if (result === "none") return void noteExtensionAction("none");
+  if (result === "sidePanel") return void (noteExtensionAction("sidePanel"), toggleSidePanel(windowId, ext.id));
+  if (!url) return void (result === null ? (noteExtensionAction("menu"), showExtensionMenu(windowId, ext)) : noteExtensionAction("none"));
+  noteExtensionAction("popup");
   useExtensions.setState({ popup: { windowId, pageProfile: pageProfile(useBrowser.getState(), windowId), extensionId: ext.id, url, anchor } });
 }
 

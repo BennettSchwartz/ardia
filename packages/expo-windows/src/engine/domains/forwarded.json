@@ -45,7 +45,7 @@
     "autofill": ["settings", "setSettings", "showSuggestions"],
     "contentBlocker": ["state", "setEnabled", "setListEnabled", "isAllowed", "setAllowed", "hiddenElements", "hideElements", "restoreElements", "addList", "removeList", "devFailNextMessage", "devDelayNextLoad"],
     "engine": ["beginTracing", "endTracing", "isTracing", "cliTabTargets", "cliOwnsTab", "cliMoveOffscreen", "cliCloseOffscreenTabs"],
-    "extensions": ["resolveInstallPrompt", "actionStates", "sidePanelUrl"],
+    "extensions": ["resolveInstallPrompt", "sidePanelUrl"],
     "media": [
       "displayMediaSources",
       "screenRecordingAllowed",

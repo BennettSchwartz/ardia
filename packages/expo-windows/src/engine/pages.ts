@@ -16,7 +16,7 @@ import { handPopupAsTab } from "./popupsAsTabs";
 export type PageListener = (name: string, data: unknown) => void;
 export type PageRect = Omit<CoverRect, "radius">;
 export type PageShape = PageRect & { radius: number; holes: number[][] };
-export type PageStart = { url?: string; profile?: string; adopt?: string; windowId: string };
+export type PageStart = { url?: string; profile?: string; adopt?: string; windowId: string; extensionHost?: "popup" | "sidePanel" };
 
 type ShowArgs = { key: string; visible: boolean } & Partial<PageShape>;
 
@@ -181,7 +181,18 @@ function listen() {
 
 const offeredByEngine = (adopt: string | undefined) => (adopt?.startsWith("ardiacore:") ? adopt : "");
 
+function startPopup(key: string, from: PageStart): Promise<boolean> {
+  return hostCall("popup.create", { key, url: from.url ?? "", profile: from.profile ?? "" }, from.windowId).then(
+    () => true,
+    (error: unknown) => {
+      console.warn(`[ardia windows] the extension pop-up ${key} did not open: ${String((error as Error)?.message ?? error)}`);
+      return false;
+    },
+  );
+}
+
 function start(key: string, from: PageStart): Promise<boolean> {
+  if (from.extensionHost === "popup") return startPopup(key, from);
   const url = from.url ?? "";
   const create = (adopt: string) => hostCall("tab.create", { key, url, profile: from.profile ?? "", adopt }, from.windowId);
   const offered = offeredByEngine(from.adopt);
@@ -293,6 +304,7 @@ export function mountPage(key: string, from: PageStart, listener: PageListener):
   void mounted.ready.then((opened) => {
     adopting(opened);
     if (opened) tellReady(mounted, listener);
+    else if (from.extensionHost === "popup" && mounted.listeners.has(listener)) listener("windowClose", {});
   });
   return () => {
     mounted.listeners.delete(listener);
@@ -364,7 +376,7 @@ export function callPage<Result = unknown>(key: string, method: string, args: Re
     if (args.follow === true && fieldFocusedIn(page.windowId, page.key)) return Promise.resolve(null);
   }
   const ready = REOPENING_METHODS.has(method) ? readyOrReopened(page, args.url) : page.ready;
-  return ready.then((opened) => (opened && !page.closed ? hostCall<Result>("tab.call", { key, method, ...args }) : null));
+  return ready.then((opened) => (opened && !page.closed ? hostCall<Result>("tab.call", { key, method, ...args }, page.windowId) : null));
 }
 
 export function followPage(key: string, windowId = "") {

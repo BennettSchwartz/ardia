@@ -14,7 +14,7 @@ import { WindowIdContext } from "./windowId";
 
 type PageEventsOnWindows = { onPageEvent?: (event: Pick<NativeSyntheticEvent<PageEvent>, "nativeEvent">) => void; onTop?: boolean };
 
-type Props = Pick<NativeProps, "url" | "profile" | "adoptId" | "tabId" | "visible" | "style"> & Partial<Pick<NativeProps, "temporary">> & Partial<Pick<NativeProps, "pageEvents">> & PageEventsOnWindows;
+type Props = Pick<NativeProps, "url" | "profile" | "adoptId" | "tabId" | "visible" | "style"> & Partial<Pick<NativeProps, "extensionHost">> & Partial<Pick<NativeProps, "temporary">> & Partial<Pick<NativeProps, "pageEvents">> & PageEventsOnWindows;
 
 
 const ARGUMENTS: Record<string, string[]> = {
@@ -38,6 +38,7 @@ const ARGUMENTS: Record<string, string[]> = {
   runPageCommand: ["name"],
   getSecurityInfo: [],
   mediaCommand: ["action", "seconds"],
+  executeExtensionAction: ["extensionId"],
   clearSiteData: [],
   pageCookies: ["urls"],
   openBlockedPopup: ["id", "always"],
@@ -54,11 +55,13 @@ const UNWRAPPED: Record<string, (reply: Record<string, unknown> | null) => unkno
   sleepIfHidden: (reply) => (Array.isArray(reply?.keptBy) ? reply.keptBy : [-1]),
   getSecurityInfo: (reply) => (!reply || reply.info === null ? null : reply),
   clearSiteData: (reply) => reply ?? { cookies: false, storage: false },
+  executeExtensionAction: (reply) => (!reply ? null : reply.result === "popup" || reply.result === "sidePanel" ? reply.result : "none"),
 };
 const ANSWERS: Record<string, unknown> = {
   requestPictureInPicture: false,
   takeControlPress: false,
 };
+const NOTHING_ON_REFUSAL = new Set(["executeExtensionAction"]);
 const SETTLE_MS = [0, 50, 200, 500];
 const PICTURE_DEADLINE_MS = 1000;
 
@@ -139,7 +142,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
   useEffect(() => {
     const first = latest.current;
     noteShowStep(key, `mount in ${windowId}`);
-    const unmount = mountPage(key, { url: first.url, profile: first.profile, adopt: first.adoptId, windowId }, (name, data) => {
+    const unmount = mountPage(key, { url: first.url, profile: first.profile, adopt: first.adoptId, windowId, extensionHost: first.extensionHost }, (name, data) => {
       if (name === "ready") {
         noteShowStep(key, "ready");
         place();
@@ -193,7 +196,8 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
             if (names) {
               const unwrap = UNWRAPPED[method];
               return async (...values: unknown[]) => {
-                const reply = await callPage<Record<string, unknown>>(key, method, Object.fromEntries(names.map((name, index) => [name, values[index] ?? null])));
+                const asked = callPage<Record<string, unknown>>(key, method, Object.fromEntries(names.map((name, index) => [name, values[index] ?? null])));
+                const reply = await (NOTHING_ON_REFUSAL.has(method) ? asked.catch(() => null) : asked);
                 return unwrap ? unwrap(reply) : undefined;
               };
             }
