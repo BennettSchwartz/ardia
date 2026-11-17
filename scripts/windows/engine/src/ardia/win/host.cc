@@ -16,6 +16,7 @@
 #include "ardia/win/frame_view.h"
 #include "ardia/win/hooks.h"
 #include "ardia/win/main.h"
+#include "ardia/win/now_playing.h"
 #include "ardia/win/page_links.h"
 #include "ardia/win/private_sessions.h"
 #include "ardia/win/profiles.h"
@@ -550,6 +551,7 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
     TabEvents::Attach(existing);
   }
   if (existing) {
+    NowPlaying::Resend(existing);
     if (!PlaceTab(existing, parent)) {
       std::move(reply).Run(Error("the tab could not move to this window"));
       return;
@@ -710,6 +712,7 @@ base::DictValue Host::CloseTab(const base::DictValue& args) {
     Hide(browser, found->second);
   }
   tabs_.erase(key);
+  NowPlaying::End(contents);
   TabState* state = TabState::FromWebContents(contents);
   if (state) {
     state->ReleaseKey();

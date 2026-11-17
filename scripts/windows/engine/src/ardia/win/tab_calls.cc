@@ -14,6 +14,7 @@
 #include "ardia/win/autoplay.h"
 #include "ardia/win/external_apps.h"
 #include "ardia/win/kept_pages.h"
+#include "ardia/win/now_playing.h"
 #include "ardia/win/tab_events.h"
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
@@ -598,15 +599,31 @@ void GetSecurityInfo(content::WebContents* contents,
 void MediaCommand(content::WebContents* contents,
                   const base::DictValue& args,
                   Reply reply) {
+  const std::optional<MediaCommandArgs> parsed = ParseMediaCommand(args);
+  if (!parsed) {
+    std::move(reply).Run(
+        Error("mediaCommand requires a known action and finite seconds"));
+    return;
+  }
   ThawHiddenPage(contents);
-  const std::string action = Text(args, "action");
+  if (NowPlaying::Command(contents, *parsed)) {
+    std::move(reply).Run(Ok());
+    return;
+  }
   base::DictValue command;
-  command.Set("action", action);
-  command.Set("seconds", args.FindDouble("seconds").value_or(0));
+  command.Set("action", Text(args, "action"));
+  command.Set("seconds", parsed->seconds);
   if (std::optional<std::string> json = base::WriteJson(command)) {
     RunMediaCommand(contents, kMediaCommandStart + *json + kMediaCommandEnd);
   }
   std::move(reply).Run(Ok());
+}
+
+void DownloadImage(content::WebContents* contents,
+                   const base::DictValue& args,
+                   Reply reply) {
+  ThawHiddenPage(contents);
+  DownloadPageImage(contents, args, std::move(reply));
 }
 
 void SiteDataCleared(void* context, const char* json) {
@@ -1059,6 +1076,7 @@ constexpr NamedMethod kMethods[] = {
     {"runPageCommand", &RunNamedPageCommand},
     {"getSecurityInfo", &GetSecurityInfo},
     {"mediaCommand", &MediaCommand},
+    {"downloadImage", &DownloadImage},
     {"clearSiteData", &ClearSiteData},
     {"pageCookies", &PageCookies},
     {"openBlockedPopup", &OpenBlockedPopup},
