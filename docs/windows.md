@@ -1351,15 +1351,14 @@ does run in a test instance. A scratch folder with the marker must get both powe
   the same script checks instead that the Linux bundle, compiled here, matches the build's own `Bundle` file for
   file, so the reuse path is known to test the bundle a build would make. A run that compiled launches the app as
   built too, with its own launcher; a run that reused launches only the assembled app with the engine inside.
-- A release run (`version` set) keeps the maps that turn a Hermes bytecode offset back into source. The `x64` and
-  `arm64` jobs pass `-MapOut` to `rebundle.ps1`, which keeps the `.map` Hermes writes for the bundle it compiled
-  (`index.windows.bundle.hbc.map`), the Metro map from the `javascript` job (`index.windows.bundle.packager.map`)
-  and `index.windows.bundle.sha256`, the digest of the `index.windows.bundle` the app ships. They are the artifact
-  `windows-hermes-map-<cpu>-build-<build>` for 90 days, named by the build number every event carries as
-  `$app_build`. An unhandled promise rejection's in-app frames carry that build (`bundle_build`) and the raw bytecode
-  offset (`bundle_offset`, the frame's column), so a report names its map. Compose the two maps, then look the
-  offset up as line 1, column `bundle_offset`: `node node_modules/react-native/scripts/compose-source-maps.js
-  index.windows.bundle.packager.map index.windows.bundle.hbc.map -o index.windows.bundle.map`.
+- `rebundle.ps1 -MapOut <folder>` keeps the maps that turn a Hermes bytecode offset back into source: the `.map`
+  Hermes writes for the bundle it compiled (`index.windows.bundle.hbc.map`), the Metro map when the JavaScript
+  folder holds one (`index.windows.bundle.packager.map`) and `index.windows.bundle.sha256`, the digest of the
+  `index.windows.bundle` the app ships. An unhandled promise rejection's in-app frames carry the build number every
+  event has as `$app_build` (`bundle_build`) and the raw bytecode offset (`bundle_offset`, the frame's column), so a
+  report names the build whose map to use. Compose the two maps, then look the offset up as line 1, column
+  `bundle_offset`: `node node_modules/react-native/scripts/compose-source-maps.js index.windows.bundle.packager.map
+  index.windows.bundle.hbc.map -o index.windows.bundle.map`.
 - A push to `main` or to the Windows branch gets the full run, and so does a pull request with the `full-ci` label
   (add the label, then push or re-run the run). A pull request can read its base branch's caches and no other pull
   request's, which is why the Windows branch builds on every push: without that, each pull request into it would
