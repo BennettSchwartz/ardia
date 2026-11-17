@@ -7,7 +7,7 @@ inline constexpr char kLinkScript[] = R"JS((() => {
   if (globalThis.ardiaPeek || !/^(https?|file):$/.test(location.protocol)) return;
   const send = (kind, data) => {
     try {
-      globalThis.ardiaPeekSend(JSON.stringify({ kind, data }));
+      globalThis.ardiaPeekSend(JSON.stringify({ kind, data, document: location.href }));
     } catch (e) {}
   };
   const stopping = new AbortController();

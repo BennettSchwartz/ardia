@@ -276,10 +276,17 @@ void PageLinks::Heard(int context, const std::string& payload) {
       base::JSONReader::ReadDict(payload, base::JSON_PARSE_RFC);
   const std::string* kind = message ? message->FindString("kind") : nullptr;
   const base::DictValue* data = message ? message->FindDict("data") : nullptr;
+  const GURL document(message
+                          ? Field(*message, "document", kLongestDocumentUrl)
+                          : std::string());
   const char* outcome = !kind || !data      ? "unreadable"
                         : !frame            ? "from a context with no active frame"
                         : !ScriptableDocument(frame)
                             ? "from a document not on http(s) or file"
+                        : !document.is_valid() ||
+                                document.GetWithoutRef() !=
+                                    frame->GetLastCommittedURL().GetWithoutRef()
+                            ? "from a document the frame no longer shows"
                             : "heard";
   NoteReportForTest(kind ? *kind : std::string(),
                     data ? Field(*data, "url", kLongestUrl) : std::string(),
