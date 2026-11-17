@@ -270,6 +270,13 @@ export class Shell {
     return this.eval("__ardiaHost.invoke('ArdiaShell.windowIds', { args: [] })");
   }
 
+  // The window's composited contents (shell, page views and overlays) as a PNG, from inside the app. Unlike
+  // screenshot(), which is CDP's capture of this one target, it shows the whole window. The host offers it to
+  // isolated instances only, which every scenario launch is. Resolves to { ok, value } like invoke().
+  snapshotWindow(file, { transparent } = {}) {
+    return this.invoke("ArdiaApp.devSnapshotWindow", { args: [this.windowId, file, ...(transparent === undefined ? [] : [transparent])] });
+  }
+
   activeTabId() {
     return this.state("const w = s.windows[windowId]; return w ? (w.activeTabIds?.[w.profileId] ?? null) : null;");
   }
