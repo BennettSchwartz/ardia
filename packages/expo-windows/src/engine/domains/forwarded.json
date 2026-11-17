@@ -94,6 +94,7 @@
       "setVideoUpscaling",
       "setVideoUpscalingTestConditions",
       "takeContentDrift",
+      "takeFirstPaintHolds",
       "videoUpscalingState"
     ],
     "windows": ["list", "dev"]
