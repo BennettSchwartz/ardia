@@ -34,11 +34,14 @@ async function clickAtOnce(page: string): Promise<Round> {
   } finally {
     watching.remove();
   }
-  const downs = await evaluate(page, 'post("result", JSON.stringify(window.downs));').catch(() => null);
+  const downs = await evaluate(page, 'post("result", JSON.stringify(window.downs));').catch((error: unknown) => {
+    throw new Error(`the ${page} page's count of trusted presses could not be read: ${String((error as Error)?.message ?? error)}`);
+  });
+  if (typeof downs !== "number") throw new Error(`the ${page} page's count of trusted presses could not be read (${JSON.stringify(downs)})`);
   const paintedAt = await evaluate(page, CONTENTFUL_PAINT_AT).catch(() => null);
   expectTrue(typeof dispatchedAt === "number" && Number.isFinite(dispatchedAt), `clickForTest answers when it dispatched the press to the renderer (dispatchedAt): ${JSON.stringify(dispatchedAt)}`);
   const paint: Paint = typeof paintedAt !== "number" ? "unknown" : dispatchedAt < paintedAt ? "before" : "after";
-  return { received: Number(downs) > 0, opened, fromClick, paint };
+  return { received: downs > 0, opened, fromClick, paint };
 }
 
 function counted(rounds: Round[], what: string) {
@@ -47,17 +50,17 @@ function counted(rounds: Round[], what: string) {
   const reached = rounds.length - lost.length;
   const lostBy = (paint: Paint) => lost.filter((round) => round.paint === paint).length;
   console.info(
-    `[ardia windows] self-check note: link script rounds, ${what}: ${rounds.length} clicks, ${reached} reached the page, ${missed} of those missed by the link script, ${lost.length} never reached it (sent ${lostBy("before")} before first contentful paint, ${lostBy("after")} after it, ${lostBy("unknown")} with no paint entry; first contentful paint is not when the browser starts accepting input, so these are data, not a verdict)`,
+    `[ardia windows] self-check note: link script rounds, ${what}: ${reached} of ${rounds.length} clicks delivered (reached the page as a trusted press), ${missed} of those missed by the link script, ${lost.length} never reached it (sent ${lostBy("before")} before first contentful paint, ${lostBy("after")} after it, ${lostBy("unknown")} with no paint entry; first contentful paint is not when the browser starts accepting input, so these are data, not a verdict)`,
   );
   return { missed, reached };
 }
 
-function judge(rounds: Round[], what: string, halfMustReach = true) {
+function judge(rounds: Round[], what: string) {
   const { missed, reached } = counted(rounds, what);
   expectEqual(
-    { missed, mostReached: !halfMustReach || reached * 2 >= rounds.length },
+    { missed, mostReached: reached * 2 >= rounds.length },
     { missed: 0, mostReached: true },
-    `${what}: every click the page received opened a tab its link script saw${halfMustReach ? `, and at least half reached the page (${reached} of ${rounds.length})` : ""} ${JSON.stringify(rounds)}`,
+    `${what}: every click the page received opened a tab its link script saw, and at least half reached the page (${reached} of ${rounds.length} delivered) ${JSON.stringify(rounds)}`,
   );
 }
 
@@ -165,17 +168,17 @@ const linkScriptChecks = (port: string): Check[] => [
       ),
   },
   {
-    name: "engine links: on freshly created tabs, every click the page received opened a tab its link script saw (50 tabs, counts logged)",
+    name: "engine links: on freshly created tabs, every click the page received opened a tab its link script saw, and at least half of 50 reached the page (50 tabs, counts logged)",
     run: async () => {
       const windowId = await firstWindow();
       const rounds: Round[] = [];
       for (let i = 0; i < FRESH_TABS; i++) rounds.push(await freshRound(port, windowId, i));
-      judge(rounds, "link script first document, clicks at once on a freshly created tab", false);
+      judge(rounds, "link script first document, clicks at once on a freshly created tab");
       expectTrue(Array.isArray((await timedCall<{ tabs?: unknown }>("tabs.list")).tabs), "the engine still lists tabs");
     },
   },
   {
-    name: "engine links: on a tab discarded and woken, every click the page received opened a tab its link script saw (50 wakes, counts logged)",
+    name: "engine links: on a tab discarded and woken, every click the page received opened a tab its link script saw, and at least half of 50 reached the page (50 wakes, counts logged)",
     run: () =>
       withPages(
         ["discard-wake"],
@@ -186,7 +189,7 @@ const linkScriptChecks = (port: string): Check[] => [
             await discardedAndWoken(page!, windowId);
             rounds.push(await clickAtOnce(page!));
           }
-          judge(rounds, "link script first document, clicks at once on a tab discarded and woken", false);
+          judge(rounds, "link script first document, clicks at once on a tab discarded and woken");
           expectTrue(Array.isArray((await timedCall<{ tabs?: unknown }>("tabs.list")).tabs), "the engine still lists tabs");
         },
         "links",
