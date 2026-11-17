@@ -38,6 +38,7 @@ const ARGUMENTS: Record<string, string[]> = {
   runPageCommand: ["name"],
   getSecurityInfo: [],
   mediaCommand: ["action", "seconds"],
+  downloadImage: ["url", "maxPixels"],
   clearSiteData: [],
   pageCookies: ["urls"],
   openBlockedPopup: ["id", "always"],
@@ -54,6 +55,7 @@ const UNWRAPPED: Record<string, (reply: Record<string, unknown> | null) => unkno
   sleepIfHidden: (reply) => (Array.isArray(reply?.keptBy) ? reply.keptBy : [-1]),
   getSecurityInfo: (reply) => (!reply || reply.info === null ? null : reply),
   clearSiteData: (reply) => reply ?? { cookies: false, storage: false },
+  downloadImage: (reply) => (typeof reply?.uri === "string" ? { uri: reply.uri, width: Number(reply.width) || 0, height: Number(reply.height) || 0 } : null),
 };
 const ANSWERS: Record<string, unknown> = {
   requestPictureInPicture: false,
