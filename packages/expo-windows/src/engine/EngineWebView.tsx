@@ -8,6 +8,7 @@ import { noteMissing } from "../missing";
 import { requireNativeModule } from "../modules";
 import { coversIn, hiddenByFullScreen, holesFor, onCoversChange, pageRadiusIn, setFullScreenPage } from "./covers";
 import { callPage, mountPage, showPage, type PageRect, type PageShape } from "./pages";
+import { holeMark } from "./holeMarks";
 import { noteShowStep } from "./showTrace";
 import { CoverAncestry } from "./usePageCover";
 import { WindowIdContext } from "./windowId";
@@ -113,6 +114,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
       return;
     }
     if (!view.current) noteShowStep(key, "place: no view");
+    const askedAt = performance.now();
     view.current?.measureInWindow((x, y, width, height) => {
       if (!view.current) return noteShowStep(key, "place: measured after the view was gone");
       if (latest.current.visible === false || hiddenByFullScreen(windowId, key) || !(width > 0) || !(height > 0)) return noteShowStep(key, `place: measured ${width}x${height}, visible ${latest.current.visible !== false}`);
@@ -126,6 +128,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
           };
       const placed = JSON.stringify(shape);
       if (shown.current.visible && shown.current.placed === placed) return noteShowStep(key, "place: deduped");
+      holeMark(() => `page ${key} measured in ${Math.round(performance.now() - askedAt)} ms, shown with ${shape.holes.length} holes: ${shape.holes.map((hole) => hole.map(Math.round).join(",")).join(" ")}`);
       if (!showPage(key, true, shape, windowId)) return noteShowStep(key, `place: not taken ${width}x${height}`);
       noteShowStep(key, `place: show ${width}x${height}`);
       shown.current = { visible: true, placed, shows: shown.current.shows + 1 };
