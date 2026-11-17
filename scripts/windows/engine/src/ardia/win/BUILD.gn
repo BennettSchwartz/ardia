@@ -20,6 +20,8 @@ source_set("win") {
     "host_visibility.cc",
     "hosted_window.cc",
     "hosted_window.h",
+    "input_watch.cc",
+    "input_watch.h",
     "kept_pages.cc",
     "kept_pages.h",
     "launch_guard.cc",

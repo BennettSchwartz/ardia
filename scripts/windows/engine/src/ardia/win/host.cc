@@ -16,6 +16,7 @@
 #include "ardia/win/frame_view.h"
 #include "ardia/win/hooks.h"
 #include "ardia/win/hosted_window.h"
+#include "ardia/win/input_watch.h"
 #include "ardia/win/main.h"
 #include "ardia/win/page_links.h"
 #include "ardia/win/private_sessions.h"
@@ -276,6 +277,14 @@ void Host::Call(const std::string& verb,
   } else if (verb == "keyboard.forget") {
     keyboard_wanted_.erase(window);
     result = Ok();
+  } else if (verb == "input.noteForTest") {
+    if (!ardiacore::TestInstance() || !::IsWindow(window)) {
+      result = Error("input.noteForTest is for test instances and a window");
+    } else {
+      WatchParent(window);
+      NoteInputForTest(window);
+      result = Ok();
+    }
   } else if (verb == "autoplay.everywhere") {
     result = SetBlockAutoplayEverywhere(args);
   } else if (verb == "peek.config") {
@@ -1247,6 +1256,7 @@ void Host::WatchParent(HWND parent) {
   }
   parents_.insert(parent);
   ::SetWindowSubclass(parent, &ParentProcedure, kParentSubclass, 0);
+  WatchInputOf(parent);
 }
 
 std::string Host::PageKeyFor(ui::Event* event) const {
