@@ -137,7 +137,7 @@ public static class ArdiaFadeCheck {
           BitmapInfoHeader header = new BitmapInfoHeader();
           header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
           header.Width = width;
-          header.Height = -1;
+          header.Height = -(ys[ys.Length - 1] - ys[0] + 1);
           header.Planes = 1;
           header.BitCount = 32;
           section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
@@ -152,17 +152,17 @@ public static class ArdiaFadeCheck {
         Sample sample = new Sample();
         sample.Ms = at;
         sample.Values = new int[tiles * ys.Length];
-        bool read = true;
-        for (int r = 0; r < ys.Length && read; r++) {
-          if (!BitBlt(memory, 0, 0, width, 1, screen, x0, ys[r], 0x40CC0020)) { read = false; break; }
-          byte[] row = new byte[width * 4];
-          Marshal.Copy(bits, row, 0, row.Length);
+        int band = ys[ys.Length - 1] - ys[0] + 1;
+        if (!BitBlt(memory, 0, 0, width, band, screen, x0, ys[0], 0x40CC0020)) { Thread.Sleep(1); continue; }
+        byte[] rows = new byte[width * band * 4];
+        Marshal.Copy(bits, rows, 0, rows.Length);
+        for (int r = 0; r < ys.Length; r++) {
+          int offset = (ys[r] - ys[0]) * width * 4;
           for (int i = 0; i < tiles; i++) {
-            int p = xs[i] * 4;
-            sample.Values[r * tiles + i] = (row[p] + row[p + 1] + row[p + 2]) / 3;
+            int p = offset + xs[i] * 4;
+            sample.Values[r * tiles + i] = (rows[p] + rows[p + 1] + rows[p + 2]) / 3;
           }
         }
-        if (!read) { Thread.Sleep(1); continue; }
         run.Samples.Add(sample);
         Thread.Sleep(2);
       }
@@ -260,7 +260,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
       }
       if ($entry.Rule -eq "shown" -and $round -gt 1) {
         if ($null -eq $landed -or $landed -gt $shownWithinMs) { $problems += "fades, $Label, $($entry.Name), round $round`: the child mounted with the round wasn't drawn above the parent's background within $shownWithinMs ms ($(if ($null -eq $landed) { "never, last $last" } else { "white at $landed ms" }))" }
-        elseif ($last -lt $whiteAt) { $problems += "fades, $Label, $($entry.Name), round $round`: the child was drawn at $landed ms but not at the round's end (last $last)" }
+        elseif ($last -lt $whiteAt) { $problems += "fades, $Label, $($entry.Name), round $round`: the child was drawn at $landed ms but gone before the round's end (last $last)" }
       }
     }
     $summary = ($rows | ForEach-Object { if ($null -eq $_.Landed) { "r$($_.Round) never (last $($_.Last))" } else { "r$($_.Round) $($_.Between) between, white at $($_.Landed) ms" } }) -join "; "
