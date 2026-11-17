@@ -18,7 +18,6 @@ import { isWebDemo } from "../../state/onboarding/demoSteps";
 import { ToolTour } from "./tour/ToolTour";
 import { ONBOARDING_CARD, OnboardingCardContext, useOnboardingColors } from "./Parts";
 import { DevResetOnboarding } from "./DevResetOnboarding";
-import { noteOverlay, overlayStartsOpaque } from "../../state/onboarding/overlayLab";
 
 const FLOATING_MIN_HEIGHT = 620;
 
@@ -40,17 +39,12 @@ function Overlay({ session }: { session: number }) {
   const step = useOnboarding((s) => s.step);
   const leaving = useOnboarding((s) => s.leaving);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const presence = useRef(new Animated.Value(overlayStartsOpaque() ? 1 : 0)).current;
+  const presence = useRef(new Animated.Value(0)).current;
   const card = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    noteOverlay("mounted");
-    if (overlayStartsOpaque()) return;
-    noteOverlay("fade started");
-    Animated.timing(presence, { toValue: 1, duration: onboardingMotion.overlayIn, easing: curve.enter, useNativeDriver: true }).start(({ finished }) => noteOverlay(`fade ended finished=${finished}`));
+    Animated.timing(presence, { toValue: 1, duration: onboardingMotion.overlayIn, easing: curve.enter, useNativeDriver: true }).start();
   }, []);
-
-  useEffect(() => noteOverlay(`step ${step}`), [step]);
 
   useEffect(() => {
     if (step === "intro") return card.setValue(0);
@@ -74,7 +68,7 @@ function Overlay({ session }: { session: number }) {
   return (
     <Animated.View
       style={[StyleSheet.absoluteFill, { opacity: presence }]}
-      onLayout={(e) => (noteOverlay(`layout ${Math.round(e.nativeEvent.layout.width)}x${Math.round(e.nativeEvent.layout.height)}`), setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height }))}
+      onLayout={(e) => setSize({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height })}
     >
       <VisualEffect material="fullScreenUI" blendingMode="withinWindow" style={StyleSheet.absoluteFill} />
       <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.overlay }]} />

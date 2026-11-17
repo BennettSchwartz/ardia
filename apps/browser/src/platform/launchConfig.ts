@@ -19,8 +19,6 @@ export const introStartDelayMs = (): number => {
   return Number.isFinite(asked) && asked > 0 ? asked : 0;
 };
 
-export const overlayLabValue = (key: string): string | null => testValue(key);
-
 export const devTestValue = (key: string): string | null => (typeof __DEV__ !== "undefined" && __DEV__ ? testValue(key) : null);
 
 export const reloadLaunchConfigForTests = () => void (config = null);
