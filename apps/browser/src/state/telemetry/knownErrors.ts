@@ -1,4 +1,6 @@
-import { NATIVE_CALL } from "./sanitize";
+import { ERROR_TEMPLATES } from "./errorTemplates";
+import { NATIVE_FUNCTIONS } from "./nativeFunctions";
+import { matchTemplate } from "./templates";
 
 export const KNOWN_ERROR_CODES: readonly string[] = [
   "ERR_ARGUMENT_CAST", "ERR_AUTOFILL_UNAVAILABLE", "ERR_BAD_ARGS", "ERR_BAD_REPLY", "ERR_BANG_LIST", "ERR_CALENDAR_DENIED",
@@ -33,42 +35,17 @@ export const KNOWN_ERROR_CODES: readonly string[] = [
   "ERR_WINDOW_IDENTITY", "cancelled", "unsupported",
 ];
 
-export const KNOWN_ERROR_MESSAGES: readonly (readonly [code: string, message: string])[] = [
-  ["cancelled", "Import cancelled"],
-  ["ERR_BAD_REPLY", "Invalid file status reply"],
-  ["ERR_BAD_REPLY", "The engine reply is not JSON"],
-  ["ERR_BAD_REPLY", "The engine reply is not JSON text"],
-  ["ERR_BAD_REPLY", "the page's result isn't JSON"],
-  ["ERR_BAD_REPLY", "the reply isn't JSON"],
-  ["ERR_DOCUMENT_REQUEST", "Document arguments require JSON text"],
-  ["ERR_DOCUMENT_RESERVED", "Canonical Live documents cannot be removed generically"],
-  ["ERR_DOCUMENT_RESERVED", "Canonical Live documents require typed operations"],
-  ["ERR_ENGINE", "no bookmarks"],
-  ["ERR_ENGINE", "Profile must be a string"],
-  ["ERR_ENGINE", "the file couldn't be written"],
-  ["ERR_PROFILE_INVALID", "The private window has no state to open"],
-  ["ERR_TELEMETRY_CHOICE", "The telemetry choice isn't one this build knows"],
-  ["ERR_TELEMETRY_OWNER", "No telemetry owner answered"],
-  ["ERR_TELEMETRY_RESET", "The anonymous ID wasn't reset"],
-  ["ERR_UNAVAILABLE", "Quitting needs the Linux host"],
-  ["ERR_UNAVAILABLE", "Sharing is unavailable in this window"],
-  ["ERR_UNKNOWN_CALL", "Unknown document operation"],
-  ["ERR_WINDOW_CLOSE_CANCELLED", "Window close cancelled"],
-  ["ERR_WINDOW_CLOSE_LIMIT", "Too many pending close attempts"],
-  ["ERR_WINDOW_CLOSE_STALE", "Invalid close identity"],
-  ["ERR_WINDOW_CLOSE_STALE", "Window close is no longer current"],
-  ["unsupported", "Password import needs the Linux host"],
-];
+const NATIVE_CALL = /^Calling the '([A-Za-z_$][\w$]{0,60})' function has failed(?:\n→ Caused by: [\s\S]*)?$/;
 
 const codes = new Set(KNOWN_ERROR_CODES);
-const messages = new Set(KNOWN_ERROR_MESSAGES.map(([, message]) => message));
+const nativeFunctions = new Set(NATIVE_FUNCTIONS);
 
 export function knownErrorMessage(error: unknown): string {
   const message = error && typeof error === "object" ? (error as { message?: unknown }).message : undefined;
   if (typeof message !== "string") return "";
-  if (messages.has(message)) return message;
-  const call = NATIVE_CALL.exec(message.split(/\r?\n/, 1)[0]!.trim());
-  return call ? `Calling the '${call[1]}' function has failed` : "";
+  const call = NATIVE_CALL.exec(message);
+  if (call) return nativeFunctions.has(call[1]!) ? `Calling the '${call[1]}' function has failed` : "";
+  return matchTemplate(message, ERROR_TEMPLATES)?.[1] ?? "";
 }
 
 export function knownErrorCode(error: unknown): string | null {

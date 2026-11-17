@@ -15,13 +15,32 @@ const queued = () => JSON.parse(stub.docs.get("telemetry-queue.json") ?? "{}").e
 
 test("a JS error is on disk the moment it's captured, so a crash right after can't lose it", () => {
   const before = queued().length;
-  captureException(new TypeError("Attempting to run JS driven animation on a native node"), "react");
+  captureException(new TypeError("the page isn't ready"), "react");
   const events = queued();
   assert.equal(events.length, before + 1);
   const props = events.at(-1).properties;
   assert.deepEqual(props.$exception_types, ["TypeError"]);
-  assert.deepEqual(props.$exception_values, ["Attempting to run JS driven animation on a native node"]);
-  assert.equal(props.$exception_list[0].value, "Attempting to run JS driven animation on a native node");
+  assert.deepEqual(props.$exception_values, ["the page isn't ready"]);
+  assert.equal(props.$exception_list[0].value, "the page isn't ready");
+});
+
+test("an exception's message is sent only as one of Ardia's own fixed messages, never the text filled into it", () => {
+  captureException(new Error("Couldn't open /Users/alice/Secret Plans for bank.example"), "console");
+  let sent = queued().at(-1);
+  assert.deepEqual(sent.properties.$exception_values, ["Error"]);
+  assert.equal(sent.properties.$exception_list[0].value, "Error");
+  assert.equal(JSON.stringify(sent).includes("alice"), false);
+  captureException(Object.assign(new Error("Tab 4242 isn't open in that window."), { code: "ERR_MADE_UP_BY_A_PAGE" }), "console");
+  sent = queued().at(-1);
+  assert.deepEqual(sent.properties.$exception_values, ["Tab {} isn't open in that window."]);
+  assert.equal(sent.properties.error_code ?? null, null);
+  assert.equal(JSON.stringify(sent).includes("4242"), false);
+  captureException(Object.assign(new Error("Calling the 'closeWindow' function has failed\n→ Caused by: Bearer qwertySecretToken"), { code: "ERR_ENGINE" }), "console");
+  sent = queued().at(-1);
+  assert.deepEqual(sent.properties.$exception_values, ["Calling the 'closeWindow' function has failed"]);
+  assert.equal(sent.properties.error_code, "ERR_ENGINE");
+  captureException(new TypeError("Calling the 'aliceSecretProject' function has failed"), "console");
+  assert.deepEqual(queued().at(-1).properties.$exception_values, ["TypeError"]);
 });
 
 test("a native crash names its exception and the app's images at the top level, never its reason", async () => {

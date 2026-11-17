@@ -3,7 +3,8 @@ import { advanceCrashCursor, capture, consentToken, crashCursor, loadChoice, sav
 import { contextAt, contextProperties, recentWebuiPages, sessionStart } from "./diagnostics";
 import type { SavedContext } from "./savedContext";
 import { recordLog } from "./logs";
-import { errorCode, errorMessage, errorType, jsFatalKind, nativeCrashExceptions, nativeCrashTermination, parseStack, type ExceptionFrame } from "./sanitize";
+import { knownErrorCode, knownErrorMessage } from "./knownErrors";
+import { errorType, jsFatalKind, nativeCrashExceptions, nativeCrashTermination, parseStack, type ExceptionFrame } from "./sanitize";
 
 type Mechanism = "onerror" | "onunhandledrejection" | "react" | "react_recovered" | "console" | "native_crash" | "helper_crash";
 
@@ -33,9 +34,9 @@ export function captureException(error: unknown, mechanism: Mechanism, { fatal =
       reported.add(error);
     }
     const type = errorType(error);
-    const value = errorMessage(error) || type;
+    const value = knownErrorMessage(error) || type;
     const frames = parseStack(error && typeof error === "object" ? (error as { stack?: unknown }).stack : undefined);
-    const code = errorCode(error);
+    const code = knownErrorCode(error);
     const key = `${type}|${value}|${code ?? ""}|${frames.at(-1)?.function ?? ""}`;
     if (seen.has(key) || seen.size >= MAX_PER_SESSION) return;
     seen.add(key);

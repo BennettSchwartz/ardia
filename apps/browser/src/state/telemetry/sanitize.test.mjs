@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cleanProperties, errorCode, errorMessage, errorType, JS_FATAL_KINDS, jsFatalKind, nativeCrashExceptions, nativeFrames, parseStack, scrubText } from "./sanitize.ts";
+import { cleanProperties, errorType, JS_FATAL_KINDS, jsFatalKind, nativeCrashExceptions, nativeFrames, parseStack, scrubText } from "./sanitize.ts";
 import { customColorProfiles, narrowWindows, settingsSnapshot, themeFileSnapshot } from "./settingsSnapshot.ts";
 const { DEFAULT_SETTINGS, SETTING_SPECS } = await import("../settings/settings.ts");
 

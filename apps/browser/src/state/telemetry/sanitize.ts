@@ -116,21 +116,6 @@ export function jsFatalKind(source: unknown, text: unknown): JsFatalKind | null 
   return "unknown";
 }
 
-export const NATIVE_CALL = /^Calling the '([A-Za-z_$][\w$]{0,60})' function has failed$/;
-
-export function errorMessage(error: unknown): string {
-  const message = error && typeof error === "object" ? (error as { message?: unknown }).message : error;
-  if (typeof message !== "string") return "";
-  const call = NATIVE_CALL.exec(message.split(/\r?\n/, 1)[0]!.trim());
-  if (call) return `Calling the '${call[1]}' function has failed`;
-  return scrubText(message, 300);
-}
-
-export function errorCode(error: unknown): string | null {
-  const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
-  return typeof code === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(code) ? code : null;
-}
-
 export type ExceptionFrame = {
   platform: "custom";
   lang: string;

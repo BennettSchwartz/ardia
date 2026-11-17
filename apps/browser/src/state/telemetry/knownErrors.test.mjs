@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { KNOWN_ERROR_CODES, KNOWN_ERROR_MESSAGES, knownErrorCode, knownErrorMessage } from "./knownErrors.ts";
+import { KNOWN_ERROR_CODES, knownErrorCode, knownErrorMessage } from "./knownErrors.ts";
 
 const ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
 const packages = readdirSync(join(ROOT, "packages")).filter((name) => statSync(join(ROOT, "packages", name)).isDirectory());
@@ -31,22 +31,12 @@ function sources(tree, pattern) {
 }
 
 const ERR_LITERAL = /"(ERR_[A-Z0-9_]+)"/g;
-const ARDIA_ERROR = /new ArdiaError\("([^"\\]+)", "([^"\\]*)"\)/g;
-const CODED_ERROR = /Object\.assign\(new Error\("([^"\\]*)"\), \{ code: "(ERR_[A-Z0-9_]+)" \}\)/g;
+const ARDIA_ERROR = /new ArdiaError\("([^"\\]+)", "[^"\\]*"\)/g;
 
 const definedCodes = new Set();
-const definedMessages = new Map();
 for (const tree of CODE_TREES) for (const file of sources(tree, SOURCE)) for (const [, code] of readFileSync(file, "utf8").matchAll(ERR_LITERAL)) definedCodes.add(code);
 for (const tree of SCRIPT_TREES)
-  for (const file of sources(tree, SCRIPT)) {
-    const text = readFileSync(file, "utf8");
-    const where = relative(ROOT, file);
-    for (const [, code, message] of text.matchAll(ARDIA_ERROR)) {
-      definedCodes.add(code);
-      definedMessages.set(`${code}\n${message}`, where);
-    }
-    for (const [, message, code] of text.matchAll(CODED_ERROR)) definedMessages.set(`${code}\n${message}`, where);
-  }
+  for (const file of sources(tree, SCRIPT)) for (const [, code] of readFileSync(file, "utf8").matchAll(ARDIA_ERROR)) definedCodes.add(code);
 
 const difference = (wanted, have) => [...wanted].filter((item) => !have.has(item)).sort();
 
@@ -56,16 +46,10 @@ test("the known error codes are exactly the ones Ardia's sources define", () => 
   assert.deepEqual({ missing: difference(definedCodes, known), extra: difference(known, definedCodes) }, { missing: [], extra: [] });
 });
 
-test("the known error messages are exactly the literal ones Ardia's sources define with their codes", () => {
-  const known = new Set(KNOWN_ERROR_MESSAGES.map(([code, message]) => `${code}\n${message}`));
-  const missing = difference(definedMessages.keys(), known).map((pair) => `${pair.replace("\n", ": ")} (${definedMessages.get(pair)})`);
-  assert.deepEqual({ missing, extra: difference(known, new Set(definedMessages.keys())).map((pair) => pair.replace("\n", ": ")) }, { missing: [], extra: [] });
-});
-
 test("only a known message or the native call template comes back, and only a known code", () => {
   assert.equal(knownErrorMessage(new Error("the reply isn't JSON")), "the reply isn't JSON");
-  assert.equal(knownErrorMessage(new Error("Calling the 'query' function has failed\n    at somewhere")), "Calling the 'query' function has failed");
-  assert.equal(knownErrorMessage(new Error("the reply isn't JSON: qwertySecretToken")), "");
+  assert.equal(knownErrorMessage(new Error("Calling the 'closeWindow' function has failed")), "Calling the 'closeWindow' function has failed");
+  assert.doesNotMatch(knownErrorMessage(new Error("the reply isn't JSON: qwertySecretToken")), /qwerty/);
   assert.equal(knownErrorMessage(new Error("Calling the 'a b' function has failed")), "");
   assert.equal(knownErrorMessage("the reply isn't JSON"), "");
   assert.equal(knownErrorMessage({ message: 42 }), "");
@@ -73,4 +57,16 @@ test("only a known message or the native call template comes back, and only a kn
   assert.equal(knownErrorCode(Object.assign(new Error("x"), { code: "cancelled" })), "cancelled");
   assert.equal(knownErrorCode(Object.assign(new Error("x"), { code: "ERR_MADE_UP_BY_A_PAGE" })), null);
   assert.equal(knownErrorCode(Object.assign(new Error("x"), { code: 7 })), null);
+});
+
+test("the native call form names only a function Ardia's native modules define, and nothing after it but Expo's cause", () => {
+  assert.equal(knownErrorMessage(new Error("Calling the 'closeWindow' function has failed")), "Calling the 'closeWindow' function has failed");
+  assert.equal(knownErrorMessage(new Error("Calling the 'closeWindow' function has failed\n→ Caused by: Bearer qwertySecretToken")), "Calling the 'closeWindow' function has failed");
+  assert.equal(knownErrorMessage(new Error("Calling the 'aliceSecretProject' function has failed")), "");
+  assert.equal(knownErrorMessage(new Error("Calling the 'closeWindow' function has failed\nsecret second line")), "");
+});
+
+test("an error message is known when it fits one of the messages Ardia's own code throws, and only the fixed words come back", () => {
+  assert.equal(knownErrorMessage(new Error("Tab 4242 isn't open in that window.")), "Tab {} isn't open in that window.");
+  assert.equal(knownErrorMessage(new Error("Couldn't open /Users/alice/Secret Plans")), "");
 });

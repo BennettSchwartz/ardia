@@ -5,7 +5,7 @@ export type PasswordAction = "browser import" | "csv import" | "settings edit" |
 export const orWarn =
   <T,>(fallback: T, action?: PasswordAction) =>
   (error: unknown): T => {
-    console.warn(`[engine] ${action ? `${action}: ` : ""}${errorText(error)}`);
+    console.warn(action ? `[engine] ${action}: ${errorText(error)}` : `[engine] ${errorText(error)}`);
     return fallback;
   };
 

@@ -42,7 +42,7 @@ export const WHATS_SENT: { title: string; items: string[] }[] = [
   {
     title: "Crashes and errors",
     items: [
-      "The error's type and message, with web addresses, paths, file names, quoted text and long numbers taken out",
+      "The error's type, and its message only when it's one Ardia's own code writes, as Ardia's fixed words with anything filled into them (a name, a number, an address) left out. Never a message from a website, an extension or another app",
       "Function names, script file names and line numbers from the stack trace",
       "After a crash: the exception type and name (never its message), and the function names where it was thrown and on the crashing thread, from this app's crash report",
       "The same for crashes of Ardia's page, graphics and helper processes, plus the version that crashed, how long the process had run, the total size of its writable memory regions, and how the system ended it (its termination reason, like a signal or a code-signing kill)",
@@ -52,7 +52,7 @@ export const WHATS_SENT: { title: string; items: string[] }[] = [
       "When pages stop reacting to the pointer while Ardia is in front: why (Ardia is only half switched to, a menu was left open in the background, the window isn't active, something covers the page, or keyboard focus went missing), whether macOS and Ardia agree that Ardia is the app in front, whether a menu was open, what kind of window was active instead (none, hidden, a pop-up, another Ardia window), whether the page's window could become active and was still the main one, what covered the page (Ardia's own view or another, or an invisible window over it) and whether it was see-through, what held keyboard focus (nothing, the window, another window, the page or one of Ardia's controls), whether it came from a click or a pointer move, whether Ardia fixed it by itself and whether that worked, how it ended (the pointer worked again, Ardia fixed it, or you switched apps) and how long it lasted. Never which page",
       "When a window may be showing a black page: whether it is a regular or a private window, how many windows are open, whether it had just been seen or had just gained or lost focus, whether the system counts it as visible and whether Ardia overruled that, whether Ardia is the app in front, whether Share tabs across windows is on, how many pages it showed and how many of them looked unpainted, and why (see-through, hidden, detached from its window, still waiting for a first frame, lent to another page, or covered while it opens). Sent once per episode, never which page",
       "When a press on the window's title strip or a window move holds the pointer for 5 seconds or more: which of the two it was, whether it was still holding when noticed and whether a mouse button was still down. At most 10 per session, never which window or page",
-      "Warning and error log lines, cleaned the same way, with the type of an error logged beside them, and its message and code only when they are one of Ardia's own fixed error messages and codes",
+      "Which of Ardia's own warning and error log lines came up, as the line's fixed words from Ardia's code and a short id for it, with anything filled into the line left out (a line Ardia doesn't know is sent as just “unlisted”), plus the type of an error logged beside it, and its message and code only when they are one of Ardia's own, cleaned the same way",
     ],
   },
   {

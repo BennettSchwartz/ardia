@@ -31,7 +31,7 @@ test("an error before the client starts keeps the queue already on disk, once", 
 
 test("a fatal JS error reaches React Native's handler only once its report is on disk", async () => {
   stub.heldSaves.on = true;
-  const error = new TypeError("fatal render error");
+  const error = new TypeError("the tab closed");
   handler(error, true);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(forwarded.length, 0);
@@ -39,7 +39,7 @@ test("a fatal JS error reaches React Native's handler only once its report is on
   for (const land of stub.heldSaves.queue.splice(0)) land();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(forwarded, [[error, true]]);
-  assert.ok(queuedEvents().some((e) => e.properties.$exception_values?.[0] === "fatal render error"));
+  assert.ok(queuedEvents().some((e) => e.properties.$exception_values?.[0] === "the tab closed"));
 });
 
 test("a fatal JS error is forwarded anyway when the disk doesn't answer within a second", async (t) => {

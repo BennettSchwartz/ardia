@@ -157,14 +157,14 @@ export function capture(event: string, props: Record<string, unknown> = {}, opti
   } catch {}
 }
 
-export function queueLog(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>) {
+export function queueLog(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>, text = message) {
   const relay = telemetryRelay();
   if (relay) return void (isSharing() && relay.log(level, message, attributes));
   try {
     const sharing = saved().sharing;
     const at = Date.now();
     const withSession = { ...attributes, $session_id: sessionId() };
-    recordLocal("log", sharing, { level, message, attributes: withSession }, at);
+    recordLocal("log", sharing, { level, message, ...(text === message ? {} : { text }), attributes: withSession }, at);
     if (!sharing) return;
     loadQueue();
     queue.logs.push(logRecord(level, message, withSession, at));

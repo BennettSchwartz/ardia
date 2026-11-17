@@ -50,7 +50,7 @@ const settle = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("a render error React hands to onUncaughtError reaches native only after its report is on disk", async () => {
   stub.heldSaves.on = true;
-  onUncaughtError(new TypeError("Attempting to run JS driven animation on a native node"), { componentStack: "\n    in GroupBlock" });
+  onUncaughtError(new TypeError("the sidebar dock went away"), { componentStack: "\n    in GroupBlock" });
   await settle();
   assert.equal(saves, 1);
   assert.equal(nativeReports.length, 0);
@@ -59,7 +59,7 @@ test("a render error React hands to onUncaughtError reaches native only after it
   await settle(0);
   assert.equal(nativeReports.length, 1);
   assert.equal(nativeReports[0].isFatal, true);
-  const reported = queuedExceptions().filter((e) => e.properties.$exception_values?.[0] === "Attempting to run JS driven animation on a native node");
+  const reported = queuedExceptions().filter((e) => e.properties.$exception_values?.[0] === "the sidebar dock went away");
   assert.equal(reported.length, 1);
   assert.equal(reported[0].properties.$exception_level, "fatal");
   assert.equal(reported[0].properties.source, "react");
