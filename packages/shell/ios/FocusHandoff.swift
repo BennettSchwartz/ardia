@@ -51,6 +51,7 @@ final class FocusHandoff {
   private var begun: Int?
   private var monitor: Any?
   private let editKeys = NSMapTable<NSEvent, NSArray>(keyOptions: .weakMemory, valueOptions: .strongMemory)
+  private let editKeyConsent = NSMapTable<NSEvent, NSString>(keyOptions: .weakMemory, valueOptions: .strongMemory)
   private var keyEpochs = KeyEpochs()
   private let ackLock = NSLock()
   private var editKeyAcks: [String: Int] = [:]
@@ -132,8 +133,12 @@ final class FocusHandoff {
     guard let window, let event = acknowledged, let closed = closedAt[window.windowNumber], event.timestamp < closed,
       let typed = typedAfterGate[window.windowNumber], typed > event.timestamp else { return false }
     note("drop \(action): acknowledged after later keys were replayed")
-    refuse(.lateAcknowledgement, [.action(action)])
+    refuse(.lateAcknowledgement, [.action(action)], since: consentAtArrival(of: event))
     return true
+  }
+
+  private func consentAtArrival(of event: NSEvent) -> String {
+    editKeyConsent.object(forKey: event) as String? ?? ""
   }
 
   private static func origin(of event: NSEvent?) -> TimeInterval? {
@@ -178,7 +183,7 @@ final class FocusHandoff {
       return false
     }
     countEditKeyAck(afterHandback ? "afterHandbackRefused" : "refused")
-    refuse(.staleEpoch, [.key(event, up: nil)])
+    refuse(.staleEpoch, [.key(event, up: nil)], since: consentAtArrival(of: event))
     return true
   }
 
@@ -209,6 +214,7 @@ final class FocusHandoff {
       }
       if event.type == .keyDown, Self.isEditKey(event) {
         self.editKeys.setObject([window.windowNumber, self.keyEpochs.epoch(of: window.windowNumber)] as NSArray, forKey: event)
+        self.editKeyConsent.setObject(ArdiaConsentStamp.begin().epoch as NSString, forKey: event)
       }
       if event.type == .keyUp { return self.releases(event, in: gate) ? nil : event }
       if gate == nil, !event.modifierFlags.contains(.command) { self.noteTyped(event, in: window) }

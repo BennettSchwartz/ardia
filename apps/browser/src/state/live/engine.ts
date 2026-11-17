@@ -12,6 +12,8 @@ import { beginLiveRefresh, applyFetch, createFolder, finishCompleting, live, mar
 import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 import { noteLiveCompletedTabsClosed } from "../telemetry/liveCompletedTabs";
 import { noteLiveSourceFetch } from "../telemetry/workCounts";
+import { consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 import { isPlaying, useMedia } from "../media/media";
 import { usePages } from "../tabs/pageState";
 import type { MediaAccess } from "../../platform/tabs";
@@ -61,7 +63,8 @@ const sameFolder = (a: unknown, b: unknown) => JSON.stringify(a, sortedKeys) ===
 
 function claimRefresh(folderId: string) {
   const refresh = beginLiveRefresh(folderId);
-  return refresh?.catch((error: unknown) => { console.warn("Couldn't claim the live folder refresh", error); return null; }).then((fence) => {
+  const consent = consentToken();
+  return refresh?.catch((error: unknown) => { warnFor(consent, "Couldn't claim the live folder refresh", error); return null; }).then((fence) => {
     if (fence === null && live().folders[folderId]) setStatus(folderId, { state: "idle" });
     return fence;
   });

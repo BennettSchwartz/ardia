@@ -48,6 +48,13 @@ const leaseOf = (value: PageLeaseMetadata): PageLeaseMetadata =>
 
 const SCROLL_STATES = new Set(["down", "up", "top"]);
 
+function stampedOnArrival<T extends PageDelivery | PageLifecycle>(payload: T): T {
+  if (payload.type !== "pageEvent") return payload;
+  const { event: shown } = payload as PageDelivery;
+  if (shown.name !== "pictureInPicture" || !record(shown.data) || !("fullScreenSpaces" in shown.data)) return payload;
+  return { ...payload, event: { ...shown, data: { ...shown.data, epoch: consentEpoch() } } };
+}
+
 function typedPageMessage(data: unknown): PageEvent | null {
   if (!record(data)) return null;
   if (data.kind === "selection") return { name: "selection", data: { selection: record(data.data) ? data.data : null } };
@@ -57,7 +64,6 @@ function typedPageMessage(data: unknown): PageEvent | null {
 
 function appEvent(value: PageEvent): PageEvent | null {
   if (value.name === "pageMessage") return typedPageMessage(value.data);
-  if (value.name === "pictureInPicture" && record(value.data) && "fullScreenSpaces" in value.data) return { ...value, data: { ...value.data, epoch: consentEpoch() } };
   if (value.name !== "navigation" || !record(value.data)) return value;
   const data = value.data;
   return { ...value, data: { ...data,
@@ -100,8 +106,9 @@ export class HostPageEvents {
     this.applyTheme = applyTheme;
   }
 
-  receive(module: string, id: string, payload: unknown): boolean {
-    if (!this.active || module !== "ArdiaWebView" || !delivery(payload) || payload.claim !== this.claim) return false;
+  receive(module: string, id: string, received: unknown): boolean {
+    if (!this.active || module !== "ArdiaWebView" || !delivery(received) || received.claim !== this.claim) return false;
+    const payload = stampedOnArrival(received);
     if (!this.installed) {
       if (this.early.length >= 128) { this.dispose(); return false; }
       this.early.push(structuredClone({ ...payload, channel: id }) as PageDelivery | PageLifecycle);

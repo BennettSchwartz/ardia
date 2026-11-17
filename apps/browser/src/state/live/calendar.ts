@@ -12,7 +12,7 @@ import { openExternalURL } from "../../platform/app";
 import { readDocument } from "../../platform/documents";
 import { onWindowEvent } from "../../platform/windows";
 import { trackCalendarConnect } from "../telemetry/track";
-import { consentToken } from "../telemetry/client";
+import { consentToken, type ConsentToken } from "../telemetry/client";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { devTestValue } from "../../platform/launchConfig";
@@ -137,7 +137,7 @@ async function askMacOS(): Promise<CalendarAccessRequest> {
   }
 }
 
-async function requestAccess(consent = consentToken()): Promise<boolean> {
+async function requestAccess(consent: ConsentToken | null): Promise<boolean> {
   const before = calendarAuthorization();
   if (before === "fullAccess") {
     await refreshCalendar();
@@ -157,7 +157,7 @@ async function requestAccess(consent = consentToken()): Promise<boolean> {
 
 export function connectCalendar(): Promise<boolean> {
   if (fixtureMode) return refreshCalendar().then(() => true);
-  connecting ??= requestAccess().finally(() => (connecting = null));
+  connecting ??= requestAccess(consentToken()).finally(() => (connecting = null));
   return connecting;
 }
 

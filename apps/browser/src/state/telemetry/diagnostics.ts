@@ -162,7 +162,7 @@ function forgetContext() {
 
 onConsentPeriodChange(() => {
   forgetContext();
-  windowUnpaintedEvents = 0;
+  hoverLostEvents = windowUnpaintedEvents = 0;
 });
 
 useBrowser.subscribe((s, prev) => {
@@ -312,7 +312,6 @@ export function hoverLostProperties(e: HoverLostEpisode) {
     heal_worked: typeof e.healWorked === "boolean" ? e.healWorked : null,
     ended_by: oneOf(HOVER_ENDINGS, e.endedBy),
     lost_seconds: Number.isFinite(e.seconds) ? Math.min(Math.max(0, Math.round(e.seconds)), MAX_HOVER_LOST_SECONDS) : null,
-    episode: Number.isSafeInteger(e.episode) ? e.episode : null,
     session_min: sessionMinutes(),
   };
 }
@@ -320,8 +319,9 @@ export function hoverLostProperties(e: HoverLostEpisode) {
 export function trackHoverLost(e: HoverLostEpisode) {
   const consent = nativeConsent(e);
   if (hoverLostEvents >= MAX_HOVER_LOST_EVENTS) return;
-  if (stillValid(consent)) hoverLostEvents++;
-  capture("page_hover_lost", hoverLostProperties(e), consent);
+  const valid = stillValid(consent);
+  if (valid) hoverLostEvents++;
+  capture("page_hover_lost", { ...hoverLostProperties(e), episode: valid ? hoverLostEvents : null }, consent);
 }
 
 const UNPAINTED_WINDOWS = new Set(["regular", "private"]);

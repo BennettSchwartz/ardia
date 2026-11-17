@@ -1,7 +1,7 @@
 import { APP_INGEST_KEY } from "@ardia/core";
 import { installErrorReporting, resetAnonymousId, startTelemetry } from "../../browser/src/state/telemetry/index.ts";
 import { captureException } from "../../browser/src/state/telemetry/errors";
-import { capture, devState, endSession, flush, loadChoice, queueLog, saveQueueNow, setSharing } from "../../browser/src/state/telemetry/client";
+import { capture, consentNow, devState, endSession, flush, loadChoice, queueLog, saveQueueNow, setSharing } from "../../browser/src/state/telemetry/client";
 import { dismissAsk, reloadChoice, savedChoice, useTelemetry, type ConsentToken } from "../../browser/src/state/telemetry/choice";
 import { DAILY_DOC } from "../../browser/src/state/telemetry/daily";
 import { requestLog } from "../../browser/src/state/telemetry/requestLog";
@@ -147,7 +147,10 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
       change: (change) => {
         const shown = shownAfter(change);
         if (shown) useTelemetry.setState(shown);
-        void current.request("choice", RESET_TIMEOUT_MS, JSON.stringify(change)).catch(report).then(refreshState);
+        return current.request("choice", RESET_TIMEOUT_MS, JSON.stringify(change)).then(
+          () => refreshState().then(() => true),
+          (error: unknown) => (report(error), refreshState().then(() => false)),
+        );
       },
       installId: () => {
         const known = savedChoice().installId;
@@ -180,14 +183,14 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
     if (current.leading()) void documentSaved(STATE_DOC).catch(report).then(() => current.announce());
   });
   setInterval(() => {
-    if (!current.leading()) emitWindowUsage();
+    if (!current.leading()) emitWindowUsage(consentNow());
   }, WINDOW_USAGE_MS);
   return current;
 }
 
 export async function settleHostTelemetry(endsSession: boolean): Promise<string | null> {
   if (!leadership) return null;
-  if (!endsSession || !leadership.leading()) emitWindowUsage();
+  if (!endsSession || !leadership.leading()) emitWindowUsage(consentNow());
   if (endsSession) {
     const token = await leadership.request("end", END_TIMEOUT_MS).catch(report);
     return typeof token === "string" ? token : null;

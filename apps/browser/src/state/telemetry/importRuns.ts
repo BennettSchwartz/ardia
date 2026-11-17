@@ -1,3 +1,6 @@
+import type { ConsentToken } from "./choice";
+import { countFor } from "./countFor";
+
 let runs = 0;
 let kindsDone = 0;
 let kindsFailed = 0;
@@ -10,24 +13,31 @@ let diaAppleScriptProfiles = 0;
 let diaGroups = 0;
 let diaSpaceProfiles = 0;
 
-export function noteImportRun(run: { done: number; failed: number; secretsLeft: number }) {
-  runs += 1;
-  kindsDone += run.done;
-  kindsFailed += run.failed;
-  secretsLeft += run.secretsLeft;
+export function noteImportRun(run: { done: number; failed: number; secretsLeft: number }, consent?: ConsentToken | null) {
+  countFor(consent, () => {
+    runs += 1;
+    kindsDone += run.done;
+    kindsFailed += run.failed;
+    secretsLeft += run.secretsLeft;
+  }, { import_runs: 1, import_kinds_done: run.done, import_kinds_failed: run.failed, import_secrets_left: run.secretsLeft });
 }
 
-export function noteDiaTabProfiles(profiles: { matched: number; withoutFolder: number }) {
-  diaProfilesMatched += profiles.matched;
-  diaProfilesWithoutFolder += profiles.withoutFolder;
+export function noteDiaTabProfiles(profiles: { matched: number; withoutFolder: number }, consent?: ConsentToken | null) {
+  countFor(consent, () => {
+    diaProfilesMatched += profiles.matched;
+    diaProfilesWithoutFolder += profiles.withoutFolder;
+  }, { import_dia_profiles_matched: profiles.matched, import_dia_profiles_without_folder: profiles.withoutFolder });
 }
 
-export function noteDiaSidebar(profile: { file: boolean; unreadable: boolean; appleScript: boolean; groups: number; ownProfiles: number }) {
-  if (profile.file) diaSidebarFiles += 1;
-  if (profile.unreadable) diaSidebarUnreadable += 1;
-  if (profile.appleScript) diaAppleScriptProfiles += 1;
-  diaGroups += profile.groups;
-  diaSpaceProfiles += profile.ownProfiles;
+export function noteDiaSidebar(profile: { file: boolean; unreadable: boolean; appleScript: boolean; groups: number; ownProfiles: number }, consent?: ConsentToken | null) {
+  const fields = { import_dia_sidebar_files: +profile.file, import_dia_sidebar_unreadable: +profile.unreadable, import_dia_applescript_profiles: +profile.appleScript, import_dia_groups: profile.groups, import_dia_space_profiles: profile.ownProfiles };
+  countFor(consent, () => {
+    diaSidebarFiles += fields.import_dia_sidebar_files;
+    diaSidebarUnreadable += fields.import_dia_sidebar_unreadable;
+    diaAppleScriptProfiles += fields.import_dia_applescript_profiles;
+    diaGroups += profile.groups;
+    diaSpaceProfiles += profile.ownProfiles;
+  }, fields);
 }
 
 export function takeImportRuns() {

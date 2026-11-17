@@ -17,7 +17,7 @@ import { useResource } from "../../../state/settings/resources";
 import { closeSettingsSheet } from "../../../state/settings/sheet";
 import { blockerAvailable, filterListAddress, filterListLabel, setFilterList } from "../../../state/site/contentBlocking";
 import { noteContentBlockerUnavailable, noteContentBlockerWriteFailure, noteCustomFilterList } from "../../../state/telemetry/usage";
-import { consentNow } from "../../../state/telemetry/client";
+import { consentNow, consentToken } from "../../../state/telemetry/client";
 import { UI_LOCALE } from "../../../lib/uiLocale";
 
 export const CATEGORIES: { id: FilterListCategory; section: string; anchor?: SettingId }[] = [
@@ -63,10 +63,11 @@ export function useContentBlocker({ countOutages = false } = {}) {
 }
 
 export async function writeBlocker(write: () => Promise<unknown>, refresh: () => void) {
+  const consent = consentToken();
   try {
     await write();
   } catch {
-    noteContentBlockerWriteFailure();
+    noteContentBlockerWriteFailure(consent);
   } finally {
     refresh();
   }

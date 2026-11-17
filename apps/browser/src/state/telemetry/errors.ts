@@ -1,8 +1,8 @@
 import { crashReports } from "../../platform/app";
-import { advanceCrashCursor, capture, consentNow, consentToken, crashCursor, loadChoice, saveQueueNow } from "./client";
+import { advanceCrashCursor, capture, consentNow, consentToken, crashCursor, loadChoice, saveQueueNow, type ConsentToken } from "./client";
 import { contextAt, contextProperties, recentWebuiPages, sessionStart } from "./diagnostics";
 import type { SavedContext } from "./savedContext";
-import { recordLog } from "./logs";
+import { logConsent, recordLog } from "./logs";
 import { knownErrorCode, knownErrorMessage } from "./knownErrors";
 import { errorType, jsFatalKind, nativeCrashExceptions, nativeCrashTermination, parseStack, type ExceptionFrame } from "./sanitize";
 
@@ -27,7 +27,7 @@ function exceptionProperties(entries: ExceptionEntry[], mechanism: Mechanism, ha
   };
 }
 
-export function captureException(error: unknown, mechanism: Mechanism, { fatal = false, handled = false } = {}) {
+export function captureException(error: unknown, mechanism: Mechanism, { fatal = false, handled = false, consent }: { fatal?: boolean; handled?: boolean; consent?: ConsentToken | null } = {}) {
   try {
     if (error && typeof error === "object") {
       if (reported.has(error)) return;
@@ -43,7 +43,7 @@ export function captureException(error: unknown, mechanism: Mechanism, { fatal =
     capture(
       "$exception",
       { $exception_level: fatal ? "fatal" : "error", source: mechanism, error_code: code },
-      consentNow(),
+      consent === undefined ? consentNow() : consent,
       { urgent: true, persist: true, raw: exceptionProperties([{ type, value, frames }], mechanism, handled) },
     );
   } catch {}
@@ -117,8 +117,8 @@ export function installErrorReporting() {
         try {
           const first = args[0];
           if (level === "error" && first instanceof Error) {
-            captureException(first, (first as { isComponentError?: boolean }).isComponentError ? "react" : "console");
-          } else recordLog(level, args);
+            captureException(first, (first as { isComponentError?: boolean }).isComponentError ? "react" : "console", { consent: logConsent() });
+          } else recordLog(level, args, logConsent());
         } catch {}
         busy = false;
       }

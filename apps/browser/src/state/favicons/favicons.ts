@@ -11,6 +11,8 @@ import { DEFAULT_PROFILE_ID } from "../settings/settings";
 import { webviews } from "../../platform/webviews";
 import { changedPages, pagesWrittenSince, withPages, type PagesPair } from "./pagesWritten";
 import { onProfilesOpened, profileOpened } from "../profiles/profileLoading";
+import { consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 
 type Icons = {
   pages: Record<string, string | null>;
@@ -98,6 +100,7 @@ function lookUp() {
 }
 
 function lookUpPages(key: string, list: string[]) {
+  const consent = consentToken();
   const pending = list.map((page) => {
     const id = `${key}|${page}`;
     const entry = inFlight.get(id) ?? { lookups: 0 };
@@ -119,7 +122,7 @@ function lookUpPages(key: string, list: string[]) {
     )
     .catch((error) => {
       for (const page of list) asked.delete(`${key}|${page}`);
-      console.warn("[favicons] lookup failed", error);
+      warnFor(consent, "[favicons] lookup failed", error);
     })
     .finally(() => {
       for (const { id, entry } of pending) if (--entry.lookups === 0) inFlight.delete(id);

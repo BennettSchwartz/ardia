@@ -87,7 +87,7 @@ export type LocalStoreReading = TelemetryLocalStats & { recorded: number; record
 let carried = { writeMs: [] as number[], droppedLines: 0 };
 let meterGeneration = 0;
 
-export async function pruneLocalStore(now = Date.now(), take = true): Promise<LocalStoreReading | null> {
+export async function pruneLocalStore(now = Date.now(), take = true, carry = true): Promise<LocalStoreReading | null> {
   flushLocal();
   ensureConfigured();
   const generation = meterGeneration;
@@ -97,7 +97,7 @@ export async function pruneLocalStore(now = Date.now(), take = true): Promise<Lo
   const writeMs = [...carried.writeMs, ...stats.writeMs].slice(-MAX_FLUSH_SAMPLES * 4);
   const droppedLines = carried.droppedLines + stats.droppedLines;
   if (!take) {
-    carried = { writeMs, droppedLines };
+    if (carry) carried = { writeMs, droppedLines };
     return null;
   }
   carried = { writeMs: [], droppedLines: 0 };
@@ -110,7 +110,7 @@ export function resetLocalStoreMeters() {
   meterGeneration++;
   Object.assign(meter, { lines: 0, chars: 0, oversize: 0, flushes: 0, flushMs: [], bufferedMax: buffer.length, failures: 0 });
   carried = { writeMs: [], droppedLines: 0 };
-  void pruneLocalStore(Date.now(), false).then(() => void (carried = { writeMs: [], droppedLines: 0 }), () => {});
+  void pruneLocalStore(Date.now(), false, false).catch(() => null);
 }
 
 export function localEventsSince(ms: number): Promise<TelemetryLocalExport | null> {

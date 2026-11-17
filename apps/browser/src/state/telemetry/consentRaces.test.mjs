@@ -64,7 +64,7 @@ test("F2 a repeated row press whose native answer arrives after sharing went off
   } finally {
     focus.pressRepeated = original;
   }
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   assert.ok((await queued("tab_presses")).every((p) => !p.repeat_presses));
 });
 

@@ -1,4 +1,4 @@
-import { capture, consentToken, queuedChars } from "./client";
+import { capture, queuedChars, stillValid, type ConsentToken } from "./client";
 import { pruneLocalStore, type LocalStoreReading } from "./localStore";
 import { percentile, takePostStats } from "./transport";
 
@@ -34,10 +34,10 @@ export function localStoreProperties(reading: LocalStoreReading, posts: ReturnTy
 
 let launchPrune: ReturnType<typeof setTimeout> | undefined;
 
-export async function reportLocalStore(consent = consentToken()) {
+export async function reportLocalStore(consent: ConsentToken | null) {
   const reading = await pruneLocalStore(Date.now(), true);
   if (!reading) return null;
-  const props = localStoreProperties(reading, takePostStats(), queuedChars());
+  const props = localStoreProperties(reading, stillValid(consent) ? takePostStats() : { bytes: 0, failed: 0, requests: 0 }, queuedChars());
   capture(LOCAL_STORE_EVENT, props, consent);
   return props;
 }

@@ -7,6 +7,7 @@ import { activeTabId } from "../browser/model";
 import { peekTabId } from "../peek/peek";
 import { showToast } from "../app/toasts";
 import { noteReaderCheck, noteReaderNoArticle, noteReaderOpened } from "../telemetry/readerCounts";
+import { consentToken } from "../telemetry/client";
 import { readerCall, readerCheckCall, readerToggleCall, type ReaderLook, type ReaderReport } from "./readerPage";
 import { READER_SIZE_NAMES } from "./tokens";
 
@@ -72,13 +73,14 @@ async function check(tabId: string) {
   if (!tab || !readable(tab.url)) return;
   const url = tab.url;
   const pushes = lookPushes;
+  const consent = consentToken();
   const report = await callPage(tabId, readerCheckCall());
   if (!report) return;
   const available = !!report.readerable;
   const first = counted.get(tabId) !== url;
   if (first) {
     counted.set(tabId, url);
-    noteReaderCheck(available);
+    noteReaderCheck(available, consent);
   }
   settle(tabId, url, report, available, pushes);
   if (first && !available && useBrowser.getState().tabs[tabId]?.url === url) later(tabId, url);
@@ -109,15 +111,16 @@ export async function toggleReader(tabId: string) {
   if (!tab || !readable(tab.url)) return;
   const url = tab.url;
   const pushes = lookPushes;
+  const consent = consentToken();
   const report = await callPage(tabId, readerToggleCall(lookFrom(s)));
   if (!report) return;
   if (report.noArticle) {
-    noteReaderNoArticle();
+    noteReaderNoArticle(consent);
     settle(tabId, url, report, false, pushes);
     showToast(tab.windowId, "No article found on this page", undefined, { icon: "doc.plaintext" });
     return;
   }
-  if (report.active) noteReaderOpened();
+  if (report.active) noteReaderOpened(consent);
   settle(tabId, url, report, true, pushes);
 }
 

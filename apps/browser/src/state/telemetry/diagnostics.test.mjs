@@ -491,7 +491,7 @@ test("tab presses count clicks, drags turned into clicks, drags and presses that
   presses.noteRangeSelect(false);
   presses.notePagePressRefused();
   presses.noteDragWithoutDrop();
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   const props = events("tab_presses").at(-1).properties;
   assert.equal(props.drags_without_drop, 1);
@@ -509,16 +509,16 @@ test("tab presses count clicks, drags turned into clicks, drags and presses that
   assert.equal(props.page_refused, 1);
   assert.equal(props.page_click_n, 1);
   assert.ok(props.page_click_ms_p50 >= 0 && props.page_click_ms_p50 < 1000);
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 1);
   stub.pressesWithoutRelease.count = 3;
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 2);
   assert.deepEqual([events("tab_presses").at(-1).properties.lost_releases, events("tab_presses").at(-1).properties.presses], [1, 0]);
   presses.noteRangeSelect(true);
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 3, "a ⇧-click whose press went out in the previous hour still sends its range");
   assert.deepEqual([events("tab_presses").at(-1).properties.range_selects, events("tab_presses").at(-1).properties.presses], [1, 0]);
@@ -527,7 +527,7 @@ test("tab presses count clicks, drags turned into clicks, drags and presses that
 test("an hour with only refused page presses still sends them", async () => {
   presses.notePagePressRefused();
   presses.notePagePressRefused();
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 4);
   const props = events("tab_presses").at(-1).properties;
@@ -544,7 +544,7 @@ test("an hour with only refused page presses still sends them", async () => {
 
 test("an hour with only a drag let go with no place to drop still sends it", async () => {
   presses.noteDragWithoutDrop();
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 5);
   const props = events("tab_presses").at(-1).properties;
@@ -553,7 +553,7 @@ test("an hour with only a drag let go with no place to drop still sends it", asy
 
 const touch = (x, y, startTimeStamp) => ({ nativeEvent: { identifier: "0", pageX: x, pageY: y }, touchHistory: { touchBank: [{ startTimeStamp }] } });
 const sent = async () => {
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   return events("tab_presses").at(-1).properties;
 };
@@ -682,7 +682,7 @@ test("turning sharing off forgets pending presses and samples, so they never go 
   assert.equal(diagnostics.contextSamples().length, 0);
   presses.notePagePress("t9");
   presses.notePressEnded("click", "t9");
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   await client.saveQueueNow();
   assert.equal(events("tab_presses").length, 0);
   assert.deepEqual(Object.values(presses.devTabPresses()).filter((n) => n !== 0 && n !== false), []);
@@ -695,7 +695,7 @@ test("with sharing off no context is saved, and tab presses stay in the local co
   assert.equal(JSON.parse(stub.docs.get("telemetry.json")).context, null);
   presses.notePressStarted();
   presses.notePressEnded("click", "t1");
-  presses.emitTabPresses();
+  presses.emitTabPresses(client.consentToken());
   const { flushLocal } = await import("./localStore.ts");
   flushLocal();
   const local = stub.telemetryLocal.records().filter((r) => r.event === "tab_presses");

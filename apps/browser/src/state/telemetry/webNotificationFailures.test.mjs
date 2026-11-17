@@ -68,19 +68,19 @@ test("a thrown post carries the error's type and an unknown icon status", () => 
 });
 
 test("a post macOS accepted records nothing", async () => {
-  await recordWebNotificationPost(Promise.resolve({ id: "web:1", icon: "attached" }), SENT);
+  await recordWebNotificationPost(Promise.resolve({ id: "web:1", icon: "attached" }), SENT, client.consentToken());
   assert.equal((await failures()).length, 0);
 });
 
 test("a post a Windows or Linux host accepted answers with the id as text and records nothing", async () => {
   const before = (await failures()).length;
-  await recordWebNotificationPost(Promise.resolve("web:2"), SENT);
-  await recordWebNotificationPost(Promise.resolve(null), SENT);
+  await recordWebNotificationPost(Promise.resolve("web:2"), SENT, client.consentToken());
+  await recordWebNotificationPost(Promise.resolve(null), SENT, client.consentToken());
   assert.equal((await failures()).length, before);
 });
 
 test("a post with no id records one event with the error code", async () => {
-  await recordWebNotificationPost(Promise.resolve({ icon: "download_failed", iconErrorCode: -1009, errorDomain: "UNErrorDomain", errorCode: 3 }), SENT);
+  await recordWebNotificationPost(Promise.resolve({ icon: "download_failed", iconErrorCode: -1009, errorDomain: "UNErrorDomain", errorCode: 3 }), SENT, client.consentToken());
   const events = await failures();
   assert.equal(events.length, 1);
   assert.deepEqual(events[0].properties.error_code, 3);
@@ -93,7 +93,7 @@ test("a post with no id records one event with the error code", async () => {
 test("a rejected post records one event and the rejection still reaches the caller", async () => {
   const before = (await failures()).length;
   const error = new RangeError("native gone");
-  await assert.rejects(recordWebNotificationPost(Promise.reject(error), SENT), (thrown) => thrown === error);
+  await assert.rejects(recordWebNotificationPost(Promise.reject(error), SENT, client.consentToken()), (thrown) => thrown === error);
   const events = await failures();
   assert.equal(events.length, before + 1);
   assert.equal(events.at(-1).properties.threw, true);
@@ -112,8 +112,8 @@ test("a post that started while sharing was off and fails after it is turned on 
   client.setSharing(false, "settings");
   const refused = pendingPost();
   const thrown = pendingPost();
-  const recorded = recordWebNotificationPost(refused.promise, SENT);
-  const rejected = recordWebNotificationPost(thrown.promise, SENT);
+  const recorded = recordWebNotificationPost(refused.promise, SENT, client.consentToken());
+  const rejected = recordWebNotificationPost(thrown.promise, SENT, client.consentToken());
   client.setSharing(true, "settings");
   const before = (await failures()).length;
   refused.resolve(REFUSED);
@@ -128,8 +128,8 @@ test("a post pending while sharing went off and back on sends nothing", async ()
   client.setSharing(true, "settings");
   const refused = pendingPost();
   const thrown = pendingPost();
-  const recorded = recordWebNotificationPost(refused.promise, SENT);
-  const rejected = recordWebNotificationPost(thrown.promise, SENT);
+  const recorded = recordWebNotificationPost(refused.promise, SENT, client.consentToken());
+  const rejected = recordWebNotificationPost(thrown.promise, SENT, client.consentToken());
   client.setSharing(false, "settings");
   client.setSharing(true, "settings");
   const before = (await failures()).length;
@@ -146,8 +146,8 @@ test("a post that starts and fails with sharing on throughout still sends, and i
   const before = (await failures()).length;
   const refused = pendingPost();
   const thrown = pendingPost();
-  const recorded = recordWebNotificationPost(refused.promise, SENT);
-  const rejected = recordWebNotificationPost(thrown.promise, SENT);
+  const recorded = recordWebNotificationPost(refused.promise, SENT, client.consentToken());
+  const rejected = recordWebNotificationPost(thrown.promise, SENT, client.consentToken());
   refused.resolve(REFUSED);
   const error = new TypeError("posting failed");
   thrown.reject(error);

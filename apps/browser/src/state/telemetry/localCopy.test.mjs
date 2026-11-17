@@ -141,7 +141,7 @@ test("the hourly measurement reports size, timings, drops and posts", async () =
   const { reportLocalStore, LOCAL_STORE_EVENT } = await import("./localStoreReport.ts");
   client.setSharing(true, "settings");
   client.capture("one_more", {}, client.consentNow());
-  const props = await reportLocalStore();
+  const props = await reportLocalStore(client.consentToken());
   for (const key of ["bytes", "lines", "files", "write_ms_p95", "prune_ms", "lines_dropped", "queue_bytes", "bytes_posted", "failed_posts"]) assert.ok(key in props, key);
   local.flushLocal();
   assert.equal(stub.telemetryLocal.records().at(-1).event, LOCAL_STORE_EVENT);

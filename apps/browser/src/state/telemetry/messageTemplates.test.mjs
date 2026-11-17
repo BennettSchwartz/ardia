@@ -168,7 +168,7 @@ function render(pieces, resolve) {
 
 const worthSending = (template) => /[A-Za-z]{2}/.test(template.split(PLACEHOLDER).join(""));
 
-const LOG_CALLS = { "console.warn": 0, "console.error": 0 };
+const LOG_CALLS = { "console.warn": 0, "console.error": 0, warnFor: 1, errorFor: 1 };
 const ERROR_CALLS = {
   "new Error": 0, "new TypeError": 0, "new SyntaxError": 0, "new RangeError": 0, "new EngineError": 0, "new NoCommandWindowError": 0,
   "new PastDeadline": 0, "new BadArgs": 0,

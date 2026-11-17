@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { readContext, type SavedContext } from "./savedContext";
 import { uuidv4, uuidv7 } from "./ids";
 import { telemetryRelay } from "./relay";
+import { consentToken, counted, setConsentPeriod, stillValid, type ConsentToken } from "./consentPeriod";
 import { parseSaved, versionedJson, unchanged, type Migrations, type SavedObject } from "../../lib/savedDocument";
 import { isFields, isString, numberOr, stringOr } from "../../lib/decode";
 
@@ -135,11 +136,7 @@ const shown = (s: Saved): Shown => ({
   sharingUntil: s.sharingUntil,
 });
 
-export type ConsentToken = string & { readonly consentPeriod: unique symbol };
-
-export const consentToken = (): ConsentToken | null => (saved.sharing && saved.epoch ? (saved.epoch as ConsentToken) : null);
-export const consentNow = consentToken;
-export const stillValid = (token: ConsentToken | null | undefined) => typeof token === "string" && saved.sharing && token === saved.epoch;
+export { consentToken, consentToken as consentNow, counted, stillValid, type ConsentToken };
 export const consentEpoch = () => (saved.sharing && saved.epoch ? saved.epoch : "");
 
 export const onConsentPeriodChange = (fn: () => void) =>
@@ -147,15 +144,11 @@ export const onConsentPeriodChange = (fn: () => void) =>
     if (current.sharing !== previous.sharing || current.epoch !== previous.epoch) fn();
   });
 
-export function counted(token: ConsentToken | null, count: () => void, local?: () => void) {
-  if (stillValid(token)) count();
-  else local?.();
-}
-
 export function save(patch: Partial<Session> | (Partial<Session> & Sharing)) {
   const was = saved;
   saved = { ...saved, ...patch } as Saved;
   if (saved.sharing !== was.sharing || saved.installId !== was.installId || !saved.epoch) saved = { ...saved, epoch: uuidv4() };
+  setConsentPeriod(saved.sharing, saved.epoch);
   try {
     writeDocument(STATE_DOC, versionedJson(saved, STATE_VERSION));
   } catch {}
@@ -200,6 +193,7 @@ export function loadChoice() {
   if (loaded) return;
   loaded = true;
   saved = readSaved(readStateDoc());
+  setConsentPeriod(saved.sharing, saved.epoch);
   useTelemetry.setState(shown(saved));
 }
 

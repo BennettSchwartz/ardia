@@ -1,5 +1,6 @@
 import type { Adapter } from "../../platform/sync";
-import { consentToken, isSharing, stillValid, onConsentPeriodChange } from "./choice";
+import { consentToken, isSharing, stillValid, onConsentPeriodChange, type ConsentToken } from "./choice";
+import { countFor, fieldName } from "./countFor";
 import { takePopupProtectedMediaCounts } from "./popupProtectedMedia";
 
 export type SyncWorkKind = "bookmark" | "history";
@@ -78,16 +79,15 @@ onConsentPeriodChange(() => {
   pending = none();
 });
 
-const count = (key: keyof ReturnType<typeof none>) => {
-  if (isSharing()) pending[key]++;
-};
+const count = (key: keyof ReturnType<typeof none>, consent?: ConsentToken | null) =>
+  countFor(consent, () => void (isSharing() && pending[key]++), { [fieldName(key)]: 1 });
 
 export const noteLiveSourceFetch = (shared: boolean) => count(shared ? "liveSourceFetchesShared" : "liveSourceFetches");
 export const noteLiveSave = (changed: boolean, kind: "write" | "intent" = "write") =>
   count(kind === "intent" ? changed ? "liveSaveIntentsQueued" : "liveSaveIntentsUnchanged" : changed ? "liveSavesWritten" : "liveSavesUnchanged");
 export const noteExtensionActionRefresh = () => count("extensionActionRefreshes");
 export const noteExtensionActionStateRequest = () => count("extensionActionStateRequests");
-export const noteExtensionActionStateFailure = () => count("extensionActionStateFailures");
+export const noteExtensionActionStateFailure = (consent?: ConsentToken | null) => count("extensionActionStateFailures", consent);
 export const noteExtensionActionTabChangeSkipped = () => count("extensionActionTabChangesSkipped");
 
 export function takeLiveWorkCounts() {

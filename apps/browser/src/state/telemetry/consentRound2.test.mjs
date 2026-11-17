@@ -148,8 +148,12 @@ test("4 a custom filter list added while sharing was off isn't counted when the 
   const token = client.consentToken();
   client.setSharing(true, "settings");
   usage.noteCustomFilterList("added", token);
+  usage.noteCustomFilterList("addFailed", token);
   usage.sessionEnding();
-  assert.ok((await queued("usage_counts")).every((p) => !p.content_blocker_custom_lists_added));
+  assert.ok((await queued("usage_counts")).every((p) => !p.content_blocker_custom_lists_added && !p.content_blocker_custom_list_add_failures));
+  const local = await localRecords("usage_counts");
+  assert.equal(local.filter((r) => r.sent === false && r.properties.content_blocker_custom_lists_added === 1).length, 1);
+  assert.equal(local.filter((r) => r.sent === false && r.properties.content_blocker_custom_list_add_failures === 1).length, 1);
 });
 
 test("7 a CLI status read started before sharing went off and on again doesn't refill drag and windowless-page counts", async () => {
@@ -188,7 +192,7 @@ test("7 local-store meters from while sharing was off aren't reported once shari
   client.setSharing(false, "settings");
   for (let i = 0; i < 40; i++) client.capture("off_period_line", {}, client.consentNow());
   client.setSharing(true, "settings");
-  const props = await localReport.reportLocalStore();
+  const props = await localReport.reportLocalStore(client.consentToken());
   assert.ok((props?.lines_recorded ?? 0) < 40, `lines_recorded ${props?.lines_recorded}`);
 });
 
@@ -340,7 +344,7 @@ test("PRRT_kwDOS_pvMc64oe4_ a local-store report begun while sharing was off doe
   const release = () => held.splice(0).forEach((go) => go());
   let stale;
   try {
-    stale = localReport.reportLocalStore();
+    stale = localReport.reportLocalStore(client.consentToken());
     await turn();
     client.setSharing(true, "settings");
     for (let i = 0; i < 5; i++) client.capture("new_period_line", {}, client.consentNow());
@@ -349,7 +353,7 @@ test("PRRT_kwDOS_pvMc64oe4_ a local-store report begun while sharing was off doe
   } finally {
     local.prune = prune;
   }
-  const fresh = await localReport.reportLocalStore();
+  const fresh = await localReport.reportLocalStore(client.consentToken());
   assert.ok((fresh?.lines_recorded ?? 0) >= 5, `lines_recorded ${fresh?.lines_recorded}`);
   assert.deepEqual(await queued(localReport.LOCAL_STORE_EVENT).then((all) => all.filter((p) => p.lines_recorded >= 5).length), 1);
 });
@@ -369,4 +373,91 @@ test("5 an extension install confirmed while sharing was off isn't sent when it 
   stub.emitEvent("extensions.installPrompt", prompt("on-ext"));
   stub.emitEvent("extensions.changed", { profile: "", id: "on-ext", event: "installed" });
   assert.equal((await queued("extension_installed")).length, 1);
+});
+
+test("9 in a window that relays to a Linux leader, turning sharing off resolves only when the leader has saved it, and says so if it couldn't", async () => {
+  const answers = [];
+  relay.setTelemetryRelay({ capture: () => {}, log: () => {}, resetId: async () => "", change: () => new Promise((resolve) => answers.push(resolve)), installId: () => null });
+  try {
+    let settled = null;
+    const off = client.setSharing(false, "settings");
+    off.then((value) => (settled = value));
+    await turns();
+    assert.equal(settled, null);
+    answers[0](false);
+    assert.equal(await off, false);
+  } finally {
+    relay.setTelemetryRelay(null);
+  }
+});
+
+test("PRRT 4606978539 a lost-hover episode is numbered within the consent period, never by the app's lifetime count that includes episodes from while sharing was off", async () => {
+  client.setSharing(true, "onboarding");
+  offAndOn();
+  const episode = { reason: "halfActive", halfActive: true, appActive: true, runningActive: true, frontmost: true, menuActive: false, trigger: "move", keyWindow: "none", mainWindow: "none", preventKey: false, canKey: true, windowMain: true, overPage: true, cover: "none", coverClear: true, healed: false, healWorked: null, endedBy: "move", seconds: 2 };
+  diagnostics.trackHoverLost({ ...episode, episode: 41, epoch: client.consentEpoch() });
+  diagnostics.trackHoverLost({ ...episode, episode: 42, epoch: client.consentEpoch() });
+  offAndOn();
+  diagnostics.trackHoverLost({ ...episode, episode: 57, epoch: client.consentEpoch() });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.deepEqual((await queued("page_hover_lost")).map((p) => p.episode), [1]);
+});
+
+test("PRRT 4606978523 a local-store report begun before a consent change doesn't take the upload statistics of the period after it", async () => {
+  client.setSharing(false, "settings");
+  const local = stub.shellNativeModules.ArdiaTelemetryLocal;
+  const prune = local.prune;
+  const held = [];
+  local.prune = (now) => new Promise((resolve) => held.push(() => resolve(prune(now))));
+  const host = transport.telemetryHost();
+  try {
+    const stale = localReport.reportLocalStore(client.consentToken());
+    await turn();
+    client.setSharing(true, "settings");
+    transport.setTelemetryHost({ ...host, send: async () => 200 });
+    await transport.post("events", "{}", 1);
+    held.splice(0).forEach((go) => go());
+    await stale;
+  } finally {
+    local.prune = prune;
+    transport.setTelemetryHost(host);
+  }
+  assert.deepEqual(transport.takePostStats(), { bytes: 2, failed: 0, requests: 1 });
+});
+
+test("PRRT 4606978500 the install prompt's token belongs to its profile, so another profile's prompt for the same extension can't vouch for it", async (t) => {
+  extensionInstalls.watchExtensionInstalls(Date.now());
+  mock.timers.enable({ apis: ["Date"], now: Date.now() + 60_000 });
+  t.after(() => mock.timers.reset());
+  const prompt = (profile) => ({ requestId: `r-${profile}`, profile, id: "same-ext", name: "x", version: "1", type: "install", icon: "", permissions: [], tabId: null });
+  client.setSharing(false, "settings");
+  stub.emitEvent("extensions.installPrompt", prompt("A"));
+  client.setSharing(true, "settings");
+  const before = (await queued("extension_installed")).length;
+  stub.emitEvent("extensions.installPrompt", prompt("B"));
+  stub.emitEvent("extensions.changed", { profile: "A", id: "same-ext", event: "installed" });
+  assert.equal((await queued("extension_installed")).length, before);
+  stub.emitEvent("extensions.changed", { profile: "B", id: "same-ext", event: "installed" });
+  assert.equal((await queued("extension_installed")).length, before + 1);
+});
+
+test("r4607098788 a consent change's own prune finishing late doesn't erase what a newer prune carried for the period after it", async () => {
+  client.setSharing(false, "settings");
+  await localReport.reportLocalStore(client.consentToken());
+  const local = stub.shellNativeModules.ArdiaTelemetryLocal;
+  const prune = local.prune;
+  const held = [];
+  let first = true;
+  local.prune = (now) => (first ? ((first = false), new Promise((resolve) => held.push(() => resolve(prune(now))))) : prune(now));
+  try {
+    client.setSharing(true, "settings");
+    stub.telemetryLocal.dropped = 3;
+    await localStore.pruneLocalStore(Date.now(), false);
+    held.splice(0).forEach((go) => go());
+    await turns();
+  } finally {
+    local.prune = prune;
+  }
+  const props = await localReport.reportLocalStore(client.consentToken());
+  assert.equal(props?.lines_dropped, 3);
 });

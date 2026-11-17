@@ -1,5 +1,6 @@
 import { extensionsLoadHealth } from "../../platform/extensions";
 import { capture, consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 
 const reported = new Set<string>();
 
@@ -15,6 +16,6 @@ export function reportExtensionsLoaded(profile: string) {
       for (const reason of DISABLE_REASONS) props[`disabled_${reason}`] = disabled[reason] ?? 0;
       capture("extensions_loaded", props, consent);
     },
-    (error: unknown) => console.warn("[extensions] load health failed", error),
+    (error: unknown) => warnFor(consent, "[extensions] load health failed", error),
   );
 }

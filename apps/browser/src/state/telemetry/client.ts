@@ -277,7 +277,7 @@ export type { AskPlacement, SharingSource };
 
 export function setSharing(on: boolean, source: SharingSource, placement?: AskPlacement): Promise<boolean> {
   const relay = telemetryRelay();
-  if (relay) return Promise.resolve(void relay.change({ kind: "sharing", on, source, ...(placement ? { placement } : {}) })).then(() => true);
+  if (relay) return relay.change({ kind: "sharing", on, source, ...(placement ? { placement } : {}) });
   const now = Date.now();
   const current = saved();
   if (on === current.sharing) {

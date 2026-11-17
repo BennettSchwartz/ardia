@@ -45,3 +45,14 @@ test("other events pass through untouched and take no extras", () => {
   usage.withHourlyExtras(() => {}, null);
   assert.equal(sent.at(-1).props.intro_shown, 9);
 });
+
+test("PRRT 4606978513 a stale usage_counts recorded on its own, outside the hour's drain, leaves the period's extras for the hour's report", () => {
+  const { sent, usage, advance } = harness([{ intro_shown: 5 }]);
+  usage.capture(USAGE_COUNTS_EVENT, { auto_pip_kept_visible: 1 }, null);
+  advance(60);
+  usage.withHourlyExtras(() => {}, null);
+  assert.deepEqual(sent, [
+    { event: USAGE_COUNTS_EVENT, props: { auto_pip_kept_visible: 1 }, options: {} },
+    { event: USAGE_COUNTS_EVENT, props: { intro_shown: 5, period_minutes: 60 }, options: undefined },
+  ]);
+});

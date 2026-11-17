@@ -1,4 +1,4 @@
-import { consentNow, queueLog } from "./client";
+import { queueLog, type ConsentToken } from "./client";
 import { knownErrorCode, knownErrorMessage } from "./knownErrors";
 import { LOG_TEMPLATES } from "./logTemplates";
 import { errorType, scrubText } from "./sanitize";
@@ -8,7 +8,9 @@ const MAX_DISTINCT = 40;
 const UNLISTED = "unlisted";
 const seen = new Set<string>();
 
-export function recordLog(level: "warn" | "error", args: unknown[]) {
+export { errorFor, logConsent, warnFor } from "./consoleConsent";
+
+export function recordLog(level: "warn" | "error", args: unknown[], consent: ConsentToken | null) {
   const first = args[0];
   if (typeof first !== "string" || !first.trim()) return;
   const template = matchTemplate(first, LOG_TEMPLATES);
@@ -23,5 +25,5 @@ export function recordLog(level: "warn" | "error", args: unknown[]) {
   if (template) attributes.log_template = template[0];
   if (reason) attributes.error_message = reason;
   if (code) attributes.error_code = code;
-  queueLog(level, template?.[1] ?? UNLISTED, attributes, consentNow(), first);
+  queueLog(level, template?.[1] ?? UNLISTED, attributes, consent, first);
 }

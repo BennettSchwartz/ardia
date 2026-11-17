@@ -37,3 +37,14 @@ test("a refused paste carries a consent stamp: the gate's epoch for input held i
   assert.match(handoff, /refuse\(reason, gone\.map\(\\\.input\), since: gate\.epoch\)/);
   assert.match(handoff, /PasteRefusal\.report\(reason, \["dropped": inputs\.count\], stamp: epoch\.map\(ArdiaConsentStamp\.init\(epoch:\)\) \?\? ArdiaConsentStamp\.begin\(\)\)/);
 });
+
+test("a refused edit key and a late acknowledgement report the consent epoch the key arrived in, never the one current at the refusal", () => {
+  const handoff = read("FocusHandoff.swift");
+  assert.match(handoff, /private let editKeyConsent = NSMapTable<NSEvent, NSString>\(keyOptions: \.weakMemory, valueOptions: \.strongMemory\)/);
+  const tagged = handoff.indexOf("self.editKeys.setObject(");
+  const stamped = handoff.indexOf("self.editKeyConsent.setObject(ArdiaConsentStamp.begin().epoch as NSString, forKey: event)");
+  assert.ok(tagged > 0 && stamped > tagged && stamped - tagged < 300, "the epoch is recorded where the key is tagged on arrival");
+  assert.match(handoff, /refuse\(\.lateAcknowledgement, \[\.action\(action\)\], since: consentAtArrival\(of: event\)\)/);
+  assert.match(handoff, /refuse\(\.staleEpoch, \[\.key\(event, up: nil\)\], since: consentAtArrival\(of: event\)\)/);
+  assert.match(handoff, /private func consentAtArrival\(of event: NSEvent\) -> String \{\s*editKeyConsent\.object\(forKey: event\) as String\? \?\? ""\s*\}/);
+});

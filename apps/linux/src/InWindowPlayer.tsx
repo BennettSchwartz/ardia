@@ -29,7 +29,7 @@ const CONTROLS_IDLE_MS = 2500;
 const VELOCITY_WINDOW_MS = 100;
 
 type Gesture =
-  | { kind: "drag"; pointer: number; start: Point; rect: Rect; travel: number; samples: { at: number; x: number; y: number }[] }
+  | { kind: "drag"; pointer: number; start: Point; rect: Rect; travel: number; samples: { at: number; x: number; y: number }[]; epoch: string }
   | { kind: "resize"; pointer: number; start: Point; rect: Rect; handle: Handle }
   | { kind: "seek"; pointer: number };
 
@@ -268,7 +268,7 @@ function PlayerFrame({ state, rect, area, hole, fade, onRect, interacting }: {
     interacting.current = true;
     gesture.current = handle
       ? { kind: "resize", pointer: event.pointerId, start: point, rect, handle }
-      : { kind: "drag", pointer: event.pointerId, start: point, rect, travel: 0, samples: [{ at: event.timeStamp, ...point }] };
+      : { kind: "drag", pointer: event.pointerId, start: point, rect, travel: 0, samples: [{ at: event.timeStamp, ...point }], epoch: consentEpoch() };
     wake();
   };
 
@@ -312,7 +312,7 @@ function PlayerFrame({ state, rect, area, hole, fade, onRect, interacting }: {
       const skip = clickSkip(current.start.x - current.rect.x, current.rect.width, travel);
       if (skip) {
         interacting.current = false;
-        notePictureInPictureClickSkip({ seconds: skip, epoch: consentEpoch() });
+        notePictureInPictureClickSkip({ seconds: skip, epoch: current.epoch });
         command("seekBy", { seconds: skip });
         return;
       }

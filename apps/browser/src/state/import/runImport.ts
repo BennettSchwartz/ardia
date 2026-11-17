@@ -7,6 +7,7 @@ import { MAX_DRAFT_LINKS } from "../groups/draftGroups";
 import { createProfile } from "../profiles/actions";
 import { noteImportedSpaces } from "../telemetry/usage";
 import { noteDiaSidebar, noteDiaTabProfiles, noteImportRun } from "../telemetry/importRuns";
+import { consentToken } from "../telemetry/client";
 import {
   adoptSpaceIdentity,
   applyResult,
@@ -172,6 +173,7 @@ const nothingRead = (browserId: string, profileId: string, failed: ImportKind[])
 export async function runImport(wanted: ReadonlySet<ImportKind>, withoutKey = false) {
   const { source, sourceProfiles, spaces, target } = importNow();
   if (!source) return;
+  const consent = consentToken();
   const api = importModule();
   const signal = importSignal();
   const bySpaces = importsBySpaces(source);
@@ -295,7 +297,7 @@ export async function runImport(wanted: ReadonlySet<ImportKind>, withoutKey = fa
         dataProfiles: members.filter(Boolean).length,
         essentials,
         startersNamed,
-      });
+      }, consent);
       extensionsProfile ||= dest;
     } else {
       const dest = await nextDestination(result.profile?.name ?? profile.name, result.profile?.color ?? profile.color);
@@ -317,7 +319,7 @@ export async function runImport(wanted: ReadonlySet<ImportKind>, withoutKey = fa
       }
       extensionsProfile ||= dest;
     }
-    if (diaSource && sidebarKinds.length) noteDiaSidebar(diaOutcome);
+    if (diaSource && sidebarKinds.length) noteDiaSidebar(diaOutcome, consent);
     if (source.family === "chromium" || source.family === "arc") {
       for (const e of await api.listExtensions(source.id, profile.id).catch(orWarn([]))) found.set(e.id, e);
     }
@@ -335,13 +337,13 @@ export async function runImport(wanted: ReadonlySet<ImportKind>, withoutKey = fa
         if (signal.aborted) return;
         total.tabs += importDiaProfile(dest, dia, kinds, appTabsResult.result.favicons);
       }
-      noteDiaTabProfiles({ matched: diaProfilesFor(appTabsResult.result, source.profiles).size, withoutFolder: extra.length });
+      noteDiaTabProfiles({ matched: diaProfilesFor(appTabsResult.result, source.profiles).size, withoutFolder: extra.length }, consent);
     }
     updateStatus(signal, (st) => ({ ...st, ...Object.fromEntries(fromApp.map((k) => [k, note ? "failed" : "done"])) }));
   }
   updateStatus(signal, (st) => Object.fromEntries(Object.entries(st).map(([k, v]) => [k, failed.has(k as ImportKind) ? "failed" : v === "failed" ? v : "done"])));
   api.forgetUnlockedKeys();
-  noteImportRun({ done: order.filter((k) => !failed.has(k)).length, failed: failed.size, secretsLeft });
+  noteImportRun({ done: order.filter((k) => !failed.has(k)).length, failed: failed.size, secretsLeft }, consent);
   if (total.bookmarks > 0) useBrowser.getState().updateSettings({ bookmarksImportDismissed: true });
   finishImport(signal, {
     counts: total,

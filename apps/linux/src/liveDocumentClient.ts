@@ -4,6 +4,8 @@ import { callHost } from "./host";
 import type { LiveCompletionInvalidation, LivePersistenceIntent, LiveProjection } from "../../browser/src/platform/livePersistence";
 import { createLiveCompletionTickets } from "./liveCompletionTickets";
 import { captureLiveIntent, projectLiveIntent } from "./liveDocumentIntent";
+import { consentToken } from "../../browser/src/state/telemetry/client";
+import { errorFor } from "../../browser/src/state/telemetry/logs";
 import { documentError, type DocumentSnapshot, type DocumentOperation, type DocumentReply, type DocumentChange } from "./liveDocumentTypes";
 
 type Pending = { operations: DocumentOperation[]; requestId?: string; observedRevision?: number; epoch?: string; skipped?: boolean; completion?: ReturnType<ReturnType<typeof createLiveCompletionTickets>["capture"]> };
@@ -124,6 +126,7 @@ export function createLiveDocumentClient(host: ArdiaHost) {
   };
   const drain = () => {
     if (active) return active;
+    const consent = consentToken();
     let attempted: Pending | undefined;
     const run = async () => {
       await ready;
@@ -142,7 +145,7 @@ export function createLiveDocumentClient(host: ArdiaHost) {
         try { reply = await invoke("commit", { document: "live.json", epoch: batch.epoch, requestId: batch.requestId, observedRevision: batch.observedRevision, operations: batch.operations }) as DocumentReply; }
         catch (error) {
           if (attemptConnection === connection && (error as { code?: unknown } | null)?.code === "ERR_DOCUMENT_REQUEST") {
-            console.error(documentError("ERR_DOCUMENT_REJECTED", `Dropped a Live change the saved document rejected: ${(error as Error).message}`));
+            errorFor(consent, documentError("ERR_DOCUMENT_REJECTED", `Dropped a Live change the saved document rejected: ${(error as Error).message}`));
             retire(batch);
             continue;
           }

@@ -62,11 +62,11 @@ test("every native telemetry event JS counts or captures is sent through a conse
   }
 });
 
-test("a lost-hover episode is stamped when it opens, and its close sends that stamp", () => {
+test("a lost-hover episode keeps the stamp it opened with, and its close sends that stamp", () => {
   assert.match(read("../ios/ArdiaHoverProbeInternal.h"), /ArdiaConsentStamp \*stamp = nil;/);
   const probe = read("../ios/ArdiaHoverProbe.mm");
   const open = probe.slice(probe.indexOf("void OpenEpisode"), probe.indexOf("void HandleHoverCheck"));
-  assert.match(open, /gEpisode\.stamp = ArdiaConsentStamp\.begin;/);
+  assert.match(open, /gEpisode\.stamp = stamp;/);
   const close = probe.slice(probe.indexOf("void CloseEpisode"), probe.indexOf("bool Recovered"));
   assert.ok(close.indexOf("ArdiaConsentStamp *stamp = gEpisode.stamp;") < close.indexOf("gEpisode = HoverEpisode{};"), "the stamp is kept before the episode is cleared");
   assert.match(close, /\[ArdiaEvents emit:@"engine\.hoverLost" data:\[stamp onto:payload\]\]/);
@@ -93,4 +93,16 @@ test("a Picture in Picture drag is stamped when it begins and its report sends t
   const began = swipe.slice(swipe.indexOf("- (void)dragBegan:"), swipe.indexOf("- (void)dragBegan:") + 900);
   assert.match(began, /_dragStamp = ArdiaConsentStamp\.begin;/);
   assert.match(swipe, /emit:@"pictureInPictureDragged" payload:\[_dragStamp onto:/);
+});
+
+test("a hover-loss episode carries the consent epoch from when its mouse event arrived, taken before the hop to the main queue", () => {
+  const probe = readFileSync(new URL("../ios/ArdiaHoverProbe.mm", import.meta.url), "utf8");
+  const monitor = probe.slice(probe.indexOf("void StartHoverWatch()"));
+  const taken = monitor.indexOf("ArdiaConsentStamp *stamp = [ArdiaConsentStamp begin];");
+  assert.ok(taken > 0 && taken < monitor.indexOf("dispatch_async"), "the monitor stamps the event before dispatching it");
+  assert.match(monitor, /HandleCoveredClick\(weakBrowser, weakCover, point, stamp\)/);
+  assert.match(monitor, /HandleHoverCheck\(weakWindow, point, move \? HoverTrigger::move : HoverTrigger::click, stamp\)/);
+  const open = probe.slice(probe.indexOf("void OpenEpisode("), probe.indexOf("void HandleHoverCheck("));
+  assert.match(open, /gEpisode\.stamp = stamp;/);
+  assert.doesNotMatch(open, /ArdiaConsentStamp\.begin|\[ArdiaConsentStamp begin\]/);
 });

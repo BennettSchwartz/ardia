@@ -176,3 +176,27 @@ test("input idle tracks shell input and the policies start once with one inputId
   assert.equal(providers[0]("ArdiaEngine", "trimMemory"), undefined);
   assert.equal(providers[0]("ArdiaShell", "inputIdleSeconds"), undefined);
 });
+
+test("a Picture in Picture window shown while sharing was off and buffered until the page installs keeps the off period's empty epoch, so no pip_shown is queued", async () => {
+  const client = await import("../../browser/src/state/telemetry/client.ts");
+  const docs = (await import("../../browser/src/test-native/index.ts")).docs;
+  const queuedShown = async () => {
+    await client.saveQueueNow();
+    return JSON.parse(docs.get("telemetry-queue.json") ?? '{"events":[]}').events.filter((e) => e.event === "pip_shown");
+  };
+  client.loadChoice();
+  client.setSharing(false, "settings");
+  try {
+    const h = setup();
+    h.send(message(2, "pictureInPicture", { kind: "video", active: true, fullScreenSpaces: false, leftTab: true }));
+    client.setSharing(true, "settings");
+    assert.ok(h.receiver.install({ lease, snapshot: { watermark: 1, events: [] } }));
+    assert.equal(h.calls.filter(([name]) => name === "pictureInPicture").length, 1);
+    assert.deepEqual(await queuedShown(), []);
+    const replayed = setup();
+    assert.ok(replayed.receiver.install({ lease, snapshot: { watermark: 1, events: mediaSnapshot(true, { camera: false, microphone: false, screen: false }, { kind: "video", active: true, fullScreenSpaces: false }) } }));
+    assert.deepEqual(await queuedShown(), []);
+  } finally {
+    client.setSharing(false, "settings");
+  }
+});

@@ -1,5 +1,5 @@
 import { pressesWithoutRelease, pressRepeated } from "../../platform/focus";
-import { capture, consentNow, consentToken, stillValid, onConsentPeriodChange, type ConsentToken } from "./client";
+import { capture, consentToken, stillValid, onConsentPeriodChange, type ConsentToken } from "./client";
 import { takeHoverCardCounts } from "./hoverCardCounts";
 import { percentile } from "./transport";
 
@@ -166,7 +166,7 @@ export const notePagePressRefused = () => void tally.page_refused++;
 
 export const noteDragWithoutDrop = () => void tally.drags_without_drop++;
 
-export function emitTabPresses(consent: ConsentToken | null = consentNow()) {
+export function emitTabPresses(consent: ConsentToken | null) {
   settleUnansweredPressOut();
   const counts = tally;
   const samples = toPageClick.sort((a, b) => a - b);
