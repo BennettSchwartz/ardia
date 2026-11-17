@@ -8,6 +8,8 @@ import { checks as passwordLoginChecks, stageChecks } from "./passwordLogins";
 import { checks as engineBackForwardChecks } from "./engineBackForward";
 import { checks as engineTopEdgeChecks } from "./engineTopEdge";
 import { checks as engineSleepChecks } from "./engineSleep";
+import { checks as engineLinkScriptChecks } from "./engineLinkScript";
+import { checks as engineLinkScriptPageChecks } from "./engineLinkScriptPages";
 import { checks as engineSleepKeptChecks } from "./engineSleepKept";
 import { checks as engineSleepNavigationChecks } from "./engineSleepNavigation";
 import { checks as engineSleepPlaceChecks } from "./engineSleepPlace";
@@ -18,6 +20,7 @@ import { checks as engineNowPlayingAskChecks } from "./engineNowPlayingAsks";
 import { checks as engineNowPlayingHeldChecks } from "./engineNowPlayingHeld";
 import { checks as engineBlankChecks } from "./engineBlank";
 import { checks as engineHistoryChecks } from "./engineHistory";
+import { checks as engineSettingsChecks } from "./engineSettingsPages";
 import { popupWindowChecks } from "./popupWindow";
 import { checks as externalAppChecks } from "./externalApps";
 import { checks as fileDropChecks } from "./fileDrop";
@@ -45,7 +48,7 @@ import { checks as viewChecks } from "./views";
 import { checks as windowDragChecks } from "./windowDrag";
 import { checks as windowChecks } from "./windows";
 
-const areas: Check[][] = [windowChecks, appSystemChecks, shellChecks, storageChecks, viewChecks, menuChecks, symbolChecks, motionChecks, pagerChecks, pagePictureChecks, materialChecks, windowDragChecks, popupWindowChecks, fileDropChecks, focusChecks, idleTimeChecks, textFocusChecks, launchLinkChecks, engineHostChecks, engineBackForwardChecks, engineTopEdgeChecks, engineSleepChecks, engineSleepKeptChecks, engineSleepNavigationChecks, engineSleepPlaceChecks, engineAutoplayChecks, engineAutoplayAskChecks, engineNowPlayingChecks, engineNowPlayingAskChecks, engineNowPlayingHeldChecks, engineBlankChecks, engineHistoryChecks, engineCallChecks, importChecks, importFirefoxChecks, introMusicChecks, desktopCallChecks, externalAppChecks, syncChecks, heldDialogChecks, meadowChecks, passwordLoginChecks];
+const areas: Check[][] = [windowChecks, appSystemChecks, shellChecks, storageChecks, viewChecks, menuChecks, symbolChecks, motionChecks, pagerChecks, pagePictureChecks, materialChecks, windowDragChecks, popupWindowChecks, fileDropChecks, focusChecks, idleTimeChecks, textFocusChecks, launchLinkChecks, engineHostChecks, engineBackForwardChecks, engineTopEdgeChecks, engineSleepChecks, engineLinkScriptChecks, engineLinkScriptPageChecks, engineSleepKeptChecks, engineSleepNavigationChecks, engineSleepPlaceChecks, engineAutoplayChecks, engineAutoplayAskChecks, engineNowPlayingChecks, engineNowPlayingAskChecks, engineNowPlayingHeldChecks, engineBlankChecks, engineHistoryChecks, engineCallChecks, importChecks, importFirefoxChecks, introMusicChecks, desktopCallChecks, externalAppChecks, syncChecks, heldDialogChecks, meadowChecks, passwordLoginChecks, engineSettingsChecks];
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
