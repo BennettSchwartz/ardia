@@ -5,6 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "relaunch-facts.ps1")
+. (Join-Path $PSScriptRoot "relaunch-during-quit.ps1")
 
 Add-Type -Namespace RelaunchCheck -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
@@ -25,6 +26,15 @@ public static System.Collections.Generic.List<IntPtr> AppWindows(uint process) {
     return true;
   }, IntPtr.Zero);
   return found;
+}
+public static string ProfileKey(string folder) {
+  ulong hash = 14695981039346656037UL;
+  foreach (char c in folder.TrimEnd('\\', '/')) {
+    char lower = char.ToLowerInvariant(c);
+    hash ^= (ulong)(lower == '/' ? '\\' : lower);
+    hash *= 1099511628211UL;
+  }
+  return hash.ToString("x16");
 }
 '@
 
@@ -232,6 +242,8 @@ try {
   Close-Window $shown
   Wait-Exit $shown.Pid "launch after a start failure" | Out-Null
   Note "launch after a start failure: a window again"
+
+  Test-LaunchesDuringQuit
 
   $events = @(Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started } -ErrorAction SilentlyContinue |
       Where-Object { $_.ProviderName -eq "Application Error" -and $_.Message -match "Ardia\.exe" })

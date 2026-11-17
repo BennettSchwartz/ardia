@@ -153,8 +153,14 @@ static int Prepare(const ArdiaEngineApi *engine) {
   return 0;
 }
 
+static constexpr int kFlushTestHoldMostMs = 15000;
+
 static void ShutDown(Ardia::Host &host) {
   const ULONGLONG flushing = GetTickCount64();
+  if (std::optional<int> held = Ardia::AppLaunch::TestMilliseconds("quitFlushHoldMs", kFlushTestHoldMostMs)) {
+    Ardia::LaunchLog::Write(L"launch", std::wstring(L"test: the flush is held ").append(std::to_wstring(*held)).append(L" ms"));
+    Sleep(static_cast<DWORD>(*held));
+  }
   Ardia::TelemetryLocalStore::Drain();
   const bool documentsWritten = Ardia::DocumentStore::Flush(false);
   Ardia::LaunchLog::Write(L"launch", std::wstring(L"telemetry and documents written in ") + std::to_wstring(GetTickCount64() - flushing) + L" ms" + (documentsWritten ? L"" : L", some documents still staged"));

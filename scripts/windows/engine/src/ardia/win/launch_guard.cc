@@ -46,6 +46,8 @@ constexpr int kLockFilePollMs = 100;
 constexpr int kLockFileGraceMs = 2000;
 constexpr int kOwnerStartWaitMs = 10000;
 constexpr wchar_t kStartsFile[] = L"launch-starts.txt";
+constexpr wchar_t kRefusedStartsFile[] = L"launch-refused.txt";
+constexpr int kMostReplayedLaunches = 1000;
 constexpr wchar_t kLogFolder[] = L"Logs";
 constexpr wchar_t kLogFile[] = L"launch.log";
 constexpr wchar_t kPreviousLogFile[] = L"launch.previous.log";
@@ -403,6 +405,10 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
     state.facts.predecessor_wait_ms = inherited;
   }
   command_line->RemoveSwitch(kWaitedForPreviousSwitch);
+  ReadReplayedLaunch(command_line->GetSwitchValueASCII(kReplayedLaunchSwitch),
+                     &state.facts.replayed_from,
+                     &state.facts.replayed_launches);
+  command_line->RemoveSwitch(kReplayedLaunchSwitch);
   if (!primary) {
     return;
   }
@@ -415,6 +421,12 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
       command_line->AppendSwitchASCII(
           kWaitedForPreviousSwitch,
           base::NumberToString(state.facts.predecessor_wait_ms));
+    }
+    if (!state.facts.replayed_from.empty()) {
+      command_line->AppendSwitchASCII(
+          kReplayedLaunchSwitch,
+          ReplayedLaunchValue(state.facts.replayed_from,
+                              state.facts.replayed_launches));
     }
     return;
   }
@@ -513,6 +525,88 @@ void MarkStartSettled() {
 
 const LaunchGuardFacts& GuardFacts() {
   return State().facts;
+}
+
+void AppendLaunchLog(const std::string& line) {
+  AppendLog(line);
+}
+
+std::string ReplayedLaunchValue(std::string_view from, int launches) {
+  return std::string(from) + ":" + base::NumberToString(launches);
+}
+
+bool ReadReplayedLaunch(std::string_view value,
+                        std::string* from,
+                        int* launches) {
+  const size_t colon = value.find(':');
+  if (colon == std::string_view::npos) {
+    return false;
+  }
+  const std::string_view name = value.substr(0, colon);
+  int count = 0;
+  if ((name != kReplayedFromQuittingApp && name != kReplayedAfterRefusal) ||
+      !base::StringToInt(value.substr(colon + 1), &count) || count < 1) {
+    return false;
+  }
+  *from = std::string(name);
+  *launches = count > kMostReplayedLaunches ? kMostReplayedLaunches : count;
+  return true;
+}
+
+bool WaitForPreviousToEnd(int budget_ms, int* waited_ms) {
+  GuardState& state = State();
+  *waited_ms = 0;
+  if (state.owns_alive) {
+    return true;
+  }
+  if (!state.alive) {
+    return false;
+  }
+  const base::TimeTicks started = base::TimeTicks::Now();
+  const DWORD owned = ::WaitForSingleObject(
+      state.alive, static_cast<DWORD>(budget_ms < 0 ? 0 : budget_ms));
+  *waited_ms =
+      static_cast<int>((base::TimeTicks::Now() - started).InMilliseconds());
+  if (!Acquired(owned)) {
+    return false;
+  }
+  state.owns_alive = true;
+  return true;
+}
+
+void LetGoOfGuard() {
+  GuardState& state = State();
+  if (!state.owns_alive) {
+    return;
+  }
+  ::ReleaseMutex(state.alive);
+  state.owns_alive = false;
+}
+
+void CountRefusedStart() {
+  const std::wstring data_dir = AppDataDirectory();
+  if (data_dir.empty()) {
+    return;
+  }
+  ::CreateDirectoryW(data_dir.c_str(), nullptr);
+  const std::wstring path = Joined(data_dir, kRefusedStartsFile);
+  const int recorded = ReadUnfinishedStarts(path);
+  WriteUnfinishedStarts(path, recorded >= kMostReplayedLaunches
+                                  ? kMostReplayedLaunches
+                                  : recorded + 1);
+}
+
+int TakeRefusedStarts() {
+  const std::wstring data_dir = AppDataDirectory();
+  if (data_dir.empty()) {
+    return 0;
+  }
+  const std::wstring path = Joined(data_dir, kRefusedStartsFile);
+  const int recorded = ReadUnfinishedStarts(path);
+  if (recorded > 0) {
+    ::DeleteFileW(path.c_str());
+  }
+  return recorded;
 }
 
 }

@@ -12,6 +12,7 @@ import { noteDragsEnded } from "./stuckDrags";
 import { noteWindowlessPages } from "./cliCounts";
 import { mainProcessWork } from "./mainProcessWork";
 import { appInfo } from "./transport";
+import { bucket } from "./journeys";
 import { readDocument } from "../../platform/documents";
 
 const CONTEXT_EVERY_MS = 10 * 60_000;
@@ -338,14 +339,24 @@ export function watchEngineReports() {
 
 export const LAUNCH_GUARD_DOC = "launch-guard.json";
 
+type LaunchReplaySource = "quitting" | "refused";
+
 type LaunchGuardProperties = {
-  launch_waited_for_previous_ms?: number;
+  launch_waited_for_previous?: string;
   launch_unfinished_starts_before?: number;
   launch_restore_state_set_aside?: boolean;
   launch_profile_held_by_another?: boolean;
+  launch_refused_starts_before?: number;
+  launch_replayed_from?: LaunchReplaySource;
+  launch_replayed_launches?: number;
 };
 
+const LAUNCH_REPLAY_SOURCES = new Set<string>(["quitting", "refused"]);
+
 const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined);
+
+export const waitedForPreviousBucket = (ms: number) =>
+  bucket(ms, [[0, "0"], [999, "<1s"], [2999, "<3s"], [9999, "<10s"], [29_999, "<30s"], [44_999, "<45s"]], "45s+");
 
 export function launchGuardProperties(read: (name: string) => string | null = readDocument): LaunchGuardProperties {
   let saved: unknown;
@@ -361,9 +372,16 @@ export function launchGuardProperties(read: (name: string) => string | null = re
   const properties: LaunchGuardProperties = {};
   const waited = count(facts.waitedForPreviousMs);
   const unfinished = count(facts.unfinishedStartsBefore);
-  if (waited !== undefined) properties.launch_waited_for_previous_ms = waited;
+  const refused = count(facts.refusedStartsBefore);
+  const replayed = count(facts.replayedLaunches);
+  if (waited !== undefined) properties.launch_waited_for_previous = waitedForPreviousBucket(waited);
   if (unfinished !== undefined) properties.launch_unfinished_starts_before = unfinished;
   if (typeof facts.restoreStateSetAside === "boolean") properties.launch_restore_state_set_aside = facts.restoreStateSetAside;
   if (typeof facts.profileHeldByAnother === "boolean") properties.launch_profile_held_by_another = facts.profileHeldByAnother;
+  if (refused !== undefined) properties.launch_refused_starts_before = refused;
+  if (typeof facts.replayedFrom === "string" && LAUNCH_REPLAY_SOURCES.has(facts.replayedFrom) && replayed !== undefined && replayed > 0) {
+    properties.launch_replayed_from = facts.replayedFrom as LaunchReplaySource;
+    properties.launch_replayed_launches = replayed;
+  }
   return properties;
 }

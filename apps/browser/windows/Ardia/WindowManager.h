@@ -194,6 +194,10 @@ struct WindowManager {
   }
 
   void Open(OpenWindowRequest const &request) noexcept {
+    if (m_quitting) {
+      LaunchLog::Write(L"window", std::wstring(L"not opened ").append(Paths::Wide(request.id)).append(L": Ardia is quitting"));
+      return;
+    }
     if (ManagedWindow *existing = Find(request.id)) {
       bool wasClosing = !existing->exits.empty() || (existing->fade && (existing->fade->phase == WindowFade::Phase::Leaving || existing->fade->phase == WindowFade::Phase::Lingering));
       StopClosing(*existing);
@@ -328,6 +332,7 @@ struct WindowManager {
   }
 
   void Focus(std::string_view id) noexcept {
+    if (m_quitting) return;
     if (ManagedWindow *closing = Find(id)) StopClosing(*closing);
     ManagedWindow *entry = Find(id);
     if (!entry) return;
@@ -356,6 +361,7 @@ struct WindowManager {
   }
 
   void RestoreFullScreen(std::vector<std::string> const &ids, std::optional<std::string> const &focus) noexcept {
+    if (m_quitting) return;
     for (auto const &id : ids) {
       ManagedWindow *entry = Find(id);
       if (!entry) continue;
@@ -494,19 +500,30 @@ struct WindowManager {
   }
 
   void ReplyToTerminate(bool ok) noexcept {
-    if (!m_quitting) return;
-    if (ok) return Finish();
+    if (!m_quitting || m_finished) return;
+    if (ok) {
+      if (m_quitHeldUntil && GetTickCount64() < m_quitHeldUntil) return;
+      return Finish();
+    }
     m_quitting = false;
+    m_quitHeldUntil = 0;
     m_quitGeneration++;
+    TellEngineQuitting(false);
     EmitApp("quitCancelled");
   }
 
   void Quit() noexcept {
     if (m_quitting) return;
     m_quitting = true;
-    if (!m_context) return Finish();
-    EmitApp("willQuit");
-    After(std::chrono::milliseconds(3000), [this, generation = ++m_quitGeneration]() noexcept {
+    TellEngineQuitting(true);
+    std::optional<int> held = AppLaunch::TestMilliseconds("quitWaitMs", kQuitTestHoldMostMs);
+    if (!m_context && !held) return Finish();
+    if (held) {
+      m_quitHeldUntil = GetTickCount64() + static_cast<ULONGLONG>(*held);
+      LaunchLog::Write(L"launch", std::wstring(L"test: the quit waits ").append(std::to_wstring(*held)).append(L" ms before it unloads"));
+    }
+    if (m_context) EmitApp("willQuit");
+    After(std::chrono::milliseconds(held.value_or(kQuitAnswerWaitMs)), [this, generation = ++m_quitGeneration]() noexcept {
       if (m_quitting && generation == m_quitGeneration) Finish();
     });
   }
@@ -528,6 +545,8 @@ struct WindowManager {
   };
 
   static constexpr UINT_PTR kSubclassId = 0xA2D1A;
+  static constexpr int kQuitAnswerWaitMs = 3000;
+  static constexpr int kQuitTestHoldMostMs = 15000;
   static constexpr double kPopupMinWidth = 200;
   static constexpr double kPopupMinPageHeight = 150;
   static constexpr double kPopupChromeHeight = 60;
@@ -1763,11 +1782,24 @@ struct WindowManager {
     try {
       auto unloading = Host::Current()->reactHost.UnloadInstance();
       unloading.Completed([](auto const &, auto const &) noexcept {
-        Host::Current()->queue.DispatcherQueue().TryEnqueue([]() noexcept { EndLoop(); });
+        Host::Current()->queue.DispatcherQueue().TryEnqueue([]() noexcept { WindowManager::Shared().EndLoopAfterTestHold(); });
       });
     } catch (...) {
       EndLoop();
     }
+  }
+
+  void EndLoopAfterTestHold() noexcept {
+    std::optional<int> held = AppLaunch::TestMilliseconds("quitUnloadHoldMs", kQuitTestHoldMostMs);
+    if (!held) return EndLoop();
+    LaunchLog::Write(L"launch", std::wstring(L"test: the engine is asked to quit ").append(std::to_wstring(*held)).append(L" ms after the unload"));
+    After(std::chrono::milliseconds(*held), []() noexcept { EndLoop(); });
+  }
+
+  static void TellEngineQuitting(bool quitting) noexcept {
+    const ArdiaEngineApi *engine = Host::Engine();
+    if (!engine || !engine->hostCall) return;
+    engine->hostCall("app.quitting", quitting ? "{\"quitting\":true}" : "{\"quitting\":false}", 0, nullptr, nullptr);
   }
 
   static void EndLoop() noexcept {
@@ -1807,6 +1839,7 @@ struct WindowManager {
   winrt::Windows::Graphics::PointInt32 m_dragOrigin{};
   std::string m_dragId;
   int m_quitGeneration{0};
+  ULONGLONG m_quitHeldUntil{0};
   bool m_finished{false};
 };
 

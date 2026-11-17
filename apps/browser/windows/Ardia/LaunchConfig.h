@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -70,7 +71,7 @@ inline std::vector<std::string_view> const &TestKeys() noexcept {
       "pipSelfTest", "pipHover", "selfCheckOnly", "meadowWebGL", "meadowReadyMs", "introStartDelayMs", "fakeFullScreenMs", "shadersKeyWindow", "peekStrict", "importSecret", "importDiaBundleId", "importDiaWindows",
       "cliInstallScript", "legacySource", "legacyCrashAfter", "bangsUrl", "onboarding", "whatsNew", "telemetry",
       "liveMock", "calendarFixture", "appMenu", "appDialog", "loginsTimeout", "externalAppLaunch", "nativeDragRefused", "httpPages", "selfCheckStage",
-      "keyHold", "keyHoldReadyMs",
+      "keyHold", "keyHoldReadyMs", "quitWaitMs", "quitUnloadHoldMs", "quitFlushHoldMs", "handOffHoldMs",
   };
   return keys;
 }
@@ -236,6 +237,15 @@ inline std::optional<std::string> TestValue(std::string_view key) noexcept {
 inline bool TestFlag(std::string_view key) noexcept {
   std::optional<std::string> value = TestValue(key);
   return value && Truthy(*value);
+}
+
+inline std::optional<int> TestMilliseconds(std::string_view key, int most) noexcept {
+  std::optional<std::string> value = TestValue(key);
+  if (!value || value->empty()) return std::nullopt;
+  char *end = nullptr;
+  long parsed = std::strtol(value->c_str(), &end, 10);
+  if (!end || *end != '\0' || parsed <= 0) return std::nullopt;
+  return static_cast<int>(parsed > most ? most : parsed);
 }
 
 }

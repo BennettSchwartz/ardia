@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "ardia/core/ac_hooks.h"
 #include "ardia/core/ac_launch_switches.h"
@@ -27,6 +28,9 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/process/process.h"
 #include "base/task/sequenced_task_runner.h"
@@ -38,6 +42,7 @@
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
 #include "components/keep_alive_registry/scoped_keep_alive.h"
@@ -82,6 +87,90 @@ std::unique_ptr<ScopedKeepAlive>& KeepAlive() {
   return *keep_alive;
 }
 
+constexpr size_t kReplayedLinksMostCharacters = 24000;
+constexpr int kHandOffHoldMostMs = 20000;
+
+struct Quitting {
+  bool app_quitting = false;
+  bool engine_quitting = false;
+  int held_launches = 0;
+  int dropped_links = 0;
+  size_t held_link_characters = 0;
+  std::vector<std::string> held_links;
+  base::CommandLine::StringType log_file;
+};
+
+Quitting& TheQuit() {
+  static base::NoDestructor<Quitting> quitting;
+  return *quitting;
+}
+
+bool QuitUnderWay() {
+  const Quitting& quit = TheQuit();
+  return quit.app_quitting || quit.engine_quitting;
+}
+
+std::wstring OwnExecutable() {
+  std::wstring path(MAX_PATH, L'\0');
+  while (true) {
+    const DWORD length = ::GetModuleFileNameW(
+        nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (length == 0) {
+      return std::wstring();
+    }
+    if (length < path.size()) {
+      path.resize(length);
+      return path;
+    }
+    if (path.size() >= 32768) {
+      return std::wstring();
+    }
+    path.resize(path.size() * 2);
+  }
+}
+
+bool StartCopyOfArdia(std::wstring command_line,
+                      DWORD* process_id,
+                      DWORD* error) {
+  *error = 0;
+  const std::wstring executable = OwnExecutable();
+  if (executable.empty()) {
+    *error = ::GetLastError();
+    return false;
+  }
+  STARTUPINFOW startup = {sizeof(startup)};
+  PROCESS_INFORMATION started = {};
+  if (!::CreateProcessW(executable.c_str(), command_line.data(), nullptr,
+                        nullptr, FALSE, 0, nullptr, nullptr, &startup,
+                        &started)) {
+    *error = ::GetLastError();
+    return false;
+  }
+  *process_id = started.dwProcessId;
+  ::CloseHandle(started.hThread);
+  ::CloseHandle(started.hProcess);
+  return true;
+}
+
+std::wstring RawCommandLineWithSwitch(const std::string& name,
+                                      const std::string& value) {
+  std::wstring_view raw(::GetCommandLineW());
+  size_t end = 0;
+  if (!raw.empty() && raw.front() == L'"') {
+    const size_t closing = raw.find(L'"', 1);
+    end = closing == std::wstring_view::npos ? raw.size() : closing + 1;
+  } else {
+    end = raw.find_first_of(L" \t");
+    if (end == std::wstring_view::npos) {
+      end = raw.size();
+    }
+  }
+  std::wstring line(raw.substr(0, end));
+  line += L" --" + base::UTF8ToWide(name) + L"=" + base::UTF8ToWide(value);
+  line += raw.substr(end);
+  return line;
+}
+
 std::wstring AppLibraryPath() {
   std::wstring path(MAX_PATH, L'\0');
   DWORD length = ::GetModuleFileNameW(nullptr, path.data(),
@@ -115,6 +204,21 @@ std::wstring Environment(const wchar_t* name) {
 
 bool Set(const std::wstring& value) {
   return !value.empty() && value != L"0";
+}
+
+std::string TestEntryFromEnvironment(std::string_view key) {
+  const std::string entries = base::WideToUTF8(Environment(L"ARDIA_TEST"));
+  for (std::string_view entry : base::SplitStringPiece(
+           entries, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
+    const size_t equals = entry.find('=');
+    if (equals != std::string_view::npos &&
+        base::TrimWhitespaceASCII(entry.substr(0, equals), base::TRIM_ALL) ==
+            key) {
+      return std::string(base::TrimWhitespaceASCII(entry.substr(equals + 1),
+                                                   base::TRIM_ALL));
+    }
+  }
+  return std::string();
 }
 
 void AddFeatures(base::CommandLine* command_line,
@@ -291,12 +395,13 @@ void WriteLaunchLog(const std::string& line) {
   fclose(file);
 }
 
-void SaveLaunchGuardFacts(const LaunchGuardFacts& facts) {
+void SaveLaunchGuardFacts(const LaunchGuardFacts& facts,
+                          int refused_starts_before) {
   const std::wstring data_dir = AppDataDirectory();
   if (data_dir.empty()) {
     return;
   }
-  const std::string json =
+  std::string json =
       "{\"waitedForPreviousMs\":" +
       std::to_string(facts.predecessor_wait_ms < 0 ? 0
                                                     : facts.predecessor_wait_ms) +
@@ -305,7 +410,14 @@ void SaveLaunchGuardFacts(const LaunchGuardFacts& facts) {
       ",\"restoreStateSetAside\":" +
       (facts.recovered_to.empty() ? "false" : "true") +
       ",\"profileHeldByAnother\":" +
-      (facts.profile_held_by_another ? "true" : "false") + "}\n";
+      (facts.profile_held_by_another ? "true" : "false") +
+      ",\"refusedStartsBefore\":" + std::to_string(refused_starts_before);
+  if (!facts.replayed_from.empty()) {
+    json += ",\"replayedFrom\":\"" + facts.replayed_from +
+            "\",\"replayedLaunches\":" +
+            std::to_string(facts.replayed_launches);
+  }
+  json += "}\n";
   FILE* file = nullptr;
   if (_wfopen_s(&file, (data_dir + L"\\launch-guard.json").c_str(), L"wb") !=
           0 ||
@@ -318,7 +430,16 @@ void SaveLaunchGuardFacts(const LaunchGuardFacts& facts) {
 
 void NoteLaunchGuard() {
   const LaunchGuardFacts& facts = GuardFacts();
-  SaveLaunchGuardFacts(facts);
+  const int refused = TakeRefusedStarts();
+  SaveLaunchGuardFacts(facts, refused);
+  std::string replayed;
+  if (facts.replayed_from == kReplayedFromQuittingApp) {
+    replayed = ", started again for " +
+               std::to_string(facts.replayed_launches) +
+               " launches that reached a quitting Ardia";
+  } else if (facts.replayed_from == kReplayedAfterRefusal) {
+    replayed = ", started again after Chromium refused the last launch";
+  }
   WriteLaunchLog("launch guard: waited " +
                  std::to_string(facts.predecessor_wait_ms < 0
                                     ? 0
@@ -326,7 +447,11 @@ void NoteLaunchGuard() {
                  " ms for a previous Ardia, " +
                  std::to_string(facts.unfinished_starts_before) +
                  " unfinished starts before this one, restore state " +
-                 (facts.recovered_to.empty() ? "kept" : "set aside"));
+                 (facts.recovered_to.empty() ? "kept" : "set aside") +
+                 replayed +
+                 (refused ? ", " + std::to_string(refused) +
+                                " refused starts since the last one"
+                          : std::string()));
 }
 
 void NoteTestGate() {
@@ -415,19 +540,23 @@ bool Background() {
              ardiacore::kBackgroundSwitch);
 }
 
-void ShowStartFailureAndQuit(const std::wstring& reason) {
-  if (!Background()) {
-    const std::wstring log = LaunchLogPath();
-    std::wstring text = L"Ardia couldn't start.\n\n" + reason +
-                        L"\n\nInstalling Ardia again from ardia.dev usually "
-                        L"fixes this.";
-    if (!log.empty()) {
-      text += L" The details are in " + log + L".";
-    }
-    ::MessageBoxW(nullptr, text.c_str(), L"Ardia",
-                  MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TASKMODAL |
-                      MB_TOPMOST);
+void ShowStartFailure(const std::wstring& reason, const std::wstring& advice) {
+  if (Background()) {
+    return;
   }
+  const std::wstring log = LaunchLogPath();
+  std::wstring text = L"Ardia couldn't start.\n\n" + reason + L"\n\n" + advice;
+  if (!log.empty()) {
+    text += L" The details are in " + log + L".";
+  }
+  ::MessageBoxW(nullptr, text.c_str(), L"Ardia",
+                MB_OK | MB_ICONERROR | MB_SETFOREGROUND | MB_TASKMODAL |
+                    MB_TOPMOST);
+}
+
+void ShowStartFailureAndQuit(const std::wstring& reason) {
+  ShowStartFailure(reason,
+                   L"Installing Ardia again from ardia.dev usually fixes this.");
   QuitApp();
 }
 
@@ -555,6 +684,7 @@ class MainParts : public ChromeBrowserMainExtraParts {
   }
 
   void PostMainMessageLoopRun() override {
+    TheQuit().engine_quitting = true;
     MarkExiting();
     StopApp();
     KeepAlive().reset();
@@ -569,10 +699,9 @@ bool KeepsWindowWithoutTabs(const BrowserWindowInterface* browser) {
   return Host::Get()->Keeps(browser);
 }
 
-bool Relaunched(const base::CommandLine& command_line,
-                const base::FilePath& cur_dir) {
-  ClearExiting();
-  base::ListValue urls;
+std::vector<std::string> LaunchLinks(const base::CommandLine& command_line,
+                                     const base::FilePath& cur_dir) {
+  std::vector<std::string> links;
   for (const base::CommandLine::StringType& argument :
        command_line.GetArgs()) {
     GURL url(base::WideToUTF8(argument));
@@ -581,13 +710,157 @@ bool Relaunched(const base::CommandLine& command_line,
                                              base::FilePath(argument));
     }
     if (url.is_valid() && (url.SchemeIsHTTPOrHTTPS() || url.SchemeIsFile())) {
-      urls.Append(url.spec());
+      links.push_back(url.spec());
     }
+  }
+  return links;
+}
+
+void EmitRelaunch(const std::vector<std::string>& links) {
+  base::ListValue urls;
+  for (const std::string& link : links) {
+    urls.Append(link);
   }
   base::DictValue payload;
   payload.Set("urls", std::move(urls));
   Emit("relaunch", std::move(payload));
+}
+
+void HoldLaunchForReplay(const base::CommandLine& command_line,
+                         std::vector<std::string> links) {
+  Quitting& quit = TheQuit();
+  quit.held_launches++;
+  for (std::string& link : links) {
+    if (quit.held_link_characters + link.size() + 3 >
+        kReplayedLinksMostCharacters) {
+      quit.dropped_links++;
+      continue;
+    }
+    quit.held_link_characters += link.size() + 3;
+    quit.held_links.push_back(std::move(link));
+  }
+  if (quit.log_file.empty()) {
+    quit.log_file = command_line.GetSwitchValueNative("log-file");
+  }
+  WriteLaunchLog("relaunch: a launch reached this Ardia while it was "
+                 "quitting; it starts again once this one has ended (" +
+                 std::to_string(quit.held_launches) + " launches and " +
+                 std::to_string(quit.held_links.size()) + " links held" +
+                 (quit.dropped_links ? ", " + std::to_string(quit.dropped_links) +
+                                           " links over the length limit"
+                                     : std::string()) +
+                 ")");
+}
+
+bool Relaunched(const base::CommandLine& command_line,
+                const base::FilePath& cur_dir) {
+  std::vector<std::string> links = LaunchLinks(command_line, cur_dir);
+  if (QuitUnderWay()) {
+    HoldLaunchForReplay(command_line, std::move(links));
+    return true;
+  }
+  ClearExiting();
+  EmitRelaunch(links);
   return true;
+}
+
+void ReplayHeldLaunches() {
+  Quitting& quit = TheQuit();
+  base::CommandLine replay{base::FilePath(OwnExecutable())};
+  replay.AppendSwitchASCII(
+      kReplayedLaunchSwitch,
+      ReplayedLaunchValue(kReplayedFromQuittingApp, quit.held_launches));
+  if (!quit.log_file.empty()) {
+    replay.AppendSwitchNative("log-file", quit.log_file);
+  }
+  for (const std::string& link : quit.held_links) {
+    replay.AppendArg(link);
+  }
+  DWORD process_id = 0;
+  DWORD error = 0;
+  if (StartCopyOfArdia(replay.GetCommandLineString(), &process_id, &error)) {
+    WriteLaunchLog("relaunch: started a fresh Ardia (" +
+                   std::to_string(process_id) + ") for " +
+                   std::to_string(quit.held_launches) + " launches and " +
+                   std::to_string(quit.held_links.size()) +
+                   " links that arrived while this one was quitting");
+  } else {
+    WriteLaunchLog("relaunch: a fresh Ardia for " +
+                   std::to_string(quit.held_launches) +
+                   " launches that arrived while this one was quitting could "
+                   "not be started (Windows error " +
+                   std::to_string(error) + ")");
+  }
+  quit.held_launches = 0;
+  quit.held_links.clear();
+}
+
+int AnswerRefusedLaunch(int exit_code) {
+  const LaunchGuardFacts& facts = GuardFacts();
+  const int already_waited =
+      facts.predecessor_wait_ms < 0 ? 0 : facts.predecessor_wait_ms;
+  const int budget = kPredecessorWaitSeconds * 1000 - already_waited;
+  int waited = 0;
+  const bool previous_ended = WaitForPreviousToEnd(budget, &waited);
+  const bool waited_for_previous = already_waited > 0 || waited > 0;
+  if (previous_ended && waited_for_previous &&
+      facts.replayed_from != kReplayedAfterRefusal) {
+    LetGoOfGuard();
+    DWORD process_id = 0;
+    DWORD error = 0;
+    const bool started = StartCopyOfArdia(
+        RawCommandLineWithSwitch(
+            kReplayedLaunchSwitch,
+            ReplayedLaunchValue(kReplayedAfterRefusal, 1)),
+        &process_id, &error);
+    WriteLaunchLog(
+        "launch guard: Chromium refused this launch because the previous "
+        "Ardia still held the profile; it ended after " +
+        std::to_string(already_waited + waited) + " ms" +
+        (started ? ", and a fresh Ardia (" + std::to_string(process_id) +
+                       ") starts in this one's place"
+                 : ", and a fresh Ardia could not be started (Windows error " +
+                       std::to_string(error) + ")"));
+    if (started) {
+      return 0;
+    }
+  }
+  CountRefusedStart();
+  const std::wstring reason =
+      previous_ended
+          ? std::wstring(L"Another program or another computer is using "
+                         L"Ardia's profile folder, so Ardia couldn't open it.")
+          : L"The copy of Ardia that was closing hadn't finished after " +
+                std::to_wstring((already_waited + waited) / 1000) +
+                L" seconds, so this one couldn't open your profile.";
+  WriteLaunchLog("app start failed: " + base::WideToUTF8(reason) +
+                 " (Chromium's profile-in-use exit, code " +
+                 std::to_string(exit_code) + ")");
+  ShowStartFailure(reason,
+                   previous_ended
+                       ? std::wstring(L"Close the program using it, or "
+                                      L"restart Windows, then open Ardia "
+                                      L"again.")
+                       : std::wstring(L"Wait a moment, then open Ardia "
+                                      L"again. Restarting Windows ends a "
+                                      L"copy that is stuck."));
+  return exit_code;
+}
+
+void HoldHandOffForTest() {
+  if (!TheGate().refusal.empty()) {
+    return;
+  }
+  int hold_ms = 0;
+  if (!base::StringToInt(TestEntryFromEnvironment("handOffHoldMs"),
+                         &hold_ms) ||
+      hold_ms <= 0) {
+    return;
+  }
+  hold_ms = hold_ms > kHandOffHoldMostMs ? kHandOffHoldMostMs : hold_ms;
+  WriteLaunchLog("test: this launch waits " + std::to_string(hold_ms) +
+                 " ms before it looks for a running Ardia");
+  ::Sleep(static_cast<DWORD>(hold_ms));
 }
 
 }
@@ -617,6 +890,7 @@ void BeforeChromeMain() {
       data_dir.empty() ? ChromiumUserDataDir() : data_dir + L"\\Chromium",
       command_line);
   AddLaunchSwitches(command_line);
+  HoldHandOffForTest();
   ardia_win::AskBeforeDiscards();
   g_ardia_win_hosts_normal_windows = true;
   g_ardia_win_frame_view = &CreateHostedFrameView;
@@ -630,6 +904,11 @@ void AfterChromeMain(int exit_code) {
   if (!g_ardia_win_add_main_parts) {
     return;
   }
+  if (TheQuit().held_launches > 0) {
+    ReplayHeldLaunches();
+  } else if (exit_code == CHROME_RESULT_CODE_PROFILE_IN_USE) {
+    exit_code = AnswerRefusedLaunch(exit_code);
+  }
   base::Process::TerminateCurrentProcessImmediately(exit_code);
 }
 
@@ -637,7 +916,38 @@ const char* TestGateDecision() {
   return TheGate().refusal.c_str();
 }
 
+void AppQuitting(bool quitting) {
+  Quitting& quit = TheQuit();
+  if (quitting) {
+    if (quit.app_quitting) {
+      return;
+    }
+    quit.app_quitting = true;
+    MarkExiting();
+    WriteLaunchLog("relaunch: the app began quitting; a new launch waits "
+                   "for it to end or starts again after it");
+    return;
+  }
+  if (!quit.app_quitting || quit.engine_quitting) {
+    return;
+  }
+  quit.app_quitting = false;
+  ClearExiting();
+  const int held = quit.held_launches;
+  std::vector<std::string> links = std::move(quit.held_links);
+  quit.held_launches = 0;
+  quit.held_links.clear();
+  quit.held_link_characters = 0;
+  quit.dropped_links = 0;
+  WriteLaunchLog("relaunch: the app stopped quitting; " +
+                 std::to_string(held) + " held launches go to it now");
+  if (held > 0) {
+    EmitRelaunch(links);
+  }
+}
+
 void QuitApp() {
+  TheQuit().engine_quitting = true;
   MarkExiting();
   MarkStartSettled();
   KeepAlive().reset();
