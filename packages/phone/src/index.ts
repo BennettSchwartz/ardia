@@ -131,3 +131,4 @@ export type {
   VisitKind,
   WebsiteDataKind,
 } from "./pageTypes";
+export { MATERIAL_ROLES, materialColors, type MaterialRole, type MaterialSchemeChange, type NativeMaterialScheme, type NativeMaterialSchemes } from "./material";
