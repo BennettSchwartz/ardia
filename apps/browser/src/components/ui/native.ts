@@ -1,7 +1,5 @@
 export {
   ActivitySpinner,
-  AnimatedBackedView,
-  BackedView,
   ClipView,
   ContextMenuArea,
   DockSelection,

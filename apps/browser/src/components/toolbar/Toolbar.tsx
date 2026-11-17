@@ -11,7 +11,7 @@ import { toggleSidebar } from "../../state/windows/actions";
 import { openBarFromAddress } from "../../state/omnibox/barState";
 import { useIsBookmarked, useSettings, useSidebarSide, useTab, useTabLayout, useTabLive, useTabsShown } from "../../state/browser/hooks";
 import type { Tab } from "../../state/browser/types";
-import { BackedView, Button, ContextMenuArea, Divider, FadeLabel, ink, sidebarFont, sidebarPoints, space, Symbol, Text, useHover, WindowDragRegion } from "../ui";
+import { Button, ContextMenuArea, Divider, FadeLabel, ink, sidebarFont, sidebarPoints, space, Symbol, Text, useHover, WindowDragRegion } from "../ui";
 import { type ToolbarGeometry } from "../window/geometry";
 import { usePage, usePages, type PageState } from "../../state/tabs/pageState";
 import { togglePopover } from "../../state/tabs/popoverDismiss";
@@ -195,7 +195,7 @@ export const ToolbarUrlField = memo(function ToolbarUrlField({ tab, palette, win
   const lockScaleStyle = lockPress.scale ? { transform: [{ scale: lockPress.scale }] } : undefined;
 
   return (
-    <BackedView {...field.hoverProps} style={[style, { flexDirection: "row", alignItems: "center", height: row.field, borderRadius: row.fieldRadius, backgroundColor: hovered && !glass ? palette.pill : undefined }]}>
+    <View {...field.hoverProps} style={[style, { flexDirection: "row", alignItems: "center", height: row.field, borderRadius: row.fieldRadius, backgroundColor: hovered && !glass ? palette.pill : undefined }]}>
       {glass ? (
         <GlassFill state={hovered ? "lit" : "rest"} radius={row.fieldRadius} dark={palette.background ? palette.text.startsWith(ink.white) : undefined} />
       ) : null}
@@ -245,7 +245,7 @@ export const ToolbarUrlField = memo(function ToolbarUrlField({ tab, palette, win
           </>
         )}
       </FieldButtons>
-    </BackedView>
+    </View>
   );
 });
 
