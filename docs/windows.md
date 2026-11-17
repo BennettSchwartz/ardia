@@ -160,7 +160,9 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     Pending telemetry and documents are written while stopping (`ShutDown` in `Ardia.cpp`), while their worker
     threads still run. Nothing in the library may wait on another thread from an exit handler or a static destructor:
     those run during `ExitProcess`, after Windows has ended every other thread, so such a wait only ends on its
-    timeout and the process outlives the quit (#1706: 30 s, which made the installer give up with exit 5).
+    timeout and the process outlives the quit (#1706: 30 s, which made the installer give up with exit 5). The
+    engine now ends the browser process as soon as Chromium's shutdown returns (`AfterChromeMain`, as Chrome does for
+    its utility processes), so no exit handler or static destructor runs in it at all.
   - `ArdiaEngineHost` (`EngineHostModule.h`) is the bridge: `available()`, `hostCall`, `engineCall`, and the engine's
     events as `ArdiaEngineHost:event`. Other native code reaches the engine through `Host::Engine()`.
   - What belongs to the app comes from the library (`AppImage.h`: the bundle folder, dialogs, window classes, the
@@ -327,6 +329,119 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   shortcut still runs. The launch log says `keys escape capture on|off` and
   `keys escape sent to the open popover or drag`. The Mac's Downloads popover does not close on Escape yet
   (`PLATFORM_FEATURES.escapeClosesDownloads` is off there).
+- The new tab's bar takes the keyboard about 50 ms after Ctrl+T (#2098). It used to take it only on its first layout,
+  60 to 280 ms after the command on CI's runner, after the whole New Tab page had mounted, and the letters typed
+  before then went to the previous tab's hidden bar.
+  - **The change:** with `PLATFORM_FEATURES.newTabBarFirst` (Windows only; the Mac and Linux keep today's order), a
+    fresh New Tab page commits its bar alone, and the bar focuses in its commit's layout effect, with the layout event
+    as the fallback. The rest of the page (the logo mark, the intro glow, the bar's shadows, `NewTabExtras`) mounts a
+    frame after the bar lays out.
+  - **Launch log:** `new tab bar page|committed|focused|rest|typed <tab>` (`platform/newTabMarks.windows.ts`);
+    `typed` is the bar's first typed change, once per page.
+  - **Tour:** the `first-run` part of `scripts/windows/tour.ps1` presses Ctrl+T and types the first key 100 ms later,
+    in fresh launches after Get Started, during and after the tool tour, under CPU and disk load, and with the Go
+    button. A stop fails only when the new tab's bar takes focus more than 90 ms after the `newTab` command (the
+    worst seen was 69 ms under load), or the first key does not land in the new tab's bar (its first `typed` mark
+    after the command, and the settled text starting with that key). A stop typing from 15 ms after Ctrl+T
+    must keep every key (#2099). The rest is report only: the whole text at 30 ms a key (#2101), where Go goes
+    (#2102), and three launches each typing at 80 and at 120 ms a key that read the field after every key.
+  - **A stalled JS thread** (a slow first launch, #2059) is covered by the key hold below (#2099).
+- The command bar puts back a letter its text field drops (#2101). React Native Windows 0.81's text field applies
+  the state of its first change (event count 0) whenever that state mounts. When JS is busy, as right after Ctrl+T,
+  the state lands after the next letter and wipes it: "example.com" became "eample.com" in 2 of 10 tries at 80 ms a
+  key and 2 of 10 at 120 ms. React Native Windows fixed it with React Native 0.88 (commit 1f59db13f9), not in 0.81.40,
+  and the app uses its prebuilt package, so the bar repairs it instead.
+  - **Where it is lost:** in the control itself. UI Automation reads the RichEdit text live, and it read "ea" while
+    the change events had said "ex" and JS had written nothing.
+  - **The repair:** with `PLATFORM_FEATURES.textInputRevertsFirstChange` (Windows only), `useRevertRepair` acts only
+    when the change events prove which letters went where (`components/omnibox/revertedText.ts`):
+    - every change since the empty field was one letter typed at the end, with the caret there;
+    - JS never wrote the field;
+    - it is within 3 s of the first change;
+    - the field drops back to its first change plus one new letter;
+    - every character involved is printable ASCII, so an IME composition that turns typed letters into か or ê never
+      looks like a revert;
+    - the new text is not a strict prefix of the old one, which Backspace could also make.
+
+    A new text equal to the old one counts: a typed letter has to change the text, so "go" after "go" proves the
+    second "o" came after a revert. It puts the lost letters back where they were and moves the caret after them,
+    since React Native keeps the old caret position. It keeps doing so until native shows the restored text, and
+    stops at any edit that isn't one letter typed at the end. A paste, a selection, Backspace, a completion or any
+    JS write turns it off for that field. It acts at most once per field. The proof comes from the change events
+    alone; it doesn't use key events.
+  - **Launch log:** `bar change <variant> #<count> len <n>`, `bar write <variant> len <n> over native len <m>`,
+    `bar repair <variant> native len <n> to len <m>`, `bar suggestions <ms> ms`, `js stall <ms>` after a New Tab
+    page mounts, `new tab bar gone <tab>` and `new tab pane <tab> mounted|gone|<flags>`
+    (`platform/barMarks.windows.ts`, `platform/newTabMarks.windows.ts`).
+  - **Tour:** these are required to lose no letter:
+    - ten first-run launches each at 80 and 120 ms a key;
+    - in the `typing` part, ten tries each into Ctrl+L's field on a page, a warm Ctrl+T, the top-tabs toolbar field
+      and the floating bar.
+
+    The per-key reads name the focused UI Automation element.
+  - **Telemetry:** `command_bar_letters_restored` in `usage_counts`, counted once per field the repair acted on.
+- A window's views mount only after the React instance finishes loading (#2115, `InstanceLoad.h`). React Native
+  Windows 0.81's `ReactNativeIsland::ShowInstanceLoaded` starts a new surface each time it runs. It runs when a view
+  host attaches to an instance already marked Loaded, and again when the host's `whenLoaded` continuation updates
+  every attached view host. A window that attached between the two got two copies of the app, both alive: every New
+  Tab page mounted twice, and the first letter typed after Ctrl+T went into the copy that then lost focus. It
+  happened in 3 of 27 first-run launches in run 43786493639; each of those logged `Running "main"` twice. `Open` now
+  mounts a window that comes before `ReloadInstance()` completes once it has completed, and logs
+  `window <id> waited <ms> ms for the instance to finish loading`. `window_roots_doubled` in `usage_counts` counts a
+  window whose root mounts while another root for it is still up.
+- The keys typed right after Ctrl+T or Ctrl+L wait for the bar's field (#2099, #2124). The keyboard hook runs on the UI
+  thread and handles a typed key before the queued mount that focuses the new bar, so a key typed then went into the
+  old, dying field or nowhere: 1 of 20 first letters with #2060's mount order and 3 of 20 with main's, at 80 and
+  120 ms a key. `FocusHold.h` holds them, through the Mac's focus-handoff contract:
+  - **Start:** `MenuKeyboard::Emit` gives `newTab` and `focusCommandBar` a `focusGeneration` when the window is
+    visible and in front. Another command ends the hold.
+  - **Ready:** `ArdiaFocus.claimFocus(generation, tag)` names the field, and that field reports native focus
+    (`src/textFocus.ts` calls `fieldFocused`/`fieldBlurred` from `TextInputState.focusInput`, `blurInput` and
+    `unregisterInput`). Windows can't focus a view by tag natively, so it needs both. With
+    `PLATFORM_FEATURES.claimsFollowFocus`, a bar field that already has focus claims when the move asks for it (Ctrl+L
+    on an open bar, a hero bar asked again), and a field claims again when it takes focus. The contract's missing part
+    is #989's acknowledgement; until it lands, a hold gives up 3 s after the command.
+  - **Held:** character keys with no Ctrl, Alt or Win, turned into characters when recorded (`ToUnicodeEx` with flag 4,
+    so the dead-key state is left alone). Modifiers pass. At most 64.
+  - **Replay:** one `WM_CHAR` at a time (a surrogate pair together) posted to the focused `InputSiteWindowClass`
+    window, then a sentinel to the hold's own message window, re-checking the window in front and the focus before the
+    next, waiting 50 ms after the first one's sentinel returns so the field's first change settles before a second letter can meet #2101's
+    revert. No `SendInput`. A failed post, or a sentinel not back within 1 s, ends the hold. A posted character can't be
+    recalled, and the check sees the input window, not which React field inside it has focus. So `src/textFocus.ts`
+    also tells the hold when JS asks another field to take focus (`fieldAsked`, sent before the request; a request
+    before the claim is kept and checked against it), which should end the hold before that move reaches the UI
+    thread: the report is sent first, but that it arrives before Fabric's focus command is expected, not proven. What's left: a focus move inside the window that doesn't come
+    from JS can take characters until the new field's focus report arrives, and a click inside the bar's own field
+    while the replay runs can put a held letter where the click left the caret (Composition clicks reach none of the
+    hold's hooks).
+  - **No second writer during a replay:** when a hold is ready with keys held, `ArdiaFocus` sends the app event
+    `keyHoldReplay` with the field's tag and the count, and again with 0 when the replay ends or the hold drops.
+    Until then that field's bar shows no inline completion and writes none (`state/omnibox/keyHoldReplay.ts`, with a
+    2 s guard so a lost end can't leave completion off); then it computes completion once for the text it has.
+  - **A typed text is never read as a completion's echo on Windows:** a value write from JS fires no change event
+    there, so `PLATFORM_FEATURES.inlineWritesEcho` is off and `useInlineCompletion` doesn't match changes against its
+    pending completion writes. Before, the whole completion arriving as typed text ("example.com" after a completion
+    computed for "e" that hadn't settled) was read as that old write's echo; the bar kept "example.co" and its next
+    render wrote that over the field. Replayed letters made it likely; a person typing the rest of a completion before
+    it settles could hit it too.
+  - **Ends a hold, dropping what it holds and passing the key on:** Ctrl, Alt or Win going down, or a key with them
+    (so AltGr characters and Ctrl+V right after Ctrl+T aren't held; the Ctrl still down from Ctrl+T doesn't count); Backspace and Enter, since a posted key event can't be ordered by the
+    sentinel; a key without a character (Escape, Tab, arrows, function keys); a dead key, `VK_PROCESSKEY` or
+    `VK_PACKET`; a mouse button; another window in front or the window closing; the move cancelled; another field
+    asked to take focus or taking it; a reload; 64 keys; 3 s. The foreground hook watches every process, so leaving for another program
+    ends the hold even while the UI thread is busy. A key whose press was held owes its release to the hold; after a
+    drop its repeats stay swallowed until it's released, even across a new hold. A dead key already
+    pending before Ctrl+T isn't protected.
+  - **Launch log:** `keys hold <g> begun for <command>`, `keys hold <g> ready after <ms> ms, replayed <n>` and
+    `keys hold <g> dropped: <why> with <n> held, <m> replayed`.
+  - **Tour:** the first-letter stop (ten tries each at 80 and 120 ms a key) and the 15 ms stop are required, at the
+    runner's own timing. The `hold-*` stops in the typing part launch with `ARDIA_TEST=keyHoldReadyMs=400`, which keeps
+    a hold from being ready for 400 ms (a slow launch; a warm runner is ready in about 50 ms), so each path runs: all of
+    example.com replayed in ten of ten tries (and ten more at the runner's own timing, no floor), capitals from Shift
+    and Caps Lock, and drops on Backspace, Escape, a click into another
+    window of ours and Notepad taking the keyboard, each logged with keys held. Ctrl+V passes through.
+  - **Telemetry:** `command_bar_key_holds`, `command_bar_keys_replayed` and `command_bar_key_hold_drops_<reason>` in
+    `usage_counts`.
 - "Ctrl+Z reopens closed tabs" works as the Mac's retargeted Undo: with the setting on, the keyboard hook in
   `MenuKeyboard.h` sends `reopenClosedTab` for a plain Ctrl+Z in a browser window (Little Ardia included, Settings and
   Import not) when Reopen isn't disabled, no command is bound to Ctrl+Z, the window itself is the active one (not a
@@ -396,8 +511,11 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 - The Windows native API has its own version: `WINDOWS_NATIVE_API_VERSION` in `platform/nativeApi.ts` and
   `windowsApiVersion` in `AppModule.h`. Bump both when the Windows native surface changes. A Mac bump doesn't
   touch it.
-- `--log-file=<path>` makes the app write its launch log, React Native's log and JavaScript errors to a file. Each
-  line is `<level> <ms since process start> <message>`.
+- The app writes its launch log, React Native's log and JavaScript errors to `Logs\launch.log` in the data folder
+  (`%LOCALAPPDATA%\Ardia\Logs`), or to `--log-file=<path>` when given. Each line is `<level> <ms since process start>
+  <message>`; the engine's lines are `engine 0 <message>`, and a crash's stack lands there too. Each start moves the
+  last run's log to `launch.previous.log`, and a run stops writing at 16 MB. A problem report from someone whose Ardia
+  won't open starts with those two files.
 - A background instance (`ARDIA_BACKGROUND=1`) shows its windows without taking focus and answers dialogs and menus
   without showing them, as on the Mac.
 
@@ -491,6 +609,34 @@ is plain Chromium.
   and stall pages while a menu is open (#1687). The self-check holds a real confirm on both threads and checks that a
   page loads only in the first case; `dialog_pages_asked` and `dialog_pages_stalled` count pages asked while a dialog
   was open and how many hadn't loaded 10 s later.
+- A launch while the previous Ardia on the same profile is still closing waits for it to end (up to 45 s) instead of
+  handing its command line to a browser that is shutting down, or starting a second browser on the same profile once
+  that one has let go of Chromium's process singleton (which happens before its shutdown is over: the old process
+  then still writes its profile). The quitting browser signals it from `QuitApp` and from its main parts' end
+  (`launch_guard.cc`, named objects under `Local\ArdiaBrowser.<hash of the user data folder>`); a launch while it runs
+  normally isn't held. Without this, Chromium's own singleton took the closing browser for a hung one and killed it
+  (`RESULT_CODE_HUNG`) before it had written its profile. The launch log says how long a start waited.
+- When the app can't start inside the engine (its library doesn't load, it has no `ArdiaAppStart`, or that refuses),
+  the engine shows why in a message box (none in a hidden instance), writes it to the launch log as
+  `app start failed: <reason>`, and quits from inside the run loop, so the process exits 0. It used to call
+  `QuitApp()` before the run loop and CHECK-crash at `browser_process_impl.cc:1959` with nothing on screen (#2044).
+  The app hands back its reason through `ArdiaAppStartFailure`.
+- A start that crashes or fails before it has run for 15 s counts as unfinished (`launch-starts.txt` in the data
+  folder; a quit before then counts as finished). After two unfinished starts in a row, the next one moves the
+  state Ardia restores at launch (`session.json`, `launch-look.json`, `switches-cache.json`, `bookmarks-cache.json`)
+  to `Recovery\<date-time>` in the data folder, deletes Chromium's graphics caches (`GrShaderCache`,
+  `GraphiteDawnCache`, `ShaderCache`, `GPUPersistentCache` and the profile's `GPUCache`, `DawnGraphiteCache`,
+  `DawnWebGPUCache`: a relaunch differs from a first run in what the first session wrote there), and says so once it
+  has opened, so a profile that crashes Ardia at every start opens again on its own. Chromium's profile (bookmarks,
+  history, passwords, cookies) isn't touched. #2097's recording (the app gone about 4 s after its window appears, at
+  every launch after onboarding) is that shape; the launch log now kept in `Logs` says what ended it.
+- A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
+  bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
+- `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens
+  it: twice right away, once after it has exited, once while the previous browser is held at its exit (it must
+  wait, with no second browser), once with two unfinished starts recorded (the session must be set aside), and
+  once with `Microsoft.ReactNative.dll` hidden (it must exit 0 with the reason logged). Every launch must show one
+  window from one browser, and Windows must log no Ardia crash, Crashpad no dump and the launch log no fatal line.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and
   file addresses on it. The app treats them as links from another app (`onOpenURLs`: a Little Ardia window or a tab,

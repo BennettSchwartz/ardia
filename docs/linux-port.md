@@ -650,14 +650,41 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
 
 ### Windows, focus and input
 
-- **Window controls.** Ardia draws close, minimize and maximize in its own header, so they work on decorationless
-  desktops such as Hyprland. Chrome's own caption buttons are hidden: opacity 0, no input, ignored by accessibility.
+- **Window controls.** Linux uses the Windows build's caption buttons on the right: `…`, minimize, maximize (restore
+  while maximized) and close, drawn by the shared `WindowControls.tsx` in the places Windows puts them (the toolbar
+  row, the end of the top strip, a right sidebar's header, atop a left sidebar with the address bar in it, Little
+  Ardia's bar, Settings and Import). There are no traffic lights. They work on decorationless desktops such as
+  Hyprland; Chrome's own caption buttons are hidden: opacity 0, no input, ignored by accessibility.
+  - `lib/platformChrome.linux.ts` takes the Windows `WINDOW_CHROME`. `platform/windowControls.ts` is swapped for
+    `hostWindowControls.ts`: minimize and maximize call `ArdiaShell.minimizeWindow` and `toggleMaximizeWindow`, and
+    caption regions are a no-op because the shell's own drag regions move the window. Close goes straight to the
+    shell's close coordinator (`captionControls.ts`, swapped in for `WindowControls.tsx`'s close), so a window with
+    tabs to lose asks once, not first in the shared path and again in the coordinator.
+  - `WindowControls.tsx` wraps the shared one: right-clicking the buttons opens the window menu (`linuxWindowMenu.ts`)
+    except in Settings and Import, and the buttons hide while a page is in full screen.
+  - The `…` opens the Linux app menu (Menu button below) under itself (`clusterAppMenu.ts`, swapped in for
+    `BrowserWindowControls.tsx`'s `showAppMenu`): a pointer press anchors it to the pressed `…`, a key to the focused
+    one, and an activation with neither (assistive technology) to the visible one. Pressing it, or Enter on it, while
+    a menu is open closes the menu. The buttons take keyboard focus like any button (`focusable` on the shared
+    `ControlButton`), and the `…` counts as a menu surface, so tabbing to it keeps the field Edit › Copy and Paste act
+    on. There are never two menu buttons: the `…` while the window buttons are drawn, the header's hamburger
+    otherwise (window or page full screen). Linux keeps the sidebar header the Windows rule would collapse whenever
+    the hamburger has no other home (`sidebarHeaderLayout.ts`). Some full-screen layouts still have none, as before
+    this change: top tabs with minimalism, or a sidebar whose profile part is hidden.
+  - Restore: the engine sends no `maximized` event, so each window reads `ArdiaShell.windowFrame` at start and once
+    per animation frame of resizing, and marks itself maximized when the frame fills the work area, feeding the shared
+    `useMaximizedWindows` through `captionRegions.ts`'s `noteMaximized` (`windowMaximized.ts`). Settings and Import
+    too. Known limits: a window that fills the work area without being maximized, such as a lone tiled window on a
+    tiling window manager (X11 or Wayland), shows restore. On Wayland `windowFrame` is null and the work area is the
+    whole output, so the shell compares its outer size with that, and with a panel, a bar or gaps a maximized window
+    keeps the maximize glyph. Clicking still toggles correctly; the glyph needs the engine to report maximized state.
 - **Header drag and double-click.** Dragging the header moves the window (`DispatchHostWindowDragMovement`).
   Double-clicking it runs the desktop's titlebar action.
 - **Outer frame.** The host overlays Chromium's client view and doesn't replace its frame. Without the Wayland
   decoration protocol, Chromium draws its custom frame.
-- **Menu button.** Linux has no global menu bar, so a hamburger in the header stands in for the Mac one. It lists
-  Ardia, File, Edit, View, Tabs, Bookmarks, History, Extensions, Window and Help as submenus built from the same menu
+- **Menu button.** Linux has no global menu bar, so a menu button stands in for the Mac one: usually the `…` beside the
+  window buttons, and a hamburger in the header only while they're hidden (Window controls above). It lists Ardia,
+  File, Edit, View, Tabs, Bookmarks, History, Extensions, Window and Help as submenus built from the same menu
   state the Mac menu bar uses (checks, disabled commands, dynamic titles, bookmarks, recently closed entries, profiles
   and extensions), labelled with the effective Linux shortcuts (`apps/linux/src/appMenu.ts`). Items run through the
   shared command path; Close Window, Minimize and Maximize call the native window operations. App commands Linux runs
@@ -759,18 +786,17 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
     `sidebarEdge`. An engine with neither uses the shell-side watcher on both sides.
 - **Top-strip peek.** With Auto-hide tabs in the top-strip layout, the strip's hover zone and its peeked panel are a
   page overlay region (`TopStripPeekRegion.tsx`, swapped in for `App.tsx`'s import), so the host gives the shell the
-  pointer where they cover a page: 2 px of the panel with the default toolbar, 15 px with the compact one. The window
-  buttons are off screen while the strip is hidden, as on macOS; the peeked strip's menu button reaches Window ›
-  Minimize, Maximize and File › Close Window.
-- **Header.** The menu button always shows. The profile name beside it follows the Mac's rule
+  pointer where they cover a page: 2 px of the panel with the default toolbar, 15 px with the compact one. While the strip
+  is hidden the window buttons and the `…` sit at the end of the toolbar row, as on Windows.
+- **Header.** The menu button shows here whenever the window buttons are hidden (full screen); otherwise it is the
+  `…` beside them. The profile name beside it follows the Mac's rule
   (`ProfileIndicator.tsx`): only in an Incognito window or with two or more profiles, cut when at least 52 px of it
   fit, a person icon below that, and nothing when not even the icon fits (a 190 px sidebar with the Downloads button).
 - **Materials.** `VisualEffect`, `GlassEffect`, popover bubbles and the window's vibrancy take light or dark from the
   theme scope they render in (`useSurfaceDark`), not the app appearance, so an Incognito window is dark in a light
   app and a toast is light there.
-- **Window controls with the sidebar on the right.** They ride the sidebar, as on macOS: `setTrafficLightsCenter`'s
-  `trailing` flag measures the first button's center from the window's right edge, and the Linux buttons are placed
-  from that edge with CSS (`shims/web/windowChrome.tsx`), so a resize moves them with no round trip.
+- **Window controls with the sidebar on the right.** They sit in the right sidebar's header, at its outer edge, as on
+  Windows.
 - **Fullscreen restore.** A window saved fullscreen comes back fullscreen. On Wayland the saved output's name is kept
   in the profile pref `browser.app_window_placement.ArdiaLinuxWindowOutputs`. When exactly one display carries that
   name, the window goes fullscreen there.
@@ -1140,7 +1166,19 @@ Linux reads calendars from Evolution Data Server, which GNOME Online Accounts, G
   (`ac_linux_password_check.cc`).
   - The helper must be a root-owned executable no one else can write, in root-owned folders no one else can write,
     at `/usr/sbin`, `/sbin`, `/usr/bin` or NixOS's `/run/wrappers/bin`; without one, reauth stays unavailable.
-  - The helper runs with an empty environment and is killed after 15 s; the typed password is wiped once checked.
+  - The helper runs with an empty environment and is killed after 15 s.
+  - The password field isn't a Views `Textfield` (its model, edit history and `RenderText` keep copies that are freed
+    without being overwritten). `PasswordField` (`ac_linux_password_field.cc`) keeps the typed text and any IME
+    composition in `SecretText` (`ac_linux_secret_text.cc`): a fixed-size buffer in its own mapped page, left out of
+    core dumps and forks, locked against swap where allowed, edited in place and zeroed before it's unmapped. It draws
+    bullets from a character count, has no undo, refuses paste and copy, gives the IME no surrounding text and
+    exposes no value to accessibility. On Confirm the text is encoded straight into another such page, which the
+    helper's stdin write reads from; submit, cancel, closing the window, a superseding request and teardown all zero
+    it. What it can't cover: each keystroke's own event, the IME's commit buffer for that keystroke, and the kernel's
+    socket buffer.
+  - `scripts/linux/password-heap-check.mjs` types random passwords into the real dialog of a package under Xvfb and
+    scans the browser process's memory, as UTF-8 and UTF-16: while typed the password must exist exactly once, text
+    typed over or erased must be gone while the dialog is still open, and nothing may be left once it closes.
   - Wrong passwords back off 2 s, 5 s, 30 s, then 60 s. The grant window and supersession are polkit's.
   - `ProbeReauth` reports such a system as available (`loginPassword`), and `reauth.requested` says which method ran.
 - **Secret routes.**
