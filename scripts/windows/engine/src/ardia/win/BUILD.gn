@@ -18,6 +18,8 @@ source_set("win") {
     "host.cc",
     "host.h",
     "host_visibility.cc",
+    "hosted_window.cc",
+    "hosted_window.h",
     "kept_pages.cc",
     "kept_pages.h",
     "launch_guard.cc",
