@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 const { useBrowser } = await import("../browser/store.ts");
-const { QUIT_WARNING, askBeforeQuitting, asksBeforeQuit, quitWarningMayAsk, windowsStayingOpen } = await import("./quitWarning.ts");
+const { QUIT_WARNING, askBeforeQuitting, asksBeforeQuit, closeQuits, downloadsQuitWarning, quitWarningMayAsk, windowsStayingOpen } = await import("./quitWarning.ts");
 const { shellNativeModules } = await import("../../test-native/shell.ts");
 
 const asking = { quitsWithLastWindow: true, background: false, warns: true, staysOpen: [] };
@@ -46,6 +46,23 @@ test("the warning uses the Mac's words and its don't-ask-again", () => {
   assert.ok(mac.includes(`"${QUIT_WARNING.message}"`));
   assert.ok(mac.includes(`addButton(withTitle: "${QUIT_WARNING.confirmTitle}")`));
   assert.ok(mac.includes(`"${QUIT_WARNING.suppression.replace("’", "'")}"`));
+});
+
+test("the downloads question uses the Mac's words, for one download and for several", () => {
+  const mac = readFileSync(new URL("../../../../../packages/shell/ios/QuitFlow.swift", import.meta.url), "utf8");
+  const one = downloadsQuitWarning(1);
+  const three = downloadsQuitWarning(3);
+  assert.equal(one.title, QUIT_WARNING.title);
+  assert.ok(mac.includes(`"${one.message}"`));
+  assert.ok(mac.includes(`"${three.message.replace("3", "\\(count)")}"`));
+  assert.equal(one.confirmTitle, "Quit");
+});
+
+test("a close that quits is one on Windows, in a shown instance, with no other window staying open, whatever the warning setting", () => {
+  assert.equal(closeQuits({ quitsWithLastWindow: true, background: false, staysOpen: [] }), true);
+  assert.equal(closeQuits({ quitsWithLastWindow: false, background: false, staysOpen: [] }), false);
+  assert.equal(closeQuits({ quitsWithLastWindow: true, background: true, staysOpen: [] }), false);
+  assert.equal(closeQuits({ quitsWithLastWindow: true, background: false, staysOpen: ["w2"] }), false);
 });
 
 test("on the Mac closing a window never shows the quit warning", async () => {
@@ -296,10 +313,10 @@ test("on Windows, when the other window closes while a window's tabs confirm is 
   assert.equal(seen.cancelled.otherGone, true, "the other window closes without a question while the first still asks");
   assert.deepEqual(seen.cancelled.asked, ["Close 2 tabs?", quit], "confirming the tabs question asks the quit question, since this close now quits");
   assert.equal(seen.cancelled.open, true, "Cancel keeps the window and its tabs");
-  assert.deepEqual(seen.cancelled.counts, { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: 1 });
+  assert.deepEqual(seen.cancelled.counts, { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: 1, quit_warnings_with_downloads: 0, quit_warnings_with_downloads_cancelled: 0 });
   assert.deepEqual(seen.quit.asked, ["Close 2 tabs?", quit]);
   assert.equal(seen.quit.open, false, "Quit closes it");
-  assert.deepEqual(seen.quit.counts, { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: 0 });
+  assert.deepEqual(seen.quit.counts, { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: 0, quit_warnings_with_downloads: 0, quit_warnings_with_downloads_cancelled: 0 });
 });
 
 test("on Windows, a browser window's close asks the quit question first: Cancel keeps it, a confirmed quit skips the tabs question and Don't ask again turns the quit warning off; a last tab asks the tabs question, or the quit question when that one is off", () => {
@@ -312,4 +329,110 @@ test("on Windows, a browser window's close asks the quit question first: Cancel 
   assert.deepEqual(seen.lastTabAsksTabs, { asked: ["Close 1 tab?"], open: false }, "the last-tab confirm asks instead of the quit question");
   assert.deepEqual(seen.lastTabQuitCancelled, { asked: [quit], open: true }, "with the last-tab confirm off, the quit question asks, and Cancel keeps the tab");
   assert.deepEqual(seen.lastTabQuit, { asked: [quit, quit], open: false }, "Quit closes it");
+});
+
+const QUITS_WITH_DOWNLOADS_RUNNING = `
+const { useBrowser } = await import("./src/state/browser/store.ts");
+const { requestWindowClose } = await import("./src/state/windows/windowClose.ts");
+const { closeTab } = await import("./src/state/browser/actions.ts");
+const { closeLittleArdia } = await import("./src/state/littleArdia/actions.ts");
+const { quitWarningMayAsk } = await import("./src/state/windows/quitWarning.ts");
+const { takeQuitWarningCounts } = await import("./src/state/telemetry/quitWarningCounts.ts");
+const { shellNativeModules, windows } = await import("./src/test-native/shell.ts");
+const S = () => useBrowser.getState();
+const settle = async () => { for (let turn = 0; turn < 12; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+const asked = [];
+let answers = [];
+shellNativeModules.ArdiaDialogs.confirm = (options) => { asked.push(options.message); return Promise.resolve({ confirmed: answers.shift() ?? false, suppressed: false }); };
+const download = (id, extra = {}) => ({ id, url: "https://dl.example/" + id, filename: id, path: "/tmp/" + id, state: "downloading", paused: false, received: 0, total: 1, speed: 0, mimeType: "", profile: "", ...extra });
+const fresh = (settings, downloads) => {
+  S().hydrate({ profiles: { default: { id: "default", name: "Personal", color: "plum", icon: null, createdAt: 0 } }, profileOrder: ["default"] });
+  S().updateSettings({ warnBeforeQuitting: false, warnBeforeClosingWindow: false, warnBeforeClosingLastTab: false, ...settings });
+  windows.open.clear();
+  for (const each of downloads) S().upsertDownload(each);
+  asked.length = 0;
+  takeQuitWarningCounts();
+};
+const lone = (options = {}) => {
+  const id = S().createWindow({ url: "https://a.example/", ...options });
+  windows.open.set(id, {});
+  return id;
+};
+const closing = async (id, close, replies) => {
+  answers = [...replies];
+  close(id);
+  await settle();
+  return { asked: [...asked], open: !!S().windows[id] };
+};
+const byButton = (id) => requestWindowClose(id);
+const seen = {};
+
+fresh({}, [download("one")]);
+let w = lone();
+seen.mayAsk = quitWarningMayAsk();
+seen.oneCancelled = await closing(w, byButton, [false]);
+seen.oneQuit = await closing(w, byButton, [true]);
+seen.oneCounts = takeQuitWarningCounts();
+
+fresh({}, [download("one"), download("two", { paused: true }), download("done", { state: "finished" })]);
+w = lone();
+seen.several = await closing(w, byButton, [false]);
+
+fresh({ warnBeforeQuitting: true }, [download("one")]);
+w = lone();
+seen.warningCancelled = await closing(w, byButton, [false]);
+seen.downloadsCancelled = await closing(w, byButton, [true, false]);
+seen.bothQuit = await closing(w, byButton, [true, true]);
+seen.bothCounts = takeQuitWarningCounts();
+
+fresh({}, []);
+w = lone();
+seen.mayAskWithNothingRunning = quitWarningMayAsk();
+seen.nothingRunning = await closing(w, byButton, []);
+
+fresh({}, [download("done", { state: "finished" })]);
+w = lone();
+seen.onlyFinished = await closing(w, byButton, []);
+
+fresh({}, [download("one")]);
+const other = lone();
+w = lone();
+seen.besideAnotherWindow = { ...(await closing(w, byButton, [])), otherOpen: !!S().windows[other] };
+
+fresh({}, [download("one")]);
+w = lone();
+seen.lastTabCancelled = await closing(w, (id) => void closeTab(S().windows[id].tabIds[0]), [false]);
+seen.lastTabQuit = await closing(w, (id) => void closeTab(S().windows[id].tabIds[0]), [true]);
+
+fresh({}, [download("one")]);
+w = lone({ kind: "small" });
+seen.littleArdiaCancelled = await closing(w, closeLittleArdia, [false]);
+seen.littleArdiaQuit = await closing(w, closeLittleArdia, [true]);
+console.log(JSON.stringify(seen));
+`;
+
+test("on Windows, a close that quits with a download running asks first, whatever the warning setting: Cancel keeps the window, Quit closes it; the warning asks before it; a finished download or another open window means no question", () => {
+  const run = spawnSync(process.execPath, ["--no-warnings", "--import", "./src/test-loader.mjs", "--import", `data:text/javascript,${encodeURIComponent(ON_WINDOWS)}`, "--input-type=module", "-e", QUITS_WITH_DOWNLOADS_RUNNING], { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  const seen = JSON.parse(run.stdout.trim().split("\n").at(-1));
+  const one = downloadsQuitWarning(1).message;
+  const two = downloadsQuitWarning(2).message;
+  const warning = QUIT_WARNING.message;
+  assert.equal(seen.mayAsk, true, "with the warning off, a running download is enough for the close paths to ask");
+  assert.deepEqual(seen.oneCancelled, { asked: [one], open: true }, "Cancel keeps the window, so the download keeps running");
+  assert.deepEqual(seen.oneQuit, { asked: [one, one], open: false }, "Quit closes it");
+  assert.deepEqual(seen.oneCounts, { quit_warnings_after_tabs_confirm: 0, quit_warnings_after_tabs_confirm_cancelled: 0, quit_warnings_with_downloads: 2, quit_warnings_with_downloads_cancelled: 1 });
+  assert.deepEqual(seen.several, { asked: [two], open: true }, "a paused download counts, a finished one doesn't");
+  assert.deepEqual(seen.warningCancelled, { asked: [warning], open: true }, "the warning comes first, and its Cancel ends it there");
+  assert.deepEqual(seen.downloadsCancelled, { asked: [warning, warning, one], open: true }, "after the warning's Quit the downloads question still asks, and its Cancel keeps the window");
+  assert.deepEqual(seen.bothQuit, { asked: [warning, warning, one, warning, one], open: false }, "both agreed: the window closes");
+  assert.deepEqual(seen.bothCounts, { quit_warnings_after_tabs_confirm: 0, quit_warnings_after_tabs_confirm_cancelled: 0, quit_warnings_with_downloads: 2, quit_warnings_with_downloads_cancelled: 1 });
+  assert.equal(seen.mayAskWithNothingRunning, false);
+  assert.deepEqual(seen.nothingRunning, { asked: [], open: false }, "nothing running and the warning off: no question");
+  assert.deepEqual(seen.onlyFinished, { asked: [], open: false });
+  assert.deepEqual(seen.besideAnotherWindow, { asked: [], open: false, otherOpen: true }, "another window keeps Ardia and its downloads running");
+  assert.deepEqual(seen.lastTabCancelled, { asked: [one], open: true }, "Ctrl+W on the last tab asks the same way");
+  assert.deepEqual(seen.lastTabQuit, { asked: [one, one], open: false });
+  assert.deepEqual(seen.littleArdiaCancelled, { asked: [one], open: true }, "and so does a lone Little Ardia");
+  assert.deepEqual(seen.littleArdiaQuit.asked, [one, one]);
 });

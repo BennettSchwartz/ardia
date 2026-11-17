@@ -1,7 +1,7 @@
 import { TurboModuleRegistry, type TurboModule } from "react-native";
 import type { AppNative, ConfirmOptions, DialogsNative, DocumentsNative, UpdateChannel, UpdaterNative, UpdaterState } from "@ardia/shell";
 import type { AppWindowsModule, WindowsUpdateConstants, WindowsUpdateModule } from "../nativeModuleTypes";
-import { failureText, feedNotPublished, folderOf, megabytes, offered, readBuild, readManifest, type BuildIdentity } from "./manifest";
+import { failureText, feedNotPublished, folderOf, installMessage, megabytes, offered, readBuild, readManifest, type BuildIdentity } from "./manifest";
 
 const PUBLISHED_UNDER = "https://github.com/ardia-browser/ardia/releases/download/";
 const FEED = `${PUBLISHED_UNDER}windows-alpha/windows-update.json`;
@@ -23,6 +23,11 @@ let checking = false;
 let declinedBuild = 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 let firstCheck: ReturnType<typeof setTimeout> | undefined;
+let downloadsInProgress = 0;
+
+export function noteDownloadsInProgress(count: unknown) {
+  downloadsInProgress = typeof count === "number" && Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
 
 function identity(): BuildIdentity | null {
   if (identityRead === undefined) identityRead = typeof constants().buildFile === "string" ? readBuild(constants().buildFile as string) : null;
@@ -117,7 +122,7 @@ async function check(asked: boolean) {
     console.info(`[ardia windows] update ${manifest.build} downloaded`);
     const install = await ask({
       title: "The update is ready to install",
-      message: `Ardia closes, installs ${newer} and opens again.`,
+      message: installMessage(newer, downloadsInProgress),
       confirmTitle: "Install and Restart",
       cancelTitle: "Later",
     });
