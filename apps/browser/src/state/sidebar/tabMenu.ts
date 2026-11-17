@@ -6,7 +6,7 @@ import { useBrowser, type BrowserState } from "../browser/store";
 import { activeTabId, bookmarkProfileId, inPinnedContainer, isIncognitoProfile, pinnedSectionTitle, pinSection, tabTitle, togglePinTitle, viewTabIds, tabLayoutOf } from "../browser/model";
 import { awayFromPin, selectedTabIds } from "../pins/organize";
 import { groupOf } from "../pins/tabGrouping";
-import { splitOf, splitRowPanes } from "../splits/splits";
+import { splitOf, splitRowPanes, splitViewAvailable } from "../splits/splits";
 import { closeSplitView, openSplitPane } from "../splits/actions";
 import type { Tab } from "../browser/types";
 import { bookmarkTabs, copyUrls, editPinnedPage, newGroupWithSelection, openIconPicker, startRename, toggleBookmarkInWindow } from "./actions";
@@ -86,7 +86,7 @@ function openItems(s: BrowserState, tab: Tab, f: Facts): MenuItem[] {
   return [
     ...(f.split
       ? [{ id: "unsplit", title: "Remove from Split View", symbol: "rectangle.split.2x1.slash" }]
-      : f.section === "tile"
+      : f.section === "tile" || !splitViewAvailable
         ? []
         : [{ id: "split", title: "Open as Split", symbol: "rectangle.split.2x1", ...hintWhen(f.active, "openSplitPane", s) }]),
     { id: "duplicate", title: "Duplicate", symbol: "plus.square.on.square" },
@@ -106,7 +106,11 @@ function organiseItems(s: BrowserState, windowId: string, tab: Tab, f: Facts): T
   const groups = f.section === "tile" ? [] : groupItems(s, windowId, f.group?.id);
   const grouping: TabMenuItem[] =
     f.section === "tile"
-      ? [tileFolderOf(tab) ? { id: "leaveFolder", title: "Remove from Folder", symbol: "folder.badge.minus" } : { id: "newFolder", title: "New Folder…", symbol: "folder.badge.plus" }]
+      ? tileFolderOf(tab)
+        ? [{ id: "leaveFolder", title: "Remove from Folder", symbol: "folder.badge.minus" }]
+        : s.settings.topAppFolders
+          ? [{ id: "newFolder", title: "New Folder…", symbol: "folder.badge.plus" }]
+          : []
       : [
           ...(f.memberPin
             ? []

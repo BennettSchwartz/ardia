@@ -1,10 +1,11 @@
-import { createContext, useContext } from "react";
+import { createContext, use } from "react";
 import { opaqueThemeTint, PRESET_BACKDROP, resolveTheme, requestedDarkFor, shownLook, themeAccent, themeBackdrop, themePalette, type LookSource, type ProfileColor, type ProfileLookFields, type ProfileTheme } from "../../lib/profileLook";
 import type { ThemeBackdropProps } from "@ardia/core";
 import { backdropTint, opaqueTint, tintForHue, type BackdropTint } from "../../lib/windowTint";
 import { isRgbFunction, luminance, mix, over, parseColor, rgbToHsl, toHex } from "../../lib/color";
 import { CARD_INSET, DEFAULT_SIDEBAR_WIDTH } from "../../lib/windowLayout";
 import { SIDEBAR_ROW } from "../../lib/sidebarMetrics";
+import { WINDOW_CHROME } from "../../lib/windowChrome";
 import { arcSelectedFill, colorRoles, HIGH_CONTRAST_INK, ink, INCOGNITO_TINT, withAlpha, PROFILE_COLORS, radius, type ColorRoles, type ProfileColorSpec, type ShadowLevel } from "./tokens";
 import type { BasePalette } from "../../lib/themeFile";
 import { visibleLine, visibleSelection } from "../../lib/selectionContrast";
@@ -220,9 +221,12 @@ export function shadowOpacityOf(level: Omit<ShadowLevel, "opacity"> & { opacity:
 }
 
 export const ThemeContext = createContext<Theme | null>(null);
+export const PageThemeContext = createContext<Theme | null>(null);
+
+export const useScopedTheme = (): Theme | null => use(PageThemeContext) ?? use(ThemeContext);
 
 export function useTheme(): Theme {
-  const scoped = useContext(ThemeContext);
+  const scoped = useScopedTheme();
   if (scoped) return scoped;
   if (__DEV__) console.warn("useTheme outside a ThemeScope");
   return themeFor("plum:dark");
@@ -263,5 +267,5 @@ export const layout = {
   toolbarButton: 30,
   toolbarIconCenters: [21, 56, 92, 127],
   breadcrumbX: 153,
-  trafficLightsWidth: 78,
+  trafficLightsWidth: WINDOW_CHROME.leadingWidth,
 } as const;

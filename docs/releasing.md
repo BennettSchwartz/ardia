@@ -24,6 +24,9 @@ GitHub Actions. Each has these assets:
 - `ArdiaCore-<engine tree>-source.tar.xz`, with that archive when the engine is built on Helium (release.sh finds
   Helium's code in the framework): copies of the GitHub tags `engine/patches/build/env.sh` pins that aren't in this
   repo (`scripts/engine-source.sh`), and where Chromium's source is. See "Source and licenses" below.
+- `ArdiaCore-<engine tree:12>-symbols.tar.xz` and `ArdiaCore-<engine tree:12>-uuids.txt`, only on an `engine-<tree:12>`
+  prerelease: the dSYMs of the engine's unstripped build and the UUID of each image they name, which
+  `scripts/symbolicate-crash.sh` reads to name the frames of a crash in Chromium Framework. See "Engines" below.
 
 Each version's notes are a file in the repo, `docs/release-notes/<version>.md` (how to write one:
 `docs/release-notes/README.md`). The GitHub release, the update dialog and the website's
@@ -104,13 +107,17 @@ phones a build that isn't a release says Dev.
   test). Nothing distributes it yet: that needs a Play Console account and an upload key.
 - **CLI.** It follows the app: the app installs the CLI of its own version, with the digest pinned in its bundle
   (`docs/cli.md`), so a Nightly Mac runs the nightly CLI.
-- **Windows.** Joins when the Windows app is on main. Its updater reads one feed today; it needs a feed per channel
-  (the stable one on the latest stable release, the nightly one on the `nightly` prerelease, as the Mac's DMG links do)
-  and the same Settings switch.
+- **Windows.** Every release, nightly or stable, builds it in the Release workflow's `windows` job, attaches
+  `Ardia-<version>-windows-<cpu>-setup.exe` for x64 and arm64 with the engine's source
+  `Ardia-<version>-windows-source.tar.xz` (`scripts/windows/engine-source.sh`), and refreshes the one feed its updater reads, on the
+  `windows-alpha` prerelease (`docs/windows.md` › Releases). So an installed Windows app takes nightlies and stables
+  alike; a feed per channel (the stable one on the latest stable release, the nightly one on the `nightly`
+  prerelease, as the Mac's DMG links do) and the same Settings switch are still to come. A failed `windows` job ships
+  the release without Windows; never re-run the release's failed jobs for it.
 
 ## Source and licenses
 
-Every binary we publish (DMG, zip, engine archive) has its source next to it, and keeps it for as long as the binary
+Every binary we publish (DMG, zip, engine archive, Windows installers) has its source next to it, and keeps it for as long as the binary
 stays up. That's GPL-3.0 §6(d) for the GPL parts (uBlock Origin today), and it's how we work anyway.
 
 - Every release's notes end with a Source section (`release.sh` writes it). It links the tag's tree: the app, the
@@ -253,6 +260,8 @@ The Linux package ships on the same GitHub release. The Release workflow's `linu
 `scripts/linux/release.sh <version> --engine exact`, and `publish.sh` attaches the assets when it creates the release:
 
 - `Ardia-<version>-linux-x64.tar.xz` and its `.sha256`: the browser, with `lib/ardia/VERSION` and the bundled CLI.
+- `Ardia-<version>-linux-x64.deb` and `Ardia-<version>-linux-x64.AppImage`, each with its `.sha256`: the same build
+  as a Debian package (setuid sandbox helper, polkit policy, AppArmor profile) and as an AppImage.
 - `ardia-cli-<version>-linux-x64.tar.gz` and its `.sha256`: the `ardia` command for Linux.
 
 The script refuses what `release.sh` refuses: a missing notes file or one whose frontmatter doesn't read, a
@@ -345,6 +354,26 @@ packs one (stripped, unpruned) with its Helium source, uploads both to the prere
 latest, so the feed and the download links never move to it) and appends `<tree> engine-<tree:12> <sha256>` to
 `packages/ardiacore/prebuilt-engines.tsv`: commit and push that line before dispatching. A release whose `engine/`
 tree has no engine fails its build at once, saying which script to run.
+
+The same script uploads the engine's symbols: `ArdiaCore-<tree:12>-symbols.tar.xz`, the dSYMs the official build writes
+beside the framework in `out/Release_GN_arm64` (`Chromium Framework.dSYM` and the helpers'; function names only, as
+`symbol_level=0` builds no line tables), and `ArdiaCore-<tree:12>-uuids.txt`, a `<uuid> <arch> <DWARF file>` row per
+image. It copies them with the framework under the chromium lock and refuses a framework whose own dSYM doesn't carry its
+UUID. The framework itself is already stripped, so strip-engine.sh's copies in `symbols/` name almost nothing. A crash's
+"Chromium Framework + 0x2e2334" is named with `scripts/symbolicate-crash.sh <Chromium Framework UUID> 0x2e2334 …`: it
+finds the engine release whose rows hold that UUID, downloads that dSYM into `dist/engine-symbols` and runs
+`atos -arch arm64 -l 0x0` on the offsets. Engines published before the symbols were uploaded have none: the next build
+overwrites `out/`'s dSYMs. To backfill one, rebuild its engine key; if the framework comes back with the published UUID,
+copy the framework and its dSYMs out of `out/` under the lock and upload the pair under the exact names
+`symbolicate-crash.sh` downloads (`key` is the release tag without `engine-`):
+
+```sh
+key=<tree:12> dir="dist/engine-$key-backfill" release_out="$HOME/chromium-build/chromium_git/chromium/src/out/Release_GN_arm64"
+mkdir -p "$dir/dsyms"
+scripts/agent/locked chromium -- bash -c 'cp -cR "$1/Chromium Framework.framework" "$2/" && cp -cR "$1"/*.dSYM "$2/dsyms/"' copy "$release_out" "$dir"
+scripts/lib/pack-symbols.sh "$dir/Chromium Framework.framework" "$dir/dsyms" "$dir/ArdiaCore-$key-symbols.tar.xz" "$dir/ArdiaCore-$key-uuids.txt"
+gh release upload "engine-$key" -R mantrakp04/ardia --clobber "$dir/ArdiaCore-$key-symbols.tar.xz" "$dir/ArdiaCore-$key-uuids.txt"
+```
 
 ## The engine switch (0.2.21 → 0.2.22)
 

@@ -1,5 +1,7 @@
 import { type SettingSection } from "./types";
 import type { SettingsPane } from "../../../state/settings/settingsWindows";
+import { keyText } from "../../../state/commands/keyText";
+import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
 
 export const toolRows = {
   shortcuts: [
@@ -8,8 +10,8 @@ export const toolRows = {
       rows: {
         undoReopensClosedTab: {
           advanced: true,
-          title: "⌘Z reopens closed tabs",
-          description: "Outside text fields, as in Arc; press it again for the tab closed before. In a text field ⌘Z still undoes typing.",
+          title: `${keyText("⌘Z")} reopens closed tabs`,
+          description: `Outside text fields, as in Arc; press it again for the tab closed before. In a text field ${keyText("⌘Z")} still undoes typing.`,
           keywords: ["undo", "undo close tab", "reopen", "restore tab", "arc", "cmd z"],
         },
         actions: { title: "Customize keyboard shortcuts", keywords: ["hotkeys", "keybindings", "remap", "menu shortcuts"] },
@@ -181,7 +183,7 @@ export const toolRows = {
           advanced: true,
           title: "Unload inactive profiles",
           description: "A profile no window has shown for this long is unloaded with its extensions once its tabs can sleep, and loads again when you open it. Tabs playing sound, holding a form you started or downloading keep it loaded. Its extensions and notifications stop until then.",
-          shown: (s) => s.memorySaver,
+          shown: (s) => PLATFORM_FEATURES.unloadsIdleProfiles && s.memorySaver,
           keywords: ["profiles", "unload", "idle", "inactive", "timeout", "memory", "ram", "extensions", "sleep", "performance"],
         },
       },
@@ -207,10 +209,11 @@ export const toolRows = {
     {
       section: "Command line",
       rows: {
-        cliControl: { advanced: true, title: "Let the ardia command control Ardia", keywords: ["cli", "command line", "terminal", "shell", "devtools", "automation", "remote debugging"] },
-        cliInstall: { advanced: true, title: "The ardia command", keywords: ["cli", "command line", "terminal", "shell", "install"] },
+        cliControl: { advanced: true, shown: () => PLATFORM_FEATURES.ardiaCommand, title: "Let the ardia command control Ardia", keywords: ["cli", "command line", "terminal", "shell", "devtools", "automation", "remote debugging"] },
+        cliInstall: { advanced: true, shown: () => PLATFORM_FEATURES.ardiaCommand, title: "The ardia command", keywords: ["cli", "command line", "terminal", "shell", "install"] },
         compactCliPill: {
           advanced: true,
+          shown: () => PLATFORM_FEATURES.ardiaCommand,
           title: "Show the control pill as an icon and Stop",
           description: "While a command controls Ardia, the pill at the bottom of the page shows only the app's icon and Stop; hover it to see who is in control. It can't be hidden, because it's how you know something is driving the browser.",
           keywords: ["cli", "control pill", "is controlling", "agent", "claude code", "codex", "hide", "smaller", "compact", "minimize", "indicator", "stop"],

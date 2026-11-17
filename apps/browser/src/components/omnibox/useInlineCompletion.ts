@@ -1,13 +1,17 @@
-import { completeInline } from "../../state/omnibox/textInput";
+import { caretAllowsInline, completeInline, selectInlineCompletion } from "../../state/omnibox/textInput";
+import { noteInlineCompletionShown } from "../../state/telemetry/inlineCompletionCounts";
+import { useSettings } from "../../state/browser/hooks";
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { findNodeHandle, type TextInput } from "react-native";
-import { acceptsCompletion, completionToWrite, previewFieldChange, withoutFirst, type EditContext, type FieldChange, type Inline, type PendingInline, type Selection } from "./inline";
+import { acceptsCompletion, completionToWrite, previewFieldChange, settlesInline, withoutFirst, type EditContext, type FieldChange, type Inline, type PendingInline, type Selection } from "./inline";
 
-export function useInlineCompletion(input: RefObject<TextInput | null>, typed: string, wanted: string, preview: string | null) {
+export function useInlineCompletion(input: RefObject<TextInput | null>, typed: string, wanted: string, preview: string | null, caret: () => Selection) {
   const [inline, setInline] = useState<Inline | null>(null);
   const pending = useRef<PendingInline[]>([]);
   const heard = useRef(typed);
+  const counted = useRef("");
   const shown = inline?.typed === typed ? inline.completion : "";
+  const searchFirst = useSettings((s) => s.commandBarPreference === "search");
 
   useLayoutEffect(() => {
     if (typed !== heard.current) {
@@ -22,7 +26,8 @@ export function useInlineCompletion(input: RefObject<TextInput | null>, typed: s
     const settle = (result: number) => {
       if (result === 2) return;
       pending.current = withoutFirst(pending.current, write);
-      if (result === 1) setInline(write);
+      const { start, end } = caret();
+      if (settlesInline(result === 1, write.completion, caretAllowsInline(start, end, write.typed.length))) setInline(write);
     };
     completeInline(tag, write.typed, write.completion).then(settle, () => settle(0));
   }, [input, typed, wanted, shown, preview]);
@@ -38,6 +43,16 @@ export function useInlineCompletion(input: RefObject<TextInput | null>, typed: s
     }
     return change;
   };
+
+  useLayoutEffect(() => {
+    if (!shown) counted.current = "";
+    if (!shown || preview !== null) return;
+    selectInlineCompletion(input.current, typed.length, typed.length + shown.length);
+    const key = `${typed}\n${shown}`;
+    if (counted.current === key) return;
+    counted.current = key;
+    noteInlineCompletionShown(searchFirst);
+  }, [input, typed, shown, preview, searchFirst]);
 
   const accepts = (selection: Selection) => preview === null && acceptsCompletion(typed, shown, selection, pending.current);
 

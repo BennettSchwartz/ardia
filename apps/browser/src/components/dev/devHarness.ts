@@ -55,6 +55,10 @@ export function startDevHarness() {
     get onboarding(): typeof import("../../state/onboarding/onboarding") {
       return require("../../state/onboarding/onboarding");
     },
+    get interfaceScale(): typeof import("../../state/settings/interfaceScale") & { pixelRatio: number; hairline: number } {
+      const rn: typeof import("react-native") = require("react-native");
+      return { ...require("../../state/settings/interfaceScale"), pixelRatio: rn.PixelRatio.get(), hairline: rn.StyleSheet.hairlineWidth };
+    },
     get media(): typeof import("../../state/media/media").useMedia {
       return require("../../state/media/media").useMedia;
     },
@@ -90,6 +94,12 @@ export function startDevHarness() {
     },
     get switcher(): typeof import("../../state/sidebar/switcher") {
       return require("../../state/sidebar/switcher");
+    },
+    get reveal(): typeof import("../../state/sidebar/reveal") {
+      return require("../../state/sidebar/reveal");
+    },
+    get tileFolders(): typeof import("../../state/pins/tileFolders") & typeof import("../../state/sidebar/tileFolderUi") {
+      return { ...require("../../state/pins/tileFolders"), ...require("../../state/sidebar/tileFolderUi") };
     },
     get sidebarRows(): typeof import("../../state/sidebar/sidebarUi") {
       return require("../../state/sidebar/sidebarUi");

@@ -31,6 +31,11 @@ store but through `storeAction` wrappers in each domain's `actions.ts` (`newTab`
   regular window closed with the close button is marked `lastWindow`, with `activePin` when a pinned tab was showing, and
   `openLastWindowOrNew` (state/windows/lastWindow.ts) brings it back on a Dock click or at launch);
   `downloads`; `settings` (typed, state/settings/settings.ts).
+- Interface size: `settings.interfaceScale` is the chosen size (this Mac only); `useInterfaceScale`
+  (state/settings/interfaceScale.ts) holds the applied one, which every root-point conversion reads
+  (`currentInterfaceScale`, `onInterfaceScaleChange`). `chooseInterfaceScale` (state/settings/actions.ts) snaps to a 5 %
+  step; `startInterfaceScale` (interfaceScaleSync.ts) pushes it to native. Window frames stay physical: lay out with
+  `windowRootSize` (state/windows/rootSize.ts).
 - `parkedPins[profileId]` (state/pins/parkedPins.ts): pinned tabs belong to the profile's sidebar, as in Dia. Closing a
   window (⌘W on its last tab, the close button, ⇧⌘W, "Start fresh" on launch) parks its pinned tiles (at their pinned
   URL) and pinned groups, with their order and tab/group ids; the next window that shows the profile takes them back,
@@ -212,11 +217,16 @@ ordered transaction that names its cause. There are no echo windows, timers or "
     place, keeping a group both neighbours share). A split is one row: its panes move together and nothing lands
     between them;
   - a new active tab that stayed in the strip is shown (`activate`'s rules, opener bookkeeping included), unless
-    it's Chrome's pick of a successor (`activePickedOnClose`; from engines that don't say, any activation that comes
-    with the old active tab leaving): then the store's own rule (state/tabs/openers.ts) decides. An explicit activation
+    it's Chrome's pick of a successor (`activePickedOnClose`, counted only while the old active tab left the strip in
+    this change, so a flag still held from an earlier close never stops a switch; from engines that don't say, any
+    activation that comes with the old active tab leaving): then the store's own rule (state/tabs/openers.ts)
+    decides. An extension that activates another tab and then discards the shown one (Auto Tab Discard) is a switch
+    too: the old tab stays in the strip, so there is no successor to pick. An explicit activation
     in the same change as the close (an extension's remove then update) is a switch, and wins over the store's
-    successor command still on its way. A split's other pane and a tab of a profile the window isn't showing
-    aren't shown (the focused pane changes on user focus; profiles keep their own tab);
+    successor command still on its way. A tab of another space that shares the window's data is shown too: the
+    window switches to that space (otherwise the app would send Chrome back to the tab being discarded). A split's
+    other pane and a tab of a space with its own data aren't shown (the focused pane changes on user focus;
+    spaces with their own data keep their own tab);
   - a tab Chrome made (`tab:` adoption) takes Chrome's pin, place and activation the first time the app sees it;
     a tab arriving in a strip of another app window (an extension moving it; the window is `appWindow`, else the
     one its other tabs are in) changes window as it is, page and live state included (`intoWindow`; its view takes

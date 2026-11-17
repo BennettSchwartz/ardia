@@ -58,18 +58,22 @@ import { startEditTargets } from "./editTargets";
 import { startNotificationResponses } from "../../browser/src/state/app/notificationResponses";
 import { inputRegions, startShellAbove } from "./shellAbove";
 import { InWindowPlayer } from "./InWindowPlayer";
+import { startLinuxUpdates } from "./linuxUpdates";
+import { noticeUnsandboxedLaunch } from "./sandboxNotice";
+import { countLoginPasswordChecks } from "./reauthCounts";
 import { startPipPlayer } from "./pipPlayer";
 import { startLinuxShortcuts } from "./shortcutsRuntime";
 import { linuxWindowMenu, TrafficLights } from "./TrafficLights";
 import { createUtilitySessionSnapshot, initialLinuxSession, isLinuxUtility, setSessionDeparture, setSessionFlush } from "./session";
 import { startUtility } from "./utility";
+import { announceShellPainted } from "./shellPainted";
 import { watchActiveProfile } from "./hostWindowProfiles";
 import { announceCommandsReady, announceTypeaheadReady, windowExpectsField } from "./typeahead";
 import { linuxSyncHooks, startLinuxSync } from "./syncEngine";
 import { linuxLiveHooks } from "./liveHooks";
 import { connectCalendar, refreshCalendar, setCalendarHidden, useCalendar } from "../../browser/src/state/live/calendar";
 import { useMeetingAlert } from "../../browser/src/state/live/alerts";
-import { linuxTelemetryHooks, reportUncaughtRender, startHostTelemetry } from "./hostTelemetry";
+import { linuxTelemetryHooks, reportRecoverableRender, reportUncaughtRender, startHostTelemetry } from "./hostTelemetry";
 import type { LeaderLocks } from "./telemetryLeader";
 
 Object.assign(globalThis, { ardiaLinux: { store: useBrowser, pages: usePages, emitCommand, extensions: useExtensions, openExtension: openExtensionFromMenu, webviews, media: useMedia, lifecycle: { state: useLifecycle }, sync: linuxSyncHooks, live: linuxLiveHooks, toolbar: useToolbarAutoHide, windowMenu: linuxWindowMenu, selection: { state: usePageSelection, jump: jumpToSelection, copyQuoteLink: copyLinkToSelection, replaceInField }, calendar: { state: useCalendar, connect: connectCalendar, refresh: refreshCalendar, hide: setCalendarHidden, alert: useMeetingAlert }, inputRegions, telemetry: linuxTelemetryHooks } });
@@ -79,6 +83,7 @@ setWindowCloseDecider(decideLinuxWindowClose);
 function FirstWindowCommitted({ typeahead }: { typeahead: boolean }) {
   useEffect(() => {
     firstWindowCommitted();
+    if (ardiaHost) void announceShellPainted(ardiaHost);
     if (typeahead && ardiaHost) {
       announceCommandsReady(ardiaHost);
       announceTypeaheadReady(ardiaHost, { expectsField: () => windowExpectsField(useBrowser.getState(), ardiaHost!.bootstrap.windowId, useOnboarding.getState().windowId) });
@@ -103,6 +108,7 @@ async function start() {
   useBrowser.getState().hydrate(initialLinuxSession(ardiaHost, saved?.settings && restoreSession !== undefined ? { ...saved, settings: { ...saved.settings, restoreSession } } : saved));
   startConfigFiles(colorRoles, launch);
   startHostTelemetry({ host: ardiaHost, candidate: !utility, locks: navigator.locks as unknown as LeaderLocks });
+  countLoginPasswordChecks(linuxTelemetryHooks.leading);
   const capabilities = linuxCapabilities(ardiaHost);
   if (capabilities.cliControl) startCliControl();
   await startLinuxShortcuts(ardiaHost);
@@ -147,7 +153,8 @@ async function start() {
     startLinuxSync({ host: ardiaHost, candidate: true, locks: navigator.locks });
     if (capabilities.cliControl && !ardiaHost.bootstrap.privateWindow) afterFirstWindow(startAutomation);
     if (capabilities.userScripts && !ardiaHost.bootstrap.privateWindow) afterFirstWindow(() => leadUserScripts({ locks: navigator.locks, start: startUserScripts }));
-    startLinuxAppServices({
+    startLinuxUpdates(ardiaHost, navigator.locks);
+    const services = startLinuxAppServices({
       host: ardiaHost,
       windowId,
       savedSession: !!saved,
@@ -155,8 +162,9 @@ async function start() {
       locks: navigator.locks,
       marks: sessionStorage,
     });
+    void noticeUnsandboxedLaunch(ardiaHost, windowId, services.launch);
   }
-  createRoot(document.getElementById("root")!, { onUncaughtError: (error) => { reportUncaughtRender(error); console.error("[ardia linux] crashed", error); } }).render(
+  createRoot(document.getElementById("root")!, { onUncaughtError: (error) => { reportUncaughtRender(error); console.error("[ardia linux] crashed", error); }, onRecoverableError: (error) => { reportRecoverableRender(error); console.warn("[ardia linux] recovered", error); } }).render(
     <div className={`ardia-desktop host ardia-linux${utility ? " utility" : ""}`} data-ardia-linux-window={windowId}>
       <div className="ardia-window">
         {!utility && <InWindowPlayer windowId={windowId} />}

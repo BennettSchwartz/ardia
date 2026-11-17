@@ -1,11 +1,15 @@
 import { takeCleanUpCounts } from "./cleanUpCounts";
 
-const none = () => ({ captureIndicatorsCleared: 0, pinnedTabsSleptByMemorySaver: 0, tabsSleptOverBudget: 0, tabsSleptOverBudgetReopened: 0, topAppsKeptRunning: 0, topAppsUnloadedFromMenu: 0 });
+const none = () => ({ captureIndicatorsCleared: 0, mediaCardsCleared: 0, pinnedTabsSleptByMemorySaver: 0, tabsSleptOverBudget: 0, tabsSleptOverBudgetReopened: 0, tabsOverBudgetSkippedLoading: 0, tabsOverBudgetAsksPassedOn: 0, topAppsKeptRunning: 0, topAppsUnloadedFromMenu: 0 });
 
 let pending = none();
 
 export function noteCaptureIndicatorCleared() {
   pending.captureIndicatorsCleared++;
+}
+
+export function noteMediaCardCleared() {
+  pending.mediaCardsCleared++;
 }
 
 export function noteTabSlept(pinned: boolean, reason: string | null) {
@@ -18,6 +22,11 @@ export function noteTabSleptOverBudget() {
 
 export function noteTabSleptOverBudgetReopened() {
   pending.tabsSleptOverBudgetReopened++;
+}
+
+export function noteBudgetSweep(skippedLoading: number, asksPassedOn: number) {
+  pending.tabsOverBudgetSkippedLoading += skippedLoading;
+  pending.tabsOverBudgetAsksPassedOn += asksPassedOn;
 }
 
 let profilesUnloaded = 0;
@@ -51,6 +60,7 @@ export function takeTabSleepCounts() {
   pending = none();
   return {
     capture_indicators_cleared: taken.captureIndicatorsCleared,
+    media_cards_cleared: taken.mediaCardsCleared,
     pinned_tabs_slept_by_memory_saver: taken.pinnedTabsSleptByMemorySaver,
     top_app_closes_kept_running: taken.topAppsKeptRunning,
     top_apps_unloaded_from_menu: taken.topAppsUnloadedFromMenu,
@@ -58,5 +68,7 @@ export function takeTabSleepCounts() {
     ...takeCleanUpCounts(),
     tabs_slept_over_budget: taken.tabsSleptOverBudget,
     tabs_slept_over_budget_reopened: taken.tabsSleptOverBudgetReopened,
+    tabs_over_budget_skipped_loading: taken.tabsOverBudgetSkippedLoading,
+    tabs_over_budget_asks_passed_on: taken.tabsOverBudgetAsksPassedOn,
   };
 }

@@ -1,6 +1,7 @@
 import { layout } from "../ui/theme";
 import { DOCK_SLIDE, DOCK_SLIDE_CURVE } from "./tokens";
 import type { SpringSpec } from "../ui/motion";
+import { WINDOW_CHROME } from "../../lib/windowChrome";
 
 export const easeOutCubic = (u: number) => 1 - (1 - u) ** 3;
 export const easeInOutCubic = (u: number) => (u < 0.5 ? 4 * u ** 3 : 1 - (-2 * u + 2) ** 3 / 2);
@@ -38,7 +39,8 @@ export const dockedCardInset = (sidebarWidth: number, inset: number) => sidebarW
 
 export const cardInsetAt = (dock: number, sidebarWidth: number, inset: number) => inset + (dockedCardInset(sidebarWidth, inset) - inset) * dock;
 
-export const HEADER_TOOLS = { toggleX: 70.75 + 27, fullScreenToggleX: 29, pitch: 35, edge: layout.sidebarInset + 1 } as const;
+const FULL_SCREEN_TOGGLE_X = 29;
+export const HEADER_TOOLS = { toggleX: WINDOW_CHROME.leadingWidth ? 70.75 + 27 : FULL_SCREEN_TOGGLE_X, fullScreenToggleX: FULL_SCREEN_TOGGLE_X, pitch: 35, edge: layout.sidebarInset + 1 } as const;
 
 export type HeaderButton = "back" | "forward" | "reload";
 
@@ -66,9 +68,9 @@ export type DockState = "fullscreen" | "docked" | "peeking" | "leaving" | "hidin
 export type DockInput = { open: boolean; fullscreen: boolean; moving: boolean; peekLive: boolean; peekLeaving?: boolean };
 
 export function dockState({ open, fullscreen, moving, peekLive, peekLeaving = false }: DockInput): DockState {
+  if (peekLive && (fullscreen || !open)) return peekLeaving ? "leaving" : "peeking";
   if (fullscreen) return "fullscreen";
   if (open) return "docked";
-  if (peekLive) return peekLeaving ? "leaving" : "peeking";
   return moving ? "hiding" : "away";
 }
 
@@ -76,7 +78,7 @@ export const peekOnScreen = (state: DockState) => state === "peeking" || state =
 
 export const shownAs = (state: DockState) => (peekOnScreen(state) ? "peek" : state === "hiding" ? "away" : state);
 
-export const watchesEdge = (state: DockState, moving: boolean) => (peekOnScreen(state) || state === "away") && !moving;
+export const watchesEdge = (state: DockState, moving: boolean) => (peekOnScreen(state) || state === "away" || state === "fullscreen") && !moving;
 
 export const atRevealEdge = (x: number, right: boolean, windowWidth: number, band: number = PEEK_EDGE_STRIP) => (right ? x >= windowWidth - band : x < band);
 

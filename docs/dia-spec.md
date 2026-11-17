@@ -326,9 +326,11 @@ Clear Tabs; Clear Today"); a toast confirms the clear and offers Undo. Measured 
 pitch, about 6.3 px/pt): the line is 1 pt at about white 0.08 and starts at the favicons' left edge; it ends 7.5 pt before
 the arrow; the arrow is 7 pt wide and 8 pt tall, 3 pt from the text; "Clear" is semibold with a cap height 0.75 of the
 tab titles' (10 pt beside our 13 pt titles) and ends where the titles do; the line's centre is 25 pt above the first
-row's centre. Ours: `components/sidebar/ClearDivider.tsx`, a 14 pt row with Dia's `divider` colour and secondary text.
+row's centre. Ours: `components/sidebar/ClearDivider.tsx`, a 21 pt row with Dia's `divider` colour and secondary text.
 Dia's divider under its Pinned section (owner's 2× capture, 2026-11-09): a 1 pt line 6.5 pt under the last pinned row and
-6.5 pt above what follows (a group's box or a row), 14 pt edge to edge; ours draws the same band with no extra margins.
+6.5 pt above what follows (a group's box or a row), 14 pt edge to edge. Dia shows no labels there; ours carries the
+Pinned fold and Tidy/Clear (10 pt tiny text on a 13 pt line), so its band is the label plus 4 pt each side, keeping a hovered row's
+background off the text: 21 pt at the default Sidebar Text size, 23 pt at Large and 25 pt at Larger.
 What it closes (issue #149): the unselected unpinned tabs (`clearOthers`), keeping the selected tab and, per Arc's 2022
 release notes, tabs playing media. Dia's Close All in the sidebar does the same with the selected tab (the issue's
 recording: of three unpinned tabs, the two unselected close and the selected one stays selected).
@@ -584,7 +586,10 @@ Implemented in `apps/browser/src/state/windows/profilePager.ts` (+ `components/w
   page changes.
 - **Wheel mice** (`nonGesturalScrollState`, `0x1005983c4`, events with no phase): scroll deltas add up while they
   come less than ~0.049 s apart; once |Σ| > 1 pt the view pages one page that way (sign flipped by
-  `isDirectionInvertedFromDevice`), then ignores wheel events for 0.25 s.
+  `isDirectionInvertedFromDevice`), then ignores wheel events for 0.25 s. Ardia does not copy the flip: AppKit has
+  already applied the device's scroll-direction setting to `scrollingDeltaX`, so a scroll left (Δx > 0) shows the
+  previous page with Natural scrolling on or off, as the trackpad path does (the flip paged a wheel with it off
+  backwards, #325).
 - `TabSidebar.PagingContainerViewController` keeps `loadedPages` / `transitionPageIDs` and schedules page cleanup:
   pages beside the current one only exist during a transition. `TabStrip.TabStripSpacePagingController` pages the
   top tab strip too (with a content fade on settle, `settleUsesContentFade`, not decoded).
@@ -808,6 +813,21 @@ theme, a group "X" of five tabs after the pinned dock. Positions in points from 
 - Ardia (in-process snapshots, same state): dock 86 … 156, container from 164 (8 after the dock), chip 50, the active
   tab 6.5 after the chip, container 4.5 after it, the next tab 8 after the container; spring sampled in the app: response
   0.31 s / damping 0.81 expanding, 0.30 s / 0.82 collapsing, 1.1 % overshoot.
+
+#### Many tabs (1.57.1 binary, 2026-11-15)
+
+Not measured in pixels: Dia is read-only here and its strip with dozens of tabs was never captured. Its binary names
+the layout's inputs, which say what it does: `TabStrip.TabStripLayout` takes a `TabStripLayoutConfiguration`
+(`maximumTabWidth`, `lockedMaximumTabWidth`, `standardTabWidth`, `dockWidth`, `itemSpacing`, `trailingReservedWidth`,
+`contentInsets`, `bottomDragBufferRegionHeight`) and gives each item `TabStripItemLayoutAttributes` with its own
+`naturalWidth`, `minWidth` and `hasCloseButton`, plus a `primarySelectedTabID`, `tabsWithExpandedPreviewWidth` and a
+`hoverExitLayoutUnlockTask` (widths held until the pointer leaves after a close, Chrome's rule). A
+`TabStripClippingView` and a `fadeWidth` sit next to it. So: the selected tab has its own minimum, narrow tabs drop ×,
+the strip scrolls inside a clipped, faded view. Ardia (2026-11-15, `tabstrip/tokens.ts`): an even share of the room
+down to each tab's own minimum, then scrolling: 32 pt for a tab with its own favicon (favicon only below 52 pt), 64 pt
+for a tab whose favicon is shared or missing, 128 pt for the selected tab, 173 pt at most; × on hover only, and not
+below 84 pt; an 88 pt fade (to 0.25 opacity) at an edge that hides tabs; widths spring on a selection change at Dia's
+group spring (0.30 s, 0.82); drag auto-scroll within 48 pt of an edge, up to 14 pt a frame; a mouse wheel 40 pt a line.
 
 #### Dragging tabs and split targets (1.50.1, owner's 2× recordings, 2026-10-01)
 

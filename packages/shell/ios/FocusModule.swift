@@ -30,7 +30,7 @@ public class FocusModule: Module {
         guard let self else { return }
         FocusHandoff.shared.install()
         self.watchUnclaimedEscape()
-        if let queue = self.appContext?.reactBridge?.uiManager.methodQueue {
+        if let queue = self.appContext?.reactBridge?.uiManager?.methodQueue {
           FocusHandoff.shared.afterPendingUI = { block in queue.async { DispatchQueue.main.async(execute: block) } }
           Self.pendingUIOwner = ObjectIdentifier(self)
         }
@@ -41,6 +41,7 @@ public class FocusModule: Module {
 
     Function("pressesWithoutRelease") { () -> Int in PressRelease.pressesWithoutRelease }
     AsyncFunction("pressRepeated") { () -> [String: Any]? in PressRelease.pressRepeated }.runOnQueue(.main)
+    Function("takeEditKeyAcks") { () -> [String: Int] in FocusHandoff.shared.takeEditKeyAcks() }
     AsyncFunction("cancelFocusMove") { (generation: Int, restoringSource: Bool) in
       FocusHandoff.shared.cancel(generation, restoringSource: restoringSource)
     }.runOnQueue(.main)

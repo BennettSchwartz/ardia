@@ -27,6 +27,8 @@ import { isLastRegularWindow, isOpenRegularWindow, isRegularWindow, isSmall, isS
 import { activated, apply, removeTabs, withNewTab } from "../tabs/tabs";
 import type { AdoptId, BrowserWindow, ClosedWindow, Frame, ParkedPins, Tab, WindowKind } from "../browser/types";
 import { emptyWindow, smallWindow, withWindow } from "./newWindow";
+import { withWindowFrame, withWindowMaximized } from "./windowPlacement";
+import { withFullScreen } from "./fullScreenDisplay";
 import { newTabHome } from "../tabs/newTabHome";
 import { noteAutoHideTabsChosen, noteTornOffWindowKeptAutoHide } from "../telemetry/autoHideTabsChoices";
 import { lastClosedEntry, lastClosedTab, restoreTab, restoreWindow, withoutRecentlyClosed } from "./reopenClosed";
@@ -47,7 +49,7 @@ export type CreateWindowOptions = {
   linkPointer?: [number, number];
   linkApp?: string;
   background?: boolean;
-  chromeWindow?: string;
+  chromeWindow?: string; opensBehind?: string;
 };
 
 export type CloseWindowOptions = { keepsLastWindow?: boolean };
@@ -62,8 +64,9 @@ export type WindowsSlice = {
 
   createWindow(options?: CreateWindowOptions): string;
   closeWindow(id: string, options?: CloseWindowOptions): void;
-  setWindowFrame(id: string, frame: Frame): void;
-  setWindowFullScreen(id: string, on: boolean): void;
+  setWindowFrame(id: string, frame: Frame, restored?: Frame, fitted?: boolean): void;
+  setWindowMaximized(id: string, on: boolean): void;
+  setWindowFullScreen(id: string, on: boolean, display?: string): void;
   toggleSidebar(windowId: string): void;
   switchProfile(windowId: string, profileId: string): void;
   moveTabsToWindow(tabIds: string[], windowId: string | null, options?: MoveOptions): string | undefined;
@@ -183,7 +186,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     const w: BrowserWindow =
       kind === "small"
         ? { ...smallWindow(id, profileId, o.frame ?? null), ...(o.linkPointer ? { linkPointer: o.linkPointer } : {}), ...(o.linkApp ? { linkApp: o.linkApp } : {}) }
-        : { ...emptyWindow(id, profileId, kind, o.frame ?? null), ...(o.chromeWindow ? { chromeWindow: o.chromeWindow } : {}) };
+        : { ...emptyWindow(id, profileId, kind, o.frame ?? null), ...(o.chromeWindow ? { chromeWindow: o.chromeWindow } : {}), ...(o.opensBehind && kind === "main" ? { opensBehind: o.opensBehind } : {}) };
     const from = o.tabIds?.length && !small ? s.windows[s.tabs[o.tabIds[0]!]?.windowId ?? ""] : undefined;
     if (from?.autoHideTabs !== undefined && !isSmallWindow(from)) {
       w.autoHideTabs = from.autoHideTabs;
@@ -204,7 +207,7 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
         ui: { ...next.ui, focusOrder: [focused, id, ...s.ui.focusOrder.filter((w) => w !== focused)], lastProfileId: s.ui.lastProfileId },
       };
     }
-    set(next);
+    set(o.opensBehind && kind === "main" ? { ...next, ui: { ...next.ui, focusOrder: s.ui.focusOrder, lastProfileId: s.ui.lastProfileId } } : next);
     home?.settle(first, get, () => {});
     return id;
   },
@@ -237,24 +240,19 @@ export const createWindowsSlice: StateCreator<BrowserState, [], [], WindowsSlice
     });
   },
 
-  setWindowFrame(id, frame) {
-    set((s) => {
-      const w = s.windows[id];
-      if (!w || (w.frame && w.frame.every((v, i) => v === frame[i]))) return {};
-      const windows = { ...s.windows, [id]: { ...w, frame } };
-      if (!isSmallWindow(w)) return { windows };
-      const size: [number, number] = [Math.round(frame[2]), Math.round(frame[3])];
-      const [width, height] = s.settings.littleArdiaSize;
-      return size[0] === width && size[1] === height ? { windows } : { windows, settings: { ...s.settings, littleArdiaSize: size } };
-    });
+  setWindowFrame(id, frame, restored, fitted) {
+    set((s) => withWindowFrame(s, id, frame, restored, fitted));
   },
 
-  setWindowFullScreen(id, on) {
+  setWindowMaximized(id, on) {
+    set((s) => withWindowMaximized(s, id, on));
+  },
+
+  setWindowFullScreen(id, on, display) {
     set((s) => {
       const w = s.windows[id];
-      if (!w || !!w.fullScreen === on) return {};
-      const { fullScreen: _, ...rest } = w;
-      return { windows: { ...s.windows, [id]: on ? { ...rest, fullScreen: Date.now() } : rest } };
+      const next = w && withFullScreen(w, on, display);
+      return next ? { windows: { ...s.windows, [id]: next } } : {};
     });
   },
 

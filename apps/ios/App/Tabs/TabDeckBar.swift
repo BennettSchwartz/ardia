@@ -6,6 +6,8 @@ struct StartBar: View {
   let plus: PlusActions
   let tabs: () -> Void
   let settings: () -> Void
+  let sidesShown: Bool
+  let centreShown: Bool
 
   @Environment(\.screenLayout) private var screenLayout
 
@@ -24,12 +26,16 @@ struct StartBar: View {
   private var row: some View {
     HStack(spacing: 0) {
       GlassCircleButton(symbol: "square.on.square", label: "Tabs", action: tabs)
+        .barReturn(.leading, isShown: sidesShown)
       Spacer(minLength: TabsLayout.barGap)
-      PlusButton(actions: plus, width: TabsLayout.barPlus.width)
+      PlusButton(actions: plus, width: TabsLayout.barPlusWidth)
+        .reportsBarAnchor(.start, face: .plus)
+        .barReturn(.centre, isShown: centreShown)
       Spacer(minLength: TabsLayout.barGap)
       GlassCircleButton(symbol: "gearshape", label: "Settings", action: settings)
+        .barReturn(.trailing, isShown: sidesShown)
     }
-    .padding(.horizontal, geometry.safeSide + TabsLayout.barSideInset)
+    .padding(.horizontal, geometry.safeSide + BrowseLayout.barEdgeInset)
     .frame(width: geometry.container.width)
     .position(x: geometry.container.width / 2, y: geometry.barCenterY)
   }
@@ -49,7 +55,7 @@ struct DeckBottomBar: View {
       SearchTabsField(query: $query, focus: searchFocus)
       PlusButton(actions: plus, width: TabsLayout.barCircle)
     }
-    .padding(.horizontal, geometry.safeSide + TabsLayout.barSideInset)
+    .padding(.horizontal, geometry.safeSide + BrowseLayout.barEdgeInset)
   }
 }
 
@@ -68,13 +74,11 @@ struct PlusButton: View {
 
   var body: some View {
     Button(action: actions.newTab) {
-      Image(systemName: "plus")
-        .font(.system(size: 18, weight: .medium))
-        .foregroundStyle(.primary)
+      PlusGlyph()
         .frame(width: width, height: TabsLayout.barCircle)
         .contentShape(.capsule)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(BarButtonStyle())
     .chromeSurface(in: .capsule)
     .contextMenu {
       if actions.isIncognito {
@@ -92,6 +96,14 @@ struct PlusButton: View {
   }
 }
 
+struct PlusGlyph: View {
+  var body: some View {
+    Image(systemName: "plus")
+      .font(.system(size: 18, weight: .medium))
+      .foregroundStyle(.primary)
+  }
+}
+
 struct GlassCircleButton: View {
   let symbol: String
   let label: LocalizedStringKey
@@ -102,7 +114,7 @@ struct GlassCircleButton: View {
     Button(action: action) {
       GlassCircleFace(symbol: symbol, diameter: diameter)
     }
-    .buttonStyle(.plain)
+    .buttonStyle(BarButtonStyle())
     .accessibilityLabel(label)
   }
 }
