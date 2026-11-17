@@ -29,6 +29,7 @@
 #include "LaunchConfig.h"
 #include "Paths.h"
 #include "WindowFade.h"
+#include "WheelProbe.h"
 #include "WindowPlacement.h"
 
 #pragma comment(lib, "dwmapi.lib")
@@ -224,6 +225,7 @@ struct WindowManager {
       ApplyTheme(entry, m_dark);
       bool maximize = Place(entry, request);
       Watch(entry);
+      WheelProbe::WatchIsland(entry.window.ReactNativeIsland(), entry.id);
       if (InstanceLoad::Shared().loaded) Mount(entry);
       ConnectNonClientInput(entry);
       ApplyInputRegions(entry);

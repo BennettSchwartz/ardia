@@ -1360,6 +1360,50 @@ if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesU
   }
 }
 
+if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesUp) {
+  $probeLog = Join-Path $Out "wheel-probe.log"
+  $env:ARDIA_DATA_DIR = New-DataDirectory "wheel-probe-data"
+  $env:ARDIA_CONFIG_DIR = $env:ARDIA_DATA_DIR
+  Set-Content -Path (Join-Path $env:ARDIA_DATA_DIR "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
+  Set-Content -Path (Join-Path $env:ARDIA_DATA_DIR "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
+  $env:ARDIA_TEST = "wheelProbe=1"
+  $probeApp = Start-Process -FilePath $App -ArgumentList "--log-file=`"$probeLog`"", "http://127.0.0.1:$httpPagesPort/a" -PassThru
+  $env:ARDIA_TEST = ""
+  $env:ARDIA_CONFIG_DIR = ""
+  try {
+    Start-Sleep -Seconds 12
+    $probeApp.Refresh()
+    if ($probeApp.HasExited) { Write-Host "Wheel probe: the app exited on its own (exit code $($probeApp.ExitCode))" }
+    else {
+      [ArdiaInput]::SetForegroundWindow($probeApp.MainWindowHandle) | Out-Null
+      Start-Sleep -Milliseconds 400
+      $client = Get-ClientArea $probeApp
+      $places = @(
+        @{ Name = "sidebar"; X = $client.X + [int](60 * $client.Scale); Y = $client.Y + [int]($client.Height * 0.5) },
+        @{ Name = "page"; X = $client.X + [int]($client.Width * 0.7); Y = $client.Y + [int]($client.Height * 0.6) }
+      )
+      foreach ($place in $places) {
+        [ArdiaInput]::SetCursorPos($place.X, $place.Y) | Out-Null
+        Start-Sleep -Milliseconds 400
+        foreach ($wheel in @(@{ Name = "MOUSEEVENTF_WHEEL down"; Flag = 0x0800; Data = [uint32]4294967176 }, @{ Name = "MOUSEEVENTF_HWHEEL right"; Flag = 0x01000; Data = [uint32]120 }, @{ Name = "MOUSEEVENTF_HWHEEL left"; Flag = 0x01000; Data = [uint32]4294967176 })) {
+          $mark = if (Test-Path $probeLog) { @(Get-Content -LiteralPath $probeLog).Count } else { 0 }
+          [ArdiaInput]::mouse_event([uint32]$wheel.Flag, 0, 0, $wheel.Data, [UIntPtr]::Zero)
+          Start-Sleep -Milliseconds 700
+          $lines = if (Test-Path $probeLog) { @(Get-Content -LiteralPath $probeLog | Select-Object -Skip $mark | Where-Object { $_ -match "wheel probe" }) } else { @() }
+          Write-Host "Wheel probe: $($wheel.Name) over the $($place.Name) at $($place.X),$($place.Y): $($lines.Count) probe lines"
+          foreach ($line in $lines) { Write-Host "  $line" }
+        }
+      }
+      if (Test-Path $probeLog) { Select-String -Path $probeLog -Pattern "wheel probe: (WH_MOUSE hook|watching|no content|the island|WH_MOUSE call)" | ForEach-Object { Write-Host "Wheel probe log: $($_.Line)" } }
+    }
+  } finally {
+    if (-not $probeApp.HasExited) {
+      Stop-Process -Id $probeApp.Id -Force
+      $probeApp.WaitForExit(10000) | Out-Null
+    }
+  }
+}
+
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
