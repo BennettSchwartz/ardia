@@ -5,8 +5,6 @@ import { decodePng, distinctColors, hasPngSignature, minimumAlpha } from "../lib
 import { sessionSeed } from "../lib/seed.mjs";
 import { until } from "../lib/util.mjs";
 
-// A page that is one flat colour no part of the shell uses, so its pixels in the window's picture can only
-// come from the page's own view.
 const PAGE = "data:text/html,<title>Window snapshot</title><body style=\"margin:0;background:%23ff00ff\"></body>";
 const nearMagenta = (pixels, at) => pixels[at] > 247 && pixels[at + 1] < 8 && pixels[at + 2] > 247 && pixels[at + 3] === 255;
 

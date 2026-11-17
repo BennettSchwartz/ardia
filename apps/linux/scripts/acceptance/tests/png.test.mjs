@@ -10,11 +10,9 @@ function chunk(type, body) {
   out.writeUInt32BE(body.length, 0);
   out.write(type, 4, "latin1");
   body.copy(out, 8);
-  // The decoder does not check CRCs; a zero CRC keeps the fixture small.
   return out;
 }
 
-// `rows` holds one array of channel bytes per scanline and `filters` one filter type per scanline.
 function png({ width, height, colorType = 6, rows, filters = rows.map(() => 0) }) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
@@ -52,7 +50,6 @@ describe("the acceptance suite's PNG reader", () => {
   });
 
   it("undoes the sub, up, average and Paeth filters", () => {
-    // The same two pixels per row, stored through each filter: only the filtered bytes differ.
     const first = [10, 20, 30, 255, 40, 60, 80, 255];
     const second = [11, 22, 33, 255, 44, 66, 88, 255];
     const sub = (row) => row.map((v, i) => (v - (i >= 4 ? row[i - 4] : 0)) & 255);

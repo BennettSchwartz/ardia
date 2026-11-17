@@ -35,8 +35,6 @@ function unfilter(raw, width, height, channels) {
   return out;
 }
 
-// Decodes an 8-bit, non-interlaced RGB or RGBA PNG, the form Chromium's PNG codec writes.
-// `pixels` holds width * height RGBA quads; an RGB picture reads as opaque.
 export function decodePng(buffer) {
   if (!hasPngSignature(buffer)) throw new Error("the file does not start with the PNG signature");
   let header = null;
@@ -67,7 +65,6 @@ export function decodePng(buffer) {
   return { width, height, pixels };
 }
 
-// How many different colours a rectangle of the picture holds, counting up to `limit`.
 export function distinctColors({ width, height, pixels }, { x = 0, y = 0, w = width, h = height } = {}, limit = 16) {
   const seen = new Set();
   for (let row = Math.max(0, y); row < Math.min(height, y + h) && seen.size < limit; row++) {
@@ -79,7 +76,6 @@ export function distinctColors({ width, height, pixels }, { x = 0, y = 0, w = wi
   return seen.size;
 }
 
-// The smallest alpha in the picture: 255 when the whole window is opaque.
 export function minimumAlpha({ width, height, pixels }) {
   let least = 255;
   for (let i = 3; i < width * height * 4 && least > 0; i += 4) least = Math.min(least, pixels[i]);
