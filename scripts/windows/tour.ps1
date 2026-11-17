@@ -1828,7 +1828,7 @@ function Invoke-SidebarWheelTour {
   Invoke-Stop $session "sidebar-wheel-scroll" "The mouse wheel scrolls a sidebar tab list longer than the sidebar" {
     param($stop)
     $stop.Did = "Opened 34 tabs with Ctrl+T, put the pointer over the middle of the sidebar's tab list and turned the wheel 5 notches up, then 5 notches down, reading the list's pixels before and after each."
-    $stop.Expected = "the list moves under the pointer: its rows shift by the scrolled distance one way, then back."
+    $stop.Expected = "the list moves under the pointer and back: each turn shifts its rows (matching far better shifted than unmoved), the second by the opposite of the first. The rows look alike every row, so the size of the shift is known only up to a row's height."
     Focus-Window $session $session.Main $stop | Out-Null
     foreach ($i in 1..34) {
       Send-Chord @(0x11) 0x54
@@ -1857,8 +1857,8 @@ function Invoke-SidebarWheelTour {
     $second = Get-StripShift $up $down
     $stop.Facts.Add("wheel up: the list's rows moved by $($first.Shift) px (match $($first.Score), unmoved $($first.Unmoved))")
     $stop.Facts.Add("wheel down: the list's rows moved by $($second.Shift) px (match $($second.Score), unmoved $($second.Unmoved))")
-    $moved = { param($s) $s -and [Math]::Abs($s.Shift) -ge [int](20 * $client.Scale) -and $s.Score -lt $s.Unmoved }
-    Set-Seen $stop ((& $moved $first) -or (& $moved $second))
+    $moved = { param($s) $s -and $s.Shift -ne 0 -and $s.Score -lt $s.Unmoved / 2 }
+    Set-Seen $stop ((& $moved $first) -and (& $moved $second) -and $first.Shift -eq -$second.Shift)
   } | Out-Null
   Stop-Ardia $session
 }
