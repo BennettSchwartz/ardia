@@ -33,6 +33,19 @@ const heldChecks: Check[] = [
       }),
   },
   {
+    name: "engine now playing: in a muted tab, the card's pause stops a cross-site frame's song, not the muted looping preview video ahead of it",
+    run: () =>
+      withReports("np-preview", "npframe?preview", FRAME_TITLE, async (key, reports, windowId) => {
+        await playFrame(key, windowId);
+        await until("the frame's muted preview video plays too", SETTLE_MS, () => pageState(key), (state) => state.frame?.preview === true);
+        await reported(reports, "the frame's song is reported playing and controllable", (now) => isPlaying(now) && now?.controllable === true);
+        await mute(key, true);
+        await pause(500);
+        await command(key, "pause");
+        await until("the card's pause stops the frame's song, which comes after the muted preview in the document", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
+      }),
+  },
+  {
     name: "engine now playing: in a muted tab, the card goes when the player it stands for is gone, though another player that played stays",
     run: () =>
       withReports("np-represented", "nowplaying?second&long", TITLE, async (key, reports) => {

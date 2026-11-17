@@ -4,7 +4,7 @@ import { SETTLE_MS, withMedia } from "./engineAutoplayKit";
 import { evaluate, LEFT, show, until } from "./engineSleep";
 
 export type NowPlaying = { title?: string; artist?: string; album?: string; artwork?: string | null; playbackState?: string; position?: number; duration?: number | null; playbackRate?: number; timestamp?: number; hasVideo?: boolean; actions?: string[]; controllable?: boolean; loop?: boolean };
-export type PageState = { paused?: boolean; time?: number; ended?: boolean; calls?: string[]; ad?: { active?: boolean; tried?: string | null } | null; frame?: { paused?: boolean; time?: number; calls?: string[] } | null; burstDone?: boolean };
+export type PageState = { paused?: boolean; time?: number; ended?: boolean; calls?: string[]; ad?: { active?: boolean; tried?: string | null } | null; frame?: { paused?: boolean; time?: number; calls?: string[]; preview?: boolean | null } | null; burstDone?: boolean };
 export type Image = { uri?: string | null; width?: number; height?: number };
 
 export const TITLE = "now playing page";
