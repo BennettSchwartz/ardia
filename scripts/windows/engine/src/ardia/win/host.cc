@@ -13,6 +13,8 @@
 #include "ardia/core/ac_launch_switches.h"
 #include "ardia/win/autoplay.h"
 #include "ardia/win/context_menu.h"
+#include "ardia/win/extension_actions.h"
+#include "ardia/win/extension_popup.h"
 #include "ardia/win/frame_view.h"
 #include "ardia/win/hooks.h"
 #include "ardia/win/hosted_window.h"
@@ -235,10 +237,33 @@ void Host::Call(const std::string& verb,
     CreateTab(std::move(args), window, std::move(reply));
     return;
   }
+  if (verb == "extensions.actions") {
+    WithProfile(Text(args, "profile"),
+                base::BindOnce(
+                    [](Reply reply, Profile* profile) {
+                      base::DictValue result;
+                      result.Set("actions", ExtensionActionsOf(profile));
+                      std::move(reply).Run(std::move(result));
+                    },
+                    std::move(reply)));
+    return;
+  }
+  if (verb == "popup.create") {
+    CreatePopup(std::move(args), window, std::move(reply));
+    return;
+  }
   if (verb == "tab.call") {
+    if (ExtensionPopup* popup = FindPopup(Text(args, "key"))) {
+      CallPopup(popup, args, std::move(reply));
+      return;
+    }
     content::WebContents* contents = Find(Text(args, "key"));
     if (!contents) {
       std::move(reply).Run(Error("no such tab"));
+      return;
+    }
+    if (CallExtensionTabMethod(contents, window, Text(args, "method"), args,
+                               reply)) {
       return;
     }
     if (std::optional<base::DictValue> done = CallTab(contents, args)) {
@@ -380,6 +405,8 @@ void Host::TabDestroyed(TabState* state) {
 
 void Host::ParentDestroying(HWND parent) {
   parents_.erase(parent);
+  ForgetPopupGrants(parent);
+  ClosePopupsOf(parent);
   for (auto& entry : hosted_) {
     Hosted& hosted = entry.second;
     if (hosted.parent != parent) {
@@ -519,6 +546,9 @@ void Host::CreateTabInProfile(std::string key,
 
 base::DictValue Host::ShowTab(const base::DictValue& args, HWND parent) {
   std::string key = Text(args, "key");
+  if (ExtensionPopup* popup = FindPopup(key)) {
+    return ShowPopup(popup, args, parent);
+  }
   content::WebContents* contents = Find(key);
   if (!contents) {
     return Error("no such tab");
@@ -563,24 +593,13 @@ base::DictValue Host::ShowTab(const base::DictValue& args, HWND parent) {
   hosted.parent = parent;
   WatchParent(parent);
   SetOwner(window, parent);
-  double scale = Text(args, "unit") == "px"
-                     ? 1.0
-                     : ::GetDpiForWindow(parent) / 96.0;
-  int x = Scaled(args.FindDouble("x").value_or(0), scale);
-  int y = Scaled(args.FindDouble("y").value_or(0), scale);
-  int width = Scaled(args.FindDouble("x").value_or(0) +
-                         args.FindDouble("width").value_or(0),
-                     scale) -
-              x;
-  int height = Scaled(args.FindDouble("y").value_or(0) +
-                          args.FindDouble("height").value_or(0),
-                      scale) -
-               y;
-  hosted.place = gfx::Rect(x, y, width, height);
+  double scale = 1;
+  hosted.place = PlaceFromArgs(args, parent, &scale);
   Place(window, hosted);
-  ShapeWindow(window, x, y, width, height,
-        Scaled(args.FindDouble("radius").value_or(0), scale),
-        args.FindList("holes"), scale);
+  ShapeWindow(window, hosted.place.x(), hosted.place.y(),
+              hosted.place.width(), hosted.place.height(),
+              Scaled(args.FindDouble("radius").value_or(0), scale),
+              args.FindList("holes"), scale);
   if (!::IsWindowVisible(window)) {
     browser->GetWindow()->ShowInactive();
     Place(window, hosted);
@@ -594,6 +613,10 @@ base::DictValue Host::ShowTab(const base::DictValue& args, HWND parent) {
 
 base::DictValue Host::CloseTab(const base::DictValue& args) {
   std::string key = Text(args, "key");
+  if (popups_.contains(key)) {
+    DropPopup(key);
+    return Ok();
+  }
   content::WebContents* contents = Find(key);
   if (!contents) {
     return Ok();
@@ -792,6 +815,7 @@ base::DictValue Host::Info() {
   result.Set("pageWindows", static_cast<int>(hosted_.size()));
   result.Set("popupBrowsers", static_cast<int>(popup_browsers_.size()));
   result.Set("offers", static_cast<int>(offers_.size()));
+  result.Set("popups", static_cast<int>(popups_.size()));
   result.Set("testInstance", ardiacore::TestInstance());
   result.Set("keyboardPage", KeyboardPage());
   result.Set("keyboardMayMove", KeyboardMayMove());
@@ -1053,19 +1077,29 @@ void Host::GiveKeyboard(Browser* browser,
                         content::WebContents* contents,
                         bool follow,
                         bool background) {
-  HWND window = WindowOf(browser);
   auto found = hosted_.find(browser);
-  HWND parent = found != hosted_.end() ? found->second.parent : nullptr;
   TabState* state = TabState::FromWebContents(contents);
+  GiveKeyboardTo(WindowOf(browser),
+                 found != hosted_.end() ? found->second.parent : nullptr,
+                 contents, state ? state->key() : std::string(), follow,
+                 background);
+}
+
+void Host::GiveKeyboardTo(HWND window,
+                          HWND parent,
+                          content::WebContents* contents,
+                          const std::string& key,
+                          bool follow,
+                          bool background) {
   if (parent) {
     keyboard_wanted_.erase(parent);
   }
-  if (!window || !parent || !state) {
+  if (!window || !parent || key.empty()) {
     return;
   }
   if (background || !KeyboardMayMove()) {
     if (background || !ardiacore::BackgroundInstance()) {
-      keyboard_wanted_[parent] = state->key();
+      keyboard_wanted_[parent] = key;
     }
     return;
   }
@@ -1093,6 +1127,13 @@ void Host::ApplyWantedKeyboard(HWND parent) {
   }
   const std::string key = wanted->second;
   keyboard_wanted_.erase(wanted);
+  if (ExtensionPopup* popup = FindPopup(key)) {
+    if (popup->shown() && popup->parent() == parent) {
+      GiveKeyboardTo(popup->window(), parent, popup->contents(), key, true,
+                     false);
+    }
+    return;
+  }
   content::WebContents* contents = Find(key);
   Browser* browser = contents ? BrowserOf(contents) : nullptr;
   auto found = browser ? hosted_.find(browser) : hosted_.end();
@@ -1111,19 +1152,46 @@ std::string Host::KeyboardPage() const {
       return entry.second.shown;
     }
   }
+  for (const auto& [key, popup] : popups_) {
+    HWND window = popup->window();
+    if (window && focus && (focus == window || ::IsChild(window, focus))) {
+      return key;
+    }
+  }
   return std::string();
 }
 
 void Host::Place(HWND window, const Hosted& hosted) {
-  if (!hosted.parent || !::IsWindow(hosted.parent)) {
+  Place(window, hosted.parent, hosted.place);
+}
+
+void Host::Place(HWND window, HWND parent, const gfx::Rect& place) {
+  if (!parent || !::IsWindow(parent)) {
     return;
   }
-  POINT origin = {hosted.place.x(), hosted.place.y()};
-  ::ClientToScreen(hosted.parent, &origin);
+  POINT origin = {place.x(), place.y()};
+  ::ClientToScreen(parent, &origin);
   base::AutoReset<bool> placing(&placing_, true);
-  ::SetWindowPos(window, nullptr, origin.x, origin.y, hosted.place.width(),
-                 hosted.place.height(),
+  ::SetWindowPos(window, nullptr, origin.x, origin.y, place.width(),
+                 place.height(),
                  SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER);
+}
+
+gfx::Rect Host::PlaceFromArgs(const base::DictValue& args,
+                              HWND parent,
+                              double* scale) const {
+  *scale = Text(args, "unit") == "px" ? 1.0 : ::GetDpiForWindow(parent) / 96.0;
+  const int x = Scaled(args.FindDouble("x").value_or(0), *scale);
+  const int y = Scaled(args.FindDouble("y").value_or(0), *scale);
+  const int width = Scaled(args.FindDouble("x").value_or(0) +
+                               args.FindDouble("width").value_or(0),
+                           *scale) -
+                    x;
+  const int height = Scaled(args.FindDouble("y").value_or(0) +
+                                args.FindDouble("height").value_or(0),
+                            *scale) -
+                     y;
+  return gfx::Rect(x, y, width, height);
 }
 
 void Host::ParentMoved(HWND parent) {
@@ -1154,6 +1222,10 @@ HWND Host::ShownParentOf(HWND window) {
       return nullptr;
     }
     return hosted.parent;
+  }
+  if (ExtensionPopup* popup = PopupOfWindow(window)) {
+    return popup->shown() && ::IsWindow(popup->parent()) ? popup->parent()
+                                                          : nullptr;
   }
   return nullptr;
 }
@@ -1231,22 +1303,31 @@ void Host::PutBack(HWND window) {
   if (!put_back_pending_.erase(window) || !ShownParentOf(window)) {
     return;
   }
+  HWND parent = nullptr;
+  gfx::Rect place;
   for (const auto& [browser, hosted] : hosted_) {
-    if (hosted.shown.empty() || WindowOf(browser) != window) {
-      continue;
+    if (!hosted.shown.empty() && WindowOf(browser) == window) {
+      parent = hosted.parent;
+      place = hosted.place;
+      break;
     }
-    POINT origin = {hosted.place.x(), hosted.place.y()};
-    RECT now;
-    if (!::ClientToScreen(hosted.parent, &origin) ||
-        !::GetWindowRect(window, &now)) {
-      return;
+  }
+  if (!parent) {
+    if (ExtensionPopup* popup = PopupOfWindow(window)) {
+      parent = popup->parent();
+      place = popup->place();
     }
-    if (now.left != origin.x || now.top != origin.y ||
-        now.right - now.left != hosted.place.width() ||
-        now.bottom - now.top != hosted.place.height()) {
-      Place(window, hosted);
-    }
+  }
+  POINT origin = {place.x(), place.y()};
+  RECT now;
+  if (!parent || !::ClientToScreen(parent, &origin) ||
+      !::GetWindowRect(window, &now)) {
     return;
+  }
+  if (now.left != origin.x || now.top != origin.y ||
+      now.right - now.left != place.width() ||
+      now.bottom - now.top != place.height()) {
+    Place(window, parent, place);
   }
 }
 
@@ -1272,6 +1353,9 @@ std::string Host::PageKeyFor(ui::Event* event) const {
     if (!entry.second.shown.empty() && WindowOf(entry.first) == window) {
       return entry.second.shown;
     }
+  }
+  if (ExtensionPopup* popup = PopupOfWindow(window)) {
+    return popup->key();
   }
   return std::string();
 }
@@ -1300,6 +1384,19 @@ bool Host::OpensLivePage(const content::WebContents* contents) const {
     content::WebContents* offered = offer.contents.get();
     content::RenderFrameHost* opener = offered ? offered->GetOpener() : nullptr;
     if (opener && content::WebContents::FromRenderFrameHost(opener) == contents) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool Host::ShowsIn(const content::WebContents* contents, HWND parent) const {
+  const TabState* state = TabState::FromWebContents(contents);
+  if (!state || state->key().empty() || !parent) {
+    return false;
+  }
+  for (const auto& [browser, hosted] : hosted_) {
+    if (hosted.parent == parent && hosted.shown == state->key()) {
       return true;
     }
   }
@@ -1444,6 +1541,9 @@ void Host::NoteOpened(Browser* browser,
   }
   payload.Set("parent", base::NumberToString(reinterpret_cast<uintptr_t>(parent)));
   NoteOffer(contents, parent);
+  if (foreground) {
+    ClosePopupsOf(parent);
+  }
   payload.Set("fromClick", false);
   if (popup || !foreground || foreign || opener_key.empty() ||
       !OpenRequest::FromWebContents(contents)) {

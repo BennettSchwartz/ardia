@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -36,6 +37,7 @@ class WebContents;
 
 namespace ardia_win {
 
+class ExtensionPopup;
 class TabState;
 
 class Host : public TabStripModelObserver,
@@ -57,6 +59,10 @@ class Host : public TabStripModelObserver,
   int CloseBrowsersOf(Profile* profile);
   void ForgetProfile(Profile* profile);
   bool Shows(const std::string& key) const;
+  bool ShowsIn(const content::WebContents* contents, HWND parent) const;
+  Browser* BrowserOfTab(content::WebContents* contents) const {
+    return BrowserOf(contents);
+  }
   bool OpensLivePage(const content::WebContents* contents) const;
   HWND VisibleParent() const;
   void TabDestroyed(TabState* state);
@@ -72,6 +78,7 @@ class Host : public TabStripModelObserver,
                    WindowOpenDisposition disposition,
                    const blink::mojom::WindowFeatures& features);
   void OfferInserted();
+  void DropPopup(const std::string& key);
 
   void OnTabStripModelChanged(
       TabStripModel* tab_strip_model,
@@ -133,6 +140,25 @@ class Host : public TabStripModelObserver,
                     content::WebContents* contents,
                     bool follow,
                     bool background);
+  void GiveKeyboardTo(HWND window,
+                      HWND parent,
+                      content::WebContents* contents,
+                      const std::string& key,
+                      bool follow,
+                      bool background);
+  void CreatePopup(base::DictValue args, HWND parent, Reply reply);
+  ExtensionPopup* FindPopup(const std::string& key) const;
+  ExtensionPopup* PopupOfWindow(HWND window) const;
+  base::DictValue ShowPopup(ExtensionPopup* popup,
+                            const base::DictValue& args,
+                            HWND parent);
+  void CallPopup(ExtensionPopup* popup, const base::DictValue& args,
+                 Reply reply);
+  void ClosePopupsOf(HWND parent);
+  gfx::Rect PlaceFromArgs(const base::DictValue& args,
+                          HWND parent,
+                          double* scale) const;
+  void Place(HWND window, HWND parent, const gfx::Rect& place);
   void ApplyWantedKeyboard(HWND parent);
   std::string KeyboardPage() const;
   void CloseSparePages();
@@ -158,6 +184,7 @@ class Host : public TabStripModelObserver,
   void FullscreenLeft(HWND window);
 
   std::map<Browser*, Hosted> hosted_;
+  std::map<std::string, std::unique_ptr<ExtensionPopup>> popups_;
   std::set<Browser*> popup_browsers_;
   struct Opening {
     raw_ptr<Browser> browser = nullptr;
