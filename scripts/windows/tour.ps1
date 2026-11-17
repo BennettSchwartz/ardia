@@ -2535,12 +2535,13 @@ function Wait-AppEnded($Session, [int]$Milliseconds) {
   $ended = $Session.Process.WaitForExit($Milliseconds)
   Start-Sleep -Milliseconds 300
   $last = [string](@(Read-LogLines $Session.Log) | Select-Object -Last 1)
-  if ($ended) {
+  $clean = $ended -and $last -match "process ending"
+  if ($clean) {
     $Session.Stopping = $true
     $Session.Summary = "Quit by the tour's close, as it should (exit code $($Session.Process.ExitCode))."
     Write-Host "[tour] '$($Session.Name)': $($Session.Summary)"
   }
-  return [pscustomobject]@{ Ended = $ended; LastLine = $last; Clean = $ended -and $last -match "process ending" }
+  return [pscustomobject]@{ Ended = $ended; LastLine = $last; Clean = $clean }
 }
 
 function Invoke-QuitDownloadsTour {
