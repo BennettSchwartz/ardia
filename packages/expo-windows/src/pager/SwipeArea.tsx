@@ -1,19 +1,19 @@
 import { forwardRef, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { NativePagerConfig, NativeSwipeAreaProps } from "@ardia/ardiacore";
 import type { EventSubscription } from "expo-modules-core";
-import { View, type LayoutChangeEvent } from "react-native";
+import { View } from "react-native";
 import { WindowIdContext } from "../engine/windowId";
 import { noteFirstWindow, noteMissing } from "../missing";
 import { requireNativeModule } from "../modules";
 import { pagers } from "./index";
-import { wheelSwipe } from "./wheel";
+import { wheelPages, wheelSwipe } from "./wheel";
 import type { PagerArea, PagerConfig, PagerStateEvent } from "./pager";
 
 type KeyedConfig = PagerConfig & Pick<NativePagerConfig, "key">;
 
-type SwipeWheelEvent = { type: "swipeWheel"; id: string; key: string; delta: number };
+type SwipeWheelEvent = { type: "swipeWheel"; id: string; point: [number, number]; delta: number };
 type WindowsSwipe = {
-  setSwipeArea(id: string, key: string, rect: [number, number, number, number] | null): Promise<void>;
+  setSwipeArea(id: string, key: string, on: boolean): Promise<void>;
   addListener(name: "onWindowEvent", listener: (event: { type: string } & Partial<SwipeWheelEvent>) => void): EventSubscription;
 };
 
@@ -53,7 +53,6 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
   const windowId = useContext(WindowIdContext);
   const areaKey = useRef(`swipe-${++made}`).current;
   const view = useRef<View | null>(null);
-  const width = useRef(0);
   const handlers = useRef({ onPagerPosition, onPagerState, onSwipe, canSwipeBack, canSwipeForward });
   handlers.current = { onPagerPosition, onPagerState, onSwipe, canSwipeBack, canSwipeForward };
   const area = useMemo<PagerArea>(
@@ -90,27 +89,24 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
     if (config) pagers.existing(config.key)?.configure(config);
   }, [key, config?.selected, config?.count, config?.ack, config?.width, config?.order]);
 
-  const register = useCallback(() => {
-    if (!paging) return;
-    view.current?.measureInWindow((x, y, w, h) => {
-      width.current = w;
-      void windowsSwipe().setSwipeArea(windowId, areaKey, w > 0 && h > 0 ? [x, y, w, h] : null).catch(() => {});
-    });
-  }, [paging, windowId, areaKey]);
-
   useEffect(() => {
     if (!paging) return;
-    register();
+    void windowsSwipe().setSwipeArea(windowId, areaKey, true).catch(() => {});
     const subscription = windowsSwipe().addListener("onWindowEvent", (event) => {
-      if (event.type !== "swipeWheel" || event.id !== windowId || event.key !== areaKey || typeof event.delta !== "number") return;
-      const { onSwipe: swipe, canSwipeBack: back, canSwipeForward: forward } = handlers.current;
-      swipe?.({ nativeEvent: wheelSwipe(event.delta, back, forward, width.current) });
+      if (event.type !== "swipeWheel" || event.id !== windowId || typeof event.delta !== "number" || !Array.isArray(event.point)) return;
+      const [x, y] = event.point;
+      const delta = event.delta;
+      view.current?.measureInWindow((left, top, width, height) => {
+        if (!wheelPages(width, height) || x < left || y < top || x >= left + width || y >= top + height) return;
+        const { onSwipe: swipe, canSwipeBack: back, canSwipeForward: forward } = handlers.current;
+        swipe?.({ nativeEvent: wheelSwipe(delta, back, forward, width) });
+      });
     });
     return () => {
       subscription.remove();
-      void windowsSwipe().setSwipeArea(windowId, areaKey, null).catch(() => {});
+      void windowsSwipe().setSwipeArea(windowId, areaKey, false).catch(() => {});
     };
-  }, [paging, windowId, areaKey, register]);
+  }, [paging, windowId, areaKey]);
 
   const setRef = useCallback(
     (node: View | null) => {
@@ -121,13 +117,8 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
     [ref],
   );
 
-  const laidOut = (event: LayoutChangeEvent) => {
-    onLayout?.(event);
-    register();
-  };
-
   return (
-    <View {...rest} ref={setRef} onLayout={laidOut} pointerEvents={pointerEvents ?? "box-none"}>
+    <View {...rest} ref={setRef} onLayout={onLayout} pointerEvents={pointerEvents ?? "box-none"}>
       {children}
     </View>
   );

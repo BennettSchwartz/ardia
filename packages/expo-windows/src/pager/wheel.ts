@@ -4,3 +4,5 @@ export function wheelSwipe(delta: number, canSwipeBack: boolean, canSwipeForward
   const back = delta < 0;
   return { phase: "wheel" as const, direction: back ? ("back" as const) : ("forward" as const), distance: Math.abs(delta) / WHEEL_DELTA_PER_POINT, dy: 0, velocity: 0, available: back ? canSwipeBack : canSwipeForward, width };
 }
+
+export const wheelPages = (width: number, height: number) => width > 0 && height > width;

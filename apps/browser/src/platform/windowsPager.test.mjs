@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PagerRegistry, REST_DISPLACEMENT } from "../../../../packages/expo-windows/src/pager/pager.ts";
-import { wheelSwipe } from "../../../../packages/expo-windows/src/pager/wheel.ts";
+import { wheelPages, wheelSwipe } from "../../../../packages/expo-windows/src/pager/wheel.ts";
 
 const FRAME_MS = 1000 / 60;
 const MAC_SETTLE_ONE_PAGE_MS = 330;
@@ -216,4 +216,10 @@ test("a sideways wheel becomes the Mac's wheel swipe: negative is back, a notch 
   assert.deepEqual(wheelSwipe(-120, true, false, 240), { phase: "wheel", direction: "back", distance: 10, dy: 0, velocity: 0, available: true, width: 240 });
   assert.deepEqual(wheelSwipe(120, true, false, 240), { phase: "wheel", direction: "forward", distance: 10, dy: 0, velocity: 0, available: false, width: 240 });
   assert.equal(wheelSwipe(18, false, true, 240).distance, 1.5, "a touchpad's small deltas add up in profilePager's burst");
+});
+
+test("only an area taller than wide pages on a sideways wheel: a wide one sits over the top strip's own horizontal scrolling", () => {
+  assert.equal(wheelPages(240, 700), true, "the sidebar");
+  assert.equal(wheelPages(900, 38), false, "the top tab strip");
+  assert.equal(wheelPages(0, 0), false, "an area not laid out");
 });

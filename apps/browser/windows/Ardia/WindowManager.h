@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,6 @@
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Graphics.h>
-#include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
 
 #include "AppIcon.h"
@@ -72,7 +72,7 @@ struct ManagedWindow {
   std::vector<std::function<void()>> exits;
   std::vector<std::function<void()>> revealWaiters;
   int closeGeneration{0};
-  std::map<std::string, std::array<double, 4>> swipeAreas;
+  std::set<std::string> swipeAreas;
 
   bool IsBrowser() const noexcept {
     return kind == "browser" || kind == "small";
@@ -433,10 +433,10 @@ struct WindowManager {
     ToggleMaximized(*entry);
   }
 
-  void SetSwipeArea(std::string const &id, std::string const &key, std::optional<std::array<double, 4>> const &rect) noexcept {
+  void SetSwipeArea(std::string const &id, std::string const &key, bool on) noexcept {
     ManagedWindow *entry = Find(id);
     if (!entry) return;
-    if (rect) entry->swipeAreas[key] = *rect;
+    if (on) entry->swipeAreas.insert(key);
     else entry->swipeAreas.erase(key);
   }
 
@@ -1447,26 +1447,15 @@ struct WindowManager {
     auto point = args.CurrentPoint();
     auto properties = point.Properties();
     int32_t delta = properties.MouseWheelDelta();
-    bool shift = (args.KeyModifiers() & winrt::Windows::System::VirtualKeyModifiers::Shift) == winrt::Windows::System::VirtualKeyModifiers::Shift;
-    if (!properties.IsHorizontalMouseWheel()) {
-      if (!shift) return;
-      delta = -delta;
-    }
-    if (delta == 0) return;
-    double scale = Scale(entry->hwnd);
-    double x = point.Position().X / scale;
-    double y = point.Position().Y / scale;
-    for (auto const &[key, rect] : entry->swipeAreas) {
-      if (x < rect[0] || y < rect[1] || x >= rect[0] + rect[2] || y >= rect[1] + rect[3]) continue;
-      winrt::Microsoft::ReactNative::JSValueObject event;
-      event["type"] = "swipeWheel";
-      event["id"] = id;
-      event["key"] = key;
-      event["delta"] = delta;
-      EmitWindow(std::move(event));
-      LaunchLog::Write(L"window", std::wstring(L"sideways wheel ").append(std::to_wstring(delta)).append(L" over the pager of ").append(Paths::Wide(id)));
-      return;
-    }
+    if (!properties.IsHorizontalMouseWheel() || delta == 0) return;
+    auto position = point.Position();
+    winrt::Microsoft::ReactNative::JSValueObject event;
+    event["type"] = "swipeWheel";
+    event["id"] = id;
+    event["point"] = winrt::Microsoft::ReactNative::JSValueArray{static_cast<double>(position.X), static_cast<double>(position.Y)};
+    event["delta"] = delta;
+    EmitWindow(std::move(event));
+    LaunchLog::Write(L"window", std::wstring(L"sideways wheel ").append(std::to_wstring(delta)).append(L" in ").append(Paths::Wide(id)));
   }
 
   void EmitWindow(winrt::Microsoft::ReactNative::JSValueObject &&event) noexcept {

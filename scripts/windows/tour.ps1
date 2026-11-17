@@ -1891,8 +1891,8 @@ function Invoke-SidebarPagerWheelTour {
   if (-not (Test-Usable $session)) { Stop-Ardia $session; return }
   Invoke-Stop $session "sidebar-pager-wheel" "A sideways wheel over the sidebar pages between profiles; a vertical one does not" {
     param($stop)
-    $stop.Did = "Started with two profiles, Personal shown. Over the middle of the sidebar: turned the wheel down 3 notches, then sent a sideways wheel notch right, then one left, then Shift with the wheel down, reading the window's profile in session.json after each."
-    $stop.Expected = "the vertical wheel leaves Personal; right pages to Work; left pages back to Personal; Shift with the wheel down pages to Work again."
+    $stop.Did = "Started with two profiles, Personal shown. Over the middle of the sidebar: turned the wheel down 3 notches, then sent a sideways wheel notch right, then one left, reading the window's profile in session.json after each."
+    $stop.Expected = "the vertical wheel leaves Personal; right pages to Work; left pages back to Personal."
     Focus-Window $session $session.Main $stop | Out-Null
     $client = Get-Client $session.Main
     if (-not $client) { $stop.Seen = "no"; $stop.Facts.Add("the window could not be measured"); return }
@@ -1910,17 +1910,10 @@ function Invoke-SidebarPagerWheelTour {
     Save-Shot $stop $session.Main | Out-Null
     Send-SidewaysWheel -1
     $afterLeft = & $wait "default"
-    Start-Sleep -Milliseconds 600
-    Send-Key 0x10 0
-    Start-Sleep -Milliseconds 60
-    [ArdiaTour]::mouse_event([uint32]0x0800, 0, 0, [uint32]4294967176, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 60
-    Send-Key 0x10 2
-    $afterShift = & $wait "p-work"
     $lines = @(Get-LinesSince $session $mark 'sideways wheel')
-    $stop.Facts.Add("profile at the start: $start; after the vertical wheel: $afterVertical; after right: $afterRight; after left: $afterLeft; after Shift with the wheel: $afterShift")
+    $stop.Facts.Add("profile at the start: $start; after the vertical wheel: $afterVertical; after right: $afterRight; after left: $afterLeft")
     $stop.Facts.Add("log lines: $(@($lines | ForEach-Object { $_ -replace '^\w+ \d+ ', '' }) -join '; ')")
-    Set-Seen $stop ($start -eq "default" -and $afterVertical -eq "default" -and $afterRight -eq "p-work" -and $afterLeft -eq "default" -and $afterShift -eq "p-work")
+    Set-Seen $stop ($start -eq "default" -and $afterVertical -eq "default" -and $afterRight -eq "p-work" -and $afterLeft -eq "default")
   } | Out-Null
   Stop-Ardia $session
 }

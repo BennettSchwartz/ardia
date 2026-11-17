@@ -125,9 +125,8 @@ struct WindowsModule {
   }
 
   REACT_METHOD(setSwipeArea)
-  void setSwipeArea(std::string id, std::string key, JSValue rect, Promise promise) noexcept {
-    std::optional<std::array<double, 4>> area = Numbers<4>(rect);
-    OnUI(promise, [id, key, area]() noexcept { WindowManager::Shared().SetSwipeArea(id, key, area); });
+  void setSwipeArea(std::string id, std::string key, bool on, Promise promise) noexcept {
+    OnUI(promise, [id, key, on]() noexcept { WindowManager::Shared().SetSwipeArea(id, key, on); });
   }
 
   REACT_METHOD(setCaptionRegions)
