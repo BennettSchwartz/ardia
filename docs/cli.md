@@ -257,7 +257,8 @@ mouse position, so a humanized path starts where the last one ended. `ardia brow
   case the load wait goes on from there. A new session the engine ends while it is being set up is attached again, up
   to `REATTACH_TRIES` times, and the console and network capture that were on stay marked on until the new session
   confirms enabling them, so an attachment that is cut off in between is followed by one that enables them again.
-  A tab that is gone fails with `code: "tab_detached"` and the page's URL in the message.
+  A tab that is gone fails with `code: "tab_detached"`; `open` and `read` name the URL they were opening in the message,
+  even when the tab was still blank.
   What can't be put back is dropped from the session's bookkeeping and the command fails with `code: "setup_lost"`, naming it. The CLI
   never detaches a tab itself: a `Network.disable` the page doesn't confirm in 2 s (Chromium waits on the page's main
   thread and on a pending navigation) leaves the session as it is, and a change report counts only requests that began

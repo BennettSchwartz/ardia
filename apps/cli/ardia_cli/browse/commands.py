@@ -210,16 +210,26 @@ def https_only_block(url: str, error_text: str) -> bool:
     return blocked
 
 
+async def reattached(page, url: str):
+    from ardia_cli.browse.page import detached
+
+    try:
+        return await page.state.reattach(page)
+    except BrowseError as error:
+        if error.code != "tab_detached":
+            raise
+        raise detached(url) from None
+
+
 async def start_navigation(page, url: str, timeout: float) -> dict:
-    state = page.state
-    page = await state.reattach(page)
+    page = await reattached(page, url)
     seen = page.loader(page.main_frame)
     try:
         return await page.send("Page.navigate", {"url": url}, timeout=timeout)
     except OutcomeUnknown:
         if page.session_id is not None:
             raise
-        await state.reattach(page)
+        await reattached(page, url)
         await page.refresh_frames()
         loader = page.loader(page.main_frame)
         if not loader or loader == seen:
@@ -230,7 +240,7 @@ async def start_navigation(page, url: str, timeout: float) -> dict:
 async def navigate(ctx: Ctx, page, url: str, until: str = "load"):
     from ardia_cli.browse import readpages
 
-    page = await page.state.reattach(page)
+    page = await reattached(page, url)
     if page.crashed:
         try:
             result = await page.send("Page.navigate", {"url": url}, timeout=ctx.timeout)
@@ -266,7 +276,7 @@ async def navigate(ctx: Ctx, page, url: str, until: str = "load"):
                                     "its content so far is here, and `wait --load load` waits for the rest")
     else:
         await readpages.after_same_document(page, before, asyncio.get_running_loop().time() + ctx.timeout)
-    await page.state.reattach(page)
+    await reattached(page, url)
     await page.refresh_frames()
 
 

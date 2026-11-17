@@ -308,7 +308,24 @@ class OpenAfterDetach(unittest.TestCase):
         with self.assertRaises(BrowseError) as failed:
             self.goto(before=lambda: self.state.on_event("Target.targetDestroyed", {"targetId": "T"}, None))
         self.assertEqual(failed.exception.code, "tab_detached")
-        self.assertIn(START, failed.exception.message)
+        self.assertIn(DEST, failed.exception.message)
+
+    def test_a_read_in_a_blank_tab_that_closed_names_the_page_it_was_opening(self):
+        self.browser.url = "about:blank"
+        self.state.target_infos["T"]["url"] = "about:blank"
+        with self.assertRaises(BrowseError) as failed:
+            self.goto(before=lambda: self.state.on_event("Target.targetDestroyed", {"targetId": "T"}, None))
+        self.assertEqual(failed.exception.code, "tab_detached")
+        self.assertIn(DEST, failed.exception.message)
+
+    def test_an_open_in_a_blank_tab_that_closed_names_the_page_it_was_opening(self):
+        self.browser.url = "about:blank"
+        self.state.target_infos["T"]["url"] = "about:blank"
+        self.browser.after["Network.enable"] = lambda session: self.state.on_event("Target.targetDestroyed", {"targetId": "T"}, None)
+        with self.assertRaises(BrowseError) as failed:
+            self.open()
+        self.assertEqual(failed.exception.code, "tab_detached")
+        self.assertIn(DEST, failed.exception.message)
 
 
 if __name__ == "__main__":

@@ -511,12 +511,12 @@ async def arrived_text(page, loader: str) -> bool:
 
 
 async def goto(ctx, page, url: str, timeout: float, keep_partial: bool = False) -> str | None:
-    from ardia_cli.browse.commands import start_navigation, wait_for_load
+    from ardia_cli.browse.commands import reattached, start_navigation, wait_for_load
     from ardia_cli.browse.errors import Gated
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
-    page = await page.state.reattach(page)
+    page = await reattached(page, url)
     before = await before_navigating(page, url)
     earlier = frozenset(page.fetches_started)
     old_loaders = frozenset(frame["loader"] for frame in page.frames.values() if frame.get("loader"))
@@ -554,7 +554,7 @@ async def goto(ctx, page, url: str, timeout: float, keep_partial: bool = False) 
         await settle(page, min(deadline, loop.time() + SETTLE_LIMIT), earlier)
     else:
         await after_same_document(page, before, deadline, earlier)
-    await page.state.reattach(page)
+    await reattached(page, url)
     await page.refresh_frames()
 
 
