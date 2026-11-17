@@ -2335,6 +2335,7 @@ $pages = @{
   "/links" = "<!doctype html><meta charset=utf-8><title>tour links</title><style>body{margin:0;background:#fff}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/peeked'>peek this</a>"
   "/peeked" = "<!doctype html><meta charset=utf-8><title>tour peeked</title><style>html,body{margin:0;height:100%;background:#2a7}</style>"
   "/taba" = "<!doctype html><meta charset=utf-8><title>tour tab a</title><style>html,body{margin:0;height:100%;background:#3366cc}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/typed'>peek this</a><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='a got '+keys}});</script>"
+  "/startdownload" = "<!doctype html><meta charset=utf-8><title>tour download page</title><style>html,body{margin:0;height:100%;background:#fff}</style><script>setTimeout(()=>{location.href='/download'},300)</script>"
   "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
   "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
 }
@@ -2598,6 +2599,39 @@ function Invoke-QuitDownloadsTour {
     Set-Seen $stop ($words -and $end.Clean)
   } | Out-Null
   if (-not $session.Stopping) { Stop-Ardia $session }
+
+  $lastTab = Start-Ardia "quit-last-tab" -Onboarded -Settings @{ appearance = "light" }
+  Invoke-Stop $lastTab "quit-last-tab" "Ctrl+W on the only tab with a download running: Close 1 tab?, then the downloads question; Cancel keeps the window (#2488, defaults)" {
+    param($stop)
+    $stop.Did = "One browser window, default settings (Warn before closing the last tab on, Warn before quitting off). Opened 127.0.0.1:$($script:TourPagesPort)/startdownload in the window's only tab; the page starts the held download from that tab and stays. Pressed Ctrl+W, answered the first dialog with its confirm button (TDM_CLICK_BUTTON 1001), then answered the second with Cancel (IDCANCEL)."
+    $stop.Expected = "a first dialog asking 'Close 1 tab?', then a second asking '$expectedMessage'; after Cancel the window, its tab and the process are still there."
+    if (-not (Test-Usable $lastTab)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    $opened = Open-TourPage $lastTab $stop "/startdownload" "tour download page"
+    $listed = Wait-Until $lastTab { @(Find-Named $lastTab.Main "tour-download.txt").Count -gt 0 } 15000
+    $stop.Facts.Add("the page shows: $opened; the download listed in the window: $listed; the window's title: '$([ArdiaTour]::TitleOf($lastTab.Main))'")
+    Focus-Window $lastTab $lastTab.Main $stop | Out-Null
+    Send-Chord @(0x11) 0x57
+    $first = Wait-QuitDialog $lastTab 8000
+    if (-not $first) { $stop.Seen = "no"; $stop.Facts.Add("no dialog within 8 s of Ctrl+W; the app is still running: $(-not $lastTab.Process.HasExited)"); return }
+    $firstTexts = @(Read-DialogTexts $first.Handle)
+    $stop.Facts.Add("first dialog's text: $(($firstTexts | ForEach-Object { "'$_'" }) -join ', ')")
+    [ArdiaTour]::PostMessageW($first.Handle, 0x0466, [IntPtr]1001, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 800
+    $second = Wait-QuitDialog $lastTab 8000
+    if (-not $second -or $second.Handle -eq $first.Handle) { $stop.Seen = "no"; $stop.Facts.Add("no second dialog after confirming the first; the app is still running: $(-not $lastTab.Process.HasExited)"); return }
+    Measure-Screen ($stop.Shot -replace '\.png$', '-asked.png') $second.Handle | Out-Null
+    $secondTexts = @(Read-DialogTexts $second.Handle)
+    $stop.Facts.Add("second dialog's text: $(($secondTexts | ForEach-Object { "'$_'" }) -join ', ')")
+    [ArdiaTour]::PostMessageW($second.Handle, 0x0466, [IntPtr]2, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 1500
+    $kept = (-not $lastTab.Process.HasExited) -and [ArdiaTour]::IsWindow($lastTab.Main) -and [ArdiaTour]::IsWindowVisible($lastTab.Main)
+    $page = $null -ne (Get-PageWindow $lastTab "tour download page")
+    $stop.Facts.Add("after Cancel: the window shown and the process alive: $kept; the tab's page window still shows: $page")
+    Save-Shot $stop $lastTab.Main | Out-Null
+    $firstRight = @($firstTexts | Where-Object { $_ -match "^Close 1 tab\?" }).Count -gt 0
+    Set-Seen $stop ($firstRight -and ($secondTexts -contains $expectedMessage) -and $kept -and $page)
+  } | Out-Null
+  if (-not $lastTab.Stopping) { Stop-Ardia $lastTab }
 
   $control = Start-Ardia "quit-no-download" -Onboarded -Settings @{ appearance = "light" }
   Invoke-Stop $control "quit-no-download" "Alt+F4 with no download running and the warning off quits without a question (#2488's control)" {
