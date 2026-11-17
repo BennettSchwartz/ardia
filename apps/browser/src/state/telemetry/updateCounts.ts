@@ -1,4 +1,4 @@
-let checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0 };
+let checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0, passwordUnverifiable: 0, passwordHelperFailed: 0 };
 
 export function noteUpdateCheck(asked: boolean, outcome: "found" | "upToDate" | "failed") {
   if (asked) checks.asked += 1;
@@ -20,6 +20,8 @@ export function noteLoginPasswordCheck(result: unknown) {
   if (result === "granted") checks.passwordGranted += 1;
   else if (result === "denied") checks.passwordDenied += 1;
   else if (result === "cancelled") checks.passwordCancelled += 1;
+  else if (result === "unverifiable") checks.passwordUnverifiable += 1;
+  else if (result === "helperFailed") checks.passwordHelperFailed += 1;
 }
 
 export function takeUpdateCounts() {
@@ -35,7 +37,9 @@ export function takeUpdateCounts() {
     login_password_checks_granted: checks.passwordGranted,
     login_password_checks_denied: checks.passwordDenied,
     login_password_checks_cancelled: checks.passwordCancelled,
+    login_password_checks_unverifiable: checks.passwordUnverifiable,
+    login_password_checks_helper_failed: checks.passwordHelperFailed,
   };
-  checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0 };
+  checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0, passwordUnverifiable: 0, passwordHelperFailed: 0 };
   return taken;
 }

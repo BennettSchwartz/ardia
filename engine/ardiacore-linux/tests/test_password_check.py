@@ -135,6 +135,7 @@ SANDBOXED = r'''#include <cassert>
 #include <cstdio>
 #include <string>
 #include <sys/prctl.h>
+#include <unistd.h>
 #include "ardia/linux/ac_linux_password_check.h"
 #include "ardia/linux/ac_linux_secret_text.h"
 using namespace ardia::linux_password;
@@ -145,7 +146,8 @@ int main(int, char** argv) {
   assert(typed.Insert(u"correct horse"));
   std::unique_ptr<SecretBytes> right = typed.Utf8();
   assert(prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0);
-  assert(RunHelper(helper, "me", right->view()) != Verdict::kMismatch);
+  const Verdict expected = geteuid() == 0 ? Verdict::kMatch : Verdict::kUnverifiable;
+  assert(RunHelper(helper, "me", right->view()) == expected);
   std::puts("a sandboxed check was not called a mismatch");
 }
 '''
@@ -157,7 +159,7 @@ FAKE_HELPER = '''#!/bin/bash
 IFS= read -r -d '' typed
 nnp=
 while read -r key value; do [ "$key" = NoNewPrivs: ] && nnp=$value; done < /proc/self/status
-[ "$nnp" = 1 ] && exit 7
+[ "$nnp" = 1 ] && [ "$EUID" != 0 ] && exit 7
 [ "$typed" = "correct horse" ] && exit 0
 exit 7
 '''
@@ -214,12 +216,23 @@ class PasswordCheckTests(unittest.TestCase):
         for needle in ['LOG(', 'Textfield', 'SetPromptField', 'GetText(', 'UTF16ToUTF8(', 'std::string password']:
             self.assertNotIn(needle, prompt)
         answered = prompt[prompt.index('void Answered('):prompt.index('raw_ptr<Profile> profile_;')]
-        self.assertNotIn('Finish(profile_, false, false)', answered)
         self.assertEqual(answered.count('TheThrottle().NoteWrong('), 1)
         self.assertLess(answered.index('Verdict::kMismatch'), answered.index('LogUnansweredCheck(result.detail)'))
         self.assertLess(answered.index('LogUnansweredCheck(result.detail)'), answered.index('Verdict::kUnverifiable'))
         self.assertIn("Ardia can't check your login password in this session", answered)
         self.assertIn("Ardia couldn't check your login password", answered)
+        self.assertLess(answered.index('unanswered_.reset();'), answered.index('Verdict::kMatch'))
+        self.assertLess(answered.index('unanswered_ = reauth_linux::Outcome::kUnverifiable;'), answered.index("Ardia can't check your login password"))
+        self.assertLess(answered.index('unanswered_ = reauth_linux::Outcome::kHelperFailed;'), answered.index("Ardia couldn't check your login password"))
+        finish = prompt[prompt.index('void Finish(Profile* profile, reauth_linux::Outcome outcome) {'):prompt.index('void Confirm(')]
+        self.assertIn('confirmation->Ended(outcome)', finish)
+        self.assertIn('std::move(done).Run(ended);', finish)
+        ended = prompt[prompt.index('reauth_linux::Outcome Ended('):prompt.index('void Show(')]
+        self.assertIn('outcome != reauth_linux::Outcome::kGranted && unanswered_ ? *unanswered_ : outcome', ended)
+        self.assertNotIn('void(bool, bool)', prompt)
+        policy = (ROOT.parent / 'chromium' / 'src' / 'chrome' / 'browser' / 'ardia' / 'ac_reauth_linux_policy.h').read_text()
+        self.assertIn('return "unverifiable";', policy)
+        self.assertIn('return "helperFailed";', policy)
         log = (LINUX / 'ac_linux_password_log.cc').read_text()
         self.assertIn('LOG(WARNING)', log)
         self.assertIn('<< detail;', log)

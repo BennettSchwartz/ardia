@@ -634,7 +634,9 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
 - **Kill switches.** `ArdiaShell.fetchKillSwitches` fetches `ardia.dev/switches.json` (at most 16 KiB) once per
   browser process for every window, and the shared refresh runs under the Mac's rule (automatic checks on).
 - **Telemetry.** `update_checks_asked`, `update_checks_automatic`, `update_check_failures`, `update_checks_found`,
-  `update_release_page_opens`, `kill_switch_refreshes`, `kill_switch_refresh_failures`.
+  `update_release_page_opens`, `kill_switch_refreshes`, `kill_switch_refresh_failures`,
+  `login_password_checks_granted`, `login_password_checks_denied`, `login_password_checks_cancelled`,
+  `login_password_checks_unverifiable`, `login_password_checks_helper_failed`.
 
 ### System signals and location
 
@@ -1192,6 +1194,10 @@ Linux reads calendars from Evolution Data Server, which GNOME Online Accounts, G
   - Wrong passwords back off 2 s, 5 s, 30 s, then 60 s. Only a real mismatch counts, and an unverifiable or failed
     check doesn't. The grant window and supersession are polkit's.
   - `ProbeReauth` reports such a system as available (`loginPassword`), and `reauth.requested` says which method ran.
+  - A confirmation that is cancelled or closed after a check that gave no verdict ends as `unverifiable` or
+    `helperFailed` in `reauth.requested`'s `result`, not as `cancelled` (the last verdict the person saw wins, and a
+    later mismatch or match replaces it). The telemetry leader counts them as `login_password_checks_unverifiable`
+    and `login_password_checks_helper_failed`, which the What's Sent copy lists.
 - **Secret routes.**
   - Secrets travel only on typed calls (`ArdiaPasswords.reveal|save|update|export|unlock`,
     `ArdiaAutofill.cardNumber|saveCard`), as hex buffers sized exactly and wiped after use.
