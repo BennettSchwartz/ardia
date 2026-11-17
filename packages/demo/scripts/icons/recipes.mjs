@@ -15,6 +15,7 @@ export const RECIPES = {
   hammer: { orient: true },
   "hammer.fill": { orient: true },
   pencil: { orient: true },
+  "wand.and.rays": { orient: true },
   "wand.and.stars": { orient: true },
 
   app: one(O("square")),

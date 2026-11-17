@@ -41,35 +41,8 @@ export const LINUX_WORDING: readonly Wording[] = [
     replacements: [["`Auto · ${toDark ? \"Dark\" : \"Light\"} like your ${PLATFORM_TERMS.computer}`", "`Auto · ${toDark ? \"Dark\" : \"Light\"} like your desktop`"]],
   },
   {
-    file: "components/settings/panes/Appearance.tsx",
-    replacements: [["{ value: \"system\", title: `Follow ${PLATFORM_TERMS.os}` }", `{ value: "system", title: "Follow system" }`]],
-  },
-  {
-    file: "components/settings/rows/generalRows.ts",
-    replacements: [
-      ["description: PLATFORM_FEATURES.quitsWithLastWindow ? `Asks before ${APP} quits when you close its last window.` : `Asks before ${APP} quits with ${keyText(\"⌘Q\")}.`", "description: `Asks before ${APP} quits with Ctrl+Shift+Q.`"],
-      ["description: `Asks before ${keyText(\"⇧⌘W\")} or the close button closes its tabs.`", `description: "Asks before the close button or File › Close Window closes its tabs."`],
-      ["The window buttons stay at the top left.", "The window buttons move with the sidebar."],
-    ],
-  },
-  {
-    file: "components/settings/rows/appearanceRows.ts",
-    replacements: [
-      [
-        `"Follow macOS uses System Settings › Appearance › Show scroll bars. Thin shows slim scroll bars over the page only while you scroll, even with a mouse."`,
-        `"Follow system keeps the scroll bars your desktop shows. Thin shows slim scroll bars over the page only while you scroll, even with a mouse."`,
-      ],
-    ],
-  },
-  {
-    file: "components/settings/panes/Privacy.tsx",
-    replacements: [[`description="Built on EasyList and EasyPrivacy. Blocking happens on this Mac."`, `description="Built on EasyList and EasyPrivacy. Blocking happens on this computer."`]],
-  },
-  {
-    file: "components/settings/rows/privacyRows.ts",
-    replacements: [
-      ["title: `Zoom with ${keyText(\"⌘\")} and the mouse wheel`", `title: "Zoom with Ctrl and the mouse wheel"`],
-    ],
+    file: "components/settings/panes/General.tsx",
+    replacements: [["label: PLATFORM_FEATURES.quitsWithLastWindow ? `Quitting when you close the last window` : `Quitting with ${keyText(\"⌘Q\")}`", `label: "Quitting with Ctrl+Shift+Q"`]],
   },
   {
     file: "state/telemetry/copy.ts",
@@ -132,6 +105,8 @@ export const LINUX_WORDING: readonly Wording[] = [
       ["and how many times its Open System Settings button was pressed", "and how many times its settings button was pressed"],
       ["how many Dock icon clicks brought a browser window forward", "how many taskbar icon clicks brought a browser window forward"],
       ["How many times ⌘T kept a New Tab bar", "How many times Ctrl+T kept a New Tab bar"],
+      ["How many times ⇧⌘C went to a focused Developer Tools", "How many times Ctrl+Shift+C went to a focused Developer Tools"],
+      ["and how many use ⌥ without ⌘ or ⌃,", "and how many use Alt without Ctrl or Super,"],
       ["How many times ⌥↩ in the command bar", "How many times Alt+Enter in the command bar"],
       ["how often the ⌃Tab switcher opens", "how often the Ctrl+Tab switcher opens"],
       ["how many tabs were closed from it with ⌃W", "how many tabs were closed from it with Ctrl+W"],
@@ -140,7 +115,10 @@ export const LINUX_WORDING: readonly Wording[] = [
       ["closing the Top App in front (⌘W, or a middle click on it)", "closing the Top App in front (Ctrl+W, or a middle click on it)"],
       ["Bringing your last window back from the Dock or at launch", "Bringing your last window back from the taskbar or at launch"],
       ["How many times ⌘Y asked for the History", "How many times Ctrl+Y asked for the History"],
-      ["how many times the macOS Now Playing controls played,", "how many times the desktop's media controls played,"],
+      [
+        "summed up once an hour, and when Ardia can't post one or the system refuses it: how long its title and message were, whether it had an icon, whether posting failed in Ardia itself and the kind of error it was, and the error code the system gave. Never the notification's text",
+        "summed up once an hour. Never the notification's text",
+      ],
     ],
   },
   {

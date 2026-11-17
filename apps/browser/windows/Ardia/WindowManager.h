@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <commctrl.h>
@@ -31,10 +32,38 @@
 #include "WindowFade.h"
 #include "WindowPlacement.h"
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shcore.lib")
 
 namespace Ardia {
+
+struct ThemedErase {
+  static constexpr UINT_PTR kSubclassId = 0xA2D1C;
+  static constexpr COLORREF kDark = RGB(32, 32, 32);
+  static constexpr COLORREF kLight = RGB(243, 243, 243);
+
+  static LRESULT CALLBACK Erase(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR dark) noexcept {
+    if (message == WM_ERASEBKGND) {
+      RECT client{};
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      if (dc && GetClientRect(hwnd, &client)) {
+        SetDCBrushColor(dc, dark ? kDark : kLight);
+        FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+      }
+      return 1;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(hwnd, &Erase, kSubclassId);
+    return DefSubclassProc(hwnd, message, wParam, lParam);
+  }
+
+  static void Apply(HWND hwnd, bool dark) noexcept {
+    if (!hwnd) return;
+    SetWindowSubclass(hwnd, &Erase, kSubclassId, dark ? 1 : 0);
+    InvalidateRect(hwnd, nullptr, TRUE);
+  }
+};
 
 struct OpenWindowRequest {
   std::string id;
@@ -232,6 +261,7 @@ struct WindowManager {
       HWND openedFrom = request.focusWhenFront.empty() ? nullptr : Hwnd(request.focusWhenFront);
       bool entrance = request.animated || entry.kind != "browser";
       bool fades = entrance && WindowMotion::SystemAnimates();
+      bool waitsForFirstFrame = !fades && !Background();
       HWND hwnd = entry.hwnd;
       auto appWindow = entry.appWindow;
       m_order.push_back(entry.id);
@@ -241,7 +271,7 @@ struct WindowManager {
           if (ManagedWindow *found = Find(id); found && found->window == window) Mount(*found);
         });
       }
-      if (fades) BeginEntrance(placed->second);
+      if (fades || waitsForFirstFrame) BeginEntrance(placed->second, fades);
       bool quietPopup = !activate && placed->second.kind == "popup";
       if (quietPopup) ShowAboveOpener(hwnd, openedFrom);
       if (maximize) ShowMaximized(placed->second, activate);
@@ -259,7 +289,7 @@ struct WindowManager {
       }
       if (m_activeId.empty()) m_activeId = request.id;
       LaunchLog::Write(L"window", std::wstring(L"opened ").append(Paths::Wide(request.id)));
-      if (entrance && !fades) LaunchLog::Write(L"window", std::wstring(L"window ").append(Paths::Wide(request.id)).append(L" shown at once: animations are off in Windows"));
+      if (entrance && !fades) LaunchLog::Write(L"window", std::wstring(L"window ").append(Paths::Wide(request.id)).append(L" shows without a fade: animations are off in Windows"));
     } catch (winrt::hresult_error const &error) {
       LaunchLog::Write(L"error", std::wstring(L"window could not open: ").append(error.message()));
     } catch (...) {
@@ -510,7 +540,22 @@ struct WindowManager {
     });
   }
 
+  HWND TakePageLeftBySecondaryPress(HWND app, ULONGLONG withinMs) noexcept {
+    FollowSecondaryPress();
+    PageLeft left = m_pageLeftBySecondaryPress;
+    ClearPageLeftBySecondaryPress();
+    if (!app || left.app != app || !left.releasedAt || GetTickCount64() - left.releasedAt > withinMs) return nullptr;
+    return left.page;
+  }
+
  private:
+  struct PageLeft {
+    HWND app = nullptr;
+    HWND page = nullptr;
+    ULONGLONG pressedAt = 0;
+    ULONGLONG releasedAt = 0;
+  };
+
   static constexpr UINT_PTR kSubclassId = 0xA2D1A;
   static constexpr double kPopupMinWidth = 200;
   static constexpr double kPopupMinPageHeight = 150;
@@ -518,6 +563,9 @@ struct WindowManager {
   static constexpr double kPopupWidth = 500;
   static constexpr double kPopupPageHeight = 600;
   static constexpr int kEdgePollMs = 40;
+  static constexpr int kSecondaryPressPollMs = 15;
+  static constexpr ULONGLONG kSecondaryHoldLimitMs = 10000;
+  static constexpr ULONGLONG kPageLeftKeptAfterReleaseMs = 2000;
   static constexpr double kEdgeReach = 24.0;
   static constexpr double kCascadeStep = 28.0;
   static constexpr std::chrono::milliseconds kPlacementSaveDelay{400};
@@ -799,6 +847,7 @@ struct WindowManager {
     static constexpr DWORD kUseImmersiveDarkMode = 20;
     BOOL useDark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(entry.hwnd, kUseImmersiveDarkMode, &useDark, sizeof(useDark));
+    ThemedErase::Apply(entry.hwnd, dark);
     try {
       entry.appWindow.TitleBar().PreferredTheme(
           dark ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark : winrt::Microsoft::UI::Windowing::TitleBarTheme::Light);
@@ -884,6 +933,7 @@ struct WindowManager {
   void Closed(std::string const &id) noexcept {
     auto found = m_windows.find(id);
     if (found == m_windows.end()) return;
+    if (m_pageLeftBySecondaryPress.app == found->second.hwnd) ClearPageLeftBySecondaryPress();
     RemoveWindowSubclass(found->second.hwnd, &WindowManager::WindowProc, kSubclassId);
     auto closedWindow = found->second.window;
     auto exits = std::move(found->second.exits);
@@ -937,15 +987,81 @@ struct WindowManager {
           Host::Current()->reactHost.InstanceSettings().Properties(), reinterpret_cast<uint64_t>(hwnd));
     } catch (...) {
     }
+    bool fromPage = OwnPageWindow(hwnd, previous);
+    ClearPageLeftBySecondaryPress();
+    if (fromPage && SecondaryButtonDown()) {
+      m_pageLeftBySecondaryPress = PageLeft{hwnd, previous, GetTickCount64(), 0};
+      if (!StartSecondaryPressWatch()) ClearPageLeftBySecondaryPress();
+    }
     winrt::Microsoft::ReactNative::JSValueObject event;
     event["type"] = "focus";
     event["id"] = entry->id;
-    if (OwnPageWindow(hwnd, previous)) event["fromPage"] = true;
+    if (fromPage) event["fromPage"] = true;
     EmitWindow(std::move(event));
+  }
+
+  bool StartSecondaryPressWatch() noexcept {
+    if (m_secondaryPressTimer) return true;
+    try {
+      auto timer = Host::Current()->queue.DispatcherQueue().CreateTimer();
+      timer.Interval(std::chrono::milliseconds(kSecondaryPressPollMs));
+      timer.IsRepeating(true);
+      m_secondaryPressTick = timer.Tick([this](auto const &, auto const &) noexcept { FollowSecondaryPress(); });
+      m_secondaryPressTimer = timer;
+      timer.Start();
+      return true;
+    } catch (...) {
+      m_secondaryPressTimer = nullptr;
+      return false;
+    }
+  }
+
+  void StopSecondaryPressWatch() noexcept {
+    if (!m_secondaryPressTimer) return;
+    auto timer = m_secondaryPressTimer;
+    m_secondaryPressTimer = nullptr;
+    try {
+      timer.Stop();
+      timer.Tick(m_secondaryPressTick);
+    } catch (...) {
+    }
+  }
+
+  void ClearPageLeftBySecondaryPress() noexcept {
+    StopSecondaryPressWatch();
+    m_pageLeftBySecondaryPress = {};
+  }
+
+  void FollowSecondaryPress() noexcept {
+    PageLeft &left = m_pageLeftBySecondaryPress;
+    if (!left.app) return StopSecondaryPressWatch();
+    ULONGLONG now = GetTickCount64();
+    bool secondary = SecondaryButtonDown();
+    if (ButtonOtherThanSecondaryDown() || (left.releasedAt && secondary)) return ClearPageLeftBySecondaryPress();
+    if (!left.releasedAt) {
+      if (!secondary) {
+        left.releasedAt = now;
+      } else if (now - left.pressedAt > kSecondaryHoldLimitMs) {
+        ClearPageLeftBySecondaryPress();
+      }
+      return;
+    }
+    if (now - left.releasedAt > kPageLeftKeptAfterReleaseMs) ClearPageLeftBySecondaryPress();
+  }
+
+  static bool ButtonOtherThanSecondaryDown() noexcept {
+    for (int key : {VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2}) {
+      if (GetAsyncKeyState(key) & 0x8000) return true;
+    }
+    return LeftButtonDown();
   }
 
   static bool LeftButtonDown() noexcept {
     return (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON) & 0x8000) != 0;
+  }
+
+  static bool SecondaryButtonDown() noexcept {
+    return (GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_LBUTTON : VK_RBUTTON) & 0x8000) != 0;
   }
 
   static std::optional<int64_t> RootTagOf(ManagedWindow const &entry) noexcept {
@@ -1196,7 +1312,13 @@ struct WindowManager {
     if (message == WM_ACTIVATE && LOWORD(wParam) != WA_INACTIVE && DialogParts::BringModalForward(hwnd)) return 0;
     if (message == WM_ACTIVATE && LOWORD(wParam) != WA_INACTIVE) manager->Activated(hwnd, reinterpret_cast<HWND>(lParam));
     if (message == WM_SIZE && wParam != SIZE_MINIMIZED) manager->ArrangeToClient(hwnd, LOWORD(lParam), HIWORD(lParam));
-    if (message == WM_ACTIVATEAPP && wParam == FALSE) manager->EmitApp("resignActive");
+    if (message == WM_ACTIVATEAPP && wParam == FALSE) {
+      if (DialogParts::ActivatesMenuThread(static_cast<DWORD>(lParam))) DialogParts::ModalRegistry::Shared().withheldResign = true;
+      else {
+        DialogParts::ModalRegistry::Shared().withheldResign = false;
+        manager->EmitApp("resignActive");
+      }
+    }
     return DefSubclassProc(hwnd, message, wParam, lParam);
   }
 
@@ -1532,21 +1654,31 @@ struct WindowManager {
     }
   }
 
-  void BeginEntrance(ManagedWindow &entry) noexcept {
+  void BeginEntrance(ManagedWindow &entry, bool fadesIn) noexcept {
     auto fade = std::make_shared<WindowFade>();
     fade->phase = WindowFade::Phase::Revealing;
     fade->hwnd = entry.hwnd;
-    fade->opacity = 0;
+    fade->fadesIn = fadesIn;
+    fade->revealTimeout = fadesIn ? WindowMotion::kRevealTimeout : WindowMotion::kFirstFrameTimeout;
+    fade->opacity = fadesIn ? 0 : WindowMotion::kWaitingOpacity;
     fade->started = std::chrono::steady_clock::now();
-    fade->layered.Hold(entry.hwnd, 0, false);
+    fade->layered.Hold(entry.hwnd, WindowMotion::Alpha(fade->opacity), false);
     entry.fade = fade;
     if (StartFadeTimer(entry.id, fade)) return;
     entry.fade.reset();
     LogFade(entry.id, L" shown at once: no timer");
   }
 
-  void Reveal(ManagedWindow &entry) noexcept {
+  void Reveal(ManagedWindow &entry, bool drawn) noexcept {
     WindowFade &fade = *entry.fade;
+    if (!fade.fadesIn) {
+      std::wstring after = std::to_wstring(fade.Elapsed(std::chrono::steady_clock::now()).count());
+      LogFade(entry.id, drawn ? std::wstring(L" shown with its first frame ").append(after).append(L" ms after it opened")
+                              : std::wstring(L" shown without a first frame: none came in ").append(after).append(L" ms"));
+      EndFade(entry);
+      RunRevealWaiters(entry);
+      return;
+    }
     fade.phase = WindowFade::Phase::Entering;
     fade.from = 0;
     fade.opacity = 0;
@@ -1634,7 +1766,7 @@ struct WindowManager {
     switch (fade->phase) {
       case WindowFade::Phase::Revealing:
         HoldOpacity(*fade, true, false);
-        if (HasContent(*entry) || fade->Elapsed(now) >= WindowMotion::kRevealTimeout) Reveal(*entry);
+        if (bool drawn = HasContent(*entry); drawn || fade->Elapsed(now) >= fade->revealTimeout) Reveal(*entry, drawn);
         return;
       case WindowFade::Phase::Entering: {
         double progress = fade->Progress(now);
@@ -1694,6 +1826,9 @@ struct WindowManager {
   winrt::event_token m_edgeTick{};
   std::vector<std::string> m_order;
   std::string m_activeId;
+  PageLeft m_pageLeftBySecondaryPress;
+  winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_secondaryPressTimer{nullptr};
+  winrt::event_token m_secondaryPressTick{};
   bool m_quitting{false};
   std::optional<SavedPlacement> m_lastPlacement;
   bool m_placementLoaded{false};
