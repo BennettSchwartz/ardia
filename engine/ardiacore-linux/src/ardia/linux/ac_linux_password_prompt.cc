@@ -8,6 +8,7 @@
 
 #include "ardia/linux/ac_linux_password_check.h"
 #include "ardia/linux/ac_linux_password_field.h"
+#include "ardia/linux/ac_linux_password_log.h"
 #include "ardia/linux/ac_linux_secret_text.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
@@ -64,6 +65,11 @@ std::string WaitText(int64_t wait_ms) {
   }
   return " Wait " + base::NumberToString((wait_ms + 999) / 1000) + " seconds, then try again.";
 }
+
+struct CheckResult {
+  Verdict verdict = Verdict::kFailed;
+  std::string detail;
+};
 
 class Confirmation;
 
@@ -200,23 +206,33 @@ class Confirmation : public views::WidgetObserver {
          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
         base::BindOnce(
             [](std::string helper, std::string user, std::unique_ptr<SecretBytes> password) {
-              return RunHelper(helper, user, password->view());
+              CheckResult result;
+              result.verdict = RunHelper(helper, user, password->view(), kHelperDeadlineMs, std::nullopt, &result.detail);
+              return result;
             },
             *checker.helper, *checker.user, std::move(password)),
-        base::BindOnce(&Confirmation::Checked, weak_factory_.GetWeakPtr()));
+        base::BindOnce(&Confirmation::Answered, weak_factory_.GetWeakPtr()));
   }
 
-  void Checked(Verdict verdict) {
+  void Answered(CheckResult result) {
     checking_ = false;
-    if (verdict == Verdict::kMatch) {
+    if (result.verdict == Verdict::kMatch) {
       TheThrottle().NoteRight();
       return Finish(profile_, true, false);
     }
-    if (verdict == Verdict::kMismatch) {
+    if (result.verdict == Verdict::kMismatch) {
       TheThrottle().NoteWrong(NowMs());
       return Show("That isn't your login password." + WaitText(TheThrottle().WaitMs(NowMs())));
     }
-    Finish(profile_, false, false);
+    LogUnansweredCheck(result.detail);
+    if (result.verdict == Verdict::kUnverifiable) {
+      return Show(
+          "Ardia can't check your login password in this session, so it can't tell whether yours is right. "
+          "This happens when Ardia runs in a sandbox, or when the system's password helper is on a disk "
+          "mounted without setuid. Cancel to close this window.");
+    }
+    Show("Ardia couldn't check your login password because the system's password helper didn't answer. "
+         "Try again, or cancel.");
   }
 
   raw_ptr<Profile> profile_;
