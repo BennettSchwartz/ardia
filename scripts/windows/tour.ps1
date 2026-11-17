@@ -2214,7 +2214,7 @@ public static class ArdiaHoleCapture {
   public class Frame { public DateTime Utc; public int Left = -1, Top = -1, Right = -1, Bottom = -1; public byte[] Pixels; }
   public class Capture { public DateTime KeyUtc; public int Width, Height; public List<Frame> Frames = new List<Frame>(); }
 
-  public static Capture Run(IntPtr window, byte modifier, byte key, int milliseconds, int keepEveryMs) {
+  public static Capture Run(IntPtr window, byte[] modifiers, byte key, int milliseconds, int keepEveryMs) {
     Rect client;
     GetClientRect(window, out client);
     Point origin = new Point();
@@ -2238,11 +2238,11 @@ public static class ArdiaHoleCapture {
     try {
       BitBlt(memory, 0, 0, width, height, screen, origin.X, origin.Y, 0x40CC0020);
       Marshal.Copy(bits, before, 0, before.Length);
-      keybd_event(modifier, 0, 0, UIntPtr.Zero);
+      foreach (byte modifier in modifiers) keybd_event(modifier, 0, 0, UIntPtr.Zero);
       keybd_event(key, 0, 0, UIntPtr.Zero);
       capture.KeyUtc = DateTime.UtcNow;
       keybd_event(key, 0, 2, UIntPtr.Zero);
-      keybd_event(modifier, 0, 2, UIntPtr.Zero);
+      for (int i = modifiers.Length - 1; i >= 0; i--) keybd_event(modifiers[i], 0, 2, UIntPtr.Zero);
       Stopwatch clock = Stopwatch.StartNew();
       long nextKept = 0;
       int saved = 0;
@@ -2337,18 +2337,18 @@ function Invoke-HoleTour {
     Set-Seen $stop (Open-Page $session $stop "example.com" "example\.com")
   }
   if ($opened.Seen -ne "yes") { Stop-Ardia $session; return }
-  foreach ($surface in @(@{ Slug = "find"; Name = "the find bar"; Key = 0x46 }, @{ Slug = "command"; Name = "the command bar"; Key = 0x4C })) {
+  foreach ($surface in @(@{ Slug = "find"; Name = "the find bar"; Keys = "Ctrl+F"; Modifiers = [byte[]]@(0x11); Key = 0x46 }, @{ Slug = "command"; Name = "the command bar"; Keys = "Ctrl+L"; Modifiers = [byte[]]@(0x11); Key = 0x4C }, @{ Slug = "share"; Name = "the share popover"; Keys = "Ctrl+Alt+S"; Modifiers = [byte[]]@(0x11, 0x12); Key = 0x53 })) {
     for ($try = 1; $try -le 3; $try++) {
-      Invoke-Stop $session "holes-$($surface.Slug)-$try" "Holes: $($surface.Name) scaling in over the page, try $try of 3 (report only, #2424)" {
+      Invoke-Stop $session "holes-$($surface.Slug)-$try" "Holes: $($surface.Name) coming in over the page, try $try of 3 (report only, #2424)" {
         param($stop)
-        $stop.Did = "With Example Domain showing, pressed Ctrl+$([char]$surface.Key) and captured the window as fast as it reads for 900 ms, comparing each capture with the one before the key; the app logged each animation frame, each cover measurement and each page reshape with its holes (ARDIA_TEST holeMarks)."
+        $stop.Did = "With Example Domain showing, pressed $($surface.Keys) and captured the window as fast as it reads for 900 ms, comparing each capture with the one before the key; the app logged each animation frame, each cover measurement and each page reshape with its holes (ARDIA_TEST holeMarks)."
         $stop.Expected = "report only: when the surface's drawn extent stops growing against when its animation ends and its hole reaches the page (#2424)."
         Focus-Window $session $session.Main $stop | Out-Null
         Start-Sleep -Milliseconds 1200
         $mark = Get-LogCount $session
         $folder = Split-Path -Parent $stop.Shot
         $prefix = [IO.Path]::GetFileNameWithoutExtension($stop.Shot)
-        $capture = [ArdiaHoleCapture]::Run($session.Main, 0x11, [byte]$surface.Key, 900, $(if ($try -eq 1) { 40 } else { 100000 }))
+        $capture = [ArdiaHoleCapture]::Run($session.Main, $surface.Modifiers, [byte]$surface.Key, 900, $(if ($try -eq 1) { 40 } else { 100000 }))
         Save-HoleFrames $capture $folder $prefix
         Start-Sleep -Milliseconds 400
         $timeline = Format-HoleTimeline $session $capture $mark
