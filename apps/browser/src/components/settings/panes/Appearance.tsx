@@ -168,8 +168,8 @@ function AddressBarPicker() {
             value={placement}
             options={[
               { value: "field", title: "At the address" },
-              { value: "centred", title: "In the centre" },
-              { value: "centredOnClick", title: "In the centre, also on click" },
+              { value: "centred", title: "In the center" },
+              { value: "centredOnClick", title: "In the center, also on click" },
             ]}
             onChange={(v) => updateSettings({ commandBarPlacement: v })}
             minWidth={220}
