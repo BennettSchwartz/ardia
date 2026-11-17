@@ -8,12 +8,14 @@ const ELEMENT_UNMUTES_AFTER_MS = 2000;
 const FOCUS_SETTLES_MS = 1000;
 const NOTHING_PLAYS_MS = 1500;
 const NOT_DONE = { ok: true, done: false };
+const BY_SCRIPT = { ok: true, done: true, byScript: true };
+const RESUME_AT = 20;
 
 type Answer = { ok?: boolean; done?: boolean; byScript?: boolean; refused?: string };
 type Media = { paused?: boolean; time?: number; played?: number };
 
-const answerOf = async (key: string, action: string): Promise<Answer> => {
-  const reply = await commandReply(key, action);
+const answerOf = async (key: string, action: string, seconds: number | null = null): Promise<Answer> => {
+  const reply = await commandReply(key, action, seconds);
   return reply.startsWith("refused") ? { refused: reply } : (JSON.parse(reply) as Answer);
 };
 const mediaOf = async (key: string) => ((await evaluate(key, 'post("result", JSON.stringify({ paused: m.paused, time: m.currentTime, played: m.played.length }));')) ?? {}) as Media;
@@ -26,11 +28,11 @@ async function neverPlayed(key: string, what: string) {
   expectEqual({ paused: media.paused, played: media.played }, { paused: true, played: 0 }, `${what}: the page's idle player never played (${JSON.stringify(media)})`);
 }
 
-async function discardedAndReloaded(key: string, windowId: string) {
+async function discardedAndReloaded(key: string, windowId: string, method = "reloadToPlay") {
   await hide(key, windowId);
   const outcome = (await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome;
   expectEqual(outcome, "discarded", "the hidden page is discarded");
-  await hostCall("tab.call", { key, method: "reload" });
+  await hostCall("tab.call", { key, method });
   await loadedAt(key, "wake");
 }
 
@@ -102,11 +104,11 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a sleeping tab woken by a reload plays once through the wake allowance, and a second play with no session does nothing",
+    name: "engine now playing: a sleeping tab woken to play (reloadToPlay) plays once through the wake allowance, and a second play with no session does nothing",
     run: () =>
       withReports("np-wake", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
         await discardedAndReloaded(key, windowId);
-        expectEqual(await answerOf(key, "play"), { ok: true, done: true, byScript: true }, "the first play after the wake");
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the first play after the wake");
         await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (media) => media.paused === false);
         await reported(reports, "the woken page reports playing", isPlaying);
         await evaluate(key, 'm.pause(); m.removeAttribute("src"); m.load(); post("result", "true");');
@@ -115,7 +117,7 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a sleeping tab woken by a reload that then navigates loses the wake allowance",
+    name: "engine now playing: a sleeping tab woken to play that then navigates loses the wake allowance",
     run: () =>
       withReports("np-wake-moved", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
         await discardedAndReloaded(key, windowId);
@@ -124,6 +126,30 @@ const sessionChecks: Check[] = [
         expectEqual(await answerOf(key, "play"), NOT_DONE, "a play after the woken page navigated");
         await neverPlayed(key, "after the woken page navigated");
         expectEqual((await reports.latest()) ?? null, null, "no session is reported for the moved page");
+      }),
+  },
+  {
+    name: "engine now playing: a sleeping tab woken to play resumes where it was: one seek, then the play, through the wake allowance, and a second seek does nothing",
+    run: () =>
+      withReports("np-wake-seek", "nowplaying?plain&long&wake", TITLE, async (key, reports, windowId) => {
+        await discardedAndReloaded(key, windowId);
+        expectEqual(await answerOf(key, "seekTo", RESUME_AT), BY_SCRIPT, "the resume seek after the wake");
+        expectEqual(await answerOf(key, "seekTo", 5), NOT_DONE, "a second seek before the play");
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play after the resume seek");
+        const media = await until("the woken page plays from where it was", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false && (now.time ?? 0) >= RESUME_AT);
+        await reported(reports, "the woken page reports playing", isPlaying);
+        expectEqual(await answerOf(key, "seekTo", 1), NOT_DONE, "a seek after the play, with the allowance used and no session");
+        console.info(`[ardia windows] self-check note: a woken tab resumed at ${media.time} s after a seek to ${RESUME_AT} s`);
+      }),
+  },
+  {
+    name: "engine now playing: a sleeping tab reloaded by the user (a plain reload) gets no wake allowance",
+    run: () =>
+      withReports("np-wake-plain", "nowplaying?plain&long&wake", TITLE, async (key, _reports, windowId) => {
+        await discardedAndReloaded(key, windowId, "reload");
+        expectEqual(await answerOf(key, "seekTo", RESUME_AT), NOT_DONE, "a seek after the user's own reload");
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a play after the user's own reload");
+        await neverPlayed(key, "after the user's own reload");
       }),
   },
 ];

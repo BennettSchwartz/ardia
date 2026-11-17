@@ -23,6 +23,7 @@ const ARGUMENTS: Record<string, string[]> = {
   goForward: [],
   goToOffset: ["offset"],
   reload: [],
+  reloadToPlay: [],
   forceReload: [],
   stopLoading: [],
   focus: [],

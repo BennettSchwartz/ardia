@@ -35,7 +35,13 @@ struct MediaCommandArgs {
   double seconds = 0;
 };
 
-enum class MediaCommandResult { kDone, kNotDone, kRefused, kPlayByScript };
+enum class MediaCommandResult {
+  kDone,
+  kNotDone,
+  kRefused,
+  kPlayByScript,
+  kSeekByScript
+};
 
 std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args);
 std::string BoundedText(const std::u16string& text);

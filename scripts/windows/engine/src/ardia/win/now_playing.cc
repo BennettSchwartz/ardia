@@ -66,6 +66,7 @@ void NowPlaying::WakingToPlay(content::WebContents* contents) {
   NowPlaying* now = FromWebContents(contents);
   now->wake_play_until_ = base::TimeTicks::Now() + kWakeToPlay;
   now->wake_load_pending_ = true;
+  now->wake_seeked_ = false;
 }
 
 MediaCommandResult NowPlaying::Command(content::WebContents* contents,

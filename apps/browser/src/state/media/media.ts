@@ -4,6 +4,7 @@ import type { AccessibilityActionEvent, GestureResponderEvent } from "react-nati
 import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { webviews } from "../../platform/webviews";
+import { reloadToPlay } from "../../platform/wakeReload";
 import { useBrowser } from "../browser/store";
 import type { BrowserState } from "../browser/store";
 import { activeTabId } from "../browser/model";
@@ -164,7 +165,7 @@ function wakeToPlay(tabId: string) {
       else if (sawLoading) loaded = setTimeout(() => resume(null), LOADED_WITHOUT_SESSION_MS);
     }),
   );
-  void handle.reload().catch(finish);
+  void reloadToPlay(handle).catch(finish);
 }
 
 export function resumeCommands(before: Session | undefined, after: NowPlaying | null): [MediaCommand, number?][] {

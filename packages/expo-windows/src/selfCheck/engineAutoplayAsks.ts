@@ -25,7 +25,7 @@ async function advances(key: string, what: string) {
 async function wokenToPlay(key: string, windowId: string) {
   await hide(key, windowId);
   expectEqual((await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome, "discarded", "the hidden page is discarded");
-  await hostCall("tab.call", { key, method: "reload" });
+  await hostCall("tab.call", { key, method: "reloadToPlay" });
   await until("the woken page loads", LOAD_MS, () => listed(key), (tab) => tab?.title === "media page" && tab.loading === false && tab.discarded !== true);
   await show(key, windowId, LEFT);
   const answer = await hostCall<{ done?: unknown; byScript?: unknown }>("tab.call", { key, method: "mediaCommand", action: "play" });

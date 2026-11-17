@@ -100,8 +100,8 @@ constexpr char kEvaluationEnd[] =
     "\n})((kind, json) => {if (kind === 'result') "
     "resolve(typeof json === 'string' ? json : 'null');});})";
 
-constexpr char kWokenPagePlays[] =
-    "(() => {"
+constexpr char kWokenPageMediaStart[] =
+    "((seconds) => {"
     "const all = [];"
     "const collect = (doc) => {"
     "all.push(...doc.querySelectorAll('video,audio'));"
@@ -115,8 +115,13 @@ constexpr char kWokenPagePlays[] =
     "const playable = (m) => m.currentSrc || m.srcObject || m.src || "
     "m.querySelector('source[src]');"
     "const el = all.find(playing) || all.find(playable) || null;"
-    "if (el) el.play();"
-    "})()";
+    "if (!el) return;";
+
+constexpr char kWokenPagePlays[] = "el.play();})(0)";
+
+constexpr char kWokenPageSeeksStart[] =
+    "if (Number.isFinite(seconds) && seconds >= 0) el.currentTime = seconds;"
+    "})(";
 
 using DevToolsReply =
     base::OnceCallback<void(std::optional<base::DictValue> result,
@@ -607,9 +612,16 @@ void MediaCommand(content::WebContents* contents,
       std::move(reply).Run(Error("the page's media session does not take that"));
       return;
     case MediaCommandResult::kPlayByScript:
+      RunMediaCommand(contents,
+                      std::string(kWokenPageMediaStart) + kWokenPagePlays);
+      break;
+    case MediaCommandResult::kSeekByScript:
+      RunMediaCommand(contents, std::string(kWokenPageMediaStart) +
+                                    kWokenPageSeeksStart +
+                                    base::NumberToString(parsed->seconds) +
+                                    ")");
       break;
   }
-  RunMediaCommand(contents, kWokenPagePlays);
   answer.Set("done", true);
   answer.Set("byScript", true);
   std::move(reply).Run(std::move(answer));

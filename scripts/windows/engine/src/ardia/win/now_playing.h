@@ -77,7 +77,7 @@ class NowPlaying : public content::WebContentsObserver,
   content::MediaSession* LiveSession() const;
   bool Lists(media_session::mojom::MediaSessionAction action) const;
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
-  bool TakeWakePlay(const MediaCommandArgs& command);
+  MediaCommandResult TakeWakeCommand(const MediaCommandArgs& command);
   MediaCommandResult RunCommand(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
   std::optional<NowPlayingState> Current() const;
@@ -90,6 +90,7 @@ class NowPlaying : public content::WebContentsObserver,
   base::TimeTicks sent_at_;
   base::TimeTicks wake_play_until_;
   bool wake_load_pending_ = false;
+  bool wake_seeked_ = false;
   base::OneShotTimer coalesce_;
   base::OneShotTimer seek_report_;
   NowPlayingArtwork artwork_;

@@ -183,21 +183,26 @@ bool NowPlaying::PageHandles(Action action) const {
          content::ArdiaWinPageHandlesMediaSessionAction(web_contents(), action);
 }
 
-bool NowPlaying::TakeWakePlay(const MediaCommandArgs& command) {
-  const bool allowed = command.action == MediaAction::kPlay &&
-                       !wake_load_pending_ &&
-                       base::TimeTicks::Now() < wake_play_until_;
-  if (allowed) {
-    wake_play_until_ = base::TimeTicks();
+MediaCommandResult NowPlaying::TakeWakeCommand(
+    const MediaCommandArgs& command) {
+  if (wake_load_pending_ || base::TimeTicks::Now() >= wake_play_until_) {
+    return MediaCommandResult::kNotDone;
   }
-  return allowed;
+  if (command.action == MediaAction::kSeekTo && !wake_seeked_) {
+    wake_seeked_ = true;
+    return MediaCommandResult::kSeekByScript;
+  }
+  if (command.action == MediaAction::kPlay) {
+    wake_play_until_ = base::TimeTicks();
+    return MediaCommandResult::kPlayByScript;
+  }
+  return MediaCommandResult::kNotDone;
 }
 
 MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
   content::MediaSession* session = LiveSession();
   if (!session) {
-    return TakeWakePlay(command) ? MediaCommandResult::kPlayByScript
-                                 : MediaCommandResult::kNotDone;
+    return TakeWakeCommand(command);
   }
   media_session::mojom::MediaSessionInfoPtr info =
       session->GetMediaSessionInfoSync();

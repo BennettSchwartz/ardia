@@ -882,6 +882,8 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
       controller.GoToOffset(offset);
     }
   } else if (method == "reload") {
+    controller.Reload(content::ReloadType::NORMAL, true);
+  } else if (method == "reloadToPlay") {
     NowPlaying::WakingToPlay(contents);
     controller.Reload(content::ReloadType::NORMAL, true);
   } else if (method == "forceReload") {
