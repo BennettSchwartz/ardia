@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ardia_surface">@android:color/system_neutral1_10</color>
+    <color name="ardia_accent">@android:color/system_accent1_600</color>
+    <color name="ardia_selection">@android:color/system_accent1_200</color>
+</resources>

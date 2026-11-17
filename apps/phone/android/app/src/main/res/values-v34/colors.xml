@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ardia_surface">@android:color/system_surface_light</color>
+    <color name="ardia_accent">@android:color/system_primary_light</color>
+    <color name="ardia_selection">@android:color/system_primary_fixed_dim</color>
+</resources>

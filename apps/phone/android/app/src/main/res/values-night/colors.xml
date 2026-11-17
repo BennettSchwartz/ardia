@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ardia_surface">#FF342123</color>
+    <color name="ardia_surface">#FF0F1512</color>
+    <color name="ardia_accent">#FF8CD5B4</color>
+    <color name="ardia_selection">#668CD5B4</color>
+    <bool name="ardia_light_bars">false</bool>
 </resources>
