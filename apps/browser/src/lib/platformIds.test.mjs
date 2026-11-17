@@ -14,3 +14,10 @@ test("only the Mac reports memory pressure", () => {
   assert.equal(macFeatures.memoryPressure, true);
   assert.equal(windowsFeatures.memoryPressure, false);
 });
+
+test("every Settings pane's icon is one Windows can draw", async () => {
+  const { PANES } = await import("../components/settings/settingsIndex.ts");
+  const { vectorIcon } = await import("../../../../packages/expo-windows/src/symbol/layers.ts");
+  assert.ok(PANES.length >= 7);
+  assert.deepEqual(PANES.filter((pane) => !vectorIcon(pane.icon, 13, "semibold")).map((pane) => pane.icon), []);
+});
