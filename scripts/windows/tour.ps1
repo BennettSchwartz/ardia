@@ -2320,8 +2320,12 @@ function Format-HoleTimeline($Session, $Capture, [int]$Mark) {
       if ($_ -match "^\w+ (\d+) (?:\[ardia windows\] hole )?(.*)$") { "+$([int]$Matches[1] - $keyAt) $($Matches[2])" }
     })
   $frameMarks = @($marks | Where-Object { $_ -match " frame \d+" })
+  $measured = @($marks | Where-Object { $_ -match " cover \S+ measured " })
+  $dropped = @($measured | Where-Object { $_ -match "stale, dropped" })
+  $shown = @($marks | Where-Object { $_ -match " page \S+ measured in .* shown with " })
+  $slowest = ($measured | ForEach-Object { if ($_ -match " in (\d+) ms") { [int]$Matches[1] } } | Measure-Object -Maximum).Maximum
   return [pscustomobject]@{
-    Summary = "first changed pixels at +$first ms, the drawn extent within 98% of its final size from +$settled ms (final $previous), $($Capture.Frames.Count) captures; animation frames $($frameMarks.Count) (first $(($frameMarks | Select-Object -First 1) -replace ' .*$', ''), last $(($frameMarks | Select-Object -Last 1) -replace ' .*$', ''))"
+    Summary = "cover answers $($measured.Count), $($dropped.Count) dropped as stale, slowest round trip $slowest ms; page reshapes $($shown.Count); first changed pixels at +$first ms, the drawn extent within 98% of its final size from +$settled ms (final $previous), $($Capture.Frames.Count) captures; animation frames $($frameMarks.Count) (first $(($frameMarks | Select-Object -First 1) -replace ' .*$', ''), last $(($frameMarks | Select-Object -Last 1) -replace ' .*$', ''))"
     Extent = ($spans -join "; ")
     Marks = (@($marks | Where-Object { $_ -notmatch " frame \d+" }) -join " | ")
   }
@@ -2338,8 +2342,10 @@ function Invoke-HoleTour {
   }
   if ($opened.Seen -ne "yes") { Stop-Ardia $session; return }
   foreach ($surface in @(@{ Slug = "find"; Name = "the find bar"; Keys = "Ctrl+F"; Modifiers = [byte[]]@(0x11); Key = 0x46 }, @{ Slug = "command"; Name = "the command bar"; Keys = "Ctrl+L"; Modifiers = [byte[]]@(0x11); Key = 0x4C }, @{ Slug = "share"; Name = "the share popover"; Keys = "Ctrl+Alt+S"; Modifiers = [byte[]]@(0x11, 0x12); Key = 0x53 })) {
-    for ($try = 1; $try -le 3; $try++) {
-      Invoke-Stop $session "holes-$($surface.Slug)-$try" "Holes: $($surface.Name) coming in over the page, try $try of 3 (report only, #2424)" {
+    for ($try = 1; $try -le 5; $try++) {
+      $underLoad = if ($try -gt 3) { ", under CPU and disk load" } else { "" }
+      if ($try -eq 4) { $hogs = Start-Hogs (Join-Path $Out "hole-hog") }
+      Invoke-Stop $session "holes-$($surface.Slug)-$try" "Holes: $($surface.Name) coming in over the page, try $try of 5$($underLoad) (report only, #2424)" {
         param($stop)
         $stop.Did = "With Example Domain showing, pressed $($surface.Keys) and captured the window as fast as it reads for 900 ms, comparing each capture with the one before the key; the app logged each animation frame, each cover measurement and each page reshape with its holes (ARDIA_TEST holeMarks)."
         $stop.Expected = "report only: when the surface's drawn extent stops growing against when its animation ends and its hole reaches the page (#2424)."
@@ -2359,6 +2365,10 @@ function Invoke-HoleTour {
         Send-Escape
         Start-Sleep -Milliseconds 800
       } | Out-Null
+      if ($try -eq 5) {
+        $hogs | Stop-Job -ErrorAction SilentlyContinue
+        $hogs | Remove-Job -Force -ErrorAction SilentlyContinue
+      }
     }
   }
   Stop-Ardia $session
