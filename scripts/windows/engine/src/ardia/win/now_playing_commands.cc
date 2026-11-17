@@ -3,12 +3,10 @@
 #include <algorithm>
 #include <vector>
 
-#include "ardia/win/autoplay.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
 namespace content {
@@ -48,10 +46,18 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
   content::MediaSession* session =
       web_contents() ? content::MediaSession::GetIfExists(web_contents())
                      : nullptr;
-  if (!session || !SessionLive()) {
-    return held_ ? RunInRepresentedFrame(command)
-                 : MediaCommandResult::kNoSession;
+  media_session::mojom::MediaSessionInfoPtr info;
+  if (session) {
+    info = session->GetMediaSessionInfoSync();
   }
+  if (!info ||
+      info->state ==
+          media_session::mojom::MediaSessionInfo::SessionState::kInactive) {
+    return reported_on_page_ ? MediaCommandResult::kNothingDone
+                             : MediaCommandResult::kNoSession;
+  }
+  const bool playing =
+      info->playback_state == media_session::mojom::MediaPlaybackState::kPlaying;
   switch (command.action) {
     case MediaAction::kPlay:
       session->Resume(SuspendType::kUI);
@@ -60,7 +66,7 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
       session->Suspend(SuspendType::kUI);
       break;
     case MediaAction::kToggle:
-      if (session_.playing) {
+      if (playing) {
         session->Suspend(SuspendType::kUI);
       } else {
         session->Resume(SuspendType::kUI);
@@ -90,22 +96,6 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
       session->Stop(SuspendType::kUI);
       break;
   }
-  return MediaCommandResult::kDone;
-}
-
-MediaCommandResult NowPlaying::RunInRepresentedFrame(
-    const MediaCommandArgs& command) {
-  content::RenderFrameHost* frame = RepresentedFrame();
-  if (!frame) {
-    return MediaCommandResult::kNoSession;
-  }
-  if (command.action == MediaAction::kNext ||
-      command.action == MediaAction::kPrevious ||
-      (command.action == MediaAction::kSeekBy &&
-       base::Seconds(command.seconds).is_zero() && command.seconds != 0)) {
-    return MediaCommandResult::kRefused;
-  }
-  RunMediaCommandIn(frame, FrameMediaScript(command));
   return MediaCommandResult::kDone;
 }
 

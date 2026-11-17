@@ -35,7 +35,7 @@ struct MediaCommandArgs {
   double seconds = 0;
 };
 
-enum class MediaCommandResult { kDone, kRefused, kNoSession };
+enum class MediaCommandResult { kDone, kNothingDone, kRefused, kNoSession };
 
 std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args);
 std::string BoundedText(const std::u16string& text);
@@ -50,7 +50,6 @@ bool SameReport(const std::optional<NowPlayingState>& before,
                 const std::optional<NowPlayingState>& after);
 base::DictValue NowPlayingEventData(const std::optional<NowPlayingState>& state,
                                     std::optional<std::string> artwork);
-std::string FrameMediaScript(const MediaCommandArgs& command);
 
 }
 

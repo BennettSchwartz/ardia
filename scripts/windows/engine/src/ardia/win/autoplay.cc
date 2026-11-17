@@ -306,12 +306,8 @@ base::DictValue SetBlockAutoplayEverywhere(const base::DictValue& args) {
 }
 
 void RunMediaCommand(content::WebContents* contents, const std::string& script) {
-  RunMediaCommandIn(contents ? contents->GetPrimaryMainFrame() : nullptr,
-                    script);
-}
-
-void RunMediaCommandIn(content::RenderFrameHost* frame,
-                       const std::string& script) {
+  content::RenderFrameHost* frame =
+      contents ? contents->GetPrimaryMainFrame() : nullptr;
   if (frame && frame->IsRenderFrameLive()) {
     ClientOf(frame)->RunArdiaMediaCommand(ISOLATED_WORLD_ID_CHROME_INTERNAL,
                                           script);

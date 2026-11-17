@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "base/win/windows_types.h"
+#include "content/common/content_export.h"
 #include "ui/base/window_open_disposition.h"
 
 namespace base {
@@ -29,6 +30,8 @@ class RenderFrameHost;
 class WeakDocumentPtr;
 class WebContents;
 struct ContextMenuParams;
+
+CONTENT_EXPORT extern bool g_ardia_win_keep_muted_media_sessions;
 }
 
 namespace url {

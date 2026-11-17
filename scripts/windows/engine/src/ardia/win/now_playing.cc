@@ -92,17 +92,6 @@ bool NowPlaying::OnPrimaryPage(const content::MediaPlayerId& id) const {
   return frame && frame->GetPage().IsPrimary();
 }
 
-content::RenderFrameHost* NowPlaying::RepresentedFrame() const {
-  if (!represented_ || !heard_.contains(*represented_)) {
-    return nullptr;
-  }
-  content::RenderFrameHost* frame =
-      content::RenderFrameHost::FromID(represented_->frame_routing_id);
-  return frame && frame->IsRenderFrameLive() && frame->GetPage().IsPrimary()
-             ? frame
-             : nullptr;
-}
-
 std::optional<NowPlayingState> NowPlaying::FromSession() const {
   NowPlayingState state;
   state.timestamp = NowMs();
@@ -138,61 +127,8 @@ std::optional<NowPlayingState> NowPlaying::FromSession() const {
   return state;
 }
 
-std::optional<NowPlayingState> NowPlaying::Held() {
-  if (awaiting_page_player_ || !RepresentedFrame()) {
-    held_.reset();
-    return std::nullopt;
-  }
-  if (!held_) {
-    if (!sent_) {
-      return std::nullopt;
-    }
-    held_ = sent_;
-  }
-  const bool playing = playing_.contains(*represented_);
-  if ((held_->playback_state == "playing") != playing) {
-    const double now = NowMs();
-    held_->position = Projected(*held_, now);
-    held_->timestamp = now;
-    held_->playback_state = playing ? "playing" : "paused";
-  }
-  return held_;
-}
-
-void NowPlaying::FollowRoutedPlayer() {
-  content::MediaSession* session =
-      web_contents() ? content::MediaSession::GetIfExists(web_contents())
-                     : nullptr;
-  content::RenderFrameHost* routed = session ? session->GetRoutedFrame() : nullptr;
-  if (!routed) {
-    return;
-  }
-  const content::GlobalRenderFrameHostId frame = routed->GetGlobalId();
-  const auto in_routed = [&frame](const content::MediaPlayerId& id) {
-    return id.frame_routing_id == frame;
-  };
-  if (represented_ && heard_.contains(*represented_) &&
-      in_routed(*represented_) && playing_.contains(*represented_)) {
-    return;
-  }
-  std::optional<content::MediaPlayerId> chosen;
-  for (const content::MediaPlayerId& id : heard_) {
-    if (in_routed(id) && (!chosen || playing_.contains(id))) {
-      chosen = id;
-    }
-  }
-  if (chosen) {
-    represented_ = chosen;
-  }
-}
-
-std::optional<NowPlayingState> NowPlaying::Current() {
-  if (SessionLive()) {
-    held_.reset();
-    FollowRoutedPlayer();
-    return FromSession();
-  }
-  return Held();
+std::optional<NowPlayingState> NowPlaying::Current() const {
+  return SessionLive() ? FromSession() : std::nullopt;
 }
 
 void NowPlaying::Update() {
@@ -223,6 +159,9 @@ void NowPlaying::Send(const std::optional<NowPlayingState>& state) {
   force_report_ = false;
   sent_ = state;
   sent_at_ = base::TimeTicks::Now();
+  if (state) {
+    reported_on_page_ = true;
+  }
   TabState* tab =
       web_contents() ? TabState::FromWebContents(web_contents()) : nullptr;
   if (!tab) {
@@ -235,19 +174,12 @@ void NowPlaying::Send(const std::optional<NowPlayingState>& state) {
   tab->Send("nowPlaying", NowPlayingEventData(state, std::move(artwork)));
 }
 
-void NowPlaying::Forget() {
-  heard_.clear();
-  playing_.clear();
-  represented_.reset();
-  held_.reset();
-}
-
 void NowPlaying::MediaSessionCreated(content::MediaSession* session) {
   ObserveSession(session);
 }
 
 void NowPlaying::PrimaryPageChanged(content::Page& page) {
-  Forget();
+  reported_on_page_ = false;
   artwork_.PageChanged();
   awaiting_page_player_ = true;
   Update();
@@ -255,35 +187,11 @@ void NowPlaying::PrimaryPageChanged(content::Page& page) {
 
 void NowPlaying::MediaStartedPlaying(const MediaPlayerInfo& info,
                                      const content::MediaPlayerId& id) {
-  if (!OnPrimaryPage(id)) {
+  if (!info.has_audio || !awaiting_page_player_ || !OnPrimaryPage(id)) {
     return;
   }
-  playing_.insert(id);
-  if (info.has_audio) {
-    heard_.insert(id);
-    represented_ = id;
-    awaiting_page_player_ = false;
-  }
+  awaiting_page_player_ = false;
   Update();
-}
-
-void NowPlaying::MediaStoppedPlaying(const MediaPlayerInfo& info,
-                                     const content::MediaPlayerId& id,
-                                     MediaStoppedReason reason) {
-  if (playing_.erase(id)) {
-    Update();
-  }
-}
-
-void NowPlaying::MediaDestroyed(const content::MediaPlayerId& id) {
-  playing_.erase(id);
-  const bool heard = heard_.erase(id) > 0;
-  if (represented_ == id) {
-    represented_.reset();
-  }
-  if (heard) {
-    Update();
-  }
 }
 
 void NowPlaying::WebContentsDestroyed() {

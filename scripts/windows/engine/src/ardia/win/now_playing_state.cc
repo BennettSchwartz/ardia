@@ -4,7 +4,6 @@
 #include <cmath>
 #include <utility>
 
-#include "base/json/json_writer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -21,52 +20,6 @@ constexpr size_t kTextLimit = 1024;
 constexpr size_t kImageUrlLimit = 1 << 20;
 constexpr double kSeekLimit = 366.0 * 24 * 60 * 60;
 constexpr double kDriftSeconds = 0.5;
-
-constexpr char kFrameMediaStart[] =
-    "((command) => {"
-    "const all = [...document.querySelectorAll('video,audio')];"
-    "const playing = (m) => !m.paused && !m.ended;"
-    "const audible = (m) => !m.muted && m.volume > 0;"
-    "const played = (m) => m.played && m.played.length > 0;"
-    "const el = all.find((m) => playing(m) && audible(m)) ||"
-    " all.find(playing) || all.find(played) || null;"
-    "if (!el) return;"
-    "const seconds = Number(command.seconds) || 0;"
-    "switch (command.action) {"
-    "case 'play': el.play(); break;"
-    "case 'pause': case 'stop': el.pause(); break;"
-    "case 'toggle': if (el.paused) el.play(); else el.pause(); break;"
-    "case 'seekBy':"
-    "el.currentTime = Math.max(0, Math.min(el.duration || Infinity, "
-    "el.currentTime + seconds));"
-    "break;"
-    "case 'seekTo': el.currentTime = seconds; break;"
-    "}"
-    "})(";
-
-constexpr char kFrameMediaEnd[] = ")";
-
-const char* CommandName(MediaAction action) {
-  switch (action) {
-    case MediaAction::kPlay:
-      return "play";
-    case MediaAction::kPause:
-      return "pause";
-    case MediaAction::kToggle:
-      return "toggle";
-    case MediaAction::kNext:
-      return "next";
-    case MediaAction::kPrevious:
-      return "previous";
-    case MediaAction::kSeekBy:
-      return "seekBy";
-    case MediaAction::kSeekTo:
-      return "seekTo";
-    case MediaAction::kStop:
-      return "stop";
-  }
-  return "pause";
-}
 
 bool AllowedImage(const GURL& url) {
   if (!url.is_valid() || url.spec().size() > kImageUrlLimit) {
@@ -255,14 +208,6 @@ base::DictValue NowPlayingEventData(const std::optional<NowPlayingState>& state,
   fields.Set("loop", false);
   data.Set("state", std::move(fields));
   return data;
-}
-
-std::string FrameMediaScript(const MediaCommandArgs& command) {
-  base::DictValue args;
-  args.Set("action", CommandName(command.action));
-  args.Set("seconds", command.seconds);
-  return kFrameMediaStart + base::WriteJson(args).value_or("{}") +
-         kFrameMediaEnd;
 }
 
 }

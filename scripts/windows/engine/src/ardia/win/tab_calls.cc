@@ -609,9 +609,15 @@ void MediaCommand(content::WebContents* contents,
     return;
   }
   ThawHiddenPage(contents);
+  base::DictValue answer = Ok();
   switch (NowPlaying::Command(contents, *parsed)) {
     case MediaCommandResult::kDone:
-      std::move(reply).Run(Ok());
+      answer.Set("done", true);
+      std::move(reply).Run(std::move(answer));
+      return;
+    case MediaCommandResult::kNothingDone:
+      answer.Set("done", false);
+      std::move(reply).Run(std::move(answer));
       return;
     case MediaCommandResult::kRefused:
       std::move(reply).Run(Error("the page's media session does not take that"));
@@ -625,7 +631,8 @@ void MediaCommand(content::WebContents* contents,
   if (std::optional<std::string> json = base::WriteJson(command)) {
     RunMediaCommand(contents, kMediaCommandStart + *json + kMediaCommandEnd);
   }
-  std::move(reply).Run(Ok());
+  answer.Set("byScript", true);
+  std::move(reply).Run(std::move(answer));
 }
 
 void DownloadImage(content::WebContents* contents,

@@ -2,7 +2,6 @@
 #define ARDIA_WIN_NOW_PLAYING_H_
 
 #include <optional>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -61,10 +60,6 @@ class NowPlaying : public content::WebContentsObserver,
   void PrimaryPageChanged(content::Page& page) override;
   void MediaStartedPlaying(const MediaPlayerInfo& info,
                            const content::MediaPlayerId& id) override;
-  void MediaStoppedPlaying(const MediaPlayerInfo& info,
-                           const content::MediaPlayerId& id,
-                           MediaStoppedReason reason) override;
-  void MediaDestroyed(const content::MediaPlayerId& id) override;
   void WebContentsDestroyed() override;
 
   void MediaSessionInfoChanged(
@@ -86,27 +81,19 @@ class NowPlaying : public content::WebContentsObserver,
   bool Lists(media_session::mojom::MediaSessionAction action) const;
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
   bool OnPrimaryPage(const content::MediaPlayerId& id) const;
-  content::RenderFrameHost* RepresentedFrame() const;
-  void FollowRoutedPlayer();
   MediaCommandResult RunCommand(const MediaCommandArgs& command);
-  MediaCommandResult RunInRepresentedFrame(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
   std::optional<NowPlayingState> FromSession() const;
-  std::optional<NowPlayingState> Held();
-  std::optional<NowPlayingState> Current();
+  std::optional<NowPlayingState> Current() const;
   void Update();
   void ForceReport();
   void Send(const std::optional<NowPlayingState>& state);
-  void Forget();
 
   Sample session_;
   std::vector<media_session::mojom::MediaSessionAction> actions_;
   std::optional<NowPlayingState> sent_;
-  std::optional<NowPlayingState> held_;
-  std::set<content::MediaPlayerId> heard_;
-  std::set<content::MediaPlayerId> playing_;
-  std::optional<content::MediaPlayerId> represented_;
   bool awaiting_page_player_ = false;
+  bool reported_on_page_ = false;
   bool force_report_ = false;
   base::TimeTicks sent_at_;
   base::OneShotTimer coalesce_;
