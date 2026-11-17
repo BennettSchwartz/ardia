@@ -137,7 +137,7 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
     channel,
     relay: (forward) => setTelemetryRelay(forward && {
       capture: (event, props, consent, captureOptions) => forward({ kind: "capture", event, props, options: { ...captureOptions }, consent }),
-      log: (level, message, attributes, consent) => forward({ kind: "log", level, message, attributes, consent }),
+      log: (level, message, attributes, consent, text) => forward({ kind: "log", level, message, attributes, consent, text }),
       resetId: async () => {
         const installId = await current.request("reset", RESET_TIMEOUT_MS);
         await refreshState();
@@ -157,7 +157,7 @@ export function startHostTelemetry(options: { host: ArdiaHost; candidate: boolea
         return id;
       },
     }),
-    deliver: (message) => message.kind === "capture" ? capture(message.event, message.props, relayedConsent(message.consent), message.options) : queueLog(message.level, message.message, message.attributes, relayedConsent(message.consent)),
+    deliver: (message) => message.kind === "capture" ? capture(message.event, message.props, relayedConsent(message.consent), message.options) : queueLog(message.level, message.message, message.attributes, relayedConsent(message.consent), message.text ?? message.message),
     handle: handleTelemetryOp,
     lead: async () => {
       await Promise.all(TELEMETRY_DOCUMENTS.map((name) => refreshDocument(name).catch(report)));

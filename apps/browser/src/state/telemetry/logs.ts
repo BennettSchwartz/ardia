@@ -1,7 +1,7 @@
 import { consentNow, queueLog } from "./client";
 import { knownErrorCode, knownErrorMessage } from "./knownErrors";
 import { LOG_TEMPLATES } from "./logTemplates";
-import { errorType } from "./sanitize";
+import { errorType, scrubText } from "./sanitize";
 import { matchTemplate } from "./templates";
 
 const MAX_DISTINCT = 40;
@@ -16,7 +16,7 @@ export function recordLog(level: "warn" | "error", args: unknown[]) {
   const type = error ? errorType(error) : "none";
   const reason = error ? knownErrorMessage(error) : "";
   const code = error ? knownErrorCode(error) : null;
-  const key = `${template?.[0] ?? UNLISTED}\n${type}\n${reason}\n${code ?? ""}`;
+  const key = `${scrubText(first, 160)}\n${type}\n${reason}\n${code ?? ""}`;
   if (seen.has(key) || seen.size >= MAX_DISTINCT) return;
   seen.add(key);
   const attributes: Record<string, string> = { error_type: type };

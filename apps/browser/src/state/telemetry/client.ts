@@ -159,7 +159,7 @@ export function capture(event: string, props: Record<string, unknown>, consent: 
 
 export function queueLog(level: "warn" | "error", message: string, attributes: Record<string, string | number | boolean>, consent: ConsentToken | null, text = message) {
   const relay = telemetryRelay();
-  if (relay) return relay.log(level, message, attributes, consent);
+  if (relay) return relay.log(level, message, attributes, consent, text);
   try {
     const sharing = stillValid(consent);
     const at = Date.now();
