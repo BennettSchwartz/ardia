@@ -1797,6 +1797,7 @@ function Get-StripShift($Before, $After) {
   if (-not $Before -or -not $After -or $Before.Rows.Count -ne $After.Rows.Count) { return $null }
   $count = $Before.Rows.Count
   $limit = [Math]::Min(400, [int]($count / 2))
+  $limit -= $limit % 2
   $best = 0
   $bestScore = [double]::MaxValue
   for ($shift = -$limit; $shift -le $limit; $shift += 2) {
@@ -1828,7 +1829,7 @@ function Invoke-SidebarWheelTour {
   Invoke-Stop $session "sidebar-wheel-scroll" "The mouse wheel scrolls a sidebar tab list longer than the sidebar" {
     param($stop)
     $stop.Did = "Opened 34 tabs with Ctrl+T, put the pointer over the middle of the sidebar's tab list and turned the wheel 5 notches up, then 5 notches down, reading the list's pixels before and after each."
-    $stop.Expected = "the list moves under the pointer and back: each turn shifts its rows (matching far better shifted than unmoved), the second by the opposite of the first. The rows look alike every row, so the size of the shift is known only up to a row's height."
+    $stop.Expected = "the list moves under the pointer and back: each turn shifts its rows (matching far better shifted than unmoved), and after both the list is back where it began. The rows look alike every row, so the size of the shift is known only up to a row's height."
     Focus-Window $session $session.Main $stop | Out-Null
     foreach ($i in 1..34) {
       Send-Chord @(0x11) 0x54
@@ -1858,7 +1859,9 @@ function Invoke-SidebarWheelTour {
     $stop.Facts.Add("wheel up: the list's rows moved by $($first.Shift) px (match $($first.Score), unmoved $($first.Unmoved))")
     $stop.Facts.Add("wheel down: the list's rows moved by $($second.Shift) px (match $($second.Score), unmoved $($second.Unmoved))")
     $moved = { param($s) $s -and $s.Shift -ne 0 -and $s.Score -lt $s.Unmoved / 2 }
-    Set-Seen $stop ((& $moved $first) -and (& $moved $second) -and $first.Shift -eq -$second.Shift)
+    $back = Get-StripShift $start $down
+    $stop.Facts.Add("after both turns the list differs from where it began by $($back.Unmoved), against $($first.Unmoved) after the first")
+    Set-Seen $stop ((& $moved $first) -and (& $moved $second) -and $back.Unmoved -lt $first.Unmoved / 2)
   } | Out-Null
   Stop-Ardia $session
 }
