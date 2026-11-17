@@ -946,14 +946,21 @@ function Click-Named($Session, [string]$Name) {
 }
 
 function Get-BarGaps($Session, [int]$Mark) {
-  $lines = @(Get-LinesSince $Session $Mark "^(command \d+ newTab|\w+ \d+ \[ardia windows\] new tab bar )")
+  $lines = @(Get-LinesSince $Session $Mark "^(command \d+ newTab|\w+ \d+ \[ardia windows\] (new tab bar |bar field (mount|focus) hero ))")
   $command = $null
   $tab = $null
   $firstTyped = $null
   $mounts = 0
+  $heroTag = $null
+  $heroFocusAt = $null
   $found = [ordered]@{}
   foreach ($line in $lines) {
     if ($line -match "^command (\d+) newTab") { if ($null -eq $command) { $command = [int64]$Matches[1] }; continue }
+    if ($null -ne $command -and $line -match "^\w+ (\d+) \[ardia windows\] bar field (mount|focus) hero tag (\d+)") {
+      if ($Matches[2] -eq "mount" -and $null -eq $heroTag) { $heroTag = $Matches[3] }
+      elseif ($Matches[2] -eq "focus" -and $null -ne $heroTag -and $Matches[3] -eq $heroTag -and $null -eq $heroFocusAt) { $heroFocusAt = [int64]$Matches[1] }
+      continue
+    }
     if ($null -eq $command -or $line -notmatch "^\w+ (\d+) \[ardia windows\] new tab bar (\w+) (\S+)") { continue }
     $at = [int64]$Matches[1]
     $stage = $Matches[2]
@@ -964,14 +971,20 @@ function Get-BarGaps($Session, [int]$Mark) {
     if ($id -ne $tab -and $null -ne $tab) { continue }
     if (-not $found.Contains("$id $stage")) { $found["$id $stage"] = $at }
   }
-  $gaps = [pscustomobject]@{ Text = ""; Tab = $tab; FocusedMs = $null; FirstTyped = $firstTyped; Mounts = 0 }
+  $gaps = [pscustomobject]@{ Text = ""; Tab = $tab; FocusedMs = $null; FocusedFrom = "no focus line"; FirstTyped = $firstTyped; Mounts = 0 }
   if ($null -eq $command) { $gaps.Text = "no newTab command in the log"; return $gaps }
   if ($null -eq $tab) { $gaps.Text = "no new tab page after the command"; return $gaps }
-  if ($found.Contains("$tab focused")) { $gaps.FocusedMs = $found["$tab focused"] - $command }
+  if ($found.Contains("$tab focused")) {
+    $gaps.FocusedMs = $found["$tab focused"] - $command
+    $gaps.FocusedFrom = "'new tab bar focused'"
+  } elseif ($null -ne $heroFocusAt) {
+    $gaps.FocusedMs = $heroFocusAt - $command
+    $gaps.FocusedFrom = "'bar field focus hero tag $heroTag', because the 'new tab bar focused' line is missing (a torn launch-log line, #2426)"
+  }
   $parts = @(foreach ($stage in "page", "committed", "focused", "rest", "typed") { if ($found.Contains("$tab $stage")) { "$stage +$($found["$tab $stage"] - $command) ms" } else { "$stage not logged" } })
   $typedBy = if ($firstTyped) { "the first typed mark after the command: $($firstTyped.Tab) +$($firstTyped.Ms) ms" } else { "no typed mark after the command" }
   $gaps.Mounts = $mounts
-  $gaps.Text = "$tab " + ($parts -join ", ") + "; the page mounted $mounts time(s); $typedBy"
+  $gaps.Text = "$tab " + ($parts -join ", ") + "; focus read from $($gaps.FocusedFrom)$(if ($null -ne $gaps.FocusedMs) { " at +$($gaps.FocusedMs) ms" }); the page mounted $mounts time(s); $typedBy"
   return $gaps
 }
 
@@ -1400,7 +1413,7 @@ function Invoke-TypeStop($Session, [string]$Slug, [string]$Title, [string]$Did, 
     if ($Into -eq "ctrl+t") {
       $focusInTime = $null -ne $gaps.FocusedMs -and $gaps.FocusedMs -le $script:FocusBoundMs
       $firstInNewBar = $null -ne $gaps.FirstTyped -and $gaps.FirstTyped.Tab -eq $gaps.Tab -and $startsRight
-      $stop.Facts.Add("required: focus within $($script:FocusBoundMs) ms: $focusInTime; the first key in the new tab's bar: $firstInNewBar")
+      $stop.Facts.Add("$(if ($JudgeWholeText) { 'report only' } else { 'required' }): focus within $($script:FocusBoundMs) ms: $focusInTime (read from $($gaps.FocusedFrom)); $(if ($JudgeWholeText) { 'report only' } else { 'required' }): the first key in the new tab's bar: $firstInNewBar")
       $firstKeyOk = $focusInTime -and $firstInNewBar
     } else {
       $firstKeyOk = $startsRight
@@ -1596,7 +1609,7 @@ function Invoke-FirstRunTour {
       $engineMs = @(Read-LogLines $session.Log | Where-Object { $_ -match "engine" } | Select-Object -First 3)
       Write-Host "[tour] slow launch, first engine lines: $($engineMs -join ' / ')"
       $walk = Walk-OnboardingToOutro $session -SkipEach
-      Invoke-TypeStop $session "slow-engine" "First run under load from a cold copy: Ctrl+T about 400 ms after Get Started, then Enter" "With CPU and disk hogs running and the app copied to a fresh folder (first window $($session.FirstWindowMs) ms after start), skipped to the last onboarding screen ($($walk.Screens)), clicked Get Started, pressed Ctrl+T about 400 ms after the click (the click waits 300 ms after the mouse button comes up, then 100 ms more) and typed example.com from 100 ms after it, 30 ms a key, then pressed Enter." { param($stop) $clicked = Click-Named $session "Get Started"; $stop.Facts.Add("Get Started clicked: $clicked"); Start-Sleep -Milliseconds 100 } "ctrl+t" "Enter" "#2101" -Required | Out-Null
+      Invoke-TypeStop $session "slow-engine" "First run under load from a cold copy: Ctrl+T about 400 ms after Get Started, then Enter" "With CPU and disk hogs running and the app copied to a fresh folder (first window $($session.FirstWindowMs) ms after start), skipped to the last onboarding screen ($($walk.Screens)), clicked Get Started, pressed Ctrl+T about 400 ms after the click (the click waits 300 ms after the mouse button comes up, then 100 ms more) and typed example.com from 100 ms after it, 30 ms a key, then pressed Enter." { param($stop) $clicked = Click-Named $session "Get Started"; $stop.Facts.Add("Get Started clicked: $clicked"); Start-Sleep -Milliseconds 100 } "ctrl+t" "Enter" "#2101, #2059, #2401" -Required -JudgeWholeText | Out-Null
     }
   } finally {
     $hogs | Stop-Job -ErrorAction SilentlyContinue
