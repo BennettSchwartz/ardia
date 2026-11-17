@@ -27,7 +27,7 @@ import { setToolbarExtensionsWidth } from "../../state/windows/layout";
 import { SIDEBAR_FIELD } from "../sidebar/geometry";
 import { FieldSiteButton, SidebarFieldFill } from "../sidebar/SidebarField";
 import { showUrlBarMenu } from "../../state/omnibox/paste";
-import { ToolbarExtensions, useToolbarExtensionsWidth } from "../extensions/ToolbarExtensions";
+import { ToolbarExtensions, useToolbarExtensionsOverflow, useToolbarExtensionsWidth } from "../extensions/ToolbarExtensions";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { TranslateButton } from "../site/TranslateControls";
 import { ReaderButton } from "../site/ReaderControls";
@@ -37,7 +37,7 @@ import { buttonMotion, curve, usePressScaleMotion } from "../ui/motion";
 import { FieldLoadFill } from "./FieldLoadFill";
 import { fieldButtonsShown, sidebarFieldButtons } from "./fieldButtons";
 import { useFieldExtensionsHeld } from "../../state/extensions/store";
-import { noteSiteControls } from "../../state/telemetry/usage";
+import { noteSiteControls, noteSplit } from "../../state/telemetry/usage";
 import { HistoryButton, ReloadButton } from "./NavButtons";
 import { FIELD_LOAD, TOOLBAR_MOTION } from "./tokens";
 import { useToolbarRow } from "./useToolbarRow";
@@ -91,6 +91,10 @@ export function Toolbar({
   const row = useToolbarRow();
   const extensionsLimit = inSplit && paneWidth !== undefined ? splitExtensionsLimit({ width: paneWidth, urlLeft: geometry.urlLeft, trailing: geometry.trailing, row }) : Infinity;
   const extensionsWidth = useToolbarExtensionsWidth(windowId, extensionsLimit);
+  const extensionsCapped = useToolbarExtensionsOverflow(windowId, extensionsLimit) && inSplit;
+  useEffect(() => {
+    if (extensionsCapped) noteSplit("splitToolbarOverflows");
+  }, [extensionsCapped]);
   useEffect(() => {
     if (focused) setToolbarExtensionsWidth(windowId, extensionsWidth);
   }, [windowId, extensionsWidth, focused]);

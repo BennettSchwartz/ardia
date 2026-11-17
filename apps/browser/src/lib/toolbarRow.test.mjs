@@ -1,15 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-const { MIN_URL_FIELD, TOOLBAR_ROWS, extensionsWidthOf, splitExtensionsLimit, urlFieldRight } = await import("./toolbarRow.ts");
+const { MIN_URL_FIELD, TOOLBAR_ROWS, extensionsWidthOf, splitExtensionsLimit, splitFieldWidth } = await import("./toolbarRow.ts");
 const { toolbarGeometry } = await import("../components/window/geometry.ts");
 
 const PINNED = 6;
 
-const limitIn = (width, geometry, row) => splitExtensionsLimit({ width, urlLeft: geometry.urlLeft, trailing: geometry.trailing, row });
+const paneIn = (width, geometry, row) => ({ width, urlLeft: geometry.urlLeft, trailing: geometry.trailing, row });
+const limitIn = (width, geometry, row) => splitExtensionsLimit(paneIn(width, geometry, row));
 
 function fieldWidth(width, geometry, row) {
   const strip = extensionsWidthOf(Math.min(PINNED, limitIn(width, geometry, row)), row.extensionButton);
-  return width - geometry.urlLeft - urlFieldRight(true, strip, row) - geometry.trailing;
+  return splitFieldWidth(paneIn(width, geometry, row), strip);
 }
 
 test("a split pane keeps a usable address field beside six pinned extensions", () => {

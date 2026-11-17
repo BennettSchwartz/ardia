@@ -29,7 +29,11 @@ export const extensionsWidthOf = (count: number, button: number) => (count ? cou
 
 export const urlFieldRight = (inSplit: boolean, extensionsWidth: number, row: ToolbarRow) => (inSplit ? 12 + 2 * (row.button - 2) : 12) + extensionsWidth;
 
-export function splitExtensionsLimit({ width, urlLeft, trailing, row }: { width: number; urlLeft: number; trailing: number; row: ToolbarRow }) {
-  const room = width - urlLeft - urlFieldRight(true, 0, row) - trailing - MIN_URL_FIELD;
-  return Math.max(1, Math.floor((room - EXTENSIONS_INSET + EXTENSION_GAP) / (row.extensionButton + EXTENSION_GAP)));
+type SplitPane = { width: number; urlLeft: number; trailing: number; row: ToolbarRow };
+
+export const splitFieldWidth = ({ width, urlLeft, trailing, row }: SplitPane, extensionsWidth: number) => width - urlLeft - urlFieldRight(true, extensionsWidth, row) - trailing;
+
+export function splitExtensionsLimit(pane: SplitPane) {
+  const room = splitFieldWidth(pane, 0) - MIN_URL_FIELD;
+  return Math.max(1, Math.floor((room - EXTENSIONS_INSET + EXTENSION_GAP) / (pane.row.extensionButton + EXTENSION_GAP)));
 }

@@ -53,6 +53,8 @@ function useToolbarExtensions(windowId: string, limit: number) {
 
 export const extensionsFitting = (room: number) => Math.max(1, Math.floor((room + GAP) / PITCH));
 
+export const useToolbarExtensionsOverflow = (windowId: string, limit: number) => useToolbarExtensions(windowId, limit).overflow;
+
 export function useToolbarExtensionsWidth(windowId: string, limit = Infinity): number {
   const { pinned, overflow, casting } = useToolbarExtensions(windowId, limit);
   const button = useToolbarRowContext().extensionButton;
