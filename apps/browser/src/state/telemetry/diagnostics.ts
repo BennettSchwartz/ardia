@@ -12,6 +12,7 @@ import { noteDragsEnded } from "./stuckDrags";
 import { noteWindowlessPages } from "./cliCounts";
 import { mainProcessWork } from "./mainProcessWork";
 import { appInfo } from "./transport";
+import { readDocument } from "../../platform/documents";
 
 const CONTEXT_EVERY_MS = 10 * 60_000;
 const FIRST_CONTEXT_MS = 3_000;
@@ -288,3 +289,35 @@ export function trackHoverLost(e: HoverLostEpisode) {
 }
 
 export const watchHoverLost = () => onHoverLost(trackHoverLost);
+
+export const LAUNCH_GUARD_DOC = "launch-guard.json";
+
+type LaunchGuardProperties = {
+  launch_waited_for_previous_ms?: number;
+  launch_unfinished_starts_before?: number;
+  launch_restore_state_set_aside?: boolean;
+  launch_profile_held_by_another?: boolean;
+};
+
+const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined);
+
+export function launchGuardProperties(read: (name: string) => string | null = readDocument): LaunchGuardProperties {
+  let saved: unknown;
+  try {
+    const raw = read(LAUNCH_GUARD_DOC);
+    if (!raw) return {};
+    saved = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!saved || typeof saved !== "object") return {};
+  const facts = saved as Record<string, unknown>;
+  const properties: LaunchGuardProperties = {};
+  const waited = count(facts.waitedForPreviousMs);
+  const unfinished = count(facts.unfinishedStartsBefore);
+  if (waited !== undefined) properties.launch_waited_for_previous_ms = waited;
+  if (unfinished !== undefined) properties.launch_unfinished_starts_before = unfinished;
+  if (typeof facts.restoreStateSetAside === "boolean") properties.launch_restore_state_set_aside = facts.restoreStateSetAside;
+  if (typeof facts.profileHeldByAnother === "boolean") properties.launch_profile_held_by_another = facts.profileHeldByAnother;
+  return properties;
+}

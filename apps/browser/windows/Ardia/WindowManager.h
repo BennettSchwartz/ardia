@@ -23,6 +23,7 @@
 #include "AppIcon.h"
 #include "Events.h"
 #include "Host.h"
+#include "InstanceLoad.h"
 #include "ModalThread.h"
 #include "LaunchLog.h"
 #include "LaunchConfig.h"
@@ -30,10 +31,38 @@
 #include "WindowFade.h"
 #include "WindowPlacement.h"
 
+#pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shcore.lib")
 
 namespace Ardia {
+
+struct ThemedErase {
+  static constexpr UINT_PTR kSubclassId = 0xA2D1C;
+  static constexpr COLORREF kDark = RGB(32, 32, 32);
+  static constexpr COLORREF kLight = RGB(243, 243, 243);
+
+  static LRESULT CALLBACK Erase(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR dark) noexcept {
+    if (message == WM_ERASEBKGND) {
+      RECT client{};
+      HDC dc = reinterpret_cast<HDC>(wParam);
+      if (dc && GetClientRect(hwnd, &client)) {
+        SetDCBrushColor(dc, dark ? kDark : kLight);
+        FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+      }
+      return 1;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(hwnd, &Erase, kSubclassId);
+    return DefSubclassProc(hwnd, message, wParam, lParam);
+  }
+
+  static void Apply(HWND hwnd, bool dark) noexcept {
+    if (!hwnd) return;
+    SetWindowSubclass(hwnd, &Erase, kSubclassId, dark ? 1 : 0);
+    InvalidateRect(hwnd, nullptr, TRUE);
+  }
+};
 
 struct OpenWindowRequest {
   std::string id;
@@ -223,7 +252,7 @@ struct WindowManager {
       ApplyTheme(entry, m_dark);
       bool maximize = Place(entry, request);
       Watch(entry);
-      Mount(entry);
+      if (InstanceLoad::Shared().loaded) Mount(entry);
       ConnectNonClientInput(entry);
       ApplyInputRegions(entry);
 
@@ -236,6 +265,11 @@ struct WindowManager {
       auto appWindow = entry.appWindow;
       m_order.push_back(entry.id);
       auto placed = m_windows.emplace(entry.id, std::move(entry)).first;
+      if (!InstanceLoad::Shared().loaded) {
+        InstanceLoad::Shared().WhenLoaded(std::wstring(L"window ").append(Paths::Wide(placed->first)), [this, id = placed->first, window = placed->second.window]() {
+          if (ManagedWindow *found = Find(id); found && found->window == window) Mount(*found);
+        });
+      }
       if (fades || waitsForFirstFrame) BeginEntrance(placed->second, fades);
       bool quietPopup = !activate && placed->second.kind == "popup";
       if (quietPopup) ShowAboveOpener(hwnd, openedFrom);
@@ -794,6 +828,7 @@ struct WindowManager {
     static constexpr DWORD kUseImmersiveDarkMode = 20;
     BOOL useDark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(entry.hwnd, kUseImmersiveDarkMode, &useDark, sizeof(useDark));
+    ThemedErase::Apply(entry.hwnd, dark);
     try {
       entry.appWindow.TitleBar().PreferredTheme(
           dark ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark : winrt::Microsoft::UI::Windowing::TitleBarTheme::Light);
