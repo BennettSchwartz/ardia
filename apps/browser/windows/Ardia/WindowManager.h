@@ -415,7 +415,7 @@ struct WindowManager {
   void RefreshCaptionColors() noexcept {
     bool contrast = HighContrastOn();
     for (auto &[id, entry] : m_windows) ApplyTheme(entry, m_dark);
-    LaunchLog::Write(L"window", contrast ? L"caption buttons take the contrast theme's colours" : L"caption buttons take the app's colours again");
+    LaunchLog::Write(L"window", contrast ? L"caption buttons take the app's stronger contrast colours" : L"caption buttons take the app's usual colours again");
   }
 
   void SetDark(bool dark) noexcept {
@@ -836,22 +836,13 @@ struct WindowManager {
 
   static void ApplyCaptionColors(winrt::Microsoft::UI::Windowing::AppWindowTitleBar const &titleBar, bool dark, bool contrast) {
     using winrt::Windows::UI::Color;
-    if (contrast) {
-      titleBar.ButtonBackgroundColor(nullptr);
-      titleBar.ButtonInactiveBackgroundColor(nullptr);
-      titleBar.ButtonForegroundColor(nullptr);
-      titleBar.ButtonInactiveForegroundColor(nullptr);
-      titleBar.ButtonHoverBackgroundColor(nullptr);
-      titleBar.ButtonHoverForegroundColor(nullptr);
-      titleBar.ButtonPressedBackgroundColor(nullptr);
-      titleBar.ButtonPressedForegroundColor(nullptr);
-      return;
-    }
     Color clear{0, 0, 0, 0};
     Color glyph = dark ? Color{255, 255, 255, 255} : Color{255, 27, 27, 27};
-    Color resting = dark ? Color{255, 128, 128, 128} : Color{255, 138, 138, 138};
-    Color hover = dark ? Color{23, 255, 255, 255} : Color{23, 0, 0, 0};
-    Color pressed = dark ? Color{46, 255, 255, 255} : Color{46, 0, 0, 0};
+    Color resting = contrast ? glyph : dark ? Color{255, 128, 128, 128} : Color{255, 138, 138, 138};
+    uint8_t hoverAlpha = contrast ? 46 : 23;
+    uint8_t pressedAlpha = contrast ? 92 : 46;
+    Color hover = dark ? Color{hoverAlpha, 255, 255, 255} : Color{hoverAlpha, 0, 0, 0};
+    Color pressed = dark ? Color{pressedAlpha, 255, 255, 255} : Color{pressedAlpha, 0, 0, 0};
     titleBar.ButtonBackgroundColor(clear);
     titleBar.ButtonInactiveBackgroundColor(clear);
     titleBar.ButtonForegroundColor(glyph);

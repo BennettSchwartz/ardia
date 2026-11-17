@@ -1878,10 +1878,11 @@ public static class ArdiaContrast {
     }
   }
 
-  function Invoke-ContrastScenario([string]$Name, [switch]$Settings, [int]$Pairs, [int]$PauseMs) {
+  function Invoke-ContrastScenario([string]$Name, [switch]$Settings, [switch]$Dark, [int]$Pairs, [int]$PauseMs) {
     $log = Join-Path $Out "contrast-$Name.log"
     $launchActions = if ($Settings) { ',"launchActions":["openSettings"]' } else { "" }
-    Set-Content -Path (Join-Path $contrastData "config.json") -Value ('{"settings":{"openLinksInLittleArdia":false' + $launchActions + '}}') -Encoding utf8NoBOM
+    $appearance = if ($Dark) { ',"appearance":"dark"' } else { "" }
+    Set-Content -Path (Join-Path $contrastData "config.json") -Value ('{"settings":{"openLinksInLittleArdia":false' + $launchActions + $appearance + '}}') -Encoding utf8NoBOM
     $env:ARDIA_DATA_DIR = $contrastData
     $env:ARDIA_CONFIG_DIR = $contrastData
     $since = Get-Date
@@ -1955,6 +1956,7 @@ public static class ArdiaContrast {
     $contrastProblems += @(Invoke-ContrastScenario "settings-fast" -Settings -Pairs 5 -PauseMs 300)
     $contrastProblems += @(Invoke-ContrastScenario "browser-fast" -Pairs 5 -PauseMs 300)
     $contrastProblems += @(Invoke-ContrastScenario "settings-many" -Settings -Pairs 15 -PauseMs 200)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-dark" -Settings -Dark -Pairs 2 -PauseMs 4000)
   } finally {
     if ([ArdiaContrast]::IsOn()) { Write-Host "Contrast: final cleanup, $(Set-Contrast $false)" }
     if ($dumpsOn) { Remove-Item -Path $dumpKey -Force -ErrorAction SilentlyContinue }
