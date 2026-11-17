@@ -116,7 +116,7 @@ export const TabDeck = memo(function TabDeck() {
   const design = useDesign();
   const redesigned = design === "redesigned";
   const glassChrome = redesigned && usesGlass();
-  const gridAvailable = redesigned && DECK_GRID_ON_PLATFORM;
+  const gridAvailable = redesigned;
   const gridChosen = useDeckGrid();
   const grid = gridAvailable && gridChosen;
   const column = useColumn();
@@ -1082,7 +1082,6 @@ const dismissKeyboard = () => Keyboard.dismiss();
 const flickTick = () => haptics.tap();
 
 const DECK_FROST = "deck";
-const DECK_GRID_ON_PLATFORM = iPhoneOr(true, false);
 const SHOWN = { opacity: 1 };
 const HIDDEN = { opacity: 0 };
 const HANDOVER_CAP_MS = 250;

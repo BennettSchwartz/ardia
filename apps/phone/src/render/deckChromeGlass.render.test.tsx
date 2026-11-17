@@ -12,9 +12,8 @@ import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 const lookModule = require("@ardia/phone-native/src/look") as typeof import("@ardia/phone-native/src/look");
 
-const HAS_GRID = Platform.OS === "ios";
-const CHROME = ["deckHeaderMore", ...(HAS_GRID ? ["deckBarGrid"] : []), "deckSearchTabs", "deckBarPlus"];
-const GLYPHS = ["deckHeaderMoreGlyph", ...(HAS_GRID ? ["deckBarGridGlyph"] : []), "deckSearchTabsContent", "deckBarPlusGlyph", "deckSwitcher"];
+const CHROME = ["deckHeaderMore", "deckBarGrid", "deckSearchTabs", "deckBarPlus"];
+const GLYPHS = ["deckHeaderMoreGlyph", "deckBarGridGlyph", "deckSearchTabsContent", "deckBarPlusGlyph", "deckSwitcher"];
 
 beforeEach(() => {
   jest.useFakeTimers();
@@ -62,7 +61,7 @@ const frames = (count: number) => {
   for (let frame = 0; frame < count; frame++) act(() => jest.advanceTimersByTime(16));
 };
 
-test("where the system glass exists, no view above the deck's glass surfaces fades, their glass waits hidden through the entrance and materialises over 200 ms once the chrome comes in, and their glyphs carry the chrome's fade", () => {
+test("where the system glass exists, no view above the deck's four glass surfaces fades, their glass waits hidden through the entrance and materialises over 200 ms once the chrome comes in, and their glyphs carry the chrome's fade", () => {
   withGlass(true);
   const root = enterDeck();
   expect(glasses(root)).toHaveLength(CHROME.length);
@@ -88,7 +87,7 @@ test("where the system glass exists, the glyphs fade in mid-entrance on the chro
   let shownAt = -1;
   for (let frame = 1; frame <= 60 && (midway < 0 || shownAt < 0); frame++) {
     frames(1);
-    const glyph = opacity(host(root, "deckBarPlusGlyph"));
+    const glyph = opacity(host(root, "deckBarGridGlyph"));
     if (midway < 0 && glyph > 0 && glyph < 1) midway = frame;
     if (shownAt < 0 && glassShown(root).every(Boolean)) shownAt = frame;
   }
