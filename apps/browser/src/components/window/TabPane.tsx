@@ -140,7 +140,7 @@ export const TabPane = memo(function TabPane({
       {bar.kind === "backdrop" && <ToolbarBackdrop tabId={tabId} />}
       {bar.kind === "spacer" && <View style={{ height: toolbarHeight }} />}
       {!autoLayout && bookmarksBar && <BookmarksBar tabId={tabId} placeholder={!visible} />}
-      <Animated.View style={autoLayout ? motion.groupStyle : { flex: 1 }}>
+      <Animated.View testID={autoLayout ? "ardia.toolbarSlide" : undefined} style={autoLayout ? motion.groupStyle : { flex: 1 }}>
         {autoLayout && bookmarksBar && <BookmarksBar tabId={tabId} placeholder={!visible} />}
         <View style={{ flex: 1 }}>
           {visible && !fullscreen && <ShareBar tabId={tabId} />}

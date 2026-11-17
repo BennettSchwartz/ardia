@@ -1,4 +1,4 @@
-let checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0 };
+let checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0, slideFramesHeld: 0 };
 
 export function noteUpdateCheck(asked: boolean, outcome: "found" | "upToDate" | "failed") {
   if (asked) checks.asked += 1;
@@ -22,6 +22,8 @@ export function noteLoginPasswordCheck(result: unknown) {
   else if (result === "cancelled") checks.passwordCancelled += 1;
 }
 
+export const noteSlideFrameHeld = () => void (checks.slideFramesHeld += 1);
+
 export function takeUpdateCounts() {
   const taken = {
     update_checks_asked: checks.asked,
@@ -35,7 +37,8 @@ export function takeUpdateCounts() {
     login_password_checks_granted: checks.passwordGranted,
     login_password_checks_denied: checks.passwordDenied,
     login_password_checks_cancelled: checks.passwordCancelled,
+    toolbar_slide_frames_held: checks.slideFramesHeld,
   };
-  checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0 };
+  checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0, slideFramesHeld: 0 };
   return taken;
 }
