@@ -1,0 +1,42 @@
+--- a/content/browser/media/session/media_session_controller.cc
++++ b/content/browser/media/session/media_session_controller.cc
+@@ -17,6 +17,13 @@
+ 
+ namespace content {
+ 
++// Ardia: the Windows engine sets this at startup, for every WebContents in
++// the process. A muted tab keeps its heard players in its media session, and
++// a persistent player that reaches its end stays in it paused, so the playing
++// card still reports and controls them, as on the Mac.
++CONTENT_EXPORT extern bool g_ardia_win_keep_media_session_players;
++CONTENT_EXPORT bool g_ardia_win_keep_media_session_players = false;
++
+ int MediaSessionController::player_count_ = 0;
+ 
+ MediaSessionController::MediaSessionController(const MediaPlayerId& id,
+@@ -206,7 +213,12 @@
+ void MediaSessionController::OnPlaybackPaused(bool reached_end_of_stream) {
+   is_paused_ = true;
+ 
+-  if (reached_end_of_stream) {
++  // Ardia: short clips (transient) are still dropped at their end, so a
++  // page's notification sound leaves no paused session behind.
++  const bool ardia_keeps_ended_player =
++      g_ardia_win_keep_media_session_players &&
++      media_content_type_ == media::MediaContentType::kPersistent;
++  if (reached_end_of_stream && !ardia_keeps_ended_player) {
+     is_playback_in_progress_ = false;
+     AddOrRemovePlayer();
+   }
+@@ -290,7 +302,10 @@
+ 
+   // We want to make sure we do not request audio focus on a muted tab as it
+   // would break user expectations by pausing/ducking other playbacks.
+-  return has_audio_ && !web_contents_->IsAudioMuted();
++  // Ardia: audio focus is not enforced on Windows, so a muted tab's session
++  // ducks and pauses nothing there; has_audio_ already means it was heard.
++  return has_audio_ && (g_ardia_win_keep_media_session_players ||
++                        !web_contents_->IsAudioMuted());
+ }
+ 
+ bool MediaSessionController::AddOrRemovePlayer() {

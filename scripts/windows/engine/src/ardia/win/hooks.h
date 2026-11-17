@@ -31,7 +31,7 @@ class WeakDocumentPtr;
 class WebContents;
 struct ContextMenuParams;
 
-CONTENT_EXPORT extern bool g_ardia_win_keep_muted_media_sessions;
+CONTENT_EXPORT extern bool g_ardia_win_keep_media_session_players;
 }
 
 namespace url {

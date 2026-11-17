@@ -39,6 +39,9 @@ class NowPlaying : public content::WebContentsObserver,
   static void DownloadArtwork(content::WebContents* contents,
                               const base::DictValue& args,
                               Reply reply);
+  static void AudioFocusForTest(content::WebContents* contents,
+                                const base::DictValue& args,
+                                Reply reply);
 
  private:
   friend class content::WebContentsUserData<NowPlaying>;

@@ -1,13 +1,22 @@
 #include "ardia/win/now_playing.h"
 
 #include <algorithm>
+#include <memory>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+#include "ardia/core/ac_launch_switches.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
+#include "base/unguessable_token.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
+#include "content/public/browser/media_session_service.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/media_session/public/cpp/media_session_service.h"
+#include "services/media_session/public/mojom/audio_focus.mojom.h"
 
 namespace content {
 CONTENT_EXPORT bool ArdiaWinPageHandlesMediaSessionAction(
@@ -21,9 +30,80 @@ namespace {
 
 using Action = media_session::mojom::MediaSessionAction;
 using SuspendType = media_session::mojom::MediaSession::SuspendType;
+using FocusManager = mojo::Remote<media_session::mojom::AudioFocusManager>;
+using SessionState = media_session::mojom::MediaSessionInfo::SessionState;
+using FocusType = media_session::mojom::AudioFocusType;
 
 constexpr base::TimeDelta kSeekReportDelay = base::Seconds(1);
 
+std::string_view SessionStateName(SessionState state) {
+  switch (state) {
+    case SessionState::kActive:
+      return "active";
+    case SessionState::kDucking:
+      return "ducking";
+    case SessionState::kSuspended:
+      return "suspended";
+    case SessionState::kInactive:
+      return "inactive";
+  }
+  return "unknown";
+}
+
+std::string_view FocusTypeName(FocusType type) {
+  switch (type) {
+    case FocusType::kGain:
+      return "gain";
+    case FocusType::kGainTransientMayDuck:
+      return "transientMayDuck";
+    case FocusType::kGainTransient:
+      return "transient";
+    case FocusType::kAmbient:
+      return "ambient";
+  }
+  return "unknown";
+}
+
+void AnswerFocusRequests(
+    std::unique_ptr<FocusManager> manager,
+    const base::UnguessableToken& request_id,
+    Reply reply,
+    std::vector<media_session::mojom::AudioFocusRequestStatePtr> requests) {
+  base::DictValue result;
+  result.Set("ok", true);
+  result.Set("held", false);
+  result.Set("requests", static_cast<int>(requests.size()));
+  for (const auto& request : requests) {
+    if (!request || !request->request_id ||
+        *request->request_id != request_id) {
+      continue;
+    }
+    result.Set("held", true);
+    result.Set("type", FocusTypeName(request->audio_focus_type));
+    if (request->session_info) {
+      result.Set("state", SessionStateName(request->session_info->state));
+    }
+  }
+  std::move(reply).Run(std::move(result));
+}
+
+}
+
+void NowPlaying::AudioFocusForTest(content::WebContents* contents,
+                                   const base::DictValue& args,
+                                   Reply reply) {
+  if (!ardiacore::TestInstance()) {
+    std::move(reply).Run(Error("audioFocusForTest is for test instances"));
+    return;
+  }
+  auto manager = std::make_unique<FocusManager>();
+  content::GetMediaSessionService().BindAudioFocusManager(
+      manager->BindNewPipeAndPassReceiver());
+  media_session::mojom::AudioFocusManager* asked = manager->get();
+  asked->GetFocusRequests(base::BindOnce(
+      &AnswerFocusRequests, std::move(manager),
+      content::MediaSession::GetRequestIdFromWebContents(contents),
+      std::move(reply)));
 }
 
 bool NowPlaying::Lists(Action action) const {

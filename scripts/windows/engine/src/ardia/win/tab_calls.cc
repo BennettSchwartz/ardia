@@ -1141,6 +1141,7 @@ constexpr NamedMethod kMethods[] = {
     {"touchForTest", &TouchForTest},
     {"reattachLinksForTest", &ReattachLinksForTest},
     {"mediaSessionActionForTest", &MediaSessionActionForTest},
+    {"audioFocusForTest", &NowPlaying::AudioFocusForTest},
     {"testClient", &TestClientForTest},
     {"discardEligibilityForTest", &DiscardEligibilityForTest},
     {"setFrozen", &SetFrozen},

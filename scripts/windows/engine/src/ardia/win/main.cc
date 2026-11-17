@@ -619,7 +619,7 @@ void BeforeChromeMain() {
   AddLaunchSwitches(command_line);
   ardia_win::AskBeforeDiscards();
   g_ardia_win_hosts_normal_windows = true;
-  content::g_ardia_win_keep_muted_media_sessions = true;
+  content::g_ardia_win_keep_media_session_players = true;
   g_ardia_win_frame_view = &CreateHostedFrameView;
   g_ardia_win_add_main_parts = &AddMainParts;
   g_ardia_win_relaunched = &Relaunched;

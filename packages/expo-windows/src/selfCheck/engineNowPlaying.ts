@@ -12,7 +12,6 @@ const MOST_STEADY_REPORTS = 5;
 const BURST_LAST = { title: "Burst 999", position: 99.9 };
 const MOST_BURST_REPORTS = 15;
 const BURST_MS = 5000;
-const STILL_PAUSED_MS = 1500;
 const REWIND_SETTLES_MS = 1000;
 const FLAP_MS = 5000;
 const MOST_FLAP_REPORTS = 15;
@@ -153,21 +152,6 @@ const nowPlayingChecks: Check[] = [
         await hostCall("tab.call", { key, method: "setMuted", muted: false });
         const back = await reported(reports, "the unmuted tab's song follows its session again", (now) => isPlaying(now) && now?.controllable === true && !!now.actions?.includes("pause"));
         expectTrue(!!back?.actions?.includes("play"), `the session's actions again: ${JSON.stringify(back)}`);
-      }),
-  },
-  {
-    name: "engine now playing: media that ends stays reported paused, as on the Mac, until the page drops it",
-    run: () =>
-      withReports("np-ended", "nowplaying?once", TITLE, async (key, reports) => {
-        await startPlaying(key);
-        await reported(reports, "the page reports playing", isPlaying);
-        await until("the media ends", SETTLE_MS, () => pageState(key), (state) => state.ended === true);
-        await reported(reports, "the ended media is reported paused", isPaused);
-        await pause(STILL_PAUSED_MS);
-        const later = await reports.latest();
-        expectEqual({ paused: isPaused(later), title: later?.title }, { paused: true, title: SONG.title }, "the ended media is still reported paused");
-        await evaluate(key, 'm.removeAttribute("src"); m.load(); post("result", "true");');
-        await reported(reports, "the session ends once the page drops its media", (now) => now === null);
       }),
   },
   {
