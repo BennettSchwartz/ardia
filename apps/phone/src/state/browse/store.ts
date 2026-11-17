@@ -90,7 +90,7 @@ export function startBrowser(beforeOpening: () => void = () => undefined) {
   listenToPages(pageEvent);
   watchFrontScroll(frontPageId);
   if (!currentPreferences().hasFinishedOnboarding) showOnboarding();
-  else if (currentPreferences().autoOpensKeyboard) presentSearch("home", "", useTabs.getState().incognito);
+  else if (currentPreferences().autoOpensKeyboard) presentSearch("home", "", useTabs.getState().incognito, null, "atRest");
 }
 
 let appActive = true;

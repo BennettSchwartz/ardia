@@ -53,6 +53,23 @@ test("the exact text typed always keeps a row of its own, second after the top r
   assert.equal(withTypedQuery([already, page(1)], "otter").filter((row) => row.kind === "query").length, 1);
 });
 
+test("a visited page at the top of the suggestions stays put while you type on, with the typed search row second on every key (main's 513bc30a7)", () => {
+  setSources({ tabs: [], history: [{ url: "https://en.wikipedia.org/wiki/Sintra", title: "Sintra - Wikipedia", favicon: null, visits: 12, lastVisit: Date.now() - 60_000 }], bookmarks: [] });
+  let previous: string[] = [];
+  let topped = 0;
+  for (const text of ["s", "si", "sin", "sint", "sintr", "sintra"]) {
+    for (const remote of [previous, [text, `${text} portugal`]]) {
+      const rows = suggest(text, remote, context).rows;
+      if (rows[0]?.kind !== "page") continue;
+      topped += 1;
+      assert.equal(rows[0].url, "https://en.wikipedia.org/wiki/Sintra", `${text}: the page stays first`);
+      assert.deepEqual([rows[1]?.kind, rows[1]?.title], ["query", text], `${text}: the typed search row is second, before and after the answer for this text`);
+    }
+    previous = [text, `${text} portugal`];
+  }
+  assert.ok(topped >= 6, `the page led on only ${topped} of the 12 lists`);
+});
+
 test("a calculation reads as = value and keeps the value to copy; a Mac's tab shows its host and opens as a synced tab", () => {
   setSources({ tabs: [], history: [], bookmarks: [] });
   const calc = suggest("12*12", [], context).rows.find((row) => row.kind === "calc");

@@ -17,6 +17,8 @@ export type SearchOrigin = "home" | "start" | "page";
 
 export type SearchEnding = "submitted" | "cancelled";
 
+export type TrayArrival = "rises" | "atRest";
+
 type SearchState = {
   open: boolean;
   ending: SearchEnding;
@@ -29,6 +31,7 @@ type SearchState = {
   session: number;
   fieldVersion: number;
   incognitoOnCancel: boolean | null;
+  arrival: TrayArrival;
 };
 
 export const useSearch = create<SearchState>()(() => ({
@@ -43,6 +46,7 @@ export const useSearch = create<SearchState>()(() => ({
   session: 0,
   fieldVersion: 0,
   incognitoOnCancel: null,
+  arrival: "rises",
 }));
 
 let remote: { text: string; values: string[] } = { text: "", values: [] };
@@ -93,7 +97,7 @@ export function applySearchEngine() {
   else setSearchEngine(currentPreferences().searchEngineId);
 }
 
-export function presentSearch(origin: SearchOrigin, text = "", incognitoOnCancel: boolean | null = null, page: SuggestContext | null = null) {
+export function presentSearch(origin: SearchOrigin, text = "", incognitoOnCancel: boolean | null = null, page: SuggestContext | null = null, arrival: TrayArrival = "rises") {
   beginInteraction("tray open", INTERACTION_WINDOW_MS.trayOpen);
   inFlight?.abort();
   remote = { text: "", values: [] };
@@ -111,6 +115,7 @@ export function presentSearch(origin: SearchOrigin, text = "", incognitoOnCancel
     session: state.session + 1,
     fieldVersion: 0,
     incognitoOnCancel,
+    arrival,
   }));
   offerPaste(useSearch.getState().session);
 }

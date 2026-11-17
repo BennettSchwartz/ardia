@@ -27,6 +27,7 @@ import {
   startLayout,
   startMotion,
   Symbol,
+  SystemGlyph,
   tabsCurve,
   tabsLayout,
   useReduceMotion,
@@ -252,7 +253,7 @@ export function SpaceTitle({ space: profile, dark, showsChevron }: { space: Sync
       <Text style={[font.body, styles.headline, { color: roles.headerText }]} numberOfLines={1}>
         {profile.name}
       </Text>
-      {showsChevron ? <Symbol name="chevronDown" size={startLayout.chevron} color={roles.secondaryLabel} /> : null}
+      {showsChevron ? <SystemGlyph testID="spaceTitleChevron" systemName="chevron.down" pointSize={12} weight="semibold" fitted name="chevronDown" size={startLayout.chevron} color={roles.secondaryLabel} /> : null}
     </View>
   );
 }

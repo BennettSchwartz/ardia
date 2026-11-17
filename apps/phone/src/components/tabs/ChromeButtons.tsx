@@ -2,7 +2,19 @@ import { StyleSheet, type ViewProps } from "react-native";
 import { haptics } from "../../state/app/haptics";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { newIncognitoTab, newRegularTab, newTab, reopenLastClosed } from "../../state/browse/store";
-import { capsule, ChromeSurface, PressScale, rolesFor, startLayout, Symbol, type MenuItem, type SymbolName } from "../ui";
+import { capsule, ChromeSurface, PressScale, rolesFor, startLayout, Symbol, SystemGlyph, type MenuItem, type SymbolName } from "../ui";
+
+const CIRCLE_SYSTEM_NAMES: Partial<Record<SymbolName, string>> = {
+  ellipsis: "ellipsis",
+  gearshape: "gearshape",
+  magnifyingglass: "magnifyingglass",
+  squareOnSquare: "square.on.square",
+  squareStack: "square.stack",
+  squareGrid2x2: "square.grid.2x2",
+};
+
+const CIRCLE_SYSTEM_GLYPH = 16;
+const PLUS_SYSTEM_GLYPH = 18;
 
 export function plusMenuItems(incognito: boolean, canReopen: boolean): MenuItem[] {
   return [
@@ -31,7 +43,11 @@ export function GlassCircleButton({ icon, label, testID, diameter = startLayout.
     <PressScale label={label} onPress={onPress} onPressIn={haptics.barPress} style={[styles.centered, size]}>
       <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(diameter)} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
         <FadingGlyphs testID={`${testID}Glyph`} pointerEvents="none" fade={glyphFade}>
-          <Symbol name={icon} size={startLayout.circleGlyph} color={rolesFor(dark).label} />
+          {CIRCLE_SYSTEM_NAMES[icon] ? (
+            <SystemGlyph systemName={CIRCLE_SYSTEM_NAMES[icon]} pointSize={CIRCLE_SYSTEM_GLYPH} weight="medium" name={icon} size={startLayout.circleGlyph} color={rolesFor(dark).label} />
+          ) : (
+            <Symbol name={icon} size={startLayout.circleGlyph} color={rolesFor(dark).label} />
+          )}
         </FadingGlyphs>
       </ChromeSurface>
     </PressScale>
@@ -44,7 +60,7 @@ export function GlassPlusButton({ width, label, testID, dark, incognito = false,
     <PressScale label={label} hint="Touch and hold for more options." onPress={onPress} onLongPress={onLongPress} onPressIn={haptics.barPress} style={size}>
       <ChromeSurface testID={testID} shape="capsule" cornerRadius={capsule(size.height)} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
         <FadingGlyphs testID={`${testID}Glyph`} pointerEvents="none" fade={glyphFade}>
-          <Symbol name="plus" size={startLayout.plusGlyph} color={rolesFor(dark).label} />
+          <SystemGlyph systemName="plus" pointSize={PLUS_SYSTEM_GLYPH} weight="medium" name="plus" size={startLayout.plusGlyph} color={rolesFor(dark).label} />
         </FadingGlyphs>
       </ChromeSurface>
     </PressScale>

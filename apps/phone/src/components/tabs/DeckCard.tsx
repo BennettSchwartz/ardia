@@ -244,7 +244,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
               onLayout={(event) => {
                 titleWidth.value = event.nativeEvent.layout.width;
               }}
-              style={[font.caption, styles.title, { color: theme.headerText }, titleStyle]}
+              style={[HEADER_TITLE_FONT, styles.title, { color: theme.headerText }, titleStyle]}
               numberOfLines={1}
             >
               {deckHeaderTitle(tab, title)}
@@ -402,6 +402,7 @@ export function OpeningCard({ tab, geometry: g, centerX, centerY, growsAtMount =
 const CARD_ELEVATION = 14;
 const COVER_NEAR_END_PX = 2;
 const HEADER_ROW_ROOM = 2000;
+const HEADER_TITLE_FONT = iPhoneOr<{ fontSize: number; lineHeight: number }>(font.footnote, font.caption);
 const CARD_SHADOW_BLUR = 36;
 const RECEIVED_INSET = 10;
 

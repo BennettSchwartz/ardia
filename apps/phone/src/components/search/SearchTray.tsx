@@ -27,8 +27,8 @@ import { searchState, setSearchText, typeSearch } from "../../state/search/store
 import { coverTray, followTrayBack, trayBackTravel, useTrayCovers } from "../../state/search/trayBack";
 import { useIncognito } from "../../state/tabs/hooks";
 import { useTabs } from "../../state/tabs/store";
-import { countUsage } from "../../state/telemetry/telemetry";
-import { browseLayout, capsule, FloatingMenu, font, ink, LookFrost, MotionView, moveTo, radius, screenReaderActions, type MotionCurve, type MotionTarget, rolesFor, trayLandingDelayMs, space, stageMotion, barReturnMotion, Symbol, SURFACES_FROST, tabsCurve, tabsInk, tabsLayout, tabsMotion, trayMotion, trayShadow, useTheme, FadeView, fadeIsNative, ChromeSurface, floatingPanelLayout, useDesign, useReduceTransparency, useReduceMotion, settingsUIAvailable } from "../ui";
+import { countUsage, reportLaunchTray } from "../../state/telemetry/telemetry";
+import { browseLayout, capsule, FloatingMenu, font, ink, LookFrost, MotionView, moveTo, radius, screenReaderActions, type MotionCurve, type MotionTarget, rolesFor, trayLandingDelayMs, space, stageMotion, barReturnMotion, Symbol, SURFACES_FROST, tabsCurve, tabsInk, tabsLayout, tabsMotion, trayMotion, trayShadow, useTheme, FadeView, fadeIsNative, ChromeSurface, floatingPanelLayout, useDesign, useReduceTransparency, useReduceMotion, settingsUIAvailable, SystemGlyph } from "../ui";
 import { SuggestionRow } from "./SuggestionRow";
 import { TrayInput, type TrayInputHandle } from "./TrayInput";
 import { canSearchByVoice, presentVoiceSearch } from "../../state/voice/store";
@@ -40,6 +40,8 @@ import { useTrayKeyboard } from "./useTrayKeyboard";
 const SHEET_ABOVE_KEYBOARD = 274;
 
 const PANEL_GLYPHS = { mic: 22, clear: 21 } as const;
+
+const FIELD_SYSTEM_GLYPH = 17;
 
 
 function useTrayTheme() {
@@ -87,7 +89,8 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
   const window = useWindowDimensions();
   const reduceMotion = useReduceMotion();
   const keyboard = useTrayKeyboard();
-  const landing = useSharedValue(0);
+  const arrivesAtRest = useRef(searchState().arrival === "atRest").current;
+  const landing = useSharedValue(arrivesAtRest ? 1 : 0);
   const [departed, setDeparted] = useState(false);
   const back = useSharedValue(0);
   const departing = useRef(false);
@@ -100,7 +103,7 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
     })();
     setDeparted(true);
   };
-  const hasLanded = useSharedValue(false);
+  const hasLanded = useSharedValue(arrivesAtRest);
   const isClosing = useSharedValue(closing);
   const dim = useSharedValue(0);
   const drag = useSharedValue(0);
@@ -136,7 +139,7 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
     if (closing) return;
     isClosing.value = false;
     const progress = keyboardProgress(keyboard.height.value, keyboard.full.value, 0);
-    const landed = keyboardIsUp(keyboard.height.value) && progress >= TRAY_LIFT.landedProgress;
+    const landed = arrivesAtRest || (keyboardIsUp(keyboard.height.value) && progress >= TRAY_LIFT.landedProgress);
     hasLanded.value = landed;
     landing.value = landed ? 1 : 0;
     const land = setTimeout(() => {
@@ -280,6 +283,7 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
     () => !isClosing.value && (keyboardIsUp(keyboard.height.value) || hasLanded.value),
     (up, was) => {
       if (up === was) return;
+      if (up && arrivesAtRest) runOnJS(launchTrayUp)();
       dim.value = withTiming(up ? 1 : 0, { duration: reduceMotion ? trayMotion.reduced : trayMotion.dim, easing: reduceMotion ? tabsCurve.easeOut : trayMotion.dimEasing });
     },
   );
@@ -494,8 +498,10 @@ function StagedTray() {
     live.current.presentation = presentation;
     if (presentation === 0) return;
     setPresented(false);
+    const launch = searchState().arrival === "atRest";
     void stage.current?.present().then(() => {
       if (live.current.presentation !== presentation || live.current.closing) return;
+      if (launch) launchTrayUp();
       setPresented(true);
       stagePresented();
     });
@@ -731,6 +737,8 @@ function useLeavingActions() {
   }, [depart]);
 }
 
+const launchTrayUp = () => void reportLaunchTray(Date.now());
+
 const putKeyboardAway = () => {
   trayInput?.blur();
   Keyboard.dismiss();
@@ -833,7 +841,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
         )}
         {hasText ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Clear Text" style={styles.accessory} onPress={() => input.current?.clearsInPlace() || setSearchText("")}>
-            <Symbol name="xmarkCircleFill" size={panelField ? PANEL_GLYPHS.clear : 18} color={theme.foregroundTertiary} />
+            <SystemGlyph testID="trayClearGlyph" systemName="xmark.circle.fill" pointSize={FIELD_SYSTEM_GLYPH} name="xmarkCircleFill" size={panelField ? PANEL_GLYPHS.clear : 18} color={theme.foregroundTertiary} />
           </Pressable>
         ) : (
           <VoiceButton />
@@ -853,7 +861,7 @@ function VoiceButton() {
   if (incognito || fontScale > LARGE_FONT_SCALE || !canSearchByVoice()) return null;
   return (
     <Pressable accessibilityRole="button" accessibilityLabel="Voice Search" style={styles.accessory} onPress={presentVoiceSearch}>
-      <Symbol name="mic" size={panelField ? PANEL_GLYPHS.mic : 19} color={theme.foregroundTertiary} />
+      <SystemGlyph testID="trayMicGlyph" systemName="mic" pointSize={FIELD_SYSTEM_GLYPH} weight="medium" name="mic" size={panelField ? PANEL_GLYPHS.mic : 19} color={theme.foregroundTertiary} />
     </Pressable>
   );
 }
