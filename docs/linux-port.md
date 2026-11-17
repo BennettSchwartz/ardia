@@ -654,8 +654,15 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   desktops such as Hyprland. Chrome's own caption buttons are hidden: opacity 0, no input, ignored by accessibility.
 - **Header drag and double-click.** Dragging the header moves the window (`DispatchHostWindowDragMovement`).
   Double-clicking it runs the desktop's titlebar action.
-- **Outer frame.** The host overlays Chromium's client view and doesn't replace its frame. Without the Wayland
-  decoration protocol, Chromium draws its custom frame.
+- **Outer frame.** The host overlays Chromium's client view. Without the Wayland decoration protocol (Hyprland),
+  Chromium uses its custom frame, which would wrap that view in a themed band with a shadow border and rounded corners of
+  its own. `chromium-linux-borderless-frame.patch` stops that for every window the host owns (main, Little Ardia,
+  Settings, Import): `g_ardia_linux_borderless_frame` answers true for them, and the frame view and its layout then
+  report no border, input or shadow insets and no corner radius, and paint no frame, so the client area is the whole
+  window. The host calls `RefreshEngineFrame` once the window is its own, because Chromium laid the frame out before
+  that. Edge resizing stays: a thin band along the edges answers as a resize border (`NonClientHitTest`). Whatever
+  corners, shadow or outline the compositor draws are its own. `windowCornerRadius` still answers a fixed 19 on Linux
+  (`apps/linux/src/shellMethods.ts`); it was not changed with the frame.
 - **Menu button.** Linux has no global menu bar, so a hamburger in the header stands in for the Mac one. It lists
   Ardia, File, Edit, View, Tabs, Bookmarks, History, Extensions, Window and Help as submenus built from the same menu
   state the Mac menu bar uses (checks, disabled commands, dynamic titles, bookmarks, recently closed entries, profiles
