@@ -7,6 +7,7 @@ type PositionReport = Pick<NowPlaying, "playbackState" | "position" | "duration"
 
 let sidebarPlayerExpands = 0;
 let sidebarPlayerReopens = 0;
+let sidebarPlayerFromOtherProfile = 0;
 let loopRestarts = 0;
 let rewinds = 0;
 let pastEnd = 0;
@@ -31,6 +32,8 @@ export function sidebarPlayerOpenCounter() {
   };
 }
 
+export const noteSidebarPlayerFromOtherProfile = () => void sidebarPlayerFromOtherProfile++;
+
 export const noteNowPlayingLoopRestart = () => void loopRestarts++;
 
 export function noteMediaCommandAnswer(answer: unknown) {
@@ -49,9 +52,10 @@ export function noteMediaPositionReport(before: PositionReport | undefined, repo
 }
 
 export function takeMediaCardCounts() {
-  const taken = { sidebar_player_expands: sidebarPlayerExpands, sidebar_player_reopens: sidebarPlayerReopens, now_playing_loop_restarts: loopRestarts, media_position_rewinds: rewinds, media_reports_past_end: pastEnd, media_commands_not_done: commandsNotDone, now_playing_artwork_empty: artworkEmpty };
+  const taken = { sidebar_player_expands: sidebarPlayerExpands, sidebar_player_reopens: sidebarPlayerReopens, sidebar_player_from_other_profile: sidebarPlayerFromOtherProfile, now_playing_loop_restarts: loopRestarts, media_position_rewinds: rewinds, media_reports_past_end: pastEnd, media_commands_not_done: commandsNotDone, now_playing_artwork_empty: artworkEmpty };
   sidebarPlayerExpands = 0;
   sidebarPlayerReopens = 0;
+  sidebarPlayerFromOtherProfile = 0;
   loopRestarts = 0;
   rewinds = 0;
   pastEnd = 0;
