@@ -67,34 +67,6 @@ class FieldKeyboardTest {
     }
 
     @Test
-    fun aFieldFocusedBeforeItIsAttachedAsksForTheKeyboardOnceItAttachesToAWindowThatAlreadyHasFocus() {
-        val late = Field(activity).apply { windowFocused = true }
-        val lateShown = ArrayList<View>()
-        val lateKeyboard = FieldKeyboard(late, show = { lateShown += it }, hide = { })
-        late.requestFocus()
-        lateKeyboard.open()
-        assertTrue("nothing is asked before the field is in a window", lateShown.isEmpty())
-        assertTrue(lateKeyboard.isWaitingForAttach)
-        (field.parent as FrameLayout).addView(late)
-        assertEquals("a cold start's window already has focus, so no focus change would ever come: the attach asks", listOf<View>(late), lateShown)
-        assertFalse(lateKeyboard.isWaitingForAttach)
-        assertFalse(lateKeyboard.isWaitingForWindowFocus)
-    }
-
-    @Test
-    fun aFieldClosedBeforeItAttachesNeverAsksForTheKeyboard() {
-        val late = Field(activity).apply { windowFocused = true }
-        val lateShown = ArrayList<View>()
-        val lateKeyboard = FieldKeyboard(late, show = { lateShown += it }, hide = { })
-        late.requestFocus()
-        lateKeyboard.open()
-        lateKeyboard.close()
-        assertFalse(lateKeyboard.isWaitingForAttach)
-        (field.parent as FrameLayout).addView(late)
-        assertTrue(lateShown.isEmpty())
-    }
-
-    @Test
     fun closingBeforeTheWindowHasFocusCancelsTheWaitAndStillHidesTheKeyboard() {
         keyboard.open()
         keyboard.close()
