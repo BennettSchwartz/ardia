@@ -94,7 +94,7 @@ export const appearanceRows = {
         addressBar: { title: "Address Bar", description: "In the toolbar or in the sidebar.", keywords: ["url bar", "location bar", "toolbar"] },
         commandBarPlacement: {
           title: `${keyText("⌘L")} opens the command bar`,
-          description: `In the centre, ${keyText("⌘L")} shows it over the middle of the page, as in Arc, and a click on the address still edits it where it is. In the centre, also on click opens a click on the address there too. ${keyText("⌘L")} opens in the centre whenever the address is out of sight.`,
+          description: `In the center, ${keyText("⌘L")} shows it over the middle of the page, as in Arc, and a click on the address still edits it where it is. In the center, also on click opens a click on the address there too. ${keyText("⌘L")} opens in the center whenever the address is out of sight.`,
           keywords: ["cmd l", "command bar", "centred", "centered", "arc", "url bar", "location bar", "click", "click address", "click url"],
         },
         compactToolbar: {
