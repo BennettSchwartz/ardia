@@ -1,7 +1,7 @@
 import { hostCall } from "../engine/host";
 import { expectEqual, expectTrue, type Check } from "./check";
 import { SETTLE_MS, port, restore, setAutoplay } from "./engineAutoplayKit";
-import { listed, pause, until } from "./engineSleep";
+import { evaluate, listed, pause, until } from "./engineSleep";
 import { TITLE, called, command, commandAnswer, isPaused, isPlaying, pageState, pausePage, projected, reported, startPlaying, unaskedPlay, withReports, type Reports } from "./engineNowPlayingKit";
 
 const SKIP_SECONDS = 15;
@@ -23,6 +23,9 @@ async function playsAfterBlock(name: string, path: string) {
       await reported(reports, "the page reports playing again", isPlaying);
       await pause(500);
       expectEqual((await pageState(key)).ad?.active, false, "the unrelated cross-site ad iframe's navigator.userActivation.hasBeenActive after the card's play");
+      await evaluate(key, 'document.querySelector("iframe").contentWindow.postMessage("np-try-muted", "*"); post("result", "true");');
+      const tried = await until("the unrelated ad iframe tries a muted play()", SETTLE_MS, () => pageState(key), (state) => typeof state.ad?.tried === "string");
+      expectEqual(tried.ad?.tried, "NotAllowedError", "a muted play() in the unrelated cross-site ad iframe after the card's play, on the blocked site");
     });
   } finally {
     await restore();

@@ -2,7 +2,7 @@ import { hostCall } from "../engine/host";
 import { expectEqual, expectTrue, type Check } from "./check";
 import { LOAD_MS, SETTLE_MS, origin, port } from "./engineAutoplayKit";
 import { evaluate, firstWindow, LEFT, listed, pause, show, until } from "./engineSleep";
-import { FRAME_TITLE, SONG, TITLE, called, command, commandReply, downloaded, expectPng, isPaused, isPlaying, mediaState, pageState, reported, reportsOf, startPlaying, withReports } from "./engineNowPlayingKit";
+import { FRAME_TITLE, SONG, TITLE, called, playFrame, command, commandReply, downloaded, expectPng, isPaused, isPlaying, mediaState, pageState, reported, reportsOf, startPlaying, withReports } from "./engineNowPlayingKit";
 
 const PAGE_ACTIONS = ["play", "pause", "nexttrack", "previoustrack", "seekto"];
 const DECLARED_DURATION = 120;
@@ -15,12 +15,6 @@ const BURST_MS = 5000;
 const STILL_PAUSED_MS = 1500;
 const REWIND_SETTLES_MS = 1000;
 
-async function playFrame(key: string, windowId: string) {
-  await show(key, windowId, LEFT);
-  await until("the cross-site iframe reports", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
-  await evaluate(key, 'document.querySelector("iframe").contentWindow.postMessage("np-play", "*"); post("result", "true");', true);
-  await until("the iframe plays its media when the page, which the user activated, asks it to (allow=autoplay)", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
-}
 
 const nowPlayingChecks: Check[] = [
   {
@@ -103,17 +97,22 @@ const nowPlayingChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a cross-site iframe's media in a muted tab is reported not controllable, and controllable again once unmuted",
+    name: "engine now playing: a cross-site iframe's song stays on the card, controllable, while the tab is muted, and follows the session again once unmuted",
     run: () =>
       withReports("np-framed-muted", "npframe", FRAME_TITLE, async (key, reports, windowId) => {
         await playFrame(key, windowId);
         await reported(reports, "the iframe's session is reported playing and controllable", (now) => isPlaying(now) && now?.controllable === true);
         await hostCall("tab.call", { key, method: "setMuted", muted: true });
-        const muted = await reported(reports, "the muted tab's cross-site media is reported not controllable", (now) => now?.controllable === false);
-        expectEqual({ title: muted?.title, playing: isPlaying(muted) }, { title: SONG.title, playing: true }, "the muted tab keeps its card's track, still playing");
+        await pause(1000);
+        const muted = await reports.latest();
+        expectEqual({ title: muted?.title, playing: isPlaying(muted), controllable: muted?.controllable }, { title: SONG.title, playing: true, controllable: true }, "the muted tab keeps its card's track, playing and controllable");
+        await command(key, "pause");
+        await until("the card's pause reaches the muted tab's cross-site song", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
+        await command(key, "play");
+        await until("the card's play reaches it again", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
         await hostCall("tab.call", { key, method: "setMuted", muted: false });
-        const back = await reported(reports, "the unmuted tab's media is controllable again", (now) => now?.controllable === true);
-        expectTrue(isPlaying(back) && !!back?.actions?.includes("pause") && !!back.actions.includes("play"), `controllable again with the session's actions: ${JSON.stringify(back)}`);
+        const back = await reported(reports, "the unmuted tab's song follows its session again", (now) => isPlaying(now) && now?.controllable === true && !!now.actions?.includes("pause"));
+        expectTrue(!!back?.actions?.includes("play"), `the session's actions again: ${JSON.stringify(back)}`);
       }),
   },
   {

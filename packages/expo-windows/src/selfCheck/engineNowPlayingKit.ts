@@ -1,10 +1,10 @@
 import { hostCall, onEngineTopic } from "../engine/host";
 import { expectEqual, expectTrue } from "./check";
 import { SETTLE_MS, withMedia } from "./engineAutoplayKit";
-import { evaluate, until } from "./engineSleep";
+import { evaluate, LEFT, show, until } from "./engineSleep";
 
 export type NowPlaying = { title?: string; artist?: string; album?: string; artwork?: string | null; playbackState?: string; position?: number; duration?: number | null; playbackRate?: number; timestamp?: number; hasVideo?: boolean; actions?: string[]; controllable?: boolean; loop?: boolean };
-export type PageState = { paused?: boolean; time?: number; ended?: boolean; calls?: string[]; ad?: { active?: boolean } | null; frame?: { paused?: boolean; time?: number; calls?: string[] } | null; burstDone?: boolean };
+export type PageState = { paused?: boolean; time?: number; ended?: boolean; calls?: string[]; ad?: { active?: boolean; tried?: string | null } | null; frame?: { paused?: boolean; time?: number; calls?: string[] } | null; burstDone?: boolean };
 export type Image = { uri?: string | null; width?: number; height?: number };
 
 export const TITLE = "now playing page";
@@ -84,4 +84,11 @@ export function expectPng(image: Image | null, what: string) {
   const width = image!.width ?? 0;
   const height = image!.height ?? 0;
   expectTrue(width > 0 && height > 0 && width <= ART_PIXELS && height <= ART_PIXELS, `${what}: within ${ART_PIXELS} px, got ${width}x${height}`);
+}
+
+export async function playFrame(key: string, windowId: string) {
+  await show(key, windowId, LEFT);
+  await until("the cross-site iframe reports", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
+  await evaluate(key, 'document.querySelector("iframe").contentWindow.postMessage("np-play", "*"); post("result", "true");', true);
+  await until("the iframe plays its media when the page, which the user activated, asks it to (allow=autoplay)", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
 }
