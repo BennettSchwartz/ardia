@@ -156,7 +156,7 @@ const nowPlayingChecks: Check[] = [
   {
     name: "engine now playing: a page that seeks its own track back to the start is not reported as looping",
     run: () =>
-      withReports("np-rewind", "nowplaying?plain&once&rewind", TITLE, async (key, reports) => {
+      withReports("np-rewind", "nowplaying?plain&long&rewind", TITLE, async (key, reports) => {
         await startPlaying(key);
         await reported(reports, "the page reports playing", isPlaying);
         await until("the page seeks itself back to the start near the end", SETTLE_MS, () => evaluate(key, 'post("result", JSON.stringify(window.rewound));'), (rewound) => rewound === true);

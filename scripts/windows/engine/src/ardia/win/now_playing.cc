@@ -9,7 +9,10 @@
 #include "base/location.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/media_session.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/page.h"
+#include "content/public/browser/reload_type.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
 namespace content {
@@ -53,6 +56,9 @@ void NowPlaying::Resend(content::WebContents* contents) {
 
 void NowPlaying::End(content::WebContents* contents) {
   NowPlaying* now = contents ? FromWebContents(contents) : nullptr;
+  if (now) {
+    now->EndWake();
+  }
   if (now && now->sent_) {
     now->Send(std::nullopt);
   }
@@ -64,9 +70,42 @@ void NowPlaying::WakingToPlay(content::WebContents* contents) {
   }
   Watch(contents);
   NowPlaying* now = FromWebContents(contents);
-  now->wake_play_until_ = base::TimeTicks::Now() + kWakeToPlay;
-  now->wake_load_pending_ = true;
-  now->wake_seeked_ = false;
+  const TabState* tab = TabState::FromWebContents(contents);
+  now->EndWake();
+  if (!tab || tab->key().empty()) {
+    return;
+  }
+  now->wake_stage_ = WakeStage::kArmed;
+  now->wake_until_ = base::TimeTicks::Now() + kWakeToPlay;
+  now->wake_key_ = tab->key();
+}
+
+void NowPlaying::CancelWake(content::WebContents* contents) {
+  if (NowPlaying* now = contents ? FromWebContents(contents) : nullptr) {
+    now->EndWake();
+  }
+}
+
+void NowPlaying::EndWake() {
+  wake_stage_ = WakeStage::kNone;
+  wake_until_ = base::TimeTicks();
+  wake_navigation_ = 0;
+  wake_document_ = content::WeakDocumentPtr();
+  wake_key_.clear();
+}
+
+bool NowPlaying::WakeUsable() const {
+  if (wake_stage_ != WakeStage::kLoaded && wake_stage_ != WakeStage::kSeeked) {
+    return false;
+  }
+  content::WebContents* contents = web_contents();
+  const TabState* tab = contents ? TabState::FromWebContents(contents) : nullptr;
+  content::RenderFrameHost* document =
+      wake_document_.AsRenderFrameHostIfValid();
+  return contents && !contents->WasDiscarded() && tab &&
+         tab->key() == wake_key_ && document &&
+         document == contents->GetPrimaryMainFrame() &&
+         base::TimeTicks::Now() < wake_until_;
 }
 
 MediaCommandResult NowPlaying::Command(content::WebContents* contents,
@@ -207,12 +246,41 @@ void NowPlaying::MediaSessionCreated(content::MediaSession* session) {
 
 void NowPlaying::PrimaryPageChanged(content::Page& page) {
   artwork_.PageChanged();
-  if (wake_load_pending_) {
-    wake_load_pending_ = false;
-  } else {
-    wake_play_until_ = base::TimeTicks();
+  if (wake_stage_ != WakeStage::kNone &&
+      wake_stage_ != WakeStage::kLoading) {
+    EndWake();
   }
   Update();
+}
+
+void NowPlaying::DidStartNavigation(content::NavigationHandle* navigation) {
+  if (wake_stage_ == WakeStage::kNone || !navigation->IsInPrimaryMainFrame() ||
+      navigation->IsSameDocument()) {
+    return;
+  }
+  if (wake_stage_ == WakeStage::kArmed &&
+      navigation->GetReloadType() != content::ReloadType::NONE &&
+      !navigation->IsRendererInitiated()) {
+    wake_stage_ = WakeStage::kLoading;
+    wake_navigation_ = navigation->GetNavigationId();
+    return;
+  }
+  EndWake();
+}
+
+void NowPlaying::DidFinishNavigation(content::NavigationHandle* navigation) {
+  if (wake_stage_ != WakeStage::kLoading ||
+      navigation->GetNavigationId() != wake_navigation_) {
+    return;
+  }
+  content::RenderFrameHost* committed = navigation->GetRenderFrameHost();
+  if (!navigation->HasCommitted() || navigation->IsErrorPage() || !committed ||
+      !committed->IsInPrimaryMainFrame()) {
+    EndWake();
+    return;
+  }
+  wake_stage_ = WakeStage::kLoaded;
+  wake_document_ = committed->GetWeakDocumentPtr();
 }
 
 void NowPlaying::WebContentsDestroyed() {

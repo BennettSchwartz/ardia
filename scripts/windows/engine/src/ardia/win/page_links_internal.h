@@ -28,7 +28,6 @@ inline constexpr int kMeta = 8;
 inline constexpr base::TimeDelta kGestureLifetime = base::Seconds(10);
 inline constexpr base::TimeDelta kFallbackLifetime = base::Seconds(60);
 inline constexpr size_t kLongestUrl = 8192;
-inline constexpr size_t kLongestDocumentUrl = 2 * 1024 * 1024;
 
 struct MouseUp {
   int keys = 0;

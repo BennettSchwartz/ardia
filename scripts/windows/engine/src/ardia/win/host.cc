@@ -853,6 +853,11 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
   if (method == "moveWindowForTest") {
     return MoveWindowForTest(contents, args);
   }
+  if (method == "loadUrl" || method == "goBack" || method == "goForward" ||
+      method == "goToOffset" || method == "reload" ||
+      method == "forceReload" || method == "stopLoading") {
+    NowPlaying::CancelWake(contents);
+  }
   if (method == "loadUrl") {
     bool user_initiated = args.FindBool("userInitiated").value_or(false);
     content::NavigationController::LoadURLParams params(

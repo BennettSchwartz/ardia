@@ -183,7 +183,7 @@ const artworkChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: declared SVG artwork, from an address and from a data URL, goes through the frame's own image downloader (what it returns is logged)",
+    name: "engine now playing: declared SVG artwork, from an address and from a data URL, arrives through the frame's own image downloader as a PNG within the size asked for",
     run: () =>
       withReports("np-svg-art", "nowplaying", TITLE, async (key, reports) => {
         await startPlaying(key);
@@ -196,7 +196,7 @@ const artworkChecks: Check[] = [
         const fromData = shape(await downloaded(key, dataSvg!));
         console.info(`[ardia windows] self-check note: declared SVG artwork through the frame's image downloader: /art.svg ${JSON.stringify(fromAddress)}, data:image/svg+xml ${JSON.stringify(fromData)}`);
         for (const [what, image] of [["/art.svg", fromAddress], ["the data: SVG", fromData]] as const) {
-          if (image) expectTrue(image.png && (image.width ?? 0) <= 256 && (image.height ?? 0) <= 256, `${what}, when it arrives, is a PNG within 256 px (${JSON.stringify(image)})`);
+          expectTrue(!!image && image.png && (image.width ?? 0) > 0 && (image.width ?? 0) <= 256 && (image.height ?? 0) > 0 && (image.height ?? 0) <= 256, `${what} arrives as a PNG within 256 px (${JSON.stringify(image)})`);
         }
       }),
   },

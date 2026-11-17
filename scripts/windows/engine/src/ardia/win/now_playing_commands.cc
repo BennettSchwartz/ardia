@@ -1,6 +1,7 @@
 #include "ardia/win/now_playing.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -185,16 +186,21 @@ bool NowPlaying::PageHandles(Action action) const {
 
 MediaCommandResult NowPlaying::TakeWakeCommand(
     const MediaCommandArgs& command) {
-  if (wake_load_pending_ || base::TimeTicks::Now() >= wake_play_until_) {
-    return MediaCommandResult::kNotDone;
+  const bool usable = WakeUsable();
+  if (command.action == MediaAction::kPlay) {
+    EndWake();
+    return usable ? MediaCommandResult::kPlayByScript
+                  : MediaCommandResult::kNotDone;
   }
-  if (command.action == MediaAction::kSeekTo && !wake_seeked_) {
-    wake_seeked_ = true;
+  if (usable && command.action == MediaAction::kSeekTo &&
+      wake_stage_ == WakeStage::kLoaded && std::isfinite(command.seconds) &&
+      command.seconds >= 0) {
+    wake_stage_ = WakeStage::kSeeked;
     return MediaCommandResult::kSeekByScript;
   }
-  if (command.action == MediaAction::kPlay) {
-    wake_play_until_ = base::TimeTicks();
-    return MediaCommandResult::kPlayByScript;
+  if (!usable && wake_stage_ != WakeStage::kArmed &&
+      wake_stage_ != WakeStage::kLoading) {
+    EndWake();
   }
   return MediaCommandResult::kNotDone;
 }
@@ -203,6 +209,10 @@ MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
   content::MediaSession* session = LiveSession();
   if (!session) {
     return TakeWakeCommand(command);
+  }
+  if (command.action == MediaAction::kPlay ||
+      command.action == MediaAction::kToggle) {
+    EndWake();
   }
   media_session::mojom::MediaSessionInfoPtr info =
       session->GetMediaSessionInfoSync();

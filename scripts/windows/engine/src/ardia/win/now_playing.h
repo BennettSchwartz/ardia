@@ -1,6 +1,7 @@
 #ifndef ARDIA_WIN_NOW_PLAYING_H_
 #define ARDIA_WIN_NOW_PLAYING_H_
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/browser/weak_document_ptr.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "services/media_session/public/cpp/media_image.h"
@@ -38,6 +40,7 @@ class NowPlaying : public content::WebContentsObserver,
   static void Resend(content::WebContents* contents);
   static void End(content::WebContents* contents);
   static void WakingToPlay(content::WebContents* contents);
+  static void CancelWake(content::WebContents* contents);
   static MediaCommandResult Command(content::WebContents* contents,
                                     const MediaCommandArgs& command);
   static void DownloadArtwork(content::WebContents* contents,
@@ -57,6 +60,8 @@ class NowPlaying : public content::WebContentsObserver,
 
   void MediaSessionCreated(content::MediaSession* session) override;
   void PrimaryPageChanged(content::Page& page) override;
+  void DidStartNavigation(content::NavigationHandle* navigation) override;
+  void DidFinishNavigation(content::NavigationHandle* navigation) override;
   void WebContentsDestroyed() override;
 
   void MediaSessionInfoChanged(
@@ -77,6 +82,8 @@ class NowPlaying : public content::WebContentsObserver,
   content::MediaSession* LiveSession() const;
   bool Lists(media_session::mojom::MediaSessionAction action) const;
   bool PageHandles(media_session::mojom::MediaSessionAction action) const;
+  void EndWake();
+  bool WakeUsable() const;
   MediaCommandResult TakeWakeCommand(const MediaCommandArgs& command);
   MediaCommandResult RunCommand(const MediaCommandArgs& command);
   MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
@@ -88,9 +95,12 @@ class NowPlaying : public content::WebContentsObserver,
   std::optional<NowPlayingState> sent_;
   bool force_report_ = false;
   base::TimeTicks sent_at_;
-  base::TimeTicks wake_play_until_;
-  bool wake_load_pending_ = false;
-  bool wake_seeked_ = false;
+  enum class WakeStage { kNone, kArmed, kLoading, kLoaded, kSeeked };
+  WakeStage wake_stage_ = WakeStage::kNone;
+  base::TimeTicks wake_until_;
+  int64_t wake_navigation_ = 0;
+  content::WeakDocumentPtr wake_document_;
+  std::string wake_key_;
   base::OneShotTimer coalesce_;
   base::OneShotTimer seek_report_;
   NowPlayingArtwork artwork_;

@@ -54,6 +54,7 @@ TabState* TabState::Bind(content::WebContents* contents, std::string key) {
   PageLinks::Watch(contents);
   WatchAutoplay(contents);
   NowPlaying::Watch(contents);
+  NowPlaying::CancelWake(contents);
   state->WatchKeys();
   return state;
 }

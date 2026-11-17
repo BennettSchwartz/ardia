@@ -172,7 +172,7 @@ void NowPlayingArtwork::Got(const SkBitmap& bitmap) {
   if (!current_) {
     return;
   }
-  if (!StillDeclared(current_->image)) {
+  if (!current_->reply || !StillDeclared(current_->image)) {
     Finish(NoImage());
     return;
   }
@@ -180,8 +180,9 @@ void NowPlayingArtwork::Got(const SkBitmap& bitmap) {
 }
 
 void NowPlayingArtwork::TimedOut() {
-  weak_factory_.InvalidateWeakPtrs();
-  Finish(NoImage());
+  if (current_) {
+    Answer(std::move(current_->reply), NoImage());
+  }
 }
 
 void NowPlayingArtwork::Finish(base::DictValue result) {

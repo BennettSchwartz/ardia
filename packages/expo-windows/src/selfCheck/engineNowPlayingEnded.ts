@@ -88,8 +88,8 @@ const endedChecks: Check[] = [
     run: () => withReports("np-ended", "nowplaying?long&once", TITLE, (key, reports) => endsAndStartsAgain(key, reports, SONG.title)),
   },
   {
-    name: "engine now playing: a track with no media session handlers that plays to its end stays reported paused at its end, and the card's play starts it again from the start",
-    run: () => withReports("np-ended-plain", "nowplaying?plain&long&once", TITLE, (key, reports) => endsAndStartsAgain(key, reports, undefined)),
+    name: "engine now playing: a track with no media session handlers that plays to its end stays reported paused at its end, under the document's title as Chromium fills it, and the card's play starts it again from the start",
+    run: () => withReports("np-ended-plain", "nowplaying?plain&long&once", TITLE, (key, reports) => endsAndStartsAgain(key, reports, TITLE)),
   },
   {
     name: "engine now playing: a two-second sound that plays and ends leaves no card and no audio focus behind",

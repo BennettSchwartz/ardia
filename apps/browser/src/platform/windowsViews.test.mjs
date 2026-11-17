@@ -60,7 +60,8 @@ test("every call the shared UI can make on a page is one Windows carries out or 
   const handle = types.slice(types.indexOf("export type WebViewHandle"));
   const asked = [...handle.slice(0, handle.indexOf("\n};")).matchAll(/^  ([A-Za-z]+)\(/gm)].map(([, name]) => name);
   const view = read("packages/expo-windows/src/engine/EngineWebView.tsx");
-  const has = new Set([...tableKeys(view, "ARGUMENTS"), ...tableKeys(view, "ANSWERS"), ...[...view.matchAll(/if \(method === "([A-Za-z]+)"\) return /g)].map(([, name]) => name)]);
+  const calls = read("packages/expo-windows/src/engine/pageCalls.ts");
+  const has = new Set([...tableKeys(calls, "ARGUMENTS"), ...tableKeys(calls, "MISSING_ANSWERS"), ...[...view.matchAll(/if \(method === "([A-Za-z]+)"\) return /g)].map(([, name]) => name)]);
   assert.ok(asked.length > 30 && has.size > 25);
   assert.deepEqual(asked.filter((name) => !has.has(name) && !NOT_ON_WINDOWS_YET.includes(name)), [], "a page call the Mac added: on Windows it does nothing and answers null");
   assert.deepEqual(NOT_ON_WINDOWS_YET.filter((name) => has.has(name) || !asked.includes(name)), [], "listed as missing, but Windows has it or the Mac dropped it");
