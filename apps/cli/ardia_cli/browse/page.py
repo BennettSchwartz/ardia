@@ -208,11 +208,9 @@ class Page:
         await self.send("Page.setLifecycleEventsEnabled", {"enabled": True})
         await self.refresh_frames()
         if self.runtime_on:
-            self.runtime_on = False
-            await self.enable_runtime()
+            await self.enable_runtime(again=True)
         if self.network_on:
-            self.network_on = False
-            await self.enable_network()
+            await self.enable_network(again=True)
         if self.needs_restore:
             await self.restore_setup()
         if self.awake or self.target_id in self.state.opened:
@@ -550,13 +548,13 @@ class Page:
 
             command_metrics.flag("focused_inner_field", True)
 
-    async def enable_runtime(self):
-        if not self.runtime_on:
+    async def enable_runtime(self, again: bool = False):
+        if again or not self.runtime_on:
             await self.send("Runtime.enable")
             self.runtime_on = True
 
-    async def enable_network(self):
-        if not self.network_on:
+    async def enable_network(self, again: bool = False):
+        if again or not self.network_on:
             await self.send("Network.enable", {"maxTotalBufferSize": 50 * 1024 * 1024, "maxResourceBufferSize": 10 * 1024 * 1024})
             self.network_on = True
 

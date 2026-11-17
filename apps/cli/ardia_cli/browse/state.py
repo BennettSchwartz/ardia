@@ -298,8 +298,6 @@ class State:
             except CdpError:
                 raise detached(page.url) from None
             except BrowseError as error:
-                # The engine ended the new session while it was being set up (a navigation committing does that); the tab is still
-                # listed, so attach to it again. A tab that is gone fails the check above instead.
                 if error.code != "tab_detached" or attempt + 1 == REATTACH_TRIES:
                     raise
                 continue

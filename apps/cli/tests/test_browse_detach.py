@@ -221,6 +221,34 @@ class OpenAfterDetach(unittest.TestCase):
         self.assertEqual(self.state.pages["T"].session_id, "S3")
         self.assertEqual(self.navigations(), ["S1"])
 
+    def test_an_open_whose_new_session_ends_while_network_monitoring_is_put_back_puts_it_back_on_the_next(self):
+        async def monitor():
+            page = await self.state.page("T")
+            await page.enable_network()
+
+        asyncio.run(monitor())
+        self.detach_after_load()
+        self.browser.during[("Network.enable", "S2")] = lambda: self.detach("S2")
+        result = self.open()
+        self.assertEqual(result.data["title"], "Destination")
+        self.assertEqual(self.browser.attached, 3)
+        self.assertEqual([session for method, session in self.browser.sent if method == "Network.enable"][-2:], ["S2", "S3"])
+        self.assertTrue(self.state.pages["T"].network_on)
+
+    def test_an_open_whose_new_session_ends_while_the_runtime_is_put_back_puts_it_back_on_the_next(self):
+        async def monitor():
+            page = await self.state.page("T")
+            await page.enable_runtime()
+
+        asyncio.run(monitor())
+        self.detach_after_load()
+        self.browser.during[("Runtime.enable", "S2")] = lambda: self.detach("S2")
+        result = self.open()
+        self.assertEqual(result.data["title"], "Destination")
+        self.assertEqual(self.browser.attached, 3)
+        self.assertEqual([session for method, session in self.browser.sent if method == "Runtime.enable"][-2:], ["S2", "S3"])
+        self.assertTrue(self.state.pages["T"].runtime_on)
+
     def test_an_open_whose_tab_closes_while_it_is_attached_again_still_fails_as_detached(self):
         self.detach_after_load()
         self.browser.during[("Page.getFrameTree", "S2")] = lambda: self.state.on_event("Target.targetDestroyed", {"targetId": "T"}, None)

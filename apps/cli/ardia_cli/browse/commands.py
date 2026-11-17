@@ -211,9 +211,6 @@ def https_only_block(url: str, error_text: str) -> bool:
 
 
 async def start_navigation(page, url: str, timeout: float) -> dict:
-    # The session is made live right before the call, so a session the engine ended earlier never reaches Page.navigate as a bare
-    # tab_detached. The call itself is sent once: when the engine's detach drops it in flight its outcome is unknown, and the frame tree
-    # of the attached-again tab says whether the navigation took (a new loader) before the caller waits for it.
     state = page.state
     page = await state.reattach(page)
     seen = page.loader(page.main_frame)

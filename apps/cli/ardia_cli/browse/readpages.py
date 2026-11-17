@@ -447,8 +447,6 @@ async def probe(page):
         return tuple(await page.call(SETTLE_PROBE, frame=page.main_frame, read=True))
     except BrowseError as error:
         if error.code == "tab_detached":
-            # The engine ended the session while the page settled: attach again (a tab that is gone raises here) and report this
-            # poll as busy, since nothing was read from the page.
             await page.state.reattach(page)
         return None, None, True
 
