@@ -7,7 +7,7 @@
 +// Ardia: whether the page itself handles |action| in the tab's routed media
 +// session, unlike the actions Chrome adds for the players underneath; the
 +// Windows host routes Ardia's media commands by it.
-+bool ArdiaWinPageHandlesMediaSessionAction(
++CONTENT_EXPORT bool ArdiaWinPageHandlesMediaSessionAction(
 +    WebContents* contents,
 +    media_session::mojom::MediaSessionAction action) {
 +  MediaSessionImpl* session =
