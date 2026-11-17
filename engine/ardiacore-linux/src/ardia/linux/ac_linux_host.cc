@@ -760,9 +760,6 @@ bool WriteDocument(const base::FilePath& directory,
                   : !base::PathExists(file) || base::DeleteFile(file);
 }
 
-// Writes what the compositor drew for a window as a PNG at `path`. With a `background` the picture is flattened
-// onto that colour, so the window's glass and any transparent corner read as the window does; without one the
-// captured pixels keep their own alpha. The file is replaced whole or not at all.
 bool WriteWindowPicture(const SkBitmap& captured,
                         const std::optional<SkColor>& background,
                         const base::FilePath& path) {
@@ -7198,8 +7195,6 @@ void ShellHostView::Invoke(
     }
     return std::move(done).Run(true, base::Value(std::move(ids)));
   }
-  // The Mac's devSnapshotWindow(windowId, path, transparent?): the window's composited contents as a PNG, read from
-  // its compositor, so a covered or off-screen window is captured too. It answers whether the file was written.
   if (method == ardia::linux_window_picture::kSnapshotCall) {
     if (!IsolatedInstance()) {
       return std::move(done).Run(false, base::Value("Window snapshots are offered to isolated dev instances only"));
