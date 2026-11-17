@@ -3,10 +3,11 @@ import { onHoverLost, systemState, type HoverLostEpisode } from "../../platform/
 import { cliControlStatus } from "../../platform/cli";
 import { call } from "../../platform/engine";
 import { withDeadline } from "../../lib/deadline";
+import { hermesHeapMegabytes } from "../../lib/hermesHeap";
 import { activeTab } from "../browser/model";
 import { useBrowser } from "../browser/store";
 import { capture, isSharing, saveContext, useTelemetry } from "./client";
-import type { SavedContext } from "./savedContext";
+import { formatRecentPages, readRecentPages, type RecentPage, type SavedContext } from "./savedContext";
 import { noteDragsEnded } from "./stuckDrags";
 import { noteWindowlessPages } from "./cliCounts";
 import { mainProcessWork } from "./mainProcessWork";
@@ -21,6 +22,8 @@ const MAX_HOVER_LOST_SECONDS = 24 * 60 * 60;
 const MINUTE_MS = 60_000;
 const MIN_SAMPLES = 12;
 const MAX_SAMPLES = 600;
+const MAX_RECENT_PAGES = 3;
+const MAX_PAGE_AGE_MIN = 999_999;
 const SAMPLE_KEEP_MS = 2 * 60 * 60_000;
 const WEBUI_RECORD_GAP_MS = 2_000;
 
@@ -31,6 +34,9 @@ let pageProcessesGone = 0;
 let pageProcessEvents = 0;
 let hoverLostEvents = 0;
 let samples: SavedContext[] = [];
+let recentPages: RecentPage[] = [];
+let shownPage: string | null = null;
+let contextEpoch = 0;
 let firstSample: ReturnType<typeof setTimeout> | undefined;
 let everySample: ReturnType<typeof setInterval> | undefined;
 let unwatchWebuiPage: (() => void) | undefined;
@@ -64,6 +70,10 @@ function activeWebuiPage(s = useBrowser.getState()): string | null {
 
 const roughGigabytes = (gb: number | undefined) => (gb === undefined ? null : gb < 10 ? Math.round(gb * 10) / 10 : Math.round(gb));
 
+function noteWebuiPage(page: string, at: number) {
+  recentPages = [{ page, at }, ...recentPages.filter((p) => p.page !== page)].slice(0, MAX_RECENT_PAGES);
+}
+
 export const noteAppMemory = (totalMb: number) => (appMemoryMb = totalMb);
 
 export async function recordContext(): Promise<SavedContext | null> {
@@ -72,8 +82,12 @@ export async function recordContext(): Promise<SavedContext | null> {
     noteDragsEnded(status.dragsEnded);
     noteWindowlessPages(status.windowlessPages);
   }, () => {});
+  const epoch = contextEpoch;
   const [sample, pressure] = await Promise.all([diagnosticsSample().catch(() => ({ footprintMB: undefined, freeDiskGB: undefined })), memoryPressure()]);
+  if (!isSharing() || epoch !== contextEpoch) return null;
   const now = Date.now();
+  const page = activeWebuiPage();
+  if (page) noteWebuiPage(page, now);
   const context: SavedContext = {
     at: now,
     session_start: sessionStart(),
@@ -83,7 +97,9 @@ export async function recordContext(): Promise<SavedContext | null> {
     free_disk_gb: roughGigabytes(sample.freeDiskGB),
     memory_pressure: pressure,
     page_processes_gone: pageProcessesGone,
-    webui_page: activeWebuiPage(),
+    webui_page: page,
+    webui_pages: formatRecentPages(recentPages),
+    hermes_heap_mb: hermesHeapMegabytes(),
   };
   if (!isSharing()) return null;
   samples = keepRecent([...samples, context], now);
@@ -107,12 +123,15 @@ export async function takeContentDriftCounts(): Promise<Record<string, number>> 
 export const contextSamples = () => samples;
 
 function forgetContext() {
+  contextEpoch++;
   samples = [];
+  recentPages = [];
+  shownPage = null;
   appMemoryMb = null;
   pageProcessesGone = 0;
 }
 
-useTelemetry.subscribe((s, prev) => prev.sharing && !s.sharing && forgetContext());
+useTelemetry.subscribe((s, prev) => prev.sharing !== s.sharing && forgetContext());
 
 useBrowser.subscribe((s, prev) => {
   if (s.profiles === prev.profiles || size(s.profiles) >= size(prev.profiles)) return;
@@ -131,12 +150,13 @@ function recordForWebuiPage() {
 }
 
 function watchWebuiPage() {
-  let shown = activeWebuiPage();
+  shownPage = activeWebuiPage();
   unwatchWebuiPage = useBrowser.subscribe((s, prev) => {
     if (s.tabs === prev.tabs && s.windows === prev.windows && s.ui === prev.ui) return;
     const page = activeWebuiPage(s);
-    if (page === shown) return;
-    shown = page;
+    if (page === shownPage) return;
+    if (shownPage && isSharing()) noteWebuiPage(shownPage, Date.now());
+    shownPage = page;
     recordForWebuiPage();
   });
 }
@@ -156,7 +176,7 @@ export function stopContextSamples() {
   firstSample = everySample = webuiRecord = unwatchWebuiPage = undefined;
 }
 
-const CONTEXT_FIELDS = ["tabs", "windows", "profiles", "footprint_mb", "app_memory_mb", "free_disk_gb", "memory_pressure", "page_processes_gone", "webui_page"] as const;
+const CONTEXT_FIELDS = ["tabs", "windows", "profiles", "footprint_mb", "app_memory_mb", "free_disk_gb", "memory_pressure", "page_processes_gone", "webui_page", "hermes_heap_mb"] as const;
 
 export function contextProperties(context: SavedContext | null, prefix: string, at: number): Record<string, unknown> {
   if (!context || typeof context.at !== "number") return {};
@@ -169,6 +189,12 @@ export function contextProperties(context: SavedContext | null, prefix: string, 
 }
 
 const startOf = (c: SavedContext | null) => (c && typeof c.session_start === "number" && typeof c.at === "number" ? c.session_start : null);
+
+export function recentWebuiPages(context: SavedContext | null, at: number): string | null {
+  const pages = readRecentPages(context?.webui_pages);
+  if (!pages.length) return null;
+  return pages.map((p) => `${p.page}:${Math.min(Math.max(0, Math.round((at - p.at) / MINUTE_MS)), MAX_PAGE_AGE_MIN)}`).join(",");
+}
 
 export function contextAt(contexts: (SavedContext | null)[], at: number, sessionStarts: number[]): SavedContext | null {
   const starts = [...sessionStarts, ...contexts.map(startOf)].filter((start): start is number => start !== null && start <= at);

@@ -97,5 +97,60 @@ test("a native crash carries the built-in page its session was on as ctx_webui_p
     assert.equal(props.crash_process, "browser");
     assert.equal(props.ctx_tabs, 4);
     assert.equal(props.ctx_webui_page, expected, String(webui_page));
+    assert.equal(props.ctx_webui_pages, null, "a sample without the recent pages sends none");
+  }
+});
+
+test("a native crash carries the last built-in pages from the saved context as page:minutes, never a page that isn't a built-in one", async () => {
+  const time = Date.now() + 3 * 60 * 60_000;
+  const saved = {
+    at: time - 500,
+    session_start: time - 5000,
+    webui_page: "flags",
+    webui_pages: `flags@${time - 2 * 60_000},downloads@${time - 17 * 60_000},settings/cookies@${time - 22 * 60_000}`,
+  };
+  stub.shellNativeModules.ArdiaApp.crashReports = async () => [
+    { time, fileTime: time, process: "browser", exceptionType: "EXC_BAD_ACCESS", signal: "SIGSEGV", frames: [{ image: "Chromium Framework", offset: 0xee9858 }] },
+  ];
+  await reportNativeCrashes([saved]);
+  assert.equal(queued().at(-1).properties.ctx_webui_pages, "flags:2,downloads:17,settings/cookies:22");
+
+  const tampered = { ...saved, webui_pages: `flags@${time},https://private.example/a@${time},settings/cookies/detail@${time}` };
+  stub.shellNativeModules.ArdiaApp.crashReports = async () => [
+    { time: time + 1000, fileTime: time + 1000, process: "browser", exceptionType: "EXC_BAD_ACCESS", signal: "SIGSEGV", frames: [{ image: "Chromium Framework", offset: 0xee9858 }] },
+  ];
+  await reportNativeCrashes([{ ...tampered, at: time + 500, session_start: time - 5000 }]);
+  const props = queued().at(-1).properties;
+  assert.equal(props.ctx_webui_pages, "flags:0");
+  assert.equal(JSON.stringify(queued().at(-1)).includes("private"), false);
+});
+
+test("a browser crash carries the kind of JS fatal that stopped it as crash_js_fatal, never the message, and no other crash does", async () => {
+  const time = Date.now() + 3 * 60 * 60_000;
+  const hermes = (process, jsFatal, at) => ({ time: at, fileTime: at, process, exceptionType: "EXC_CRASH", signal: "SIGABRT", jsFatal, jsFatalSource: "hermes", frames: [{ image: "hermes", offset: 0x19bea4 }] });
+  const reactNative = (process, jsFatal, at) => ({ time: at, fileTime: at, process, exceptionType: "EXC_BREAKPOINT", signal: "SIGTRAP", exceptionName: "RCTFatalException", jsFatal, jsFatalSource: "reactNative", frames: [{ image: "Ardia", offset: 0x444da4 }] });
+  const cases = [
+    [hermes, "browser", "OOM: error_code(value = 1, category = vm_allocate_category, message = Max heap size was exceeded)", "hermes_heap_limit"],
+    [hermes, "browser", "OOM at https://example.com/private?q=secret on /Users/someone/Library/page.json for me@example.com", "hermes_out_of_memory"],
+    [hermes, "browser", "", null],
+    [hermes, "browser", undefined, null],
+    [hermes, "renderer", "OOM: error_code(value = 1, category = vm_allocate_category, message = Max heap size was exceeded)", null],
+    [reactNative, "browser", "Exception in HostFunction: Unknown native module at https://example.com/private?q=secret", "rn_host_function"],
+    [reactNative, "browser", "Unhandled JS Exception: TypeError: cannot read title of /Users/someone/page.json", "rn_js_type_error"],
+  ];
+  let n = 0;
+  for (const [make, process, jsFatal, expected] of cases) {
+    const at = time + 10_000 * ++n;
+    const report = make(process, jsFatal, at);
+    stub.shellNativeModules.ArdiaApp.crashReports = async () => [report];
+    await reportNativeCrashes();
+    const sent = queued().at(-1);
+    const props = sent.properties;
+    assert.equal(props.crash_process, process);
+    if (report.exceptionName) assert.equal(props.objc_exception, report.exceptionName);
+    assert.equal(props.crash_js_fatal, expected, `${process} ${String(jsFatal)}`);
+    assert.equal("crash_js_reason" in props, false);
+    const json = JSON.stringify(sent);
+    for (const leak of ["example.com", "secret", "/Users", "someone", "page.json", "native module", "Max heap size", "cannot read"]) assert.equal(json.includes(leak), false, leak);
   }
 });
