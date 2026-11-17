@@ -30,7 +30,7 @@ feed="$dist/appcast.xml"
 cli="$dist/ardia-cli-$version-macos-arm64.tar.gz"
 
 assets=()
-for file in "$dmg" "$zip" "$feed" "$cli" "$cli.sha256"; do
+for file in "$dmg" "$zip" "$feed" "$cli" "$cli.sha256" "$dist/$(app_symbols_name "$version")" "$dist/$(app_uuids_name "$version")"; do
   [ -f "$file" ] || die "no $file (scripts/release.sh $version first)"
   assets+=("$file")
 done
