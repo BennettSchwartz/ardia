@@ -606,9 +606,15 @@ void MediaCommand(content::WebContents* contents,
     return;
   }
   ThawHiddenPage(contents);
-  if (NowPlaying::Command(contents, *parsed)) {
-    std::move(reply).Run(Ok());
-    return;
+  switch (NowPlaying::Command(contents, *parsed)) {
+    case MediaCommandResult::kDone:
+      std::move(reply).Run(Ok());
+      return;
+    case MediaCommandResult::kRefused:
+      std::move(reply).Run(Error("the page's media session does not take that"));
+      return;
+    case MediaCommandResult::kNoSession:
+      break;
   }
   base::DictValue command;
   command.Set("action", Text(args, "action"));
@@ -623,7 +629,7 @@ void DownloadImage(content::WebContents* contents,
                    const base::DictValue& args,
                    Reply reply) {
   ThawHiddenPage(contents);
-  DownloadPageImage(contents, args, std::move(reply));
+  NowPlaying::DownloadArtwork(contents, args, std::move(reply));
 }
 
 void SiteDataCleared(void* context, const char* json) {

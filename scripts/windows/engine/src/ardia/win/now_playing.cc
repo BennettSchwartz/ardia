@@ -9,6 +9,7 @@
 #include "ardia/win/tab_state.h"
 #include "base/base64.h"
 #include "base/functional/bind.h"
+#include "base/location.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/media_session.h"
@@ -19,7 +20,13 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/size.h"
-#include "url/gurl.h"
+#include "url/origin.h"
+
+namespace content {
+bool ArdiaWinPageHandlesMediaSessionAction(
+    WebContents* contents,
+    media_session::mojom::MediaSessionAction action);
+}
 
 namespace ardia_win {
 
@@ -33,10 +40,9 @@ constexpr size_t kImageUrlLimit = 1 << 20;
 constexpr size_t kActionLimit = 32;
 constexpr double kSeekLimit = 366.0 * 24 * 60 * 60;
 constexpr double kDriftSeconds = 0.5;
-constexpr double kLoopNearEndSeconds = 0.5;
-constexpr double kLoopRestartSeconds = 1;
-constexpr base::TimeDelta kSeekSettles = base::Seconds(2);
 constexpr int kMostImagePixels = 512;
+constexpr base::TimeDelta kReportGap = base::Milliseconds(100);
+constexpr base::TimeDelta kSeekReportDelay = base::Seconds(1);
 
 std::string Bounded(const std::u16string& text) {
   std::u16string bounded = text.substr(0, kTextLimit);
@@ -132,23 +138,13 @@ double NowMs() {
   return base::Time::Now().InMillisecondsFSinceUnixEpoch();
 }
 
-double Reached(const NowPlayingState& state, double at_ms) {
+double Projected(const NowPlayingState& state, double at_ms) {
   const double elapsed = state.playback_state == "playing"
                              ? (at_ms - state.timestamp) / 1000 *
                                    state.playback_rate
                              : 0;
-  return std::max(0.0, state.position + elapsed);
-}
-
-double Projected(const NowPlayingState& state, double at_ms) {
-  const double reached = Reached(state, at_ms);
-  if (!state.duration) {
-    return reached;
-  }
-  if (state.loop && *state.duration > 0) {
-    return std::fmod(reached, *state.duration);
-  }
-  return std::min(reached, *state.duration);
+  const double reached = std::max(0.0, state.position + elapsed);
+  return state.duration ? std::min(reached, *state.duration) : reached;
 }
 
 bool SameReport(const std::optional<NowPlayingState>& before,
@@ -159,14 +155,15 @@ bool SameReport(const std::optional<NowPlayingState>& before,
   NowPlayingState anchored = *after;
   anchored.position = before->position;
   anchored.timestamp = before->timestamp;
-  if (!(anchored == *before)) {
-    return false;
-  }
-  double drift = std::abs(Projected(*before, after->timestamp) - after->position);
-  if (before->loop && before->duration && *before->duration > 0) {
-    drift = std::min(drift, *before->duration - drift);
-  }
-  return drift < kDriftSeconds;
+  return anchored == *before &&
+         std::abs(Projected(*before, after->timestamp) - after->position) <
+             kDriftSeconds;
+}
+
+bool ChangesState(const std::optional<NowPlayingState>& before,
+                  const std::optional<NowPlayingState>& after) {
+  return !before || !after || before->playback_state != after->playback_state ||
+         before->controllable != after->controllable;
 }
 
 base::DictValue EventData(const std::optional<NowPlayingState>& state) {
@@ -194,7 +191,7 @@ base::DictValue EventData(const std::optional<NowPlayingState>& state) {
   fields.Set("hasVideo", state->has_video);
   fields.Set("actions", std::move(actions));
   fields.Set("controllable", state->controllable);
-  fields.Set("loop", state->loop);
+  fields.Set("loop", false);
   data.Set("state", std::move(fields));
   return data;
 }
@@ -203,32 +200,6 @@ base::DictValue NoImage() {
   base::DictValue result;
   result.Set("uri", base::Value());
   return result;
-}
-
-void ImageDownloaded(Reply reply,
-                     int id,
-                     int http_status,
-                     const GURL& url,
-                     const std::vector<SkBitmap>& bitmaps,
-                     const std::vector<gfx::Size>& sizes) {
-  for (const SkBitmap& bitmap : bitmaps) {
-    if (bitmap.drawsNothing() || bitmap.width() > kMostImagePixels ||
-        bitmap.height() > kMostImagePixels) {
-      continue;
-    }
-    std::optional<std::vector<uint8_t>> png =
-        gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false);
-    if (!png) {
-      continue;
-    }
-    base::DictValue result;
-    result.Set("uri", "data:image/png;base64," + base::Base64Encode(*png));
-    result.Set("width", bitmap.width());
-    result.Set("height", bitmap.height());
-    std::move(reply).Run(std::move(result));
-    return;
-  }
-  std::move(reply).Run(NoImage());
 }
 
 }
@@ -273,33 +244,15 @@ std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args) {
   return MediaCommandArgs{*action, value};
 }
 
-void DownloadPageImage(content::WebContents* contents,
-                       const base::DictValue& args,
-                       Reply reply) {
-  const std::string* text = args.FindString("url");
-  const GURL url(text ? *text : std::string());
-  const double limit = args.FindDouble("maxPixels").value_or(0);
-  if (!AllowedImage(url) || !std::isfinite(limit) || limit < 1) {
-    std::move(reply).Run(NoImage());
-    return;
-  }
-  const int pixels =
-      static_cast<int>(std::min<double>(limit, kMostImagePixels));
-  contents->DownloadImage(
-      url, false, gfx::Size(pixels, pixels), static_cast<uint32_t>(pixels),
-      false,
-      base::BindOnce(&ImageDownloaded,
-                     mojo::WrapCallbackWithDefaultInvokeIfNotRun(
-                         std::move(reply), NoImage())));
-}
-
 NowPlaying::NowPlaying(content::WebContents* contents)
     : content::WebContentsObserver(contents),
       content::WebContentsUserData<NowPlaying>(*contents) {
   ObserveSession(content::MediaSession::GetIfExists(contents));
 }
 
-NowPlaying::~NowPlaying() = default;
+NowPlaying::~NowPlaying() {
+  AnswerArtwork(NoImage());
+}
 
 void NowPlaying::Watch(content::WebContents* contents) {
   if (contents && !FromWebContents(contents)) {
@@ -320,10 +273,25 @@ void NowPlaying::End(content::WebContents* contents) {
   }
 }
 
-bool NowPlaying::Command(content::WebContents* contents,
-                         const MediaCommandArgs& command) {
+MediaCommandResult NowPlaying::Command(content::WebContents* contents,
+                                       const MediaCommandArgs& command) {
   NowPlaying* now = contents ? FromWebContents(contents) : nullptr;
-  return now && now->RunCommand(command);
+  return now ? now->RunCommand(command) : MediaCommandResult::kNoSession;
+}
+
+void NowPlaying::DownloadArtwork(content::WebContents* contents,
+                                 const base::DictValue& args,
+                                 Reply reply) {
+  NowPlaying* now = contents ? FromWebContents(contents) : nullptr;
+  const std::string* url = args.FindString("url");
+  const double limit = args.FindDouble("maxPixels").value_or(0);
+  if (!now || !url || !std::isfinite(limit) || limit < 1) {
+    std::move(reply).Run(NoImage());
+    return;
+  }
+  now->Download(GURL(*url),
+                static_cast<int>(std::min<double>(limit, kMostImagePixels)),
+                std::move(reply));
 }
 
 void NowPlaying::ObserveSession(content::MediaSession* session) {
@@ -337,12 +305,43 @@ bool NowPlaying::SessionLive() const {
   return session_.active && !awaiting_page_player_;
 }
 
-bool NowPlaying::RunCommand(const MediaCommandArgs& command) {
+bool NowPlaying::Lists(Action action) const {
+  return std::ranges::find(session_.actions, action) != session_.actions.end();
+}
+
+bool NowPlaying::PageHandles(Action action) const {
+  return web_contents() &&
+         content::ArdiaWinPageHandlesMediaSessionAction(web_contents(), action);
+}
+
+bool NowPlaying::OnPrimaryPage(const content::MediaPlayerId& id) const {
+  content::RenderFrameHost* frame =
+      content::RenderFrameHost::FromID(id.frame_routing_id);
+  return frame && frame->GetPage().IsPrimary();
+}
+
+bool NowPlaying::ScriptReaches(const content::MediaPlayerId& id) const {
+  content::RenderFrameHost* frame =
+      content::RenderFrameHost::FromID(id.frame_routing_id);
+  if (!frame || !web_contents()) {
+    return false;
+  }
+  const url::Origin& top =
+      web_contents()->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+  for (content::RenderFrameHost* each = frame; each; each = each->GetParent()) {
+    if (!each->GetLastCommittedOrigin().IsSameOriginWith(top)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+MediaCommandResult NowPlaying::RunCommand(const MediaCommandArgs& command) {
   content::MediaSession* session =
       web_contents() ? content::MediaSession::GetIfExists(web_contents())
                      : nullptr;
   if (!session || !SessionLive()) {
-    return false;
+    return MediaCommandResult::kNoSession;
   }
   switch (command.action) {
     case MediaAction::kPlay:
@@ -359,30 +358,134 @@ bool NowPlaying::RunCommand(const MediaCommandArgs& command) {
       }
       break;
     case MediaAction::kNext:
+      if (!PageHandles(Action::kNextTrack)) {
+        return MediaCommandResult::kRefused;
+      }
       session->NextTrack();
       break;
     case MediaAction::kPrevious:
-      seeked_at_ = base::TimeTicks::Now();
+      if (!PageHandles(Action::kPreviousTrack)) {
+        return MediaCommandResult::kRefused;
+      }
       session->PreviousTrack();
       break;
     case MediaAction::kSeekBy:
-      if (command.seconds != 0) {
-        seeked_at_ = base::TimeTicks::Now();
-        session->Seek(base::Seconds(command.seconds));
-      }
-      break;
+      return SeekBy(session, command.seconds);
     case MediaAction::kSeekTo:
-      seeked_at_ = base::TimeTicks::Now();
+      if (!Lists(Action::kSeekTo)) {
+        return MediaCommandResult::kRefused;
+      }
       session->SeekTo(base::Seconds(command.seconds));
       break;
     case MediaAction::kStop:
       session->Stop(SuspendType::kUI);
       break;
   }
-  return true;
+  return MediaCommandResult::kDone;
 }
 
-std::optional<NowPlayingState> NowPlaying::FromSession() {
+MediaCommandResult NowPlaying::SeekBy(content::MediaSession* session,
+                                      double seconds) {
+  if (seconds == 0) {
+    return MediaCommandResult::kDone;
+  }
+  const base::TimeDelta delta = base::Seconds(seconds);
+  if (delta.is_zero()) {
+    return MediaCommandResult::kRefused;
+  }
+  const Action relative =
+      delta.is_positive() ? Action::kSeekForward : Action::kSeekBackward;
+  if (!Lists(Action::kSeekTo) && !Lists(relative)) {
+    return MediaCommandResult::kRefused;
+  }
+  if (PageHandles(Action::kSeekTo) && sent_) {
+    double target = std::max(0.0, Projected(*sent_, NowMs()) + seconds);
+    if (sent_->duration) {
+      target = std::min(target, *sent_->duration);
+    }
+    session->SeekTo(base::Seconds(target));
+    return MediaCommandResult::kDone;
+  }
+  session->Seek(delta);
+  if (PageHandles(relative)) {
+    seek_report_.Start(FROM_HERE, kSeekReportDelay,
+                       base::BindOnce(
+                           [](NowPlaying* now) { now->Send(now->Current()); },
+                           base::Unretained(this)));
+  }
+  return MediaCommandResult::kDone;
+}
+
+bool NowPlaying::Declared(const GURL& url) const {
+  return AllowedImage(url) &&
+         std::ranges::any_of(session_.artwork,
+                             [&url](const media_session::MediaImage& image) {
+                               return image.src == url;
+                             });
+}
+
+void NowPlaying::Download(const GURL& url, int pixels, Reply reply) {
+  content::MediaSession* session =
+      content::MediaSession::GetIfExists(web_contents());
+  content::RenderFrameHost* frame =
+      session ? session->GetRoutedFrame() : nullptr;
+  if (!frame || !Declared(url)) {
+    std::move(reply).Run(NoImage());
+    return;
+  }
+  AnswerArtwork(NoImage());
+  artwork_reply_ = std::move(reply);
+  const int request = ++artwork_request_;
+  web_contents()->DownloadImageInFrame(
+      frame->GetGlobalId(), url, false, gfx::Size(pixels, pixels),
+      static_cast<uint32_t>(pixels), false,
+      mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+          base::BindOnce(&NowPlaying::ArtworkDownloaded,
+                         weak_factory_.GetWeakPtr(), request, url),
+          0, 0, GURL(), std::vector<SkBitmap>(), std::vector<gfx::Size>()));
+}
+
+void NowPlaying::ArtworkDownloaded(int request,
+                                   const GURL& asked,
+                                   int id,
+                                   int http_status,
+                                   const GURL& url,
+                                   const std::vector<SkBitmap>& bitmaps,
+                                   const std::vector<gfx::Size>& sizes) {
+  if (request != artwork_request_ || !artwork_reply_) {
+    return;
+  }
+  if (!Declared(asked)) {
+    AnswerArtwork(NoImage());
+    return;
+  }
+  for (const SkBitmap& bitmap : bitmaps) {
+    if (bitmap.drawsNothing() || bitmap.width() > kMostImagePixels ||
+        bitmap.height() > kMostImagePixels) {
+      continue;
+    }
+    std::optional<std::vector<uint8_t>> png =
+        gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, false);
+    if (!png) {
+      continue;
+    }
+    base::DictValue result;
+    result.Set("uri", "data:image/png;base64," + base::Base64Encode(*png));
+    result.Set("width", bitmap.width());
+    result.Set("height", bitmap.height());
+    AnswerArtwork(std::move(result));
+    return;
+  }
+  AnswerArtwork(NoImage());
+}
+
+void NowPlaying::AnswerArtwork(base::DictValue answer) {
+  if (artwork_reply_) {
+    std::move(artwork_reply_).Run(std::move(answer));
+  }
+}
+
+std::optional<NowPlayingState> NowPlaying::FromSession() const {
   NowPlayingState state;
   state.timestamp = NowMs();
   state.title = Bounded(session_.title);
@@ -414,38 +517,37 @@ std::optional<NowPlayingState> NowPlaying::FromSession() {
     }
   }
   state.controllable = session_.controllable;
-  if (sent_ && !loop_ && state.duration && sent_->duration == state.duration &&
-      sent_->title == state.title && sent_->playback_state == "playing" &&
-      state.playback_state == "playing" &&
-      base::TimeTicks::Now() - seeked_at_ > kSeekSettles) {
-    const double reached = Reached(*sent_, state.timestamp);
-    loop_ = reached >= *state.duration - kLoopNearEndSeconds &&
-            state.position <= kLoopRestartSeconds &&
-            state.position + kLoopRestartSeconds < reached;
-  }
-  state.loop = loop_;
   return state;
 }
 
 std::optional<NowPlayingState> NowPlaying::Held() {
-  if (awaiting_page_player_ || players_.empty() || !web_contents()) {
+  if (awaiting_page_player_ || heard_.empty() || !web_contents()) {
     held_.reset();
     return std::nullopt;
   }
   if (!held_) {
-    if (!sent_ || !web_contents()->IsAudioMuted()) {
+    if (!sent_) {
       return std::nullopt;
     }
     held_ = sent_;
   }
-  const bool playing = !playing_players_.empty();
+  const bool playing = std::ranges::any_of(
+      heard_, [this](const content::MediaPlayerId& id) {
+        return playing_.contains(id);
+      });
   if ((held_->playback_state == "playing") != playing) {
     const double now = NowMs();
     held_->position = Projected(*held_, now);
     held_->timestamp = now;
     held_->playback_state = playing ? "playing" : "paused";
   }
-  return held_;
+  NowPlayingState state = *held_;
+  state.controllable =
+      held_->controllable &&
+      std::ranges::any_of(heard_, [this](const content::MediaPlayerId& id) {
+        return ScriptReaches(id);
+      });
+  return state;
 }
 
 std::optional<NowPlayingState> NowPlaying::Current() {
@@ -458,16 +560,26 @@ std::optional<NowPlayingState> NowPlaying::Current() {
 
 void NowPlaying::Update() {
   std::optional<NowPlayingState> state = Current();
-  if (!state) {
-    loop_ = false;
+  if (SameReport(sent_, state)) {
+    coalesce_.Stop();
+    return;
   }
-  if (!SameReport(sent_, state)) {
+  const base::TimeTicks now = base::TimeTicks::Now();
+  if (ChangesState(sent_, state) || now - sent_at_ >= kReportGap) {
     Send(state);
+    return;
+  }
+  if (!coalesce_.IsRunning()) {
+    coalesce_.Start(FROM_HERE, sent_at_ + kReportGap - now,
+                    base::BindOnce(&NowPlaying::Update, base::Unretained(this)));
   }
 }
 
 void NowPlaying::Send(const std::optional<NowPlayingState>& state) {
+  coalesce_.Stop();
+  seek_report_.Stop();
   sent_ = state;
+  sent_at_ = base::TimeTicks::Now();
   TabState* tab =
       web_contents() ? TabState::FromWebContents(web_contents()) : nullptr;
   if (tab) {
@@ -476,10 +588,14 @@ void NowPlaying::Send(const std::optional<NowPlayingState>& state) {
 }
 
 void NowPlaying::Forget() {
-  players_.clear();
-  playing_players_.clear();
+  heard_.clear();
+  playing_.clear();
   held_.reset();
-  loop_ = false;
+}
+
+void NowPlaying::Hear(const content::MediaPlayerId& id) {
+  heard_.insert(id);
+  awaiting_page_player_ = false;
 }
 
 void NowPlaying::MediaSessionCreated(content::MediaSession* session) {
@@ -494,34 +610,44 @@ void NowPlaying::PrimaryPageChanged(content::Page& page) {
 
 void NowPlaying::MediaStartedPlaying(const MediaPlayerInfo& info,
                                      const content::MediaPlayerId& id) {
-  content::RenderFrameHost* frame =
-      content::RenderFrameHost::FromID(id.frame_routing_id);
-  if (!frame || !frame->GetPage().IsPrimary()) {
+  if (!OnPrimaryPage(id)) {
     return;
   }
-  players_.insert(id);
-  playing_players_.insert(id);
-  awaiting_page_player_ = false;
+  playing_.insert(id);
+  if (info.has_audio) {
+    Hear(id);
+  }
   Update();
 }
 
 void NowPlaying::MediaStoppedPlaying(const MediaPlayerInfo& info,
                                      const content::MediaPlayerId& id,
                                      MediaStoppedReason reason) {
-  if (playing_players_.erase(id)) {
+  if (playing_.erase(id)) {
+    Update();
+  }
+}
+
+void NowPlaying::MediaMetadataChanged(const MediaPlayerInfo& info,
+                                      const content::MediaPlayerId& id) {
+  if (info.has_audio && !heard_.contains(id) && OnPrimaryPage(id)) {
+    Hear(id);
     Update();
   }
 }
 
 void NowPlaying::MediaDestroyed(const content::MediaPlayerId& id) {
-  playing_players_.erase(id);
-  if (players_.erase(id)) {
+  playing_.erase(id);
+  if (heard_.erase(id)) {
     Update();
   }
 }
 
 void NowPlaying::WebContentsDestroyed() {
+  coalesce_.Stop();
+  seek_report_.Stop();
   receiver_.reset();
+  AnswerArtwork(NoImage());
 }
 
 void NowPlaying::MediaSessionInfoChanged(
@@ -540,11 +666,7 @@ void NowPlaying::MediaSessionInfoChanged(
 
 void NowPlaying::MediaSessionMetadataChanged(
     const std::optional<media_session::MediaMetadata>& metadata) {
-  const std::u16string title = metadata ? metadata->title : std::u16string();
-  if (title != session_.title) {
-    loop_ = false;
-  }
-  session_.title = title;
+  session_.title = metadata ? metadata->title : std::u16string();
   session_.artist = metadata ? metadata->artist : std::u16string();
   session_.album = metadata ? metadata->album : std::u16string();
   Update();

@@ -8,7 +8,9 @@
 
 #include "ardia/win/api.h"
 #include "base/containers/flat_map.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "content/public/browser/media_player_id.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -18,6 +20,13 @@
 #include "services/media_session/public/cpp/media_metadata.h"
 #include "services/media_session/public/cpp/media_position.h"
 #include "services/media_session/public/mojom/media_session.mojom.h"
+#include "url/gurl.h"
+
+class SkBitmap;
+
+namespace gfx {
+class Size;
+}
 
 namespace ardia_win {
 
@@ -34,7 +43,6 @@ struct NowPlayingState {
   bool has_video = false;
   std::vector<std::string> actions;
   bool controllable = false;
-  bool loop = false;
   bool operator==(const NowPlayingState&) const = default;
 };
 
@@ -45,11 +53,9 @@ struct MediaCommandArgs {
   double seconds = 0;
 };
 
-std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args);
+enum class MediaCommandResult { kDone, kRefused, kNoSession };
 
-void DownloadPageImage(content::WebContents* contents,
-                       const base::DictValue& args,
-                       Reply reply);
+std::optional<MediaCommandArgs> ParseMediaCommand(const base::DictValue& args);
 
 class NowPlaying : public content::WebContentsObserver,
                    public content::WebContentsUserData<NowPlaying>,
@@ -62,8 +68,11 @@ class NowPlaying : public content::WebContentsObserver,
   static void Watch(content::WebContents* contents);
   static void Resend(content::WebContents* contents);
   static void End(content::WebContents* contents);
-  static bool Command(content::WebContents* contents,
-                      const MediaCommandArgs& command);
+  static MediaCommandResult Command(content::WebContents* contents,
+                                    const MediaCommandArgs& command);
+  static void DownloadArtwork(content::WebContents* contents,
+                              const base::DictValue& args,
+                              Reply reply);
 
  private:
   friend class content::WebContentsUserData<NowPlaying>;
@@ -90,6 +99,8 @@ class NowPlaying : public content::WebContentsObserver,
   void MediaStoppedPlaying(const MediaPlayerInfo& info,
                            const content::MediaPlayerId& id,
                            MediaStoppedReason reason) override;
+  void MediaMetadataChanged(const MediaPlayerInfo& info,
+                            const content::MediaPlayerId& id) override;
   void MediaDestroyed(const content::MediaPlayerId& id) override;
   void WebContentsDestroyed() override;
 
@@ -109,8 +120,24 @@ class NowPlaying : public content::WebContentsObserver,
 
   void ObserveSession(content::MediaSession* session);
   bool SessionLive() const;
-  bool RunCommand(const MediaCommandArgs& command);
-  std::optional<NowPlayingState> FromSession();
+  bool Lists(media_session::mojom::MediaSessionAction action) const;
+  bool PageHandles(media_session::mojom::MediaSessionAction action) const;
+  bool OnPrimaryPage(const content::MediaPlayerId& id) const;
+  bool ScriptReaches(const content::MediaPlayerId& id) const;
+  void Hear(const content::MediaPlayerId& id);
+  MediaCommandResult RunCommand(const MediaCommandArgs& command);
+  MediaCommandResult SeekBy(content::MediaSession* session, double seconds);
+  bool Declared(const GURL& url) const;
+  void Download(const GURL& url, int pixels, Reply reply);
+  void ArtworkDownloaded(int request,
+                         const GURL& asked,
+                         int id,
+                         int http_status,
+                         const GURL& url,
+                         const std::vector<SkBitmap>& bitmaps,
+                         const std::vector<gfx::Size>& sizes);
+  void AnswerArtwork(base::DictValue answer);
+  std::optional<NowPlayingState> FromSession() const;
   std::optional<NowPlayingState> Held();
   std::optional<NowPlayingState> Current();
   void Update();
@@ -120,12 +147,16 @@ class NowPlaying : public content::WebContentsObserver,
   Sample session_;
   std::optional<NowPlayingState> sent_;
   std::optional<NowPlayingState> held_;
-  std::set<content::MediaPlayerId> players_;
-  std::set<content::MediaPlayerId> playing_players_;
+  std::set<content::MediaPlayerId> heard_;
+  std::set<content::MediaPlayerId> playing_;
   bool awaiting_page_player_ = false;
-  bool loop_ = false;
-  base::TimeTicks seeked_at_;
+  base::TimeTicks sent_at_;
+  base::OneShotTimer coalesce_;
+  base::OneShotTimer seek_report_;
+  Reply artwork_reply_;
+  int artwork_request_ = 0;
   mojo::Receiver<media_session::mojom::MediaSessionObserver> receiver_{this};
+  base::WeakPtrFactory<NowPlaying> weak_factory_{this};
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 };
 
