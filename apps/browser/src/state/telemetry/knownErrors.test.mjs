@@ -12,6 +12,7 @@ const CODE_TREES = ["engine", "apps/browser/windows", ...SCRIPT_TREES, ...packag
 const SOURCE = /\.(?:tsx?|m?js|cjs|cc|cpp|h|hpp|mm|m|swift|patch|py)$/;
 const SCRIPT = /\.(?:tsx?|m?js|cjs)$/;
 const SKIPPED_FOLDERS = new Set(["node_modules", "tests", "test", "test-native", "fixtures", "__tests__", "Pods", "build"]);
+const DERIVED = new Set(["knownErrors.ts", "errorTemplates.ts", "logTemplates.ts", "nativeFunctions.ts"].map((name) => join(ROOT, "apps/browser/src/state/telemetry", name)));
 const TEST_FILE = /\.(?:test|spec)\.[^.]+$|(?:^|_)test\.py$|_(?:unittest|browsertest)\.(?:cc|mm)$/;
 
 function sources(tree, pattern) {
@@ -23,7 +24,7 @@ function sources(tree, pattern) {
       const path = join(folder, entry.name);
       if (entry.isDirectory()) {
         if (!SKIPPED_FOLDERS.has(entry.name)) walk(path);
-      } else if (entry.isFile() && pattern.test(entry.name) && !TEST_FILE.test(entry.name)) found.push(path);
+      } else if (entry.isFile() && pattern.test(entry.name) && !TEST_FILE.test(entry.name) && !DERIVED.has(path)) found.push(path);
     }
   };
   walk(start);
@@ -33,8 +34,10 @@ function sources(tree, pattern) {
 const ERR_LITERAL = /"(ERR_[A-Z0-9_]+)"/g;
 const ARDIA_ERROR = /new ArdiaError\("([^"\\]+)", "[^"\\]*"\)/g;
 
+const codesIn = (text) => new Set([...text.matchAll(ERR_LITERAL)].map(([, code]) => code));
+const scanned = CODE_TREES.flatMap((tree) => sources(tree, SOURCE));
 const definedCodes = new Set();
-for (const tree of CODE_TREES) for (const file of sources(tree, SOURCE)) for (const [, code] of readFileSync(file, "utf8").matchAll(ERR_LITERAL)) definedCodes.add(code);
+for (const file of scanned) for (const code of codesIn(readFileSync(file, "utf8"))) definedCodes.add(code);
 for (const tree of SCRIPT_TREES)
   for (const file of sources(tree, SCRIPT)) for (const [, code] of readFileSync(file, "utf8").matchAll(ARDIA_ERROR)) definedCodes.add(code);
 
@@ -44,6 +47,14 @@ test("the known error codes are exactly the ones Ardia's sources define", () => 
   const known = new Set(KNOWN_ERROR_CODES);
   assert.ok(definedCodes.size > 100, `only ${definedCodes.size} codes found; the scan is looking in the wrong place`);
   assert.deepEqual({ missing: difference(definedCodes, known), extra: difference(known, definedCodes) }, { missing: [], extra: [] });
+});
+
+test("an allowlist entry that no source defines is caught, because the allowlist and the generated tables aren't counted as sources", () => {
+  for (const path of DERIVED) assert.equal(scanned.includes(path), false, path);
+  const allowlist = join(ROOT, "apps/browser/src/state/telemetry/knownErrors.ts");
+  assert.ok(codesIn(readFileSync(allowlist, "utf8")).has("ERR_ENGINE"), "the allowlist would vouch for its own entries if it were scanned");
+  const withObsolete = new Set([...KNOWN_ERROR_CODES, "ERR_ONLY_IN_THE_ALLOWLIST"]);
+  assert.deepEqual(difference(withObsolete, definedCodes), ["ERR_ONLY_IN_THE_ALLOWLIST"]);
 });
 
 test("only a known message or the native call template comes back, and only a known code", () => {
