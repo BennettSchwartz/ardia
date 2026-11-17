@@ -2338,6 +2338,7 @@ $pages = @{
   "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
   "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
 }
+$held = [System.Collections.Generic.List[object]]::new()
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
 $listener.Start()
 while ($true) {
@@ -2349,6 +2350,14 @@ while ($true) {
     $request = $reader.ReadLine()
     while ($line = $reader.ReadLine()) { }
     $path = if ($request) { ($request.Split(" ")[1]) -replace '\?.*$', '' } else { "" }
+    if ($path -eq "/download") {
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/octet-stream`r`nContent-Disposition: attachment; filename=`"tour-download.txt`"`r`nContent-Length: 104857600`r`nConnection: keep-alive`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write([byte[]](116, 111, 117, 114), 0, 4)
+      $stream.Flush()
+      $held.Add($client)
+      continue
+    }
     $text = $pages[$path]
     $status = if ($text) { "200 OK" } else { "404 Not Found" }
     $body = [System.Text.Encoding]::UTF8.GetBytes([string]$text)
@@ -2356,7 +2365,8 @@ while ($true) {
     $stream.Write($head, 0, $head.Length)
     $stream.Write($body, 0, $body.Length)
     $stream.Flush()
-  } catch { } finally { $client.Close() }
+  } catch { $client.Close() }
+  if (-not $held.Contains($client)) { $client.Close() }
 }
 '@
   $script:TourPages = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-NonInteractive", "-File", "`"$serve`"", "-Port", $script:TourPagesPort -WindowStyle Hidden -PassThru
@@ -2498,6 +2508,112 @@ function Note-Required($Stop, [string]$Part) {
 }
 
 $script:RequiredFailures = [System.Collections.Generic.List[string]]::new()
+
+function Read-DialogTexts([IntPtr]$Window) {
+  if (-not (Initialize-Uia)) { return @() }
+  $texts = @()
+  try {
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Window)
+    foreach ($element in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+      try { $name = [string]$element.Current.Name; if ($name.Trim()) { $texts += $name.Trim() } } catch { }
+    }
+  } catch { }
+  return @($texts | Select-Object -Unique)
+}
+
+function Wait-QuitDialog($Session, [int]$Milliseconds) {
+  $found = $null
+  $deadline = (Get-Date).AddMilliseconds($Milliseconds)
+  while (-not $found -and (Get-Date) -lt $deadline -and -not $Session.Process.HasExited) {
+    $found = @(Get-TopWindows $Session | Where-Object { $_.ClassName -eq "#32770" }) | Select-Object -First 1
+    if (-not $found) { Start-Sleep -Milliseconds 150 }
+  }
+  return $found
+}
+
+function Wait-AppEnded($Session, [int]$Milliseconds) {
+  $ended = $Session.Process.WaitForExit($Milliseconds)
+  Start-Sleep -Milliseconds 300
+  $last = [string](@(Read-LogLines $Session.Log) | Select-Object -Last 1)
+  if ($ended) {
+    $Session.Stopping = $true
+    $Session.Summary = "Quit by the tour's close, as it should (exit code $($Session.Process.ExitCode))."
+    Write-Host "[tour] '$($Session.Name)': $($Session.Summary)"
+  }
+  return [pscustomobject]@{ Ended = $ended; LastLine = $last; Clean = $ended -and $last -match "process ending" }
+}
+
+function Invoke-QuitDownloadsTour {
+  if (-not (Start-TourPages)) {
+    $script:Lines.Add("- The quit-downloads part found no loopback page server on port $($script:TourPagesPort).")
+    return
+  }
+  $session = Start-Ardia "quit-download" -Onboarded -Settings @{ appearance = "light" }
+  $expectedTitle = "Are you sure you want to quit Ardia?"
+  $expectedMessage = "You have 1 download in progress. If you quit now, this download will be cancelled."
+  Invoke-Stop $session "quit-download" "Alt+F4 with a download running asks before quitting; Cancel keeps Ardia, Quit ends it (#2488)" {
+    param($stop)
+    $stop.Did = "One browser window, Warn before quitting off (the default). Opened 127.0.0.1:$($script:TourPagesPort)/download in a new tab, which sends a 100 MB attachment's first 4 bytes and then holds the connection, so the download stays in progress. Pressed Alt+F4 and waited for a dialog; pressed Cancel (TDM_CLICK_BUTTON with IDCANCEL); pressed Alt+F4 again and pressed Quit (TDM_CLICK_BUTTON with 1001)."
+    $stop.Expected = "Alt+F4 asks '$expectedTitle' / '$expectedMessage' in a dialog of the app; after Cancel the window and the process are still there and the dialog is gone; after Quit the process ends and its launch log ends with 'process ending'."
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    Focus-Window $session $session.Main $stop | Out-Null
+    $mark = Get-LogCount $session
+    Send-Chord @(0x11) 0x54
+    $opened = Wait-Command $session $mark "newTab"
+    Start-Sleep -Milliseconds 700
+    Send-Address "127.0.0.1:$($script:TourPagesPort)/download"
+    Send-Key 0x0D 0
+    Send-Key 0x0D 2
+    $listed = Wait-Until $session { @(Find-Named $session.Main "tour-download.txt").Count -gt 0 } 15000
+    Start-Sleep -Milliseconds 1000
+    $stop.Facts.Add("newTab logged: $opened; the download listed in the window (UI Automation found 'tour-download.txt'): $listed")
+    $panel = Measure-Screen ($stop.Shot -replace '\.png$', '-downloading.png') $session.Main
+    Focus-Window $session $session.Main $stop | Out-Null
+    Send-Chord @(0x12) 0x73
+    $dialog = Wait-QuitDialog $session 8000
+    if (-not $dialog) {
+      $stop.Seen = "no"
+      $stop.Facts.Add("no dialog within 8 s of Alt+F4; the app is still running: $(-not $session.Process.HasExited); windows: $(Format-Windows (Get-TopWindows $session))")
+      return
+    }
+    $asked = Measure-Screen ($stop.Shot -replace '\.png$', '-asked.png') $dialog.Handle
+    $texts = @(Read-DialogTexts $dialog.Handle)
+    $words = ($texts -contains $expectedTitle) -and ($texts -contains $expectedMessage)
+    $stop.Facts.Add("dialog '$($dialog.Title)' ($($dialog.ClassName)); its text read with UI Automation: $(($texts | ForEach-Object { "'$_'" }) -join ', '); the Mac's title and message both there: $words")
+    [ArdiaTour]::PostMessageW($dialog.Handle, 0x0466, [IntPtr]2, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 1500
+    $gone = -not @(Get-TopWindows $session | Where-Object { $_.Handle -eq $dialog.Handle }).Count
+    $kept = (-not $session.Process.HasExited) -and [ArdiaTour]::IsWindow($session.Main) -and [ArdiaTour]::IsWindowVisible($session.Main)
+    $stop.Facts.Add("after Cancel: the dialog is gone: $gone; the window is still shown and the process alive: $kept")
+    Save-Shot $stop $session.Main | Out-Null
+    if (-not ($gone -and $kept)) { $stop.Seen = "no"; return }
+    Focus-Window $session $session.Main $stop | Out-Null
+    Send-Chord @(0x12) 0x73
+    $again = Wait-QuitDialog $session 8000
+    if (-not $again) { $stop.Seen = "no"; $stop.Facts.Add("the second Alt+F4 showed no dialog; the app is still running: $(-not $session.Process.HasExited)"); return }
+    [ArdiaTour]::PostMessageW($again.Handle, 0x0466, [IntPtr]1001, [IntPtr]::Zero) | Out-Null
+    $end = Wait-AppEnded $session 20000
+    $stop.Facts.Add("after Quit: the process ended within 20 s: $($end.Ended); the launch log's last line: '$($end.LastLine)'")
+    Set-Seen $stop ($words -and $end.Clean)
+  } | Out-Null
+  if (-not $session.Stopping) { Stop-Ardia $session }
+
+  $control = Start-Ardia "quit-no-download" -Onboarded -Settings @{ appearance = "light" }
+  Invoke-Stop $control "quit-no-download" "Alt+F4 with no download running and the warning off quits without a question (#2488's control)" {
+    param($stop)
+    $stop.Did = "One browser window, Warn before quitting off, no download. Pressed Alt+F4 and watched for a dialog for 4 s."
+    $stop.Expected = "no dialog; the process ends and its launch log ends with 'process ending'."
+    if (-not (Test-Usable $control)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    Focus-Window $control $control.Main $stop | Out-Null
+    Send-Chord @(0x12) 0x73
+    $dialog = Wait-QuitDialog $control 4000
+    if ($dialog) { [ArdiaTour]::PostMessageW($dialog.Handle, 0x0466, [IntPtr]1001, [IntPtr]::Zero) | Out-Null }
+    $end = Wait-AppEnded $control 20000
+    $stop.Facts.Add("a dialog showed: $(if ($dialog) { "yes, '$($dialog.Title)'" } else { 'no' }); the process ended within 20 s: $($end.Ended); the launch log's last line: '$($end.LastLine)'")
+    Set-Seen $stop ((-not $dialog) -and $end.Clean)
+  } | Out-Null
+  if (-not $control.Stopping) { Stop-Ardia $control }
+}
 
 function Invoke-PeekTabsTour {
   if (-not (Start-TourPages)) {
@@ -2791,6 +2907,7 @@ if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
   $tours += @{ Name = "peek"; Run = { Invoke-PeekTour "peek-light" @{ appearance = "light" } "light" } }
   $tours += @{ Name = "peek-dark"; Run = { Invoke-PeekTour "peek-dark" @{ appearance = "dark" } "dark" } }
   $tours += @{ Name = "peek-tabs"; Run = { Invoke-PeekTabsTour } }
+  $tours += @{ Name = "quit-downloads"; Run = { Invoke-QuitDownloadsTour } }
   $tours += @{ Name = "peek-layouts"; Run = {
       Invoke-PeekTour "peek-sidebar-address" @{ appearance = "light"; addressBar = "sidebar" } "light, address bar in the sidebar"
       Invoke-PeekTour "peek-borderless" @{ appearance = "light"; borderlessMode = $true } "light, Borderless"
