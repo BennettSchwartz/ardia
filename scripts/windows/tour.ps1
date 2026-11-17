@@ -1767,6 +1767,100 @@ function Invoke-TabClickStop($Session) {
   } | Out-Null
 }
 
+function Get-SidebarStrip($Client) {
+  $left = $Client.X + [int](16 * $Client.Scale)
+  $width = [int](150 * $Client.Scale)
+  $top = $Client.Y + [int](60 * $Client.Scale)
+  $height = $Client.Height - [int](120 * $Client.Scale)
+  if ($width -le 0 -or $height -le 0) { return $null }
+  $bitmap = New-Object System.Drawing.Bitmap $width, $height
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try {
+    $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)
+    $rows = New-Object double[] $height
+    for ($y = 0; $y -lt $height; $y++) {
+      $sum = 0.0
+      for ($x = 0; $x -lt $width; $x += 3) {
+        $pixel = $bitmap.GetPixel($x, $y)
+        $sum += 0.299 * $pixel.R + 0.587 * $pixel.G + 0.114 * $pixel.B
+      }
+      $rows[$y] = $sum / [Math]::Ceiling($width / 3.0)
+    }
+    return [pscustomobject]@{ Top = $top; Rows = $rows }
+  } finally {
+    $graphics.Dispose()
+    $bitmap.Dispose()
+  }
+}
+
+function Get-StripShift($Before, $After) {
+  if (-not $Before -or -not $After -or $Before.Rows.Count -ne $After.Rows.Count) { return $null }
+  $count = $Before.Rows.Count
+  $limit = [Math]::Min(400, [int]($count / 2))
+  $best = 0
+  $bestScore = [double]::MaxValue
+  for ($shift = -$limit; $shift -le $limit; $shift += 2) {
+    $score = 0.0
+    $compared = 0
+    for ($y = [Math]::Max(0, -$shift); $y -lt [Math]::Min($count, $count - $shift); $y += 2) {
+      $score += [Math]::Abs($Before.Rows[$y] - $After.Rows[$y + $shift])
+      $compared++
+    }
+    if ($compared -gt $count / 3) {
+      $score = $score / $compared
+      if ($score -lt $bestScore) { $bestScore = $score; $best = $shift }
+    }
+  }
+  $same = 0.0
+  for ($y = 0; $y -lt $count; $y += 2) { $same += [Math]::Abs($Before.Rows[$y] - $After.Rows[$y]) }
+  return [pscustomobject]@{ Shift = $best; Score = [Math]::Round($bestScore, 2); Unmoved = [Math]::Round($same / [Math]::Ceiling($count / 2.0), 2) }
+}
+
+function Send-Wheel([int]$Notches) {
+  [ArdiaTour]::mouse_event([uint32]0x0800, 0, 0, [uint32](([int64](120 * $Notches)) -band 0xFFFFFFFF), [UIntPtr]::Zero)
+}
+
+function Invoke-SidebarWheelTour {
+  $session = Start-Ardia "sidebar-wheel" -Onboarded
+  if (-not (Test-Usable $session)) { Stop-Ardia $session; return }
+  Invoke-Stop $session "sidebar-wheel-scroll" "The mouse wheel scrolls a sidebar tab list longer than the sidebar" {
+    param($stop)
+    $stop.Did = "Opened 34 tabs with Ctrl+T, put the pointer over the middle of the sidebar's tab list and turned the wheel 5 notches up, then 5 notches down, reading the list's pixels before and after each."
+    $stop.Expected = "the list moves under the pointer: its rows shift by the scrolled distance one way, then back."
+    Focus-Window $session $session.Main $stop | Out-Null
+    foreach ($i in 1..34) {
+      Send-Chord @(0x11) 0x54
+      Start-Sleep -Milliseconds 250
+      Send-Escape
+      Start-Sleep -Milliseconds 120
+    }
+    Start-Sleep -Milliseconds 1200
+    $client = Get-Client $session.Main
+    if (-not $client) { $stop.Seen = "no"; $stop.Facts.Add("the window could not be measured"); return }
+    $rows = @(Find-Named $session.Main "New Tab" | Where-Object { $_.X -lt $client.X + [int](190 * $client.Scale) })
+    $stop.Facts.Add("New Tab rows on screen in the sidebar: $($rows.Count)")
+    $x = $client.X + [int](90 * $client.Scale)
+    $y = $client.Y + [int]($client.Height / 2)
+    Send-MouseMove $x $y
+    Start-Sleep -Milliseconds 400
+    $start = Get-SidebarStrip $client
+    Send-Wheel 5
+    Start-Sleep -Milliseconds 900
+    $up = Get-SidebarStrip $client
+    Save-Shot $stop $session.Main | Out-Null
+    Send-Wheel -5
+    Start-Sleep -Milliseconds 900
+    $down = Get-SidebarStrip $client
+    $first = Get-StripShift $start $up
+    $second = Get-StripShift $up $down
+    $stop.Facts.Add("wheel up: the list's rows moved by $($first.Shift) px (match $($first.Score), unmoved $($first.Unmoved))")
+    $stop.Facts.Add("wheel down: the list's rows moved by $($second.Shift) px (match $($second.Score), unmoved $($second.Unmoved))")
+    $moved = { param($s) $s -and [Math]::Abs($s.Shift) -ge [int](20 * $client.Scale) -and $s.Score -lt $s.Unmoved }
+    Set-Seen $stop ((& $moved $first) -or (& $moved $second))
+  } | Out-Null
+  Stop-Ardia $session
+}
+
 function Invoke-ShortcutStop($Session, [string]$Slug, [string]$Title, [string]$Keys, [byte[]]$Modifiers, [byte]$Key, [string]$Command, [string]$Expected, [switch]$WatchBand, [switch]$ClosesOnEscape, [switch]$EscapeCaptured) {
   Invoke-Stop $Session $Slug $Title {
     param($stop)
@@ -2781,7 +2875,8 @@ $tours = @(
   @{ Name = "top tabs"; Run = { Invoke-LayoutTour "top-tabs" @{ tabLayout = "top" } "Tabs in a top strip" "the window buttons sit at the end of the strip, and the gap beside them is a caption region." } },
   @{ Name = "sidebar on the right"; Run = { Invoke-LayoutTour "sidebar-right" @{ sidebarSide = "right" } "Sidebar on the right" "the window buttons sit in the sidebar's header, and the gap beside them is a caption region." } },
   @{ Name = "dark"; Run = { Invoke-DarkTour } },
-  @{ Name = "motion"; Run = { Invoke-MotionTour } }
+  @{ Name = "motion"; Run = { Invoke-MotionTour } },
+  @{ Name = "sidebar wheel"; Run = { Invoke-SidebarWheelTour } }
 )
 
 if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
