@@ -1187,7 +1187,9 @@ Linux reads calendars from Evolution Data Server, which GNOME Online Accounts, G
     only when the process is root or can gain the helper's privilege. Under `no_new_privs` (a sandbox, a container,
     a service with `NoNewPrivileges`) or with the helper on a `nosuid` mount, exit 7 is `kUnverifiable`: the dialog
     says Ardia can't check the password in this session, and stays open for Cancel. A helper that doesn't start,
-    times out or exits with another code is `kFailed`, and the dialog says the helper didn't answer.
+    times out or exits with another code is `kFailed`, and the dialog says the helper didn't answer. Both messages
+    point to the Recovery Kit saved when sync was turned on, which holds the same words, since Show Code, Show Words
+    and Save Recovery Kit all wait on this confirmation.
   - A check that gave no verdict logs `[ardia] the login password was not checked: helper <detail>` at warning level
     (`ac_linux_password_log.cc`), where the detail is `exit N` with the reason, `timed out` or `could not start`. It
     never holds the password.

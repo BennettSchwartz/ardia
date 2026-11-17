@@ -221,6 +221,7 @@ class PasswordCheckTests(unittest.TestCase):
         self.assertLess(answered.index('LogUnansweredCheck(result.detail)'), answered.index('Verdict::kUnverifiable'))
         self.assertIn("Ardia can't check your login password in this session", answered)
         self.assertIn("Ardia couldn't check your login password", answered)
+        self.assertEqual(answered.count('Your Recovery Kit, if you saved one when you turned sync on, has the same'), 2)
         self.assertLess(answered.index('unanswered_.reset();'), answered.index('Verdict::kMatch'))
         self.assertLess(answered.index('unanswered_ = reauth_linux::Outcome::kUnverifiable;'), answered.index("Ardia can't check your login password"))
         self.assertLess(answered.index('unanswered_ = reauth_linux::Outcome::kHelperFailed;'), answered.index("Ardia couldn't check your login password"))

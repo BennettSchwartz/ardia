@@ -235,11 +235,12 @@ class Confirmation : public views::WidgetObserver {
       return Show(
           "Ardia can't check your login password in this session, so it can't tell whether yours is right. "
           "This happens when Ardia runs in a sandbox, or when the system's password helper is on a disk "
-          "mounted without setuid. Cancel to close this window.");
+          "mounted without setuid. Your Recovery Kit, if you saved one when you turned sync on, has the same "
+          "words. Cancel to close this window.");
     }
     unanswered_ = reauth_linux::Outcome::kHelperFailed;
     Show("Ardia couldn't check your login password because the system's password helper didn't answer. "
-         "Try again, or cancel.");
+         "Try again, or cancel. Your Recovery Kit, if you saved one when you turned sync on, has the same words.");
   }
 
   raw_ptr<Profile> profile_;
