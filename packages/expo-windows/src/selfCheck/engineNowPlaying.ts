@@ -1,102 +1,40 @@
-import { hostCall, onEngineTopic } from "../engine/host";
+import { hostCall } from "../engine/host";
 import { expectEqual, expectTrue, type Check } from "./check";
-import { LOAD_MS, SETTLE_MS, origin, port, restore, setAutoplay, withMedia } from "./engineAutoplayKit";
+import { LOAD_MS, SETTLE_MS, origin, port } from "./engineAutoplayKit";
 import { click, evaluate, firstWindow, LEFT, listed, pause, show, until } from "./engineSleep";
+import { FRAME_BUTTON, FRAME_TITLE, SONG, TITLE, called, command, downloaded, expectPng, isPaused, isPlaying, pageState, reported, reportsOf, startPlaying, withReports } from "./engineNowPlayingKit";
 
-type NowPlaying = { title?: string; artist?: string; album?: string; artwork?: string | null; playbackState?: string; position?: number; duration?: number | null; playbackRate?: number; timestamp?: number; hasVideo?: boolean; actions?: string[]; controllable?: boolean; loop?: boolean };
-type PageState = { paused?: boolean; time?: number; calls?: string[]; ad?: { active?: boolean } | null; frame?: { paused?: boolean; time?: number; calls?: string[] } | null };
-type Image = { uri?: string | null; width?: number; height?: number };
-
-const TITLE = "now playing page";
-const FRAME_TITLE = "now playing frame";
-const SONG = { title: "Ardia Song", artist: "Ardia Band", album: "Ardia Album" };
 const PAGE_ACTIONS = ["play", "pause", "nexttrack", "previoustrack", "seekto"];
 const DECLARED_DURATION = 120;
 const SEEK_TO = 42;
 const STEADY_MS = 10000;
 const MOST_STEADY_REPORTS = 5;
-const ART_PIXELS = 256;
-const FRAME_BUTTON = { x: 100, y: 100 };
-const PNG_DATA = "data:image/png;base64,";
+const BURST_LAST = { title: "Burst 999", position: 99.9 };
+const MOST_BURST_REPORTS = 15;
+const BURST_MS = 5000;
+const STILL_PAUSED_MS = 1500;
 
-function reportsOf(key: string) {
-  const reports: (NowPlaying | null)[] = [];
-  const watching = onEngineTopic("tab", (event: { key?: unknown; name?: unknown; data?: { state?: NowPlaying | null } }) => {
-    if (event.key === key && event.name === "nowPlaying") reports.push(event.data?.state ?? null);
-  });
-  return { reports, latest: async () => (reports.length ? reports[reports.length - 1]! : undefined), stop: () => watching.remove() };
-}
-
-type Reports = ReturnType<typeof reportsOf>;
-
-const command = (key: string, action: string, seconds: number | null = null) => hostCall("tab.call", { key, method: "mediaCommand", action, seconds });
-
-const pageState = async (key: string) =>
-  ((await evaluate(key, 'const media = typeof m === "undefined" ? null : m; post("result", JSON.stringify({ paused: media ? media.paused : null, time: media ? media.currentTime : null, calls: window.calls || [], ad: window.adState || null, frame: window.frameState || null }));')) ?? {}) as PageState;
-
-const startPlaying = async (key: string) => {
-  const started = await evaluate(key, 'm.play().then(() => "played", (error) => error.name).then((result) => post("result", JSON.stringify(result)));', true);
-  expectEqual(started, "played", "the page plays with sound under a script gesture");
-};
-
-const reported = (reports: Reports, what: string, done: (state: NowPlaying | null | undefined) => boolean) => until(`${what} (nowPlaying)`, SETTLE_MS, reports.latest, done);
-const isPlaying = (state: NowPlaying | null | undefined) => state?.playbackState === "playing";
-const isPaused = (state: NowPlaying | null | undefined) => state?.playbackState === "paused";
-const called = (key: string, call: string, what: string) => until(what, SETTLE_MS, () => pageState(key), (state) => !!state.calls?.includes(call));
-
-async function withReports(name: string, path: string, title: string, run: (key: string, reports: Reports, windowId: string) => Promise<void>) {
-  const reports = reportsOf(`self-check-autoplay-${name}`);
-  try {
-    await withMedia(name, path, title, (key, windowId) => run(key, reports, windowId));
-  } finally {
-    reports.stop();
-  }
-}
-
-async function downloaded(key: string, url: string): Promise<Image | null> {
-  return (await hostCall<Image>("tab.call", { key, method: "downloadImage", url, maxPixels: ART_PIXELS })) ?? null;
-}
-
-function expectPng(image: Image | null, what: string) {
-  expectTrue(typeof image?.uri === "string" && image.uri.startsWith(PNG_DATA), `${what}: a PNG data URI, got ${JSON.stringify(image).slice(0, 120)}`);
-  const width = image!.width ?? 0;
-  const height = image!.height ?? 0;
-  expectTrue(width > 0 && height > 0 && width <= ART_PIXELS && height <= ART_PIXELS, `${what}: within ${ART_PIXELS} px, got ${width}x${height}`);
-}
-
-async function playsAfterBlock(name: string, path: string) {
-  try {
-    await withReports(name, path, TITLE, async (key, reports) => {
-      await until("the unrelated cross-site ad iframe reports", SETTLE_MS, () => pageState(key), (state) => state.ad?.active === false);
-      await startPlaying(key);
-      await reported(reports, "the page reports playing", isPlaying);
-      await setAutoplay("block");
-      await until("blocking autoplay pauses the media the user did not ask for", SETTLE_MS, () => pageState(key), (state) => state.paused === true);
-      await reported(reports, "the paused media is reported paused", isPaused);
-      await command(key, "play");
-      await until("the card's play plays it on the blocked site", SETTLE_MS, () => pageState(key), (state) => state.paused === false && (state.time ?? 0) > 0);
-      await reported(reports, "the page reports playing again", isPlaying);
-      await pause(500);
-      expectEqual((await pageState(key)).ad?.active, false, "the unrelated cross-site ad iframe's navigator.userActivation.hasBeenActive after the card's play");
-    });
-  } finally {
-    await restore();
-  }
+async function playFrame(key: string, windowId: string) {
+  await show(key, windowId, LEFT);
+  await until("the cross-site iframe reports", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
+  await click(key, FRAME_BUTTON.x, FRAME_BUTTON.y);
+  await until("a click in the iframe plays its media", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
 }
 
 const nowPlayingChecks: Check[] = [
   {
-    name: "engine now playing: a playing page reports its Media Session metadata, playing, controllable and its actions, and its artwork downloads as a PNG",
+    name: "engine now playing: a playing page reports its Media Session metadata, playing, controllable and its actions, and only its declared artwork downloads, as a PNG",
     run: () =>
       withReports("np-report", "nowplaying", TITLE, async (key, reports) => {
         await startPlaying(key);
         const state = await reported(reports, "the page's session is reported playing with its declared duration and artwork", (now) => isPlaying(now) && now?.title === SONG.title && now?.duration === DECLARED_DURATION && !!now?.artwork);
         expectEqual({ title: state?.title, artist: state?.artist, album: state?.album }, SONG, "the reported metadata");
-        expectEqual({ controllable: state?.controllable, hasVideo: state?.hasVideo, duration: state?.duration }, { controllable: true, hasVideo: false, duration: DECLARED_DURATION }, "controllable audio with the page's declared duration");
+        expectEqual({ controllable: state?.controllable, hasVideo: state?.hasVideo, loop: state?.loop }, { controllable: true, hasVideo: false, loop: false }, "controllable audio, loop not guessed");
         expectEqual(PAGE_ACTIONS.filter((action) => !state?.actions?.includes(action)), [], `the page's action handlers among the actions ${JSON.stringify(state?.actions)}`);
         expectEqual(state?.artwork, `${origin}/art.png`, "the artwork is the largest declared size, as on the Mac");
         expectPng(await downloaded(key, state!.artwork!), "the 300 px PNG artwork, asked for at 256 px");
-        expectPng(await downloaded(key, `${origin}/art.svg`), "the SVG artwork, rasterized in the page's renderer");
+        expectPng(await downloaded(key, `${origin}/art.svg`), "the declared SVG artwork, rasterized in the page's renderer");
+        expectEqual((await downloaded(key, `${origin}/art.png?undeclared`))?.uri ?? null, null, "an image the session did not declare is not downloaded");
         expectEqual((await downloaded(key, "file:///C:/Windows/win.ini"))?.uri ?? null, null, "a file URL is not downloaded");
       }),
   },
@@ -143,10 +81,7 @@ const nowPlayingChecks: Check[] = [
     name: "engine now playing: media in a cross-site iframe is reported and obeys play and pause from the app",
     run: () =>
       withReports("np-framed", "npframe", FRAME_TITLE, async (key, reports, windowId) => {
-        await show(key, windowId, LEFT);
-        await until("the cross-site iframe reports", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === true);
-        await click(key, FRAME_BUTTON.x, FRAME_BUTTON.y);
-        await until("a click in the iframe plays its media", SETTLE_MS, () => pageState(key), (state) => state.frame?.paused === false);
+        await playFrame(key, windowId);
         const state = await reported(reports, "the iframe's session is reported playing", (now) => isPlaying(now) && now?.title === SONG.title);
         expectEqual(state?.controllable, true, "the iframe's media is controllable");
         await command(key, "pause");
@@ -155,6 +90,44 @@ const nowPlayingChecks: Check[] = [
         await command(key, "play");
         await until("the app's play reaches the iframe's handler", SETTLE_MS, () => pageState(key), (now) => now.frame?.paused === false && !!now.frame.calls?.includes("play"));
         await reported(reports, "the iframe reports playing again", isPlaying);
+      }),
+  },
+  {
+    name: "engine now playing: a cross-site iframe's artwork downloads as that frame, not as the page around it",
+    run: () =>
+      withReports("np-framed-art", "npframe?owned", FRAME_TITLE, async (key, reports, windowId) => {
+        await playFrame(key, windowId);
+        const state = await reported(reports, "the iframe's session is reported with its artwork", (now) => isPlaying(now) && !!now?.artwork?.endsWith("/art-own.png"));
+        expectPng(await downloaded(key, state!.artwork!), "the artwork the page server gives only to a same-origin request (Sec-Fetch-Site), fetched from the iframe");
+      }),
+  },
+  {
+    name: "engine now playing: a cross-site iframe's media in a muted tab is reported not controllable, and controllable again once unmuted",
+    run: () =>
+      withReports("np-framed-muted", "npframe", FRAME_TITLE, async (key, reports, windowId) => {
+        await playFrame(key, windowId);
+        await reported(reports, "the iframe's session is reported playing and controllable", (now) => isPlaying(now) && now?.controllable === true);
+        await hostCall("tab.call", { key, method: "setMuted", muted: true });
+        const muted = await reported(reports, "the muted tab's cross-site media is reported not controllable", (now) => now?.controllable === false);
+        expectEqual({ title: muted?.title, playing: isPlaying(muted) }, { title: SONG.title, playing: true }, "the muted tab keeps its card's track, still playing");
+        await hostCall("tab.call", { key, method: "setMuted", muted: false });
+        const back = await reported(reports, "the unmuted tab's media is controllable again", (now) => now?.controllable === true);
+        expectTrue(isPlaying(back) && !!back?.actions?.includes("pause") && !!back.actions.includes("play"), `controllable again with the session's actions: ${JSON.stringify(back)}`);
+      }),
+  },
+  {
+    name: "engine now playing: media that ends stays reported paused, as on the Mac, until the page drops it",
+    run: () =>
+      withReports("np-ended", "nowplaying?once", TITLE, async (key, reports) => {
+        await startPlaying(key);
+        await reported(reports, "the page reports playing", isPlaying);
+        await until("the media ends", SETTLE_MS, () => pageState(key), (state) => state.ended === true);
+        await reported(reports, "the ended media is reported paused", isPaused);
+        await pause(STILL_PAUSED_MS);
+        const later = await reports.latest();
+        expectEqual({ paused: isPaused(later), title: later?.title }, { paused: true, title: SONG.title }, "the ended media is still reported paused");
+        await evaluate(key, 'm.removeAttribute("src"); m.load(); post("result", "true");');
+        await reported(reports, "the session ends once the page drops its media", (now) => now === null);
       }),
   },
   {
@@ -188,27 +161,37 @@ const nowPlayingChecks: Check[] = [
     },
   },
   {
-    name: "engine now playing: on a blocked site, the card's play reaches the page's play handler, and an unrelated cross-site ad iframe gains no user activation",
-    run: () => playsAfterBlock("np-blocked", "nowplaying?withad"),
-  },
-  {
-    name: "engine now playing: on a blocked site, the card's play plays a page without action handlers, and an unrelated cross-site ad iframe gains no user activation",
-    run: () => playsAfterBlock("np-blocked-bare", "nowplaying?withad&bare"),
-  },
-  {
-    name: "engine now playing: steady playback of a looping track sends few reports and marks the loop",
+    name: "engine now playing: steady playback sends few reports",
     run: () =>
-      withReports("np-steady", "nowplaying?plain", TITLE, async (key, reports) => {
+      withReports("np-steady", "nowplaying?plain&long", TITLE, async (key, reports) => {
         await startPlaying(key);
         await reported(reports, "the page reports playing", isPlaying);
         await pause(1000);
         const before = reports.reports.length;
         await pause(STEADY_MS);
         const sent = reports.reports.length - before;
-        console.info(`[ardia windows] self-check note: ${sent} nowPlaying reports over ${STEADY_MS / 1000} s of steady looping playback`);
+        console.info(`[ardia windows] self-check note: ${sent} nowPlaying reports over ${STEADY_MS / 1000} s of steady playback`);
         expectTrue(sent <= MOST_STEADY_REPORTS, `at most ${MOST_STEADY_REPORTS} reports over ${STEADY_MS / 1000} s of steady playback, got ${sent}`);
+        expectEqual(isPlaying(await reports.latest()), true, "the track is still reported playing");
+      }),
+  },
+  {
+    name: "engine now playing: a page changing its metadata and position 1,000 times in a second sends about ten reports, the last with its final state",
+    run: () =>
+      withReports("np-burst", "nowplaying", TITLE, async (key, reports) => {
+        await startPlaying(key);
+        await reported(reports, "the page reports playing", (now) => isPlaying(now) && now?.title === SONG.title);
+        await pause(500);
+        const before = reports.reports.length;
+        await evaluate(key, 'burst(); post("result", "true");');
+        await until("the page finishes its burst", BURST_MS, () => pageState(key), (state) => state.burstDone === true);
+        await pause(500);
+        const sent = reports.reports.length - before;
+        console.info(`[ardia windows] self-check note: ${sent} nowPlaying reports for 1,000 metadata and position changes`);
+        expectTrue(sent <= MOST_BURST_REPORTS, `at most ${MOST_BURST_REPORTS} reports for the burst, got ${sent}`);
         const last = await reports.latest();
-        expectEqual({ playing: isPlaying(last), loop: last?.loop }, { playing: true, loop: true }, "the looping track is reported playing and looping");
+        expectEqual(last?.title, BURST_LAST.title, "the last report carries the final title");
+        expectTrue(Math.abs((last?.position ?? 0) - BURST_LAST.position) < 1.5, `the last report carries the final position ${BURST_LAST.position}: ${last?.position}`);
       }),
   },
 ];

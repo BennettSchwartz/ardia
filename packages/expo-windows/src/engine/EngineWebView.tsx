@@ -61,6 +61,7 @@ const ANSWERS: Record<string, unknown> = {
   requestPictureInPicture: false,
   takeControlPress: false,
 };
+const REFUSALS_ANSWER_NOTHING = new Set(["mediaCommand"]);
 const SETTLE_MS = [0, 50, 200, 500];
 const PICTURE_DEADLINE_MS = 1000;
 
@@ -195,7 +196,8 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
             if (names) {
               const unwrap = UNWRAPPED[method];
               return async (...values: unknown[]) => {
-                const reply = await callPage<Record<string, unknown>>(key, method, Object.fromEntries(names.map((name, index) => [name, values[index] ?? null])));
+                const asked = callPage<Record<string, unknown>>(key, method, Object.fromEntries(names.map((name, index) => [name, values[index] ?? null])));
+                const reply = await (REFUSALS_ANSWER_NOTHING.has(method) ? asked.catch(() => null) : asked);
                 return unwrap ? unwrap(reply) : undefined;
               };
             }
