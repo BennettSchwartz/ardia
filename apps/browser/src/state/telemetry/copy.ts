@@ -246,6 +246,9 @@ export const LOCAL_COPY = {
 } as const;
 
 const ADDED_ITEMS = {
+  "Crashes and errors": [
+    "On Windows, after a crash of Ardia or one of its page, graphics or helper processes: the process that crashed, the exception's name (such as an access violation) and whether it was reading, writing or running, the file name of the module it happened in (never its folder) and the offset in it, how long the process had run and the version that crashed, read from the crash report Windows' crash handler wrote. Never the report itself, its stacks, memory or paths",
+  ],
   Usage: [
     "How many cut, copy, paste and select all keys a page handed back to Ardia were carried out or refused as stale, and of those, how the first one after another app handed the window back was answered, summed up once an hour. Never what you copied or pasted or on which page",
     "How many times the first-launch intro was shown, how many of those started with its music muted, how many were skipped and how many played to the end, and on Windows how many showed the moving meadow, the still picture, or the still picture after the meadow failed, and the time the meadow took to draw its first frame, rounded to a tenth of a second, and on Linux how many times the intro's music couldn't play, summed up once an hour",
