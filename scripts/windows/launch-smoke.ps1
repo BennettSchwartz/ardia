@@ -1285,6 +1285,7 @@ public static class ArdiaSnapKeys {
 }
 
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
+foreach ($extension in @("self-check-extension-popup", "self-check-extension-click")) { Copy-Item -Recurse -Force -Path (Join-Path $PSScriptRoot $extension) -Destination (Join-Path $env:ARDIA_DATA_DIR $extension) }
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
 foreach ($fixture in @(@("firefox", "Firefox\Profiles\abcd1234.default-release"), @("work", "Firefox\Profiles\zzzz9999.work"), @("zen", "zen\Profiles\zen12345.Default (release)"), @("chrome", "Google\Chrome\Default"))) {

@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Ardia self-check click",
+  "version": "1.0",
+  "permissions": ["tabs", "storage"],
+  "background": { "service_worker": "worker.js" },
+  "action": { "default_title": "Ardia self-check click" }
+}
