@@ -326,9 +326,13 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     `typed` is the bar's first typed change, once per page.
   - **Tour:** the `first-run` part of `scripts/windows/tour.ps1` presses Ctrl+T and types the first key 100 ms later,
     in fresh launches after Get Started, during and after the tool tour, under CPU and disk load, and with the Go
-    button. A stop fails only when the new tab's bar takes focus more than 90 ms after the `newTab` command (the
-    worst seen was 69 ms under load), or the first key does not land in the new tab's bar (its first `typed` mark
-    after the command, and the settled text starting with that key). A stop typing from 15 ms after Ctrl+T
+    button. A stop fails only when the new tab's bar takes focus more than 90 ms after the `newTab` command, or the
+    first key does not land in the new tab's bar (its first `typed` mark after the command, and the settled text
+    starting with that key). Focus is read from `new tab bar focused`, or from the new bar's `bar field focus` line
+    when that one is missing (a torn log line, #2426), and the stop's facts say which. The stop under CPU and disk
+    load from a cold copy must instead keep every key and have Enter open the page, and only reports its focus
+    time: under that load focus has taken 125 ms (run 44067785523), and with the key hold the keys don't wait on it
+    (#2401). A stop typing from 15 ms after Ctrl+T
     must keep every key (#2099). The rest is report only: the whole text at 30 ms a key (#2101), where Go goes
     (#2102), and three launches each typing at 80 and at 120 ms a key that read the field after every key.
   - **A stalled JS thread** (a slow first launch, #2059) is covered by the key hold below (#2099).
