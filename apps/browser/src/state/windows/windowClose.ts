@@ -93,8 +93,10 @@ export async function decideWindowClose(windowId: string, ask: CloseAsk = confir
 
 export async function decideLastTabClose(windowId: string, ask: CloseAsk = confirm): Promise<WindowCloseDecision> {
   if (!useBrowser.getState().windows[windowId]) return allow();
-  if (asksBeforeClosingLastTab(windowId)) return askToClose(windowId, ask, unpinnedOpenTabIds(windowId));
-  return (await askBeforeQuitting(windowId, ask)) === "cancelled" ? cancel() : allow();
+  if (!asksBeforeClosingLastTab(windowId)) return (await askBeforeQuitting(windowId, ask)) === "cancelled" ? cancel() : allow();
+  const tabs = await askToClose(windowId, ask, unpinnedOpenTabIds(windowId));
+  if (tabs.decision === "cancel") return tabs;
+  return (await askBeforeQuitting(windowId, ask, { warning: false })) === "cancelled" ? cancel(tabs.suppressWarning) : tabs;
 }
 
 export function asksBeforeClosingLastTab(windowId: string) {

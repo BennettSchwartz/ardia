@@ -120,12 +120,10 @@ async function check(asked: boolean) {
     }
     const path = await update.download(installer.url, installer.sha256, installer.bytes);
     console.info(`[ardia windows] update ${manifest.build} downloaded`);
-    const install = await ask({
-      title: "The update is ready to install",
-      message: installMessage(newer, downloadsInProgress),
-      confirmTitle: "Install and Restart",
-      cancelTitle: "Later",
-    });
+    const askToInstall = (running: number) => ask({ title: "The update is ready to install", message: installMessage(newer, running), confirmTitle: "Install and Restart", cancelTitle: "Later" });
+    const told = downloadsInProgress;
+    let install = await askToInstall(told);
+    if (install && downloadsInProgress > told) install = await askToInstall(downloadsInProgress);
     if (!install) {
       declinedBuild = manifest.build;
       return;

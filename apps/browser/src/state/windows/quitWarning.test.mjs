@@ -343,7 +343,14 @@ const S = () => useBrowser.getState();
 const settle = async () => { for (let turn = 0; turn < 12; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 const asked = [];
 let answers = [];
-shellNativeModules.ArdiaDialogs.confirm = (options) => { asked.push(options.message); return Promise.resolve({ confirmed: answers.shift() ?? false, suppressed: false }); };
+let whileAsking = null;
+shellNativeModules.ArdiaDialogs.confirm = (options) => {
+  asked.push(options.message);
+  const meanwhile = whileAsking;
+  whileAsking = null;
+  meanwhile?.();
+  return Promise.resolve({ confirmed: answers.shift() ?? false, suppressed: false });
+};
 const download = (id, extra = {}) => ({ id, url: "https://dl.example/" + id, filename: id, path: "/tmp/" + id, state: "downloading", paused: false, received: 0, total: 1, speed: 0, mimeType: "", profile: "", ...extra });
 const fresh = (settings, downloads) => {
   S().hydrate({ profiles: { default: { id: "default", name: "Personal", color: "plum", icon: null, createdAt: 0 } }, profileOrder: ["default"] });
@@ -408,6 +415,27 @@ fresh({}, [download("one")]);
 w = lone({ kind: "small" });
 seen.littleArdiaCancelled = await closing(w, closeLittleArdia, [false]);
 seen.littleArdiaQuit = await closing(w, closeLittleArdia, [true]);
+
+const lastTab = (id) => void closeTab(S().windows[id].tabIds[0]);
+fresh({ warnBeforeClosingLastTab: true }, [download("one")]);
+w = lone();
+seen.tabsConfirmCancelled = await closing(w, lastTab, [false]);
+seen.tabsConfirmThenDownloadsCancelled = await closing(w, lastTab, [true, false]);
+seen.tabsConfirmThenQuit = await closing(w, lastTab, [true, true]);
+
+fresh({ warnBeforeClosingLastTab: true, warnBeforeQuitting: true }, [download("one")]);
+w = lone();
+seen.tabsConfirmStandsInForTheWarning = await closing(w, lastTab, [true, true]);
+
+fresh({ warnBeforeClosingLastTab: true, warnBeforeQuitting: true }, []);
+w = lone();
+seen.tabsConfirmWithNothingRunning = await closing(w, lastTab, [true]);
+
+fresh({ warnBeforeQuitting: true }, [download("one")]);
+w = lone();
+let opened;
+whileAsking = () => { opened = lone(); };
+seen.windowOpenedDuringTheWarning = { ...(await closing(w, byButton, [true])), openedStays: !!S().windows[opened] };
 console.log(JSON.stringify(seen));
 `;
 
@@ -435,4 +463,11 @@ test("on Windows, a close that quits with a download running asks first, whateve
   assert.deepEqual(seen.lastTabQuit, { asked: [one, one], open: false });
   assert.deepEqual(seen.littleArdiaCancelled, { asked: [one], open: true }, "and so does a lone Little Ardia");
   assert.deepEqual(seen.littleArdiaQuit.asked, [one, one]);
+  const tabs = "This window has 1 tab open in your Personal profile.";
+  assert.deepEqual(seen.tabsConfirmCancelled, { asked: [tabs], open: true }, "with the last-tab confirm on (the default), its Cancel ends it there");
+  assert.deepEqual(seen.tabsConfirmThenDownloadsCancelled, { asked: [tabs, tabs, one], open: true }, "agreeing to close the tab still asks about the download, and Cancel keeps the window");
+  assert.deepEqual(seen.tabsConfirmThenQuit, { asked: [tabs, tabs, one, tabs, one], open: false });
+  assert.deepEqual(seen.tabsConfirmStandsInForTheWarning, { asked: [tabs, one], open: false }, "the last-tab confirm stands in for the warning, never for the downloads question");
+  assert.deepEqual(seen.tabsConfirmWithNothingRunning, { asked: [tabs], open: false }, "and with nothing running it is the only question, as before");
+  assert.deepEqual(seen.windowOpenedDuringTheWarning, { asked: [warning], open: false, openedStays: true }, "a window opened while the warning was up keeps Ardia running, so the downloads question isn't asked");
 });

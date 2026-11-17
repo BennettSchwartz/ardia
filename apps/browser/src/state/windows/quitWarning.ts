@@ -44,23 +44,28 @@ export function quitWarningMayAsk() {
 
 const asking = new Set<string>();
 
-export async function askBeforeQuitting(windowId: string, ask: typeof confirm = confirm): Promise<QuitWarning> {
+async function closeStillQuits(windowId: string) {
+  const openWindowIds = await windowIds().catch(() => [] as string[]);
+  const staysOpen = windowsStayingOpen(openWindowIds, windowId, new Set(Object.keys(useBrowser.getState().windows)), isWindowClosing);
+  return closeQuits({ quitsWithLastWindow: true, background: false, staysOpen });
+}
+
+export async function askBeforeQuitting(windowId: string, ask: typeof confirm = confirm, { warning = true }: { warning?: boolean } = {}): Promise<QuitWarning> {
   if (!quitWarningMayAsk()) return "notAsked";
   if (asking.has(windowId)) return "cancelled";
   asking.add(windowId);
   try {
     const wasBrowserWindow = windowId in useBrowser.getState().windows;
-    const openWindowIds = await windowIds().catch(() => [] as string[]);
-    const s = useBrowser.getState();
-    if (wasBrowserWindow && !s.windows[windowId]) return "notAsked";
-    const staysOpen = windowsStayingOpen(openWindowIds, windowId, new Set(Object.keys(s.windows)), isWindowClosing);
-    if (!closeQuits({ quitsWithLastWindow: true, background: false, staysOpen })) return "notAsked";
+    const quits = await closeStillQuits(windowId);
+    if (wasBrowserWindow && !useBrowser.getState().windows[windowId]) return "notAsked";
+    if (!quits) return "notAsked";
     let answer: QuitWarning = "notAsked";
-    if (s.settings.warnBeforeQuitting) {
+    if (warning && useBrowser.getState().settings.warnBeforeQuitting) {
       const { confirmed, suppressed } = await ask({ ...QUIT_WARNING, windowId });
       if (suppressed) useBrowser.getState().updateSettings({ warnBeforeQuitting: false });
       if (!confirmed) return "cancelled";
       answer = "confirmed";
+      if (!(await closeStillQuits(windowId))) return answer;
     }
     const running = downloadsInProgress(useBrowser.getState().downloads);
     if (running > 0) {

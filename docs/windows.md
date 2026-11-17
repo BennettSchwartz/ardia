@@ -267,7 +267,8 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     A close that quits while a download is running asks as well, whatever the setting, with the Mac's words
     ("You have 1 download in progress. If you quit now, this download will be cancelled."), after the warning when
     both apply; Cancel keeps the window, so the download goes on. Paused downloads count, finished ones don't, and
-    another open window means no question, because nothing quits (#2488; `quit_warnings_with_downloads` and its
+    another open window means no question, because nothing quits; the last-tab confirm stands in for the warning but
+    never for this question (#2488; `quit_warnings_with_downloads` and its
     `_cancelled` count them). It is asked in the UI before the window closes: once the app has decided to quit, the
     engine closes without a second question. The update's "ready to install" question adds a sentence when a
     download is running, since installing closes Ardia. A quit that never passes through the UI (Windows ending the
