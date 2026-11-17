@@ -49,6 +49,7 @@ export type SwipeAreaProps = ViewProps & {
   tracksUnavailableDirections?: boolean;
   allowsVerticalMotion?: boolean;
   isPager?: boolean;
+  wheelPages?: boolean;
   onSwipe: (event: SwipeEvent) => void;
   nativePager?: NativePagerConfig;
   onPagerPosition?: (event: { nativeEvent: { position: number } }) => void;
@@ -92,7 +93,7 @@ export const selectPager = (key: string, profileId: string, order: readonly stri
   Module.selectPager(key, profileId, order);
 export const pagerState = (key: string): PagerSnapshot | null => Module.pagerState(key);
 
-export const SwipeArea = forwardRef<SwipeAreaHandle, SwipeAreaProps>(function SwipeArea({ onSwipe, onPagerState, ...props }, ref) {
+export const SwipeArea = forwardRef<SwipeAreaHandle, SwipeAreaProps>(function SwipeArea({ onSwipe, onPagerState, wheelPages: _wheelPages, ...props }, ref) {
   const handle = useRef<NativeHandle>(null);
   useImperativeHandle(ref, () => ({
     async devSimulate(steps, options = {}) {

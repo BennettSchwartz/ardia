@@ -6,7 +6,7 @@ import { WindowIdContext } from "../engine/windowId";
 import { noteFirstWindow, noteMissing } from "../missing";
 import { requireNativeModule } from "../modules";
 import { pagers } from "./index";
-import { wheelPages, wheelSwipe } from "./wheel";
+import { wheelSwipe } from "./wheel";
 import type { PagerArea, PagerConfig, PagerStateEvent } from "./pager";
 
 type KeyedConfig = PagerConfig & Pick<NativePagerConfig, "key">;
@@ -39,6 +39,7 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
     tracksUnavailableDirections: _tracksUnavailableDirections,
     allowsVerticalMotion: _allowsVerticalMotion,
     isPager,
+    wheelPages,
     onSwipe,
     nativePager,
     onPagerPosition,
@@ -71,7 +72,7 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
   );
   const config = readConfig(nativePager);
   const key = config?.key;
-  const paging = !!isPager && !!windowId;
+  const paging = !!isPager && !!wheelPages && !!windowId;
 
   useEffect(() => {
     noteFirstWindow();
@@ -97,7 +98,7 @@ export const SwipeArea = forwardRef<View, NativeSwipeAreaProps>(function SwipeAr
       const [x, y] = event.point;
       const delta = event.delta;
       view.current?.measureInWindow((left, top, width, height) => {
-        if (!wheelPages(width, height) || x < left || y < top || x >= left + width || y >= top + height) return;
+        if (width <= 0 || height <= 0 || x < left || y < top || x >= left + width || y >= top + height) return;
         const { onSwipe: swipe, canSwipeBack: back, canSwipeForward: forward } = handlers.current;
         swipe?.({ nativeEvent: wheelSwipe(delta, back, forward, width) });
       });
