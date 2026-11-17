@@ -17,7 +17,8 @@ import { checks as engineAutoplayChecks } from "./engineAutoplay";
 import { checks as engineAutoplayAskChecks } from "./engineAutoplayAsks";
 import { checks as engineNowPlayingChecks } from "./engineNowPlaying";
 import { checks as engineNowPlayingAskChecks } from "./engineNowPlayingAsks";
-import { checks as engineNowPlayingHeldChecks } from "./engineNowPlayingHeld";
+import { checks as engineNowPlayingMutedChecks } from "./engineNowPlayingMuted";
+import { checks as engineNowPlayingArtworkChecks } from "./engineNowPlayingArtwork";
 import { checks as engineBlankChecks } from "./engineBlank";
 import { checks as engineHistoryChecks } from "./engineHistory";
 import { checks as engineSettingsChecks } from "./engineSettingsPages";
@@ -48,7 +49,7 @@ import { checks as viewChecks } from "./views";
 import { checks as windowDragChecks } from "./windowDrag";
 import { checks as windowChecks } from "./windows";
 
-const areas: Check[][] = [windowChecks, appSystemChecks, shellChecks, storageChecks, viewChecks, menuChecks, symbolChecks, motionChecks, pagerChecks, pagePictureChecks, materialChecks, windowDragChecks, popupWindowChecks, fileDropChecks, focusChecks, idleTimeChecks, textFocusChecks, launchLinkChecks, engineHostChecks, engineBackForwardChecks, engineTopEdgeChecks, engineSleepChecks, engineLinkScriptChecks, engineLinkScriptPageChecks, engineSleepKeptChecks, engineSleepNavigationChecks, engineSleepPlaceChecks, engineAutoplayChecks, engineAutoplayAskChecks, engineNowPlayingChecks, engineNowPlayingAskChecks, engineNowPlayingHeldChecks, engineBlankChecks, engineHistoryChecks, engineCallChecks, importChecks, importFirefoxChecks, introMusicChecks, desktopCallChecks, externalAppChecks, syncChecks, heldDialogChecks, meadowChecks, passwordLoginChecks, engineSettingsChecks];
+const areas: Check[][] = [windowChecks, appSystemChecks, shellChecks, storageChecks, viewChecks, menuChecks, symbolChecks, motionChecks, pagerChecks, pagePictureChecks, materialChecks, windowDragChecks, popupWindowChecks, fileDropChecks, focusChecks, idleTimeChecks, textFocusChecks, launchLinkChecks, engineHostChecks, engineBackForwardChecks, engineTopEdgeChecks, engineSleepChecks, engineLinkScriptChecks, engineLinkScriptPageChecks, engineSleepKeptChecks, engineSleepNavigationChecks, engineSleepPlaceChecks, engineAutoplayChecks, engineAutoplayAskChecks, engineNowPlayingChecks, engineNowPlayingAskChecks, engineNowPlayingMutedChecks, engineNowPlayingArtworkChecks, engineBlankChecks, engineHistoryChecks, engineCallChecks, importChecks, importFirefoxChecks, introMusicChecks, desktopCallChecks, externalAppChecks, syncChecks, heldDialogChecks, meadowChecks, passwordLoginChecks, engineSettingsChecks];
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
