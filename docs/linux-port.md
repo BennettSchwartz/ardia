@@ -661,7 +661,10 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   report no border, input or shadow insets and no corner radius, and paint no frame, so the client area is the whole
   window. The host calls `RefreshEngineFrame` once the window is its own, because Chromium laid the frame out before
   that. Edge resizing stays: in a window that can be resized, a thin band along the edges answers as a resize border
-  (`NonClientHitTest`); Import, which can't be resized, keeps its edges for its content. Whatever
+  (`NonClientHitTest`); Import, which can't be resized, keeps its edges for its content. On X11 Chrome maps its startup window
+  before the host starts and sets `_GTK_FRAME_EXTENTS` from the frame insets it had then; the host's `FrameTypeChanged`
+  now has X11 rewrite the property (`X11Extension::RefreshDecorationInsets`), so it is gone once the window is the
+  host's. Whatever
   corners, shadow or outline the compositor draws are its own. `windowCornerRadius` still answers a fixed 19 on Linux
   (`apps/linux/src/shellMethods.ts`); it was not changed with the frame.
 - **Menu button.** Linux has no global menu bar, so a hamburger in the header stands in for the Mac one. It lists

@@ -6,6 +6,10 @@ g_ardia_linux_borderless_frame; for those windows the frame view and its layout 
 insets and no corner radius, and paint no frame, so the client area is the whole window. A thin band along the edges
 still answers as a resize border so a window can be resized where the compositor draws none. Settings and Import
 (g_ardia_linux_frameless_app) count as hosted too. The hook is null outside the Linux host.
+Chrome maps its startup window before the host starts, so X11 sets _GTK_FRAME_EXTENTS from the frame insets it had
+then and rewrites it only on a window state change. When the host lays the frame out again (FrameTypeChanged), the
+browser's window tree host now asks X11 for the insets once more through X11Extension::RefreshDecorationInsets, so
+a window manager that honours the property sees none. Wayland has no X11 extension and is unchanged.
 --- a/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.cc
 +++ b/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.cc
 @@ -10,6 +10,10 @@
@@ -183,3 +187,51 @@ still answers as a resize border so a window can be resized where the compositor
  namespace {
  
  bool ArdiaLinuxBackgroundInstance() {
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
+@@ -118,6 +118,9 @@
+ void BrowserDesktopWindowTreeHostLinux::FrameTypeChanged() {
+   DesktopWindowTreeHostPlatform::FrameTypeChanged();
+   UpdateFrameHints();
++  if (auto* x11_extension = GetX11Extension()) {
++    x11_extension->RefreshDecorationInsets();
++  }
+ }
+ 
+ void BrowserDesktopWindowTreeHostLinux::TabDraggingKindChanged(
+--- a/ui/ozone/platform/x11/x11_window.cc
++++ b/ui/ozone/platform/x11/x11_window.cc
+@@ -1340,6 +1340,12 @@
+ 
+ bool X11Window::IsWmSyncActiveForTest() {
+   return bounds_wm_sync_.get();
++}
++
++void X11Window::RefreshDecorationInsets() {
++  if (CanSetDecorationInsets()) {
++    UpdateDecorationInsets();
++  }
+ }
+ 
+ bool X11Window::HandleAsAtkEvent(const x11::Event& event) {
+--- a/ui/ozone/platform/x11/x11_window.h
++++ b/ui/ozone/platform/x11/x11_window.h
+@@ -155,6 +155,7 @@
+   bool CanResetOverrideRedirect() const override;
+   void SetX11ExtensionDelegate(X11ExtensionDelegate* delegate) override;
+   bool IsWmSyncActiveForTest() override;
++  void RefreshDecorationInsets() override;
+ 
+   // x11::EventObserver:
+   void OnEvent(const x11::Event& event) override;
+--- a/ui/platform_window/extensions/x11_extension.h
++++ b/ui/platform_window/extensions/x11_extension.h
+@@ -49,6 +49,8 @@
+   // Indicates whether a WmSync is pending. Should only be used for testing.
+   virtual bool IsWmSyncActiveForTest() = 0;
+ 
++  virtual void RefreshDecorationInsets() {}
++
+  protected:
+   virtual ~X11Extension();
+ 

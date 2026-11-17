@@ -141,6 +141,53 @@ void BrowserFrameViewLinuxNative::PaintRestoredFrameBorder(
 '''),
 ]
 
+HOST_LINUX_CC = [
+    (118, r'''void BrowserDesktopWindowTreeHostLinux::FrameTypeChanged() {
+  DesktopWindowTreeHostPlatform::FrameTypeChanged();
+  UpdateFrameHints();
+}
+
+void BrowserDesktopWindowTreeHostLinux::TabDraggingKindChanged(
+'''),
+]
+
+X11_WINDOW_CC = [
+    (1340, r'''
+bool X11Window::IsWmSyncActiveForTest() {
+  return bounds_wm_sync_.get();
+}
+
+bool X11Window::HandleAsAtkEvent(const x11::Event& event) {
+'''),
+]
+
+X11_WINDOW_H = [
+    (155, r'''  bool CanResetOverrideRedirect() const override;
+  void SetX11ExtensionDelegate(X11ExtensionDelegate* delegate) override;
+  bool IsWmSyncActiveForTest() override;
+
+  // x11::EventObserver:
+  void OnEvent(const x11::Event& event) override;
+'''),
+]
+
+X11_EXTENSION_H = [
+    (49, r'''  // Indicates whether a WmSync is pending. Should only be used for testing.
+  virtual bool IsWmSyncActiveForTest() = 0;
+
+ protected:
+  virtual ~X11Extension();
+
+'''),
+]
+
+X11_FILES = {
+    'chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc': HOST_LINUX_CC,
+    'ui/ozone/platform/x11/x11_window.cc': X11_WINDOW_CC,
+    'ui/ozone/platform/x11/x11_window.h': X11_WINDOW_H,
+    'ui/platform_window/extensions/x11_extension.h': X11_EXTENSION_H,
+}
+
 FRAME_FILES = {
     'browser_frame_view_layout_linux.cc': LAYOUT_CC,
     'browser_frame_view_layout_linux.h': LAYOUT_H,
@@ -176,6 +223,9 @@ class BorderlessFrameTests(unittest.TestCase):
             view.write_text('\n' * 431 + GLOBALS_157 + '\n' * 3580 + TITLE_157)
             for name, fragments in FRAME_FILES.items():
                 (root / FRAME / name).write_text(at_real_lines(fragments))
+            for path, fragments in X11_FILES.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(at_real_lines(fragments))
             for patch, only in ((FRAMELESS, BROWSER_VIEW), (PATCH, None)):
                 command = ['git', 'apply', '--whitespace=nowarn']
                 if only:
@@ -183,7 +233,9 @@ class BorderlessFrameTests(unittest.TestCase):
                 result = subprocess.run(command + [str(patch)], cwd=directory, capture_output=True, text=True,
                                         timeout=30)
                 self.assertEqual(result.returncode, 0, f'{patch.name}: {result.stderr}')
-            return {name: (root / FRAME / name).read_text() for name in [*FRAME_FILES, 'browser_view.cc']}
+            files = {name: (root / FRAME / name).read_text() for name in [*FRAME_FILES, 'browser_view.cc']}
+            files.update({path: (root / path).read_text() for path in X11_FILES})
+            return files
 
     def test_the_patch_is_linux_only_and_after_the_frameless_patch(self):
         steps = [line.split() for line in (PATCHES / 'series').read_text().splitlines() if line.startswith('chromium ')]
@@ -252,6 +304,23 @@ class BorderlessFrameTests(unittest.TestCase):
         self.contains('kResizeAreaCornerSize, kResizeAreaCornerSize, true);', hit)
         self.contains('if (edge != HTNOWHERE) {\n        return edge;\n      }', hit)
         self.assertLess(hit.index('GetHTComponentForFrame('), hit.index('OpaqueBrowserFrameView::NonClientHitTest(point)'))
+
+    def test_x11_rewrites_the_frame_extents_when_the_host_lays_the_frame_out_again(self):
+        files = self.patched()
+        extension = files['ui/platform_window/extensions/x11_extension.h']
+        self.contains('  virtual void RefreshDecorationInsets() {}\n', extension)
+        self.assertLess(extension.index('virtual void RefreshDecorationInsets() {}'), extension.index(' protected:'))
+        self.contains('  void RefreshDecorationInsets() override;\n', files['ui/ozone/platform/x11/x11_window.h'])
+        self.contains('void X11Window::RefreshDecorationInsets() {\n'
+                      '  if (CanSetDecorationInsets()) {\n    UpdateDecorationInsets();\n  }\n}\n',
+                      files['ui/ozone/platform/x11/x11_window.cc'])
+        self.contains('void BrowserDesktopWindowTreeHostLinux::FrameTypeChanged() {\n'
+                      '  DesktopWindowTreeHostPlatform::FrameTypeChanged();\n  UpdateFrameHints();\n'
+                      '  if (auto* x11_extension = GetX11Extension()) {\n'
+                      '    x11_extension->RefreshDecorationInsets();\n  }\n}\n',
+                      files['chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc'])
+        refresh = self.host[self.host.index('void ShellHostView::RefreshEngineFrame() {'):]
+        self.contains('GetWidget()->FrameTypeChanged();', refresh[:refresh.index('\n}\n')])
 
     def test_the_host_names_every_window_it_owns(self):
         self.contains('extern bool (*g_ardia_linux_borderless_frame)(const BrowserWindowInterface*);', self.host)
