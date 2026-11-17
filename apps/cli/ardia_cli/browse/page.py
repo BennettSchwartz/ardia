@@ -31,7 +31,7 @@ HIDDEN_TAB = (
     "use: ardia browse tab {tab} --show (or open <url> --show)"
 )
 LIVE_WAIT = 0.5
-DETACHED = "Ardia detached this tab from the ardia command while it was in use (the tab closed, crashed, went to sleep or moved to a window Ardia keeps for itself). Run the command again"
+DETACHED = "Ardia detached this tab{page} from the ardia command while it was in use (the tab closed, crashed, went to sleep or moved to a window Ardia keeps for itself). Run the command again"
 CRASHED = "This tab's page crashed. `ardia browse reload` brings it back; `ardia browse close` or `tab close` closes it"
 CRASH_PROBE = 5.0
 BUSY_PROBE = 3.0
@@ -49,6 +49,11 @@ SETUP_NAMES = {
 ROUTE_PATTERNS = [{"urlPattern": "*", "requestStage": "Request"}]
 OTHER_WORLD = "same JavaScript world"
 STALE_CONTEXT = ("Cannot find context", "Execution context was destroyed", "Cannot find default execution context", "Inspected target navigated")
+
+
+def detached(url: str | None = None) -> BrowseError:
+    named = f" ({url})" if url and not url.startswith("about:") else ""
+    return BrowseError(DETACHED.format(page=named), code="tab_detached")
 
 
 @dataclass
@@ -343,7 +348,7 @@ class Page:
         from ardia_cli.browse.connection import is_mutation
 
         if self.session_id is None:
-            raise BrowseError(DETACHED, code="tab_detached")
+            raise detached(self.url)
         if self.crashed and method not in CRASH_SAFE:
             raise BrowseError(CRASHED, code="tab_crashed")
         if self.unanswered_at and time.monotonic() - self.unanswered_at < BUSY_MEMORY:
@@ -359,7 +364,7 @@ class Page:
                 raise OutcomeUnknown(f"`{method}`", f"Ardia detached the tab before it answered {method}") from None
             if self.crashed:
                 raise BrowseError(CRASHED, code="tab_crashed") from None
-            raise BrowseError(DETACHED, code="tab_detached") from None
+            raise detached(self.url) from None
         except CdpTimeout:
             self.unanswered_at = time.monotonic()
             if input_event or mutation or is_mutation(method):

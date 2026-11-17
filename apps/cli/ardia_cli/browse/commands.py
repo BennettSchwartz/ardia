@@ -210,9 +210,30 @@ def https_only_block(url: str, error_text: str) -> bool:
     return blocked
 
 
+async def start_navigation(page, url: str, timeout: float) -> dict:
+    # The session is made live right before the call, so a session the engine ended earlier never reaches Page.navigate as a bare
+    # tab_detached. The call itself is sent once: when the engine's detach drops it in flight its outcome is unknown, and the frame tree
+    # of the attached-again tab says whether the navigation took (a new loader) before the caller waits for it.
+    state = page.state
+    page = await state.reattach(page)
+    seen = page.loader(page.main_frame)
+    try:
+        return await page.send("Page.navigate", {"url": url}, timeout=timeout)
+    except OutcomeUnknown:
+        if page.session_id is not None:
+            raise
+        await state.reattach(page)
+        await page.refresh_frames()
+        loader = page.loader(page.main_frame)
+        if not loader or loader == seen:
+            raise
+        return {"loaderId": loader}
+
+
 async def navigate(ctx: Ctx, page, url: str, until: str = "load"):
     from ardia_cli.browse import readpages
 
+    page = await page.state.reattach(page)
     if page.crashed:
         try:
             result = await page.send("Page.navigate", {"url": url}, timeout=ctx.timeout)
@@ -226,7 +247,7 @@ async def navigate(ctx: Ctx, page, url: str, until: str = "load"):
         return
     before = await readpages.before_navigating(page, url)
     try:
-        result = await page.send("Page.navigate", {"url": url}, timeout=ctx.timeout)
+        result = await start_navigation(page, url, ctx.timeout)
     except Gated:
         raise BrowseError(f"Ardia's policy only lets the ardia command open web pages (http, https, data, about:blank); {url} isn't one", code="policy_refused") from None
     except OutcomeUnknown as error:

@@ -249,10 +249,14 @@ mouse position, so a humanized path starts where the last one ended. `ardia brow
   without a session (`code: "tab_detached"`), `Page.detach` fails the calls still waiting for an answer at once (a
   mutating one as an unknown outcome) instead of leaving them to their timeout (a `Page.navigate` waited its 30 s). A
   multi-page `read` reads that page again in a new tab, once (`READER_TRIES`; telemetry `read_tabs_reopened`); a second
-  detach fails that page only. When the tab is still open, `open`, the load wait and an action's change report attach
-  to it again (`State.reattach`) and put back what the session set on it: init scripts, the `set` overrides (viewport,
-  device, geolocation, media, offline, headers) and request interception for routes and credentials. What can't be put
-  back is dropped from the session's bookkeeping and the command fails with `code: "setup_lost"`, naming it. The CLI
+  detach fails that page only. When the tab is still open, `open`, a multi-page `read`'s page load, the load wait and an
+  action's change report attach to it again (`State.reattach`) and put back what the session set on it: init scripts,
+  the `set` overrides (viewport, device, geolocation, media, offline, headers) and request interception for routes and
+  credentials. `open` and `read` make the session live before they send `Page.navigate`, and the call is sent once: a
+  detach that drops it in flight is an unknown outcome unless the tab's new loader shows the navigation took, in which
+  case the load wait goes on from there. A new session the engine ends while it is being set up is attached again, up
+  to `REATTACH_TRIES` times. A tab that is gone fails with `code: "tab_detached"` and the page's URL in the message.
+  What can't be put back is dropped from the session's bookkeeping and the command fails with `code: "setup_lost"`, naming it. The CLI
   never detaches a tab itself: a `Network.disable` the page doesn't confirm in 2 s (Chromium waits on the page's main
   thread and on a pending navigation) leaves the session as it is, and a change report counts only requests that began
   after its own `Network.enable` returned, so a late event from an earlier capture isn't reported as this action's
