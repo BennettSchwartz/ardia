@@ -1817,7 +1817,9 @@ function Get-StripShift($Before, $After) {
 }
 
 function Send-Wheel([int]$Notches) {
-  [ArdiaTour]::mouse_event([uint32]0x0800, 0, 0, [uint32](([int64](120 * $Notches)) -band 0xFFFFFFFF), [UIntPtr]::Zero)
+  $delta = [int64](120 * $Notches)
+  if ($delta -lt 0) { $delta += 4294967296 }
+  [ArdiaTour]::mouse_event([uint32]0x0800, 0, 0, [uint32]$delta, [UIntPtr]::Zero)
 }
 
 function Invoke-SidebarWheelTour {
