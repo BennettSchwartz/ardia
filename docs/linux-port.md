@@ -82,7 +82,8 @@ The acceptance suite is in [linux-acceptance.md](linux-acceptance.md) and CI in 
   `setBlockAutoplayEverywhere`.
 - **Block autoplay on every site.** As on macOS, a page's autoplay is blocked when its site's autoplay setting is Block,
   or when `webView.setBlockAutoplayEverywhere` is on and the site has no exception of its own (`ac_linux_autoplay.cc`).
-  Turning it on or off re-sends the config to open pages and updates Chromium's own autoplay policy for them.
+  It covers web pages and local files (`http`, `https` and `file`); the shell and extension pages keep Chromium's
+  own policy. Turning it on or off re-sends the config to open pages and updates Chromium's own autoplay policy for them.
 - **Theme swatches.** `ThemeSwatch` (the Mac's `ThemeSwatchView`: the anonymous-ID avatar, the theme editor's
   swatches, preview and colour pad) is drawn by the shell (`shims/shaders.tsx`, `shims/web/gl/themeSwatch.ts`): the
   same 17 Oklab samples and start and end points as `ArcGradientLayer`, the third colour's overlay, the hue pad, and
@@ -536,6 +537,14 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
 - **Content blocker.** `fetch-ubo.sh` prepares the same pinned, patched uBlock Origin build macOS embeds, by running
   `packages/ardiacore/scripts/ubo.sh` with `flock` and `sha256sum` standing in for `lockf` and `shasum`. Without
   `--content-blocker` the package has no blocker, and Settings says so.
+- **Seeded blocker.** With a blocker, package.py runs `scripts/linux/ubo-seed.mjs` on its staged copy (skip it with
+  `--no-ubo-seed`). The script starts the staged `chrome` once on a scratch profile in English, waits for uBlock
+  Origin to fetch and compile its default lists and save its engine, and writes that storage to
+  `extensions/ublock/ardia-seed/storage.json`, without the raw and compiled list copies uBlock Origin can rebuild. It
+  also patches the staged `js/start.js` to load the seed first thing into a profile whose uBlock Origin storage is
+  empty, when the seed's uBlock Origin version is the running one and the profile's languages select no regional list
+  the seed lacks (otherwise uBlock Origin compiles its own lists, as before). A seeded profile skips uBlock Origin's
+  first-install restart and list compile and loads the saved engine. Packaging takes about a minute longer.
 - **Modes.** package.py sets every directory and executable to 0755 and every other file to 0644 before archiving,
   so a package built under a umask of 002, Ubuntu's default, matches one built under 022.
 - **Archive contents.**
@@ -650,14 +659,41 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
 
 ### Windows, focus and input
 
-- **Window controls.** Ardia draws close, minimize and maximize in its own header, so they work on decorationless
-  desktops such as Hyprland. Chrome's own caption buttons are hidden: opacity 0, no input, ignored by accessibility.
+- **Window controls.** Linux uses the Windows build's caption buttons on the right: `…`, minimize, maximize (restore
+  while maximized) and close, drawn by the shared `WindowControls.tsx` in the places Windows puts them (the toolbar
+  row, the end of the top strip, a right sidebar's header, atop a left sidebar with the address bar in it, Little
+  Ardia's bar, Settings and Import). There are no traffic lights. They work on decorationless desktops such as
+  Hyprland; Chrome's own caption buttons are hidden: opacity 0, no input, ignored by accessibility.
+  - `lib/platformChrome.linux.ts` takes the Windows `WINDOW_CHROME`. `platform/windowControls.ts` is swapped for
+    `hostWindowControls.ts`: minimize and maximize call `ArdiaShell.minimizeWindow` and `toggleMaximizeWindow`, and
+    caption regions are a no-op because the shell's own drag regions move the window. Close goes straight to the
+    shell's close coordinator (`captionControls.ts`, swapped in for `WindowControls.tsx`'s close), so a window with
+    tabs to lose asks once, not first in the shared path and again in the coordinator.
+  - `WindowControls.tsx` wraps the shared one: right-clicking the buttons opens the window menu (`linuxWindowMenu.ts`)
+    except in Settings and Import, and the buttons hide while a page is in full screen.
+  - The `…` opens the Linux app menu (Menu button below) under itself (`clusterAppMenu.ts`, swapped in for
+    `BrowserWindowControls.tsx`'s `showAppMenu`): a pointer press anchors it to the pressed `…`, a key to the focused
+    one, and an activation with neither (assistive technology) to the visible one. Pressing it, or Enter on it, while
+    a menu is open closes the menu. The buttons take keyboard focus like any button (`focusable` on the shared
+    `ControlButton`), and the `…` counts as a menu surface, so tabbing to it keeps the field Edit › Copy and Paste act
+    on. There are never two menu buttons: the `…` while the window buttons are drawn, the header's hamburger
+    otherwise (window or page full screen). Linux keeps the sidebar header the Windows rule would collapse whenever
+    the hamburger has no other home (`sidebarHeaderLayout.ts`). Some full-screen layouts still have none, as before
+    this change: top tabs with minimalism, or a sidebar whose profile part is hidden.
+  - Restore: the engine sends no `maximized` event, so each window reads `ArdiaShell.windowFrame` at start and once
+    per animation frame of resizing, and marks itself maximized when the frame fills the work area, feeding the shared
+    `useMaximizedWindows` through `captionRegions.ts`'s `noteMaximized` (`windowMaximized.ts`). Settings and Import
+    too. Known limits: a window that fills the work area without being maximized, such as a lone tiled window on a
+    tiling window manager (X11 or Wayland), shows restore. On Wayland `windowFrame` is null and the work area is the
+    whole output, so the shell compares its outer size with that, and with a panel, a bar or gaps a maximized window
+    keeps the maximize glyph. Clicking still toggles correctly; the glyph needs the engine to report maximized state.
 - **Header drag and double-click.** Dragging the header moves the window (`DispatchHostWindowDragMovement`).
   Double-clicking it runs the desktop's titlebar action.
 - **Outer frame.** The host overlays Chromium's client view and doesn't replace its frame. Without the Wayland
   decoration protocol, Chromium draws its custom frame.
-- **Menu button.** Linux has no global menu bar, so a hamburger in the header stands in for the Mac one. It lists
-  Ardia, File, Edit, View, Tabs, Bookmarks, History, Extensions, Window and Help as submenus built from the same menu
+- **Menu button.** Linux has no global menu bar, so a menu button stands in for the Mac one: usually the `…` beside the
+  window buttons, and a hamburger in the header only while they're hidden (Window controls above). It lists Ardia,
+  File, Edit, View, Tabs, Bookmarks, History, Extensions, Window and Help as submenus built from the same menu
   state the Mac menu bar uses (checks, disabled commands, dynamic titles, bookmarks, recently closed entries, profiles
   and extensions), labelled with the effective Linux shortcuts (`apps/linux/src/appMenu.ts`). Items run through the
   shared command path; Close Window, Minimize and Maximize call the native window operations. App commands Linux runs
@@ -759,18 +795,17 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
     `sidebarEdge`. An engine with neither uses the shell-side watcher on both sides.
 - **Top-strip peek.** With Auto-hide tabs in the top-strip layout, the strip's hover zone and its peeked panel are a
   page overlay region (`TopStripPeekRegion.tsx`, swapped in for `App.tsx`'s import), so the host gives the shell the
-  pointer where they cover a page: 2 px of the panel with the default toolbar, 15 px with the compact one. The window
-  buttons are off screen while the strip is hidden, as on macOS; the peeked strip's menu button reaches Window ›
-  Minimize, Maximize and File › Close Window.
-- **Header.** The menu button always shows. The profile name beside it follows the Mac's rule
+  pointer where they cover a page: 2 px of the panel with the default toolbar, 15 px with the compact one. While the strip
+  is hidden the window buttons and the `…` sit at the end of the toolbar row, as on Windows.
+- **Header.** The menu button shows here whenever the window buttons are hidden (full screen); otherwise it is the
+  `…` beside them. The profile name beside it follows the Mac's rule
   (`ProfileIndicator.tsx`): only in an Incognito window or with two or more profiles, cut when at least 52 px of it
   fit, a person icon below that, and nothing when not even the icon fits (a 190 px sidebar with the Downloads button).
 - **Materials.** `VisualEffect`, `GlassEffect`, popover bubbles and the window's vibrancy take light or dark from the
   theme scope they render in (`useSurfaceDark`), not the app appearance, so an Incognito window is dark in a light
   app and a toast is light there.
-- **Window controls with the sidebar on the right.** They ride the sidebar, as on macOS: `setTrafficLightsCenter`'s
-  `trailing` flag measures the first button's center from the window's right edge, and the Linux buttons are placed
-  from that edge with CSS (`shims/web/windowChrome.tsx`), so a resize moves them with no round trip.
+- **Window controls with the sidebar on the right.** They sit in the right sidebar's header, at its outer edge, as on
+  Windows.
 - **Fullscreen restore.** A window saved fullscreen comes back fullscreen. On Wayland the saved output's name is kept
   in the profile pref `browser.app_window_placement.ArdiaLinuxWindowOutputs`. When exactly one display carries that
   name, the window goes fullscreen there.
@@ -961,14 +996,15 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   At most 512 lists and 10,000 directives of 2 KiB.
 - **Navigation hold.** Until an isolated profile's blocker is ready on its first load in a run,
   `chromium-linux-navigation-hold-hook.patch` holds its page navigations for at most 2 s. Internal schemes aren't held.
-  The app profile is never held, as on macOS: on a fresh profile uBlock Origin restarts itself once and compiles its
-  lists, about 12 s on a loaded Xvfb box, so the first pages of a new install load unfiltered rather than wait.
+  The app profile is never held, as on macOS. A new profile loads the packaged seed (see Seeded blocker), so its
+  first pages wait only for the saved engine to load; without a seed uBlock Origin restarts itself once and compiles
+  its lists, about 12 s on a loaded Xvfb box, and the first pages of a new install load unfiltered meanwhile.
 - **Saved engine.** `ubo.sh` makes uBlock Origin save its compiled engine (its selfie) 3 s after its lists change
   instead of 53 s. Without it, a launch that ended within about a minute of the first one left no selfie, and the next
   launch rebuilt the engine from the compiled lists (about 3.2 s here) while its page requests waited on uBlock's
-  blocking listener: first tab paint was about 3.8 s instead of 2.0 s on an existing profile. A new install still
-  pays uBlock's own restart and list compile once, about 11 s on the same box. The smoke test's `content-blocker` check fails a
-  package whose `js/background.js` lacks this delay or the 600 s update delay after launch.
+  blocking listener: first tab paint was about 3.8 s instead of 2.0 s on an existing profile. The smoke test's
+  `content-blocker` check fails a package whose `js/background.js` lacks this delay or the 600 s update delay after
+  launch, or whose blocker has no seed that `js/start.js` loads.
 
 ### Memory Saver
 

@@ -12,7 +12,6 @@ import type {
   DisplayMediaRequest,
   DownloadNavigation,
   DrmDiagnostic,
-  FairPlayReport,
   FindResult,
   FocusRestoreOutcome,
   LoadError,
@@ -73,7 +72,6 @@ type NativeEvents = {
   onScroll: { state: ScrollState };
   onProtectedMedia: ProtectedMediaRequest;
   onDrmDiagnostic: DrmDiagnostic;
-  onFairPlay: FairPlayReport;
   onAutoplayBlocked: { count?: number };
   onReady: object;
   onDiscarded: { url: string; reason?: DiscardReason | "" };
@@ -128,7 +126,6 @@ const PAGE_EVENTS = {
   onScroll: "scroll",
   onProtectedMedia: "protectedMedia",
   onDrmDiagnostic: "drmDiagnostic",
-  onFairPlay: "fairPlay",
   onAutoplayBlocked: "autoplayBlocked",
   onReady: "ready",
   onDiscarded: "discarded",
@@ -181,7 +178,6 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onScroll: (e) => [e.state],
   onProtectedMedia: (e) => [e],
   onDrmDiagnostic: (e) => [e],
-  onFairPlay: (e) => [e],
   onAutoplayBlocked: (e) => [Number.isInteger(e.count) ? Math.min(Math.max(e.count!, 1), 20) : 1],
   onReady: () => [],
   onDiscarded: (e) => [toAppUrl(e.url), e.reason || null],

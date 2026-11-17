@@ -52,6 +52,7 @@ export type OpenWindowRequest = {
   point?: { x: number; y: number };
   site?: boolean;
   fromClick?: boolean;
+  shiftClick?: boolean;
   linkWait?: "matched" | "skipped" | "timedOut";
   popup?: boolean;
 };
@@ -175,14 +176,6 @@ export type DrmDiagnostic = {
   blockedHosts: string[];
 };
 
-export type FairPlayReport = {
-  event: "played" | "failed" | "mirrored" | "mirrorResync" | "pip" | "pipReopen" | "choppy" | "nowPlayingCommand";
-  step?: "license" | "playback" | "player";
-  video?: boolean;
-  site?: "youtube";
-  fitted?: boolean;
-};
-
 export type WebViewProps = ViewProps & {
   engine?: PageEngine;
   url?: string;
@@ -239,7 +232,6 @@ export type WebViewProps = ViewProps & {
   onScroll?: (state: ScrollState) => void;
   onProtectedMedia?: (request: ProtectedMediaRequest) => void;
   onDrmDiagnostic?: (diagnostic: DrmDiagnostic) => void;
-  onFairPlay?: (report: FairPlayReport) => void;
   onAutoplayBlocked?: (count: number) => void;
   onReady?: () => void;
   onDiscarded?: (url: string, reason: DiscardReason | null) => void;

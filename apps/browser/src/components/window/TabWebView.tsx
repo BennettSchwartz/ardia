@@ -48,7 +48,6 @@ import { noteWebKitFocusRestore } from "../../state/telemetry/pageFocusReturns";
 import { trackDrmDiagnostic } from "../../state/telemetry/protectedMedia";
 import { noteAutoPictureInPictureKept, notePageOverlay, noteReopenedPage, noteSiteControls, noteWebKitPageKeptHidden } from "../../state/telemetry/usage";
 import { noteWebKitMediaFault } from "../../state/telemetry/webkitMediaFaults";
-import { noteFairPlay } from "../../state/telemetry/fairPlayCounts";
 import { isAdoptKind } from "../../state/tabs/adoptIds";
 import { firstPagePending, isBlankAddress, noteFirstPagePending, reportedAddress, reportedTitle } from "../../state/tabs/pendingAddress";
 import { STATUS_FLIP_BAND } from "./tokens";
@@ -285,7 +284,6 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onScroll={(state) => noteScroll(tabId, state)}
       onProtectedMedia={(request) => offerWebKit(tabId, request)}
       onDrmDiagnostic={trackDrmDiagnostic}
-      onFairPlay={noteFairPlay}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {
