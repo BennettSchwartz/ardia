@@ -540,7 +540,6 @@ const fakeModules = {
     setPeekOtherSiteTabs: () => null,
     setSelectionPopover: () => null,
     setBlockAutoplayEverywhere: () => null,
-    setFairPlayInChromium: () => null,
     setCommandScrollZoom: () => null,
     setLittleArdiaOpensNewTabLinks: () => null,
     setPopupsOpenAsTabs: () => null,
@@ -549,6 +548,7 @@ const fakeModules = {
     setVideoUpscalingTestConditions: () => null,
     videoUpscalingState: () => null,
     takeContentDrift: () => ({ layouts: 0, fits: 0, maxPoints: 0 }),
+    takeFirstPaintHolds: () => ({ held: 0, painted: 0, loaded: 0, pressed: 0, timedOut: 0, heldMs: 0 }),
   }),
   ArdiaWebKit: domain("webKit", {
     endPrivateSession: ({ session }) => (endedWebKitSessions.push(session), null),
