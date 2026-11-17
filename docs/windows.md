@@ -281,7 +281,11 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     and in dark. While it waits it is layered at alpha 1 of 255, invisible but still hit-tested, so a click there
     goes to it and never to the window behind; its taskbar button and Alt+Tab entry show at once. The launch log
     says `window <id> shown with its first frame <ms> ms after it opened`, or `shown without a first frame: none came
-    in <ms> ms` when the deadline shows it anyway. A background instance shows its windows at once, as before. The
+    in <ms> ms` when the deadline shows it anyway. The reveal comes when the frame is committed, which can be one
+    screen frame before it is drawn, so every app window erases to its theme's colour (rgb(32,32,32) in dark,
+    rgb(243,243,243) in light, `ThemedErase`, set with the theme and behind the backdrop's own black erase): that
+    frame, or a window the deadline shows empty, is the theme's colour and never white. A background instance shows
+    its windows at once, as before. The
     launch check captures the first window from process start, light and dark, for a fresh and a finished profile,
     over a solid window of its own that counts clicks, and compares each capture with the screen before the launch.
     It fails on any plain white capture before the UI's first frame, on anything covering more than 3% of the window
