@@ -2545,6 +2545,236 @@ function Invoke-FolderSwapTour {
   Invoke-FolderSwapStop $true
 }
 
+if (-not ([System.Management.Automation.PSTypeName]"ArdiaPaintWatch").Type) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class ArdiaPaintWatch {
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] struct Header { public uint Size; public int Width, Height; public ushort Planes, BitCount; public uint Compression, SizeImage; public int XPels, YPels; public uint Used, Important; }
+  delegate bool EnumProc(IntPtr window, IntPtr param);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr param);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
+  [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref Header header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dc, int x, int y, int width, int height, IntPtr source, int sx, int sy, uint op);
+  [DllImport("gdi32.dll")] static extern bool GdiFlush();
+
+  public class Shot { public double Ms; public string Why; public int Width, Height; public byte[] Pixels; }
+  public class Watch {
+    public double WindowMs = -1, PaintedMs = -1, LastWhiteShare = -1;
+    public int Samples, Checks, SkippedWindows;
+    public string PageClass = "";
+    public Rect Page;
+    public List<Shot> Shots = new List<Shot>();
+  }
+
+  static IntPtr FindPage(uint process, Rect app, HashSet<IntPtr> skip, out Rect found, out string className) {
+    IntPtr best = IntPtr.Zero; Rect bestRect = new Rect(); long bestArea = 0; string bestClass = "";
+    EnumWindows((window, param) => {
+      uint owner; GetWindowThreadProcessId(window, out owner);
+      if (owner != process || !IsWindowVisible(window) || skip.Contains(window)) return true;
+      StringBuilder name = new StringBuilder(128); GetClassName(window, name, 128);
+      if (!name.ToString().StartsWith("Chrome_")) return true;
+      Rect rect; if (!GetWindowRect(window, out rect)) return true;
+      int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
+      if (width < 200 || height < 150) return true;
+      if (rect.Left < app.Left - 2 || rect.Top < app.Top - 2 || rect.Right > app.Right + 2 || rect.Bottom > app.Bottom + 2) return true;
+      long area = (long)width * height;
+      if (area > bestArea) { bestArea = area; best = window; bestRect = rect; bestClass = name.ToString(); }
+      return true;
+    }, IntPtr.Zero);
+    found = bestRect; className = bestClass;
+    return best;
+  }
+
+  static byte[] Grab(int left, int top, int width, int height) {
+    IntPtr screen = GetDC(IntPtr.Zero);
+    IntPtr memory = CreateCompatibleDC(screen);
+    Header header = new Header();
+    header.Size = (uint)Marshal.SizeOf(typeof(Header));
+    header.Width = width; header.Height = -height; header.Planes = 1; header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    IntPtr previous = SelectObject(memory, section);
+    byte[] pixels = new byte[width * height * 4];
+    try {
+      BitBlt(memory, 0, 0, width, height, screen, left, top, 0x40CC0020);
+      GdiFlush();
+      Marshal.Copy(bits, pixels, 0, pixels.Length);
+    } finally {
+      SelectObject(memory, previous);
+      DeleteObject(section);
+      DeleteDC(memory);
+      ReleaseDC(IntPtr.Zero, screen);
+    }
+    return pixels;
+  }
+
+  public static Watch Run(uint process, IntPtr appWindow, byte key, int targetR, int targetG, int targetB, bool byColour, int timeoutMs) {
+    Watch watch = new Watch();
+    Rect app; GetWindowRect(appWindow, out app);
+    int appWidth = app.Right - app.Left, appHeight = app.Bottom - app.Top;
+    HashSet<IntPtr> before = new HashSet<IntPtr>();
+    while (true) {
+      Rect shown; string shownClass;
+      IntPtr old = FindPage(process, app, before, out shown, out shownClass);
+      if (old == IntPtr.Zero) break;
+      before.Add(old);
+    }
+    watch.SkippedWindows = before.Count;
+    keybd_event(key, 0, 0, UIntPtr.Zero);
+    keybd_event(key, 0, 2, UIntPtr.Zero);
+    Stopwatch clock = Stopwatch.StartNew();
+    double nextShot = 0;
+    while (clock.ElapsedMilliseconds < timeoutMs) {
+      Rect page; string className;
+      IntPtr found = FindPage(process, app, before, out page, out className);
+      double now = clock.Elapsed.TotalMilliseconds;
+      if (found == IntPtr.Zero) {
+        if (now >= nextShot && watch.Shots.Count < 8) { watch.Shots.Add(new Shot { Ms = now, Why = "no page window", Width = appWidth, Height = appHeight, Pixels = Grab(app.Left, app.Top, appWidth, appHeight) }); nextShot = now + 1500; }
+        Thread.Sleep(8);
+        continue;
+      }
+      if (watch.WindowMs < 0) { watch.WindowMs = now; watch.Page = page; watch.PageClass = className; watch.Shots.Add(new Shot { Ms = now, Why = "page window shown", Width = appWidth, Height = appHeight, Pixels = Grab(app.Left, app.Top, appWidth, appHeight) }); nextShot = now + 1500; }
+      int width = page.Right - page.Left, height = page.Bottom - page.Top;
+      byte[] pixels = Grab(page.Left, page.Top, width, height);
+      int samples = 0, hits = 0, white = 0;
+      for (int y = 4; y < height - 4; y += 6) {
+        for (int x = 4; x < width - 4; x += 6) {
+          int at = (y * width + x) * 4;
+          int b = pixels[at], g = pixels[at + 1], r = pixels[at + 2];
+          samples++;
+          if (r >= 245 && g >= 245 && b >= 245) white++;
+          if (byColour) { if (Math.Abs(r - targetR) + Math.Abs(g - targetG) + Math.Abs(b - targetB) <= 60) hits++; }
+          else if ((255 - r) + (255 - g) + (255 - b) > 150) hits++;
+        }
+      }
+      watch.Checks++;
+      watch.Samples = samples;
+      watch.LastWhiteShare = samples > 0 ? (double)white / samples : -1;
+      bool painted = byColour ? hits * 2 >= samples : hits >= 30;
+      if (painted) {
+        watch.PaintedMs = clock.Elapsed.TotalMilliseconds;
+        watch.Shots.Add(new Shot { Ms = watch.PaintedMs, Why = "painted", Width = appWidth, Height = appHeight, Pixels = Grab(app.Left, app.Top, appWidth, appHeight) });
+        break;
+      }
+      if (now >= nextShot && watch.Shots.Count < 8) { watch.Shots.Add(new Shot { Ms = now, Why = "page window not painted", Width = appWidth, Height = appHeight, Pixels = Grab(app.Left, app.Top, appWidth, appHeight) }); nextShot = now + 1500; }
+      Thread.Sleep(8);
+    }
+    return watch;
+  }
+}
+"@
+}
+
+function Save-PaintShot($Shot, [string]$Path) {
+  Add-Type -AssemblyName System.Drawing
+  $bitmap = [System.Drawing.Bitmap]::new($Shot.Width, $Shot.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+  try {
+    $locked = $bitmap.LockBits([System.Drawing.Rectangle]::new(0, 0, $Shot.Width, $Shot.Height), [System.Drawing.Imaging.ImageLockMode]::WriteOnly, $bitmap.PixelFormat)
+    [System.Runtime.InteropServices.Marshal]::Copy($Shot.Pixels, 0, $locked.Scan0, $Shot.Pixels.Length)
+    $bitmap.UnlockBits($locked)
+    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $bitmap.Dispose()
+  }
+}
+
+function Measure-PagePaint($Session, [IntPtr]$Window, $Stop, [string]$Label, [string]$Address, [bool]$Local, [switch]$NewTab) {
+  Focus-Window $Session $Window $Stop | Out-Null
+  if ($NewTab) {
+    Send-Chord @(0x11) 0x54
+    Start-Sleep -Milliseconds 700
+  }
+  Send-Address $Address
+  $mark = Get-LogCount $Session
+  $watch = [ArdiaPaintWatch]::Run([uint32]$Session.Process.Id, $Window, [byte]0x0D, 142, 68, 173, $Local, 20000)
+  $folder = Split-Path -Parent $Stop.Shot
+  $prefix = [IO.Path]::GetFileNameWithoutExtension($Stop.Shot)
+  $index = 0
+  foreach ($shot in @($watch.Shots)) {
+    Save-PaintShot $shot (Join-Path $folder ("{0}-{1}-{2}-{3:00000}ms.png" -f $prefix, $Label, $index, [int]$shot.Ms))
+    $index++
+  }
+  $watch.Shots.Clear()
+  $windowText = if ($watch.WindowMs -ge 0) { "+$([int]$watch.WindowMs) ms ($($watch.PageClass), $($watch.Page.Right - $watch.Page.Left)x$($watch.Page.Bottom - $watch.Page.Top))" } else { "never within 20 s" }
+  $paintText = if ($watch.PaintedMs -ge 0) { "+$([int]$watch.PaintedMs) ms" } else { "not within 20 s (white share at the last check $([Math]::Round($watch.LastWhiteShare, 2)))" }
+  $Stop.Facts.Add("${Label}: $Address, the page's window shown $windowText, painted $paintText, $($watch.Checks) checks, $($watch.SkippedWindows) page windows already showing left out")
+  return [pscustomobject]@{ Label = $Label; WindowMs = $watch.WindowMs; PaintedMs = $watch.PaintedMs; Mark = $mark }
+}
+
+function Invoke-PrivatePagesTour {
+  if (-not (Start-TourPages)) {
+    $script:Lines.Add("- The private-pages part found no loopback page server on port $($script:TourPagesPort).")
+    return
+  }
+  $local = "127.0.0.1:$($script:TourPagesPort)/painted"
+  $real = "duckduckgo.com"
+  $session = Start-Ardia "private-pages" -Onboarded -Settings @{ appearance = "light" }
+  Invoke-Stop $session "private-pages-normal" "Time to a page's first painted frame in a normal window: the local page and $real, first and again (report only, #2034 item 3)" {
+    param($stop)
+    $stop.Did = "In the launch's normal window, opened each page in a new tab (Ctrl+T, the address, Enter) and timed from Enter to the page's own window showing and to its first painted frame, read from the screen: the local page counts as painted when its purple covers half the page's window, $real when ink shows on it."
+    $stop.Expected = "report only: the times, to set against the private window's."
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    $runs = @(
+      (Measure-PagePaint $session $session.Main $stop "normal-local-first" $local $true -NewTab),
+      (Measure-PagePaint $session $session.Main $stop "normal-real-first" $real $false -NewTab),
+      (Measure-PagePaint $session $session.Main $stop "normal-local-again" $local $true -NewTab),
+      (Measure-PagePaint $session $session.Main $stop "normal-real-again" $real $false -NewTab)
+    )
+    $stop.Seen = if (@($runs | Where-Object { $_.PaintedMs -ge 0 }).Count -eq $runs.Count) { "yes" } else { "no" }
+  } | Out-Null
+  Invoke-Stop $session "private-pages-private" "Time to a page's first painted frame in a private window: the local page right after the window appears, $real a few seconds later, then both again (report only, #2034 item 3)" {
+    param($stop)
+    $stop.Did = "Pressed Ctrl+Shift+N; as soon as the private window showed, typed the local page into its first tab and pressed Enter; 3 s later opened $real in a new tab; then each again in new tabs. Timed each as in the normal window, and kept the launch log from Ctrl+Shift+N to the first private page's paint."
+    $stop.Expected = "report only: the times, against the normal window's; the first walk saw a private page stay white for 6 to 9 s."
+    Focus-Window $session $session.Main $stop | Out-Null
+    $before = @(Get-TopWindows $session)
+    $asked = Get-LogCount $session
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    Send-Chord @(0x11, 0x10) 0x4E
+    $ours = { @(Get-NewWindows $session $before | Where-Object { $_.ClassName -notmatch "^(#32768|Chrome_)" -and $_.Width -ge 300 -and $_.Height -ge 200 }) }
+    $opened = Wait-Until $session { (& $ours).Count -gt 0 } 10000
+    $stop.Facts.Add("the private window showed $([int]$clock.Elapsed.TotalMilliseconds) ms after Ctrl+Shift+N (the chord's own 550 ms included): $opened")
+    if (-not $opened) { $stop.Seen = "no"; return }
+    $private = (& $ours)[0].Handle
+    $barReady = Wait-Until $session { @(Get-LinesSince $session $asked "new tab bar focused").Count -gt 0 } 3000
+    $stop.Facts.Add("its new tab bar logged focus $([int]$clock.Elapsed.TotalMilliseconds) ms after Ctrl+Shift+N: $barReady")
+    $first = Measure-PagePaint $session $private $stop "private-local-first" $local $true
+    Start-Sleep -Milliseconds 3000
+    $runs = @(
+      $first,
+      (Measure-PagePaint $session $private $stop "private-real-first" $real $false -NewTab),
+      (Measure-PagePaint $session $private $stop "private-local-again" $local $true -NewTab),
+      (Measure-PagePaint $session $private $stop "private-real-again" $real $false -NewTab)
+    )
+    $slice = @(Read-LogLines $session.Log | Select-Object -Skip $asked | Select-Object -First ([Math]::Max(1, $runs[1].Mark - $asked)))
+    $slicePath = Join-Path (Split-Path -Parent $stop.Shot) "private-pages-from-ctrl-shift-n.log"
+    Set-Content -LiteralPath $slicePath -Value $slice -Encoding utf8NoBOM
+    $engine = @($slice | Where-Object { $_ -match "host call (profile|tab\.create|tab\.show|window)" } | ForEach-Object { ($_ -replace '^engine 0 host call ', '') -replace '\s+\S+$', '' } | Group-Object | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ", "
+    $stop.Facts.Add("the log from Ctrl+Shift+N to the second private navigation: $($slice.Count) lines (in private-pages-from-ctrl-shift-n.log); engine calls: $engine")
+    $stop.Seen = if (@($runs | Where-Object { $_.PaintedMs -ge 0 }).Count -eq $runs.Count) { "yes" } else { "no" }
+    [ArdiaTour]::PostMessageW($private, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 800
+  } | Out-Null
+  Stop-Ardia $session
+}
+
 function Invoke-PagesTour {
   $session = Start-Ardia "pages" -Onboarded
   Invoke-Stop $session "page-loads" "A page loads in a tab" {
@@ -2695,6 +2925,7 @@ $pages = @{
   "/taba" = "<!doctype html><meta charset=utf-8><title>tour tab a</title><style>html,body{margin:0;height:100%;background:#3366cc}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/typed'>peek this</a><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='a got '+keys}});</script>"
   "/flightdownload" = "<!doctype html><meta charset=utf-8><title>tour flight page</title><style>html,body{margin:0;height:100%;background:#3366cc}</style><script>setTimeout(()=>{location.href='/download'},3000)</script>"
   "/startdownload" = "<!doctype html><meta charset=utf-8><title>tour download page</title><style>html,body{margin:0;height:100%;background:#fff}</style><script>setTimeout(()=>{location.href='/download'},300)</script>"
+  "/painted" = "<!doctype html><meta charset=utf-8><title>tour painted</title><style>html,body{margin:0;height:100%;background:#8e44ad}</style>"
   "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
   "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
 }
@@ -3602,6 +3833,7 @@ if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
   $tours += @{ Name = "peek-dark"; Run = { Invoke-PeekTour "peek-dark" @{ appearance = "dark" } "dark" } }
   $tours += @{ Name = "peek-tabs"; Run = { Invoke-PeekTabsTour } }
   $tours += @{ Name = "quit-downloads"; Run = { Invoke-QuitDownloadsTour } }
+  $tours += @{ Name = "private-pages"; Run = { Invoke-PrivatePagesTour } }
   $tours += @{ Name = "download-flight"; Run = { Invoke-DownloadFlightTour } }
   $tours += @{ Name = "peek-layouts"; Run = {
       Invoke-PeekTour "peek-sidebar-address" @{ appearance = "light"; addressBar = "sidebar" } "light, address bar in the sidebar"
