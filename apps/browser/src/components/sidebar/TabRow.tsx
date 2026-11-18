@@ -108,7 +108,7 @@ export const TabRow = memo(function TabRow({
       style={moved.style as object}
       onDoubleClick={() => void startRename(windowId, { kind: "tab", id: tabId })}
     >
-      <TabPressArea windowId={windowId} tab={tab} hitSlop={rowGapSlop(0)}>
+      <TabPressArea windowId={windowId} tab={tab} hitSlop={rowGapSlop(0)} selected={selected}>
       {({ pressed }) => (
           <SidebarRowSurface
             fill={onto || (!active && pressed) ? pressedFill : fill}
@@ -125,6 +125,8 @@ export const TabRow = memo(function TabRow({
                   onPressIn={pinActionMotion.onPressIn}
                   onPressOut={pinActionMotion.onPressOut}
                   tooltip={withShortcut("Back to Pinned URL", backToPinHint)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Pinned URL"
                 >
                   <Animated.View pointerEvents="none" style={pinActionScale}>
                     {resetting ? (
@@ -197,6 +199,8 @@ function StatusIconButton({ icon, color, tooltip, onPress }: { icon: string; col
       onPressOut={pressMotion.onPressOut}
       style={{ marginLeft: space.s }}
       tooltip={tooltip}
+      accessibilityRole="button"
+      accessibilityLabel={tooltip}
     >
       <Animated.View style={[glyphFrame, scaleStyle]}>
         <Symbol name={icon} size={ROW_GLYPH.symbol} color={color} style={glyphFrame} />

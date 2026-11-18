@@ -1,6 +1,8 @@
 import { AppState, type GestureResponderEvent } from "react-native";
 import { modifiersOf } from "../../lib/keys";
 import { activeTabId } from "../browser/model";
+import { dropTabReveals } from "../../platform/tabs";
+import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { useBrowser } from "../browser/store";
 import { focusedWindowOf } from "../windows/ui";
 import { clickTab } from "./actions";
@@ -71,10 +73,13 @@ function driftBetween(from: TabPress["at"], to: TabPress["at"]): TabPressDrift {
   return far < 5 ? "lt5" : far < TAB_CLICK_SLOP ? "5_9" : "10_plus";
 }
 
-function switchesOnPress(windowId: string, tabId: string, press: GestureResponderEvent) {
-  if (!devTabPress.switchOnPress) return false;
+function plainPress(press: GestureResponderEvent) {
   const mods = modifiersOf(press);
-  if (mods.metaKey || mods.altKey || mods.shiftKey || (press.nativeEvent as { ctrlKey?: boolean }).ctrlKey) return false;
+  return !(mods.metaKey || mods.altKey || mods.shiftKey || (press.nativeEvent as { ctrlKey?: boolean }).ctrlKey);
+}
+
+function switchesOnPress(windowId: string, tabId: string, press: GestureResponderEvent) {
+  if (!devTabPress.switchOnPress || !plainPress(press)) return false;
   const s = useBrowser.getState();
   if (!s.tabs[tabId] || activeTabId(s, windowId) === tabId) return false;
   return !(s.selection[windowId] ?? []).includes(tabId);
@@ -106,6 +111,7 @@ export function holdTabPress(windowId: string, tabId: string, press: GestureResp
     dismissHover();
     clickTab(windowId, tabId);
   }
+  if (PLATFORM_FEATURES.nativeTabSwitch && plainPress(press) && activeTabId(useBrowser.getState(), windowId) !== tabId) dropTabReveals(tabId);
   return held;
 }
 

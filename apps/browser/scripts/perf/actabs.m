@@ -252,8 +252,58 @@ static unsigned short ModKeyCode(NSEventModifierFlags f) {
   [self answer:cid with:@{@"ok": @YES, @"windows": list}];
 }
 
+static NSView *ChildToward(NSView *ancestor, NSView *view) {
+  for (NSView *v = view; v; v = v.superview)
+    if (v.superview == ancestor) return v;
+  return nil;
+}
+
+static BOOL InFrontOf(NSView *a, NSView *b) {
+  for (NSView *shared = a.superview; shared; shared = shared.superview) {
+    if (![b isDescendantOf:shared]) continue;
+    NSView *pa = ChildToward(shared, a), *pb = ChildToward(shared, b);
+    if (pa.layer.zPosition != pb.layer.zPosition) return pa.layer.zPosition > pb.layer.zPosition;
+    return [shared.subviews indexOfObject:pa] > [shared.subviews indexOfObject:pb];
+  }
+  return NO;
+}
+
+static NSString *FrontPageKey(NSWindow *w, NSPoint inContent) {
+  NSMutableArray<NSView *> *found = [NSMutableArray array];
+  CollectClass(w.contentView, @"ArdiaWebView", found);
+  NSView *front = nil;
+  for (NSView *v in found) {
+    if (v.isHiddenOrHasHiddenAncestor || v.alphaValue < 1 || !NSPointInRect([v convertPoint:inContent fromView:w.contentView], v.bounds)) continue;
+    BOOL paints = NO;
+    for (NSView *sub in v.subviews) paints = paints || !sub.hidden;
+    if (paints && (!front || InFrontOf(v, front))) front = v;
+  }
+  id key = front ? [front valueForKey:@"transferKey"] : nil;
+  return [key isKindOfClass:NSString.class] ? key : @"";
+}
+
++ (void)front:(NSDictionary *)cmd id:(NSString *)cid {
+  NSWindow *w = WindowNumbered([cmd[@"window"] integerValue]);
+  if (!w) return [self answer:cid with:@{@"ok": @NO, @"error": @"no window"}];
+  NSView *content = w.contentView;
+  double x = [cmd[@"x"] doubleValue], y = [cmd[@"y"] doubleValue];
+  NSPoint p = content.isFlipped ? NSMakePoint(x, y) : NSMakePoint(x, content.bounds.size.height - y);
+  double until = EpochMs() + [cmd[@"ms"] doubleValue];
+  __block NSString *last = nil;
+  CFRunLoopTimerRef timer = CFRunLoopTimerCreateWithHandler(kCFAllocatorDefault, CFAbsoluteTimeGetCurrent(), 0.002, 0, 0, ^(CFRunLoopTimerRef t) {
+    NSString *key = FrontPageKey(w, p);
+    if (![key isEqualToString:last]) Record([NSString stringWithFormat:@"{\"k\":\"f\",\"t\":%.3f,\"key\":\"%@\"}", EpochMs(), key]);
+    last = key;
+    if (EpochMs() > until) CFRunLoopTimerInvalidate(t);
+  });
+  CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+  CFRelease(timer);
+  [self answer:cid with:@{@"ok": @YES, @"now": @(EpochMs())}];
+}
+
 + (void)handle:(NSDictionary *)cmd {
   NSString *cid = cmd[@"id"], *op = cmd[@"op"];
+  if ([op isEqualToString:@"front"]) return [self front:cmd id:cid];
   if ([op isEqualToString:@"key"]) return [self key:cmd id:cid];
   if ([op isEqualToString:@"click"]) return [self click:cmd id:cid];
   if ([op isEqualToString:@"drag"]) return [self drag:cmd id:cid];

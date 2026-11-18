@@ -72,6 +72,10 @@ struct ArdiaReveal {
   CGFloat loweredPaneZ{};
   __weak NSView *frontedPage;
   NSUInteger frontGeneration{};
+  BOOL native{};
+  __weak ArdiaWebView *focusOwner;
+  __weak NSView *focusFrom;
+  NSHashTable<NSView *> *hitSwaps;
 };
 
 struct ArdiaPageReports {
@@ -106,6 +110,7 @@ struct ArdiaPageFocusState {
   __weak NSView *elsewhere;
   BOOL onActivate{};
   BOOL keepsOutgoing{};
+  BOOL storedAtReveal{};
   CFTimeInterval activatedAt{};
   __weak NSWindow *activatedIn;
 };
@@ -264,6 +269,15 @@ typedef NS_ENUM(NSInteger, ArdiaTransfer) {
 - (BOOL)onlyShownInWindow;
 - (void)frontPage:(NSView *)page profile:(ArdiaCoreProfile *)profile;
 - (void)dropFront;
+- (BOOL)revealsFirst;
+- (ArdiaWebView *)revealableOver:(BOOL)pastOtherReveals;
+- (void)takeFocusFrom:(ArdiaWebView *)shown;
+- (void)giveFocusBack;
+- (void)keepAtSettle;
+- (void)takeHitTesting;
+- (void)giveHitTestingBack;
++ (ArdiaWebView *)nativeRevealInWindow:(NSWindow *)window except:(ArdiaWebView *)skip;
+- (BOOL)stayOver:(ArdiaWebView *)shown;
 - (void)revealAhead;
 - (void)endReveal;
 - (void)dropReveal;
