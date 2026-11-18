@@ -102,3 +102,15 @@ onAndroid("a committed back swipe that moved counts once; a 3-button Back, which
   swipe.commit();
   expect(counted).toHaveBeenCalledTimes(1);
 });
+
+onAndroid("the sheet's drag-to-dismiss lives on its handle, so a tall sheet's content scrolls instead of dragging the sheet", () => {
+  const root = material(
+    <Sheet open onDismiss={() => undefined} onHidden={() => undefined}>
+      <Text>Rows</Text>
+    </Sheet>,
+  );
+  const grip = root.root.findAll((found) => found.props.testID === "materialSheetGrip" && typeof found.type === "string")[0]!;
+  expect(grip.findAll((found) => found.props.testID === "materialDragHandle").length).toBeGreaterThan(0);
+  expect(grip.findAll((found) => found.type === Text && found.props.children === "Rows")).toHaveLength(0);
+  unmount(root);
+});

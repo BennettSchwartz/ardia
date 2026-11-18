@@ -62,7 +62,7 @@ export function MaterialPageBar({ tab, order, showsPlus, onTabs, onTabsMenu, onS
           <Symbol name="plus" size={materialSize.icon} color={scheme.onSurfaceVariant} />
         </Pressable>
       ) : null}
-      <TabsMenuTrigger order={order} onTabsMenu={onTabsMenu}>
+      <TabsMenuTrigger order={order} onTabsMenu={onTabsMenu} style={styles.iconSlot}>
         {({ onLongPress, screenReaderActions: menuActions }) => (
           <Pressable
             testID="materialBarTabs"
@@ -114,6 +114,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, height: materialSize.bottomBar },
   field: { flex: 1, height: materialSize.searchBar, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16 },
   host: { flex: 1 },
+  iconSlot: { width: materialSize.touchTarget, height: materialSize.touchTarget },
   iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
   countBox: { minWidth: TAB_COUNT_BOX, height: TAB_COUNT_BOX, borderWidth: 2, borderRadius: materialShape.extraSmall, alignItems: "center", justifyContent: "center", paddingHorizontal: 2 },
   count: { textAlign: "center" },

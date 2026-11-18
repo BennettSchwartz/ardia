@@ -194,8 +194,7 @@ export function MaterialSheet({ open, onDismiss, onHidden, children }: SheetProp
       <Animated.View testID="materialScrim" style={[StyleSheet.absoluteFill, scrim]}>
         <Pressable accessibilityLabel="Close" style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(scheme.scrim, MATERIAL_STATE.scrim) }]} onPress={onDismiss} />
       </Animated.View>
-      <GestureDetector gesture={pull}>
-        <Animated.View
+      <Animated.View
           ref={panel}
           testID="materialSheet"
           accessibilityViewIsModal
@@ -204,10 +203,13 @@ export function MaterialSheet({ open, onDismiss, onHidden, children }: SheetProp
           }}
           style={[styles.sheet, { left: insets.left + (across - sheetWidth) / 2, width: sheetWidth, maxHeight: Math.max(height - insets.top - SHEET_TOP_GAP, 0), paddingBottom: insets.bottom, backgroundColor: scheme.surfaceContainerLow }, slide]}
         >
-          <DragHandle onPress={onDismiss} />
+          <GestureDetector gesture={pull}>
+            <View testID="materialSheetGrip" collapsable={false}>
+              <DragHandle onPress={onDismiss} />
+            </View>
+          </GestureDetector>
           {children}
         </Animated.View>
-      </GestureDetector>
     </View>
   );
 }
