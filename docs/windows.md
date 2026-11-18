@@ -121,7 +121,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Settings window, panes, search | Works (all twelve panes; search finds rows and opens their pane) | |
 | Profiles: create, switcher | Works | |
 | Appearance: light and dark | Works | |
-| Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). Changing the theme while Settings is open can crash the window layer, on older builds too | #1831, #1882, #1900 |
+| Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). A contrast theme switched on or off no longer crashes the app (#1900): the Windows App SDK repainted every window's caption buttons from a thread-pool thread when the colours changed, because the app set `AppWindowTitleBar.PreferredTheme`, and that raced the window's own repaint (`CTitleBar::PaintTitle`, an access violation in `dcomp` on x64, a Control Flow Guard fail-fast on ARM64; the ARM64 runner crashed on every contrast switch, browser window alone included). The app now leaves `PreferredTheme` at `Legacy`, so that handler paints nothing, and sets the caption buttons' colours itself on the UI thread (`WindowManager::ApplyCaptionColors`). Under a contrast theme they keep the app's palette with stronger ink (the resting glyph at full strength, hover and pressed twice as strong), as the sidebar's text does through `highContrastText` and as the Mac's Increase Contrast does: the buttons draw over the app's own chrome, which keeps its palette, so the theme's palette there would put white glyphs on a light sidebar. The launch check switches contrast on and off under the app, slowly and fast, with and without Settings, on x64 and ARM64. The app's own colours (sidebar, toolbar, Settings) don't follow a contrast theme yet | #1831, #1882, #1900 |
 | Keyboard Shortcuts pane | Works, Windows keys | |
 | "…" menu | Works, except Check for Updates | #1517 |
 | Sync | Works: Turn On Sync at the default folder shows the Recovery Kit, the pane says updated just now, every What Syncs row but Passwords; a Mac and a PC exchanged pinned tabs and bookmarks both ways (#1594) | #1575, #1425 |
@@ -1434,8 +1434,8 @@ Ranked by how much a user notices. Sizes are rough: S is under a day, M is one t
 App side, an agent can do these now:
 1. A new tab opened with an address (Ctrl+T, the address, Enter) gets no keyboard (#1689). S, with the engine
    thread.
-2. Changing a Windows contrast theme while Settings is open crashes Ardia, inside the Windows App SDK (#1900). S once
-   the cause is seen on Windows.
+2. Ardia's own colours (sidebar, toolbar, Settings) don't follow a Windows contrast theme: only the window frame, the
+   caption buttons and the pages do (the crash a switch caused is #1900, fixed). M.
 3. A private pop-up left as the only window closes the tabs it opens at once, where a regular one gets a browser window
    back (#1910): the app can't open a window on the pop-up's private session yet. S.
 4. The top edge over a page that reaches it (#1888): a real drag in CI resizes the window from the top; the cursor, a
