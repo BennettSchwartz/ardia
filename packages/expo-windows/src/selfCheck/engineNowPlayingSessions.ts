@@ -15,6 +15,7 @@ const EARLIER_SEEK = 5;
 const STARTED_FROM_ZERO_BY = 3;
 const HELD_RELOAD_MS = 800;
 const REPOST_SETTLES_MS = 1500;
+const PLAYED_BEFORE_SECONDS = 0.3;
 
 type Answer = { ok?: boolean; done?: boolean; byScript?: boolean; recorded?: boolean; refused?: string };
 type Media = { paused?: boolean; time?: number; played?: number };
@@ -35,7 +36,14 @@ async function neverPlayed(key: string, what: string) {
   expectEqual({ paused: media.paused, played: media.played }, { paused: true, played: 0 }, `${what}: the page's idle player never played (${JSON.stringify(media)})`);
 }
 
+async function playedBefore(key: string) {
+  await startPlaying(key);
+  await until("the page plays before it sleeps, as a tab with a card has", SETTLE_MS, () => mediaOf(key), (media) => media.paused === false && (media.time ?? 0) > PLAYED_BEFORE_SECONDS);
+  await pausePage(key);
+}
+
 async function discarded(key: string, windowId: string) {
+  await playedBefore(key);
   await hide(key, windowId);
   const outcome = (await hostCall<{ outcome?: unknown }>("tab.call", { key, method: "discard" })).outcome;
   expectEqual(outcome, "discarded", "the hidden page is discarded");

@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Out,
   [int]$Seconds = 25,
   [int]$SelfCheckSeconds = 300,
+  [int]$MediaSelfCheckSeconds = 300,
   [switch]$NoInput,
   [ValidateSet("all", "launch", "gate")][string]$Part = "all"
 )
@@ -1911,6 +1912,39 @@ public static class ArdiaFirstFramesFront {
   }
 }
 
+$pageTestKeys = "httpPages=$httpPagesPort" + $(if ($publicPagesUp) { ",publicPages=$publicPagesPort" } else { "" }) + $(if ($httpsPagesUp) { ",httpsPages=$httpsPagesPort" } else { "" })
+$pageSwitches = @()
+if ($publicPagesUp) { $pageSwitches += "--ip-address-space-overrides=127.0.0.1:$publicPagesPort=public" }
+if ($httpsPagesUp) { $pageSwitches += @("--host-resolver-rules=`"MAP npmixed.test 127.0.0.1`"", "--ignore-certificate-errors-spki-list=$httpsSpki") }
+
+if ($Part -ne "gate" -and $httpPagesUp -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $App).Path) "chrome.dll"))) {
+  $mediaLog = Join-Path $Out "self-check-media.log"
+  $env:ARDIA_DATA_DIR = New-DataDirectory "media-self-check-data"
+  $env:ARDIA_CONFIG_DIR = $env:ARDIA_DATA_DIR
+  $env:ARDIA_BACKGROUND = "1"
+  $env:ARDIA_TEST = "selfCheckStage=media,$pageTestKeys"
+  $mediaRun = Start-Process -FilePath $App -ArgumentList (@("--self-check", "--log-file=`"$mediaLog`"") + $pageSwitches) -PassThru
+  $env:ARDIA_TEST = ""
+  try {
+    if (-not $mediaRun.WaitForExit($MediaSelfCheckSeconds * 1000)) { $failures += "the media self-check did not finish within $MediaSelfCheckSeconds s" }
+    elseif ($mediaRun.ExitCode -ne 0) { $failures += "the media self-check launch exited with code $($mediaRun.ExitCode)" }
+  } finally {
+    if (-not $mediaRun.HasExited) {
+      Save-Screenshot (Join-Path $Out "self-check-media-stuck.png")
+      Stop-Process -Id $mediaRun.Id -Force
+      $mediaRun.WaitForExit(10000) | Out-Null
+    }
+  }
+  if (Test-Path $mediaLog) {
+    Select-String -Path $mediaLog -Pattern "self-check|now playing |^(js-error|fatal|error) " | ForEach-Object { Write-Host "media: $($_.Line)" }
+    $mediaDone = Select-String -Path $mediaLog -Pattern "self-check done: (\d+) passed, (\d+) failed" | Select-Object -First 1
+    if (-not $mediaDone) { $failures += "the media self-check never reported its result" }
+    elseif ([int]$mediaDone.Matches[0].Groups[2].Value -gt 0) { $failures += "$($mediaDone.Matches[0].Groups[2].Value) media self-checks failed" }
+    elseif ([int]$mediaDone.Matches[0].Groups[1].Value -eq 0) { $failures += "the media self-check ran no checks" }
+    if (Select-String -Path $mediaLog -Pattern "^(js-error|fatal|error) " -Quiet) { $failures += "the media self-check log has errors" }
+  } else { $failures += "the media self-check wrote no log" }
+}
+
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
@@ -1924,10 +1958,8 @@ foreach ($fixture in @(@("firefox", "Firefox\Profiles\abcd1234.default-release")
 }
 $env:ARDIA_CONFIG_DIR = $env:ARDIA_DATA_DIR
 $env:ARDIA_BACKGROUND = "1"
-$env:ARDIA_TEST = "pipHover=first,pipHover=last,httpPages=$httpPagesPort" + $(if ($publicPagesUp) { ",publicPages=$publicPagesPort" } else { "" }) + $(if ($httpsPagesUp) { ",httpsPages=$httpsPagesPort" } else { "" })
+$env:ARDIA_TEST = "pipHover=first,pipHover=last,$pageTestKeys"
 $selfCheckArguments = @("--self-check", "--log-file=`"$checkLog`"")
-if ($publicPagesUp) { $selfCheckArguments += "--ip-address-space-overrides=127.0.0.1:$publicPagesPort=public" }
-if ($httpsPagesUp) { $selfCheckArguments += @("--host-resolver-rules=`"MAP npmixed.test 127.0.0.1`"", "--ignore-certificate-errors-spki-list=$httpsSpki") }
 $leftover = Join-Path $env:ARDIA_DATA_DIR "Chromium\Ardia self-check-stuck (removing)"
 $held = $null
 $check = $null

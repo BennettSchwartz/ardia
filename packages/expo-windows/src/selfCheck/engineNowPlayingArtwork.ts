@@ -8,7 +8,7 @@ const ROTATIONS = 10;
 const DOWNLOADS_SETTLE_MS = 15000;
 const LONGEST_REPORTED_ARTWORK = 2048;
 const PROBE_SETTLES_MS = 1500;
-const OWN_LOAD_MS = 5000;
+const OWN_LOAD_MS = 3000;
 const REFUSED_DOWNLOAD_MS = 8000;
 const COUNT_PAGE = "self-check-np-art-count";
 const DATA_SVG_PREFIX = "data:image/svg+xml;base64,";
@@ -212,7 +212,8 @@ const addressSpaceChecks: Check[] = [
       withOtherOrigin("np-lna-art", `http://127.0.0.1:${publicPort}/nowplaying?lnaart=${port}`, async (key, reports, windowId) => {
         const space = await evaluate(key, 'post("result", JSON.stringify(window.isSecureContext));');
         const { own } = await refusedLikeTheFrame(key, reports, windowId, "/art-lna.png", `a loopback artwork from a public page (secure context ${JSON.stringify(space)})`);
-        console.info(`[ardia windows] self-check note: on this runner, 157 answers a public page's own request for a loopback image with ${JSON.stringify(own)}`);
+        const rule = own === "pending" ? "held" : own === "error" ? "refused" : String(own);
+        console.info(`[ardia windows] self-check note: on this runner, 157's local network rule for a public page's own loopback image: ${rule} (${JSON.stringify(own)})`);
       }),
   },
   {
