@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -12,9 +14,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ColorScheme
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuGroup
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DropdownMenuPopup
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuDefaults
@@ -28,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -63,49 +67,63 @@ internal object MaterialMenuRules {
     fun buttonsInOrder(sheet: NativeMenuRules.Sheet): List<NativeMenuRules.ActionSheetActionShape> = sheet.buttons.asReversed()
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun MaterialMenu(scheme: ColorScheme, expanded: MutableState<Boolean>, rows: List<NativeMenuRules.Row>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     MaterialTheme(colorScheme = scheme) {
         Box(Modifier.fillMaxSize()) {
-            DropdownMenu(expanded = expanded.value, onDismissRequest = onDismiss) {
+            DropdownMenuPopup(expanded = expanded.value, onDismissRequest = onDismiss) {
                 MaterialMenuPages(rows, onPick)
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun MaterialMenuPages(rows: List<NativeMenuRules.Row>, onPick: (String) -> Unit) {
     var pages by remember { mutableStateOf(listOf(MaterialMenuRules.Page(null, rows))) }
     val page = pages.last()
     val scheme = MaterialTheme.colorScheme
-    page.title?.let { title ->
-        DropdownMenuItem(
-            text = { Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-            onClick = { pages = pages.dropLast(1) },
-            leadingIcon = { Icon(SettingsSymbols.vector("chevron.left"), contentDescription = null, modifier = Modifier.size(20.dp)) },
-            colors = MenuDefaults.itemColors(textColor = scheme.onSurface, leadingIconColor = scheme.onSurfaceVariant),
-        )
-        HorizontalDivider(Modifier.padding(vertical = 8.dp), color = scheme.outlineVariant)
+    val sections = MaterialMenuRules.sections(page.rows)
+    val back = page.title
+    val groupCount = sections.size + if (back != null) 1 else 0
+    var groupIndex = 0
+    if (back != null) {
+        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount)) {
+            DropdownMenuItem(
+                onClick = { pages = pages.dropLast(1) },
+                text = { Text(back, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                shape = MenuDefaults.itemShape(0, 1).shape,
+                leadingIcon = { Icon(SettingsSymbols.vector("chevron.left"), contentDescription = null, modifier = Modifier.size(20.dp)) },
+                colors = MenuDefaults.itemColors(textColor = scheme.onSurface, leadingIconColor = scheme.onSurfaceVariant),
+            )
+        }
     }
-    MaterialMenuRules.sections(page.rows).forEachIndexed { index, section ->
-        if (index > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp), color = scheme.outlineVariant)
-        for (row in section) {
-            when (row) {
-                is NativeMenuRules.Header -> Text(
-                    row.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = scheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).semantics { heading() },
-                )
-                is NativeMenuRules.Action -> MaterialMenuRow(row.item, onOpen = { children -> pages = pages + MaterialMenuRules.Page(row.item.title, children) }, onPick = onPick)
+    for (section in sections) {
+        if (groupIndex > 0) Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+        val actions = section.filterIsInstance<NativeMenuRules.Action>()
+        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount)) {
+            for (row in section) {
+                when (row) {
+                    is NativeMenuRules.Header -> MenuDefaults.DropdownMenuGroupLabel(modifier = Modifier.semantics { heading() }) {
+                        Text(row.title, style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
+                    }
+                    is NativeMenuRules.Action -> MaterialMenuRow(
+                        row.item,
+                        shape = MenuDefaults.itemShape(actions.indexOf(row), actions.size).shape,
+                        onOpen = { children -> pages = pages + MaterialMenuRules.Page(row.item.title, children) },
+                        onPick = onPick,
+                    )
+                }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun MaterialMenuRow(item: NativeMenuRules.Item, onOpen: (List<NativeMenuRules.Row>) -> Unit, onPick: (String) -> Unit) {
+private fun MaterialMenuRow(item: NativeMenuRules.Item, shape: Shape, onOpen: (List<NativeMenuRules.Row>) -> Unit, onPick: (String) -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val text = if (item.destructive) scheme.error else scheme.onSurface
     val icon = if (item.destructive) scheme.error else scheme.onSurfaceVariant
@@ -117,16 +135,13 @@ private fun MaterialMenuRow(item: NativeMenuRules.Item, onOpen: (List<NativeMenu
         else -> null
     }
     DropdownMenuItem(
-        text = {
-            Column {
-                Text(item.title, style = MaterialTheme.typography.bodyLarge)
-                item.subtitle?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant) }
-            }
-        },
         onClick = { if (children != null) onOpen(children) else onPick(item.id) },
+        text = { Text(item.title, style = MaterialTheme.typography.bodyLarge) },
+        shape = shape,
         modifier = Modifier.semantics { if (item.checked) selected = true },
         leadingIcon = leading?.let { vector -> { Icon(vector, contentDescription = null, modifier = Modifier.size(24.dp)) } },
-        trailingIcon = trailing?.let { vector -> { Icon(vector, contentDescription = null, modifier = Modifier.size(20.dp)) } },
+        trailingContent = trailing?.let { vector -> { Icon(vector, contentDescription = null, modifier = Modifier.size(20.dp)) } },
+        supportingText = item.subtitle?.takeIf { it.isNotEmpty() }?.let { subtitle -> { Text(subtitle) } },
         enabled = !item.disabled,
         colors = MenuDefaults.itemColors(textColor = text, leadingIconColor = icon, trailingIconColor = icon),
     )
