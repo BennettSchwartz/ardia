@@ -741,8 +741,9 @@ is plain Chromium.
 - `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
   Sync on, checks an ordinary start reports `recoveredStart` false, writes `unsettledStarts` 1 before it unlocks,
   keeps it through a finished cycle and leaves 0 after a clean quit; a full run (`FULL`, `-SettleCheck`) also keeps a
-  start alive until the count goes back to 0, between 110 and 200 s after its `[sync] unlock finished: unlocked` line
-  (the load's start); a start whose key didn't unlock is never asserted to reach 0. Then it records two unfinished
+  start alive until `sync.json`, sampled while the app runs and before its window is closed, shows the count back at 0,
+  between 110 and 200 s after its `[sync] unlock finished: unlocked` line (the load's start); a start whose key didn't
+  unlock is never asserted to reach 0. Then it records two unfinished
   starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`,
   `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
   the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and

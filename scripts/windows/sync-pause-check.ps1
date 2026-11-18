@@ -141,6 +141,25 @@ function Wait-LoadBegan($run) {
   return $seen
 }
 
+function Wait-ResetWhileAlive($run, [datetime]$loadBegan) {
+  $deadline = $loadBegan.AddSeconds(200)
+  $lastOneAt = $null
+  while ((Get-Date) -lt $deadline) {
+    if (-not (Get-Process -Id $run.Pid -ErrorAction SilentlyContinue)) { Keep-Log $run.What; throw "$($run.What): Ardia ended before unsettledStarts went back to 0" }
+    $count = (Read-SyncDocWhileRunning $docPath).UnsettledStarts
+    $at = Get-Date
+    $alive = [bool](Get-Process -Id $run.Pid -ErrorAction SilentlyContinue)
+    if ($count -eq 1) { $lastOneAt = $at }
+    elseif ($count -eq 0) {
+      if (-not $alive) { Keep-Log $run.What; throw "$($run.What): unsettledStarts read 0 only as Ardia ended, so the quit may have written it" }
+      return [pscustomobject]@{ ZeroAt = $at; LastOneAt = $lastOneAt }
+    }
+    Start-Sleep -Milliseconds 250
+  }
+  Keep-Log $run.What
+  throw "$($run.What): unsettledStarts didn't go back to 0 within 200 s of the load while Ardia ran (last 1 at $(if ($lastOneAt) { [int]($lastOneAt - $loadBegan).TotalSeconds } else { 'never' }) s)"
+}
+
 function Assert-StaysPaused($run, [bool]$recovered, $digests, [string]$seqs, [int]$unsettled) {
   $trace = Read-SyncTrace @(Run-Lines $run)
   if ($trace.Recovered -ne $recovered) { throw "$($run.What): recoveredStart was $($trace.Recovered), not $recovered" }
@@ -203,15 +222,14 @@ try {
     $run = Start-Run "two minutes alive"
     Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60 | Out-Null
     $loadBegan = Wait-LoadBegan $run
-    Wait-Trace $run { param($t) $t.Statuses -contains "updated" } "a finished cycle" | Out-Null
-    $left = [Math]::Max(1, 200 - [int]((Get-Date) - $loadBegan).TotalSeconds)
-    $settledAt = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 0 } "unsettledStarts back to 0 within 200 s of the load" $left
-    $afterSeconds = [int]($settledAt - $loadBegan).TotalSeconds
+    $sampled = Wait-ResetWhileAlive $run $loadBegan
+    $afterSeconds = [Math]::Round(($sampled.ZeroAt - $loadBegan).TotalSeconds, 1)
     if ($afterSeconds -lt 110) { throw "two minutes alive: unsettledStarts went back to 0 only $afterSeconds s after the load began, before 2 minutes" }
+    $lastOne = if ($sampled.LastOneAt) { "$([Math]::Round(($sampled.LastOneAt - $loadBegan).TotalSeconds, 1)) s" } else { "never" }
     Stop-Run $run
     $afterQuit = (Read-SyncDoc $docPath).UnsettledStarts
     if ($afterQuit -ne 0) { throw "two minutes alive: unsettledStarts is $afterQuit after the quit" }
-    Note "two minutes alive: unsettledStarts 1 at the start, 0 about $afterSeconds s after the load began (the [sync] unlock finished line), and 0 after the quit"
+    Note "two minutes alive: unsettledStarts 1 at the start (last seen 1 at $lastOne after the load began), 0 at $afterSeconds s after the load began (the [sync] unlock finished line) with Ardia still running and its window open, and 0 after the quit"
   } else {
     Note "two minutes alive: not run (full runs only)"
   }
