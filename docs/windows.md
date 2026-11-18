@@ -37,7 +37,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Installer (wizard, Start menu, Open Ardia) | Works (`setup exit 0` over an empty and over an existing install) | |
 | First launch after the installer | Works: onboarding, no release notes | #1517 |
 | First launch with a link | Works: the link opens in a Little Ardia window in front, onboarding waits in the main window behind it | |
-| Onboarding (main's walk-through, #1762) | Works (72901e27a): eight steps (source, layout, tabs, look, search and privacy, pins, default browser, outro), Edge found on this PC, Windows wording, Ctrl+T, Ctrl+L and Ctrl+S key caps, no Dock card or trial, no app icon row; Skip on every step; Get Started and Take the Tour. Gaps: Tab leaves the intro for the page behind it, and the links step names the Mac's Notes (#1812); the default-browser hand-off to Windows Settings wasn't seen (the VM's default is already Ardia) | #1812 |
+| Onboarding (main's walk-through, #1762) | Works (72901e27a): eight steps (source, layout, tabs, look, search and privacy, pins, default browser, outro), Edge found on this PC, Windows wording, Ctrl+T, Ctrl+L and Ctrl+S key caps, no Dock card or trial, no app icon row; Skip on every step; Get Started and Take the Tour. An onboarding that starts with the launch shows its overlay opaque from the window's first frame, with no 0.25 s fade-in (`PLATFORM_FEATURES.onboardingOpaqueAtLaunch`, Windows only): that fade, native-driven and started on mount, drew no frames on Windows and sometimes never landed, so the browser underneath showed for 0.3 to 4.3 s (#2190); one started later, from Settings or the command, still fades in. The launch check's first launches fail when a capture matches the browser of the second launch in the same appearance. Gaps: Tab leaves the intro for the page behind it, and the links step names the Mac's Notes (#1812); the default-browser hand-off to Windows Settings wasn't seen (the VM's default is already Ardia) | #1812 |
 | Intro animation and music | Differs: no Windows machine with a real GPU has run the animated meadow yet. Where Chromium gives no WebGL2 (the VM and the CI runners: no GPU, and the engine has no SwiftShader) the dawn poster stands in, or the plain dark background at night, within about 0.4 s (14 of 14 launches on 72901e27a). On software rendering (WARP, turned on with test switches) the scene draws: in the VM on 65dd9760b, in light with the page's own icon and wordmark and at night with the moon and fireflies; Tab, Space and Enter work Mute and Skip, and a click on Skip ends it. The WARP self-check runs it on every PR on x64 and ARM64. Music not checked (the VM has no audio out) | #1547, #1546, #1737, #1249 |
 | Tour | Works (d83398e1f): Take the Tour shows five stops (search, tabs in the sidebar, room to focus, two pages side by side, all set) with Back, Next and Skip Tour; Done ends it | |
 | Import from Edge | Works (onboarding finds Edge; import itself checked in #1357) | #1516 |
@@ -121,7 +121,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Settings window, panes, search | Works (all twelve panes; search finds rows and opens their pane) | |
 | Profiles: create, switcher | Works | |
 | Appearance: light and dark | Works | |
-| Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). Changing the theme while Settings is open can crash the window layer, on older builds too | #1831, #1882, #1900 |
+| Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). A contrast theme switched on or off no longer crashes the app (#1900): the Windows App SDK repainted every window's caption buttons from a thread-pool thread when the colours changed, because the app set `AppWindowTitleBar.PreferredTheme`, and that raced the window's own repaint (`CTitleBar::PaintTitle`, an access violation in `dcomp` on x64, a Control Flow Guard fail-fast on ARM64; the ARM64 runner crashed on every contrast switch, browser window alone included). The app now leaves `PreferredTheme` at `Legacy`, so that handler paints nothing, and sets the caption buttons' colours itself on the UI thread (`WindowManager::ApplyCaptionColors`). Under a contrast theme they keep the app's palette with stronger ink (the resting glyph at full strength, hover and pressed twice as strong), as the sidebar's text does through `highContrastText` and as the Mac's Increase Contrast does: the buttons draw over the app's own chrome, which keeps its palette, so the theme's palette there would put white glyphs on a light sidebar. The launch check switches contrast on and off under the app, slowly and fast, with and without Settings, on x64 and ARM64. The app's own colours (sidebar, toolbar, Settings) don't follow a contrast theme yet | #1831, #1882, #1900 |
 | Keyboard Shortcuts pane | Works, Windows keys | |
 | "…" menu | Works, except Check for Updates | #1517 |
 | Sync | Works: Turn On Sync at the default folder shows the Recovery Kit, the pane says updated just now, every What Syncs row but Passwords; a Mac and a PC exchanged pinned tabs and bookmarks both ways (#1594) | #1575, #1425 |
@@ -281,9 +281,27 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     fade makes the app window and every visible window it owns (the page windows) layered for its length and puts
     their styles back at the end; on the way out they ignore clicks, and pages still shown after the hide stay
     transparent until the engine hides them (at most 2 s). A minimized, full screen or not yet shown window, or
-    Windows' "Animation effects" off, shows and hides at once. The launch log says `window <id> fades in over <ms> ms
+    Windows' "Animation effects" off, hides at once. The launch log says `window <id> fades in over <ms> ms
     with <n> page windows`, `window <id> shown`, `window <id> fades out over <ms> ms`, `window <id> hidden` and
     `window <id> hidden at once: <reason>`.
+  - Every other window (the first window of a launch, a restored session's windows, any browser window opened without
+    `animated`, and every window while "Animation effects" is off) opens, activates and takes the keyboard at once but
+    keeps its pixels back until its React root has content, for at most 1.5 s, then shows at full opacity with no
+    fade (#2169). Before that it showed whatever was under the empty island: plain white for 64 to 253 ms, in light
+    and in dark. While it waits it is layered at alpha 1 of 255, invisible but still hit-tested, so a click there
+    goes to it and never to the window behind; its taskbar button and Alt+Tab entry show at once. The launch log
+    says `window <id> shown with its first frame <ms> ms after it opened`, or `shown without a first frame: none came
+    in <ms> ms` when the deadline shows it anyway. The reveal comes when the frame is committed, which can be one
+    screen frame before it is drawn, so every app window erases to its theme's colour (rgb(32,32,32) in dark,
+    rgb(243,243,243) in light, `ThemedErase`, set with the theme and behind the backdrop's own black erase): that
+    frame, or a window the deadline shows empty, is the theme's colour and never white. A background instance shows
+    its windows at once, as before. The
+    launch check captures the first window from process start, light and dark, for a fresh and a finished profile,
+    over a solid window of its own that counts clicks, and compares each capture with the screen before the launch.
+    It fails on any plain white capture before the UI's first frame, on anything covering more than 3% of the window
+    while it is still transparent (a page window shown before its owner), on a window that never shows its UI, on a window that comes
+    to the front more than 100 ms after it is visible, and when a click at its centre in its first moment reaches the
+    window underneath.
 - What has a C++ version: windows, documents, config files and their watcher, secrets (Credential Manager), local
   telemetry, launch config and system info, file actions and icons, launch at login, the theme, lock and sleep
   signals, the clipboard, the bang list, confirm, prompt and file dialogs, the command table with its shortcuts and
@@ -336,9 +354,13 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     `typed` is the bar's first typed change, once per page.
   - **Tour:** the `first-run` part of `scripts/windows/tour.ps1` presses Ctrl+T and types the first key 100 ms later,
     in fresh launches after Get Started, during and after the tool tour, under CPU and disk load, and with the Go
-    button. A stop fails only when the new tab's bar takes focus more than 90 ms after the `newTab` command (the
-    worst seen was 69 ms under load), or the first key does not land in the new tab's bar (its first `typed` mark
-    after the command, and the settled text starting with that key). A stop typing from 15 ms after Ctrl+T
+    button. A stop fails only when the new tab's bar takes focus more than 90 ms after the `newTab` command, or the
+    first key does not land in the new tab's bar (its first `typed` mark after the command, and the settled text
+    starting with that key). Focus is read from `new tab bar focused`, or from the new bar's `bar field focus` line
+    when that one is missing (a torn log line, #2426), and the stop's facts say which. The stop under CPU and disk
+    load from a cold copy must instead keep every key and have Enter open the page, and only reports its focus
+    time: under that load focus has taken 125 ms (run 44067785523), and with the key hold the keys don't wait on it
+    (#2401). A stop typing from 15 ms after Ctrl+T
     must keep every key (#2099). The rest is report only: the whole text at 30 ms a key (#2101), where Go goes
     (#2102), and three launches each typing at 80 and at 120 ms a key that read the field after every key.
   - **A stalled JS thread** (a slow first launch, #2059) is covered by the key hold below (#2099).
@@ -1093,7 +1115,8 @@ that answers the same methods with the same result shapes, so the wizard (`compo
 - What is read, per profile, with the Mac's readers ported: bookmarks (`Bookmarks`, `AccountBookmarks`; Firefox
   `places.sqlite`), history (`History`; `places.sqlite`), open tabs (the newest cleartext `Sessions\Session_*` or
   `Current Session`; Firefox and Zen `sessionstore-backups\recovery.jsonlz4` and the rest, LZ4 in TypeScript), favicons
-  for the imported tabs and bookmarks bar (`Favicons`), a bookmarks HTML file and a passwords CSV file (picked with
+  for the imported tabs and bookmarks bar (`Favicons`; Firefox and Zen `favicons.sqlite` in `firefoxFavicons.ts`, with
+  `FirefoxFavicons.swift`'s rules: PNGs up to 64 px by their own header, SVGs and other formats skipped), a bookmarks HTML file and a passwords CSV file (picked with
   `ArdiaDialogs.pickFiles`).
 - Spaces (`arcSidebar.ts`, `zenSession.ts`, `zenSidebar.ts`, `sidebars.ts`, ported from `ArcSidebar.swift` and
   `ZenSidebar.swift`): Arc for Windows keeps `StorableSidebar.json` beside its `User Data`, in
@@ -1421,8 +1444,8 @@ Ranked by how much a user notices. Sizes are rough: S is under a day, M is one t
 App side, an agent can do these now:
 1. A new tab opened with an address (Ctrl+T, the address, Enter) gets no keyboard (#1689). S, with the engine
    thread.
-2. Changing a Windows contrast theme while Settings is open crashes Ardia, inside the Windows App SDK (#1900). S once
-   the cause is seen on Windows.
+2. Ardia's own colours (sidebar, toolbar, Settings) don't follow a Windows contrast theme: only the window frame, the
+   caption buttons and the pages do (the crash a switch caused is #1900, fixed). M.
 3. A private pop-up left as the only window closes the tabs it opens at once, where a regular one gets a browser window
    back (#1910): the app can't open a window on the pop-up's private session yet. S.
 4. The top edge over a page that reaches it (#1888): a real drag in CI resizes the window from the top; the cursor, a
