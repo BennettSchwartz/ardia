@@ -696,14 +696,28 @@ is plain Chromium.
   every launch after onboarding) is that shape; the launch log now kept in `Logs` says what ended it.
   Sync is paused on that recovered start (#2592): the start gets `launchConfig().recoveredStart`, and Sync then
   unlocks nothing and reads, writes or deletes none of its files; it only records the pause in `sync.json` (keeping the
-  `seqs` it read), because a profile whose Sync load crashes the app (#2570) would otherwise crash every recovered
-  start too. The pause sticks across starts until Settings › Sync › Resume, which unlocks, loads Sync's saved state and
-  runs one cycle, and clears the pause only once that cycle has finished; a failed cycle or a crash during Resume
-  leaves it paused. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and
-  asks for the recovery phrase, and entering it finishes the resume. The switch is shared (`state/sync/syncPause.ts`),
-  so the Mac's and Linux's guards can set the same flag. On the dashboard, `usage_counts` carries `sync_paused_by_launch_guard`, `sync_resumes` and
-  `sync_resumes_completed`: resumes well below pauses means people don't find Resume, and completed well below resumes
-  means the crash comes back when Sync loads.
+  `seqs` it read, and any synced tab closed meanwhile), because a profile whose Sync load crashes the app (#2570) would
+  otherwise crash every recovered start too. While paused, every Sync action refuses and Settings offers only Resume
+  and Stop Syncing. The pause sticks across starts until Resume, which unlocks, loads Sync's saved state and runs one
+  cycle, and clears the pause only once that cycle has ended updated and the clear has been saved. A Resume that fails
+  (a failed cycle, the sync data missing from the folder, a quit, a clear that didn't save) leaves Sync exactly as a
+  fresh paused start: nothing loaded or running, `sync.json` read again. A missing chain during Resume never resets
+  this device. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
+  for the recovery phrase, and entering it finishes the resume. Stop Syncing while paused turns Sync off here without
+  a last cycle and never deletes the sync folder's data. Only Windows sets the flag today; the switch is shared
+  (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`
+  carries `sync_paused_by_launch_guard`, `sync_resumes` and `sync_resumes_completed`: resumes well below pauses means
+  people don't find Resume, and completed well below resumes means the crash comes back when Sync loads.
+- Sync keeps its own count of unsettled starts, because the launch guard misses a Sync crash that comes later than
+  15 s (#2570's profile died at 5.2, 19.4, 3.8, 18.9 and 4.6 s, so the guard's count went 1, 0, 1, 0, 1). It's shared
+  code, so it holds on the Mac and Linux too. At a start with Sync on and no pause, before the unlock and the load,
+  Sync reads `unsettledStarts` from `sync.json`: at 2 or more it pauses exactly as a recovered start does; otherwise
+  it adds 1 and waits for that write to land (a refused write is logged and the load goes on). The count goes back to
+  0, saved, on a clean quit (even one seconds after the start) and once the app has stayed alive 2 minutes after Sync
+  began loading; never at the end of a cycle, since a death can come after one has finished. A Resume counts as a load
+  the same way, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
+  count is kept. `recoveredStart` stays a second trigger. On the dashboard,
+  `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens

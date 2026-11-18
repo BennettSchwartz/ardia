@@ -1,163 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { calls, docOnDisk, engineInstance, pausedStart, quit, reads, retire, S, sealedFiles, setConsentPeriod, settle, shell, stub, syncedProfile, syncFileNames, takeSyncPauseCounts, timersRun, writes } from "./fixtures/pausedSync.mjs";
 
-let timers = [];
-globalThis.setTimeout = (fn, ms) => (timers.push({ fn, ms }), timers.length);
-globalThis.clearTimeout = () => {};
-globalThis.__DEV__ = false;
-
-const folder = new Map();
-const calls = { unlock: 0, openLocal: 0, chainStatus: 0, read: 0, enterPhrase: 0 };
-const hold = { unlock: null, read: null };
-let unlockAnswer = true;
-let chainFails = false;
-let duringRead = null;
-globalThis.acTestNativeModules = {
-  ArdiaSync: {
-    newDeviceId: () => "devP",
-    deviceName: () => "Test PC",
-    createPhrase: async () => true,
-    createChain: async () => {},
-    unlock: async () => {
-      calls.unlock++;
-      if (hold.unlock) await new Promise(() => {});
-      return unlockAnswer;
-    },
-    forget: async () => {},
-    chainStatus: async () => {
-      calls.chainStatus++;
-      if (chainFails) throw new Error("The sync folder went away");
-      return "ok";
-    },
-    write: async (_folder, scope, payload) => {
-      const id = `f${folder.size + 1}`;
-      folder.set(id, { scope, payload });
-      return id;
-    },
-    read: async (_folder, scope, known) => {
-      calls.read++;
-      duringRead?.();
-      if (hold.read) await new Promise(() => {});
-      const here = [...folder].filter(([, f]) => f.scope === scope);
-      const files = here.filter(([id]) => !known.includes(id)).map(([id, f]) => ({ id, payload: f.payload }));
-      return { files, pending: [], damaged: [], present: here.map(([id]) => id) };
-    },
-    remove: async (_folder, _scope, list) => list.forEach((id) => folder.delete(id)),
-    sealLocal: async (text) => `sealed:${text}`,
-    openLocal: async (sealed) => {
-      calls.openLocal++;
-      return sealed.startsWith("sealed:") ? sealed.slice(7) : null;
-    },
-    readPasswords: async () => null,
-    enterPhrase: async () => {
-      calls.enterPhrase++;
-      unlockAnswer = true;
-      return { ok: true };
-    },
-  },
-};
-
-const shell = await import("../../test-native/index.ts");
-const { reloadLaunchConfigForTests } = await import("../../platform/launchConfig.ts");
-const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
-const { takeSyncPauseCounts } = await import("../telemetry/syncPauseCounts.ts");
 const { syncFiles } = await import("./syncFiles.ts");
-const { useBrowser } = await import("../browser/store.ts");
-const quit = await import("../app/quit.ts");
-const S = () => useBrowser.getState();
-
-setConsentPeriod(true, "sync-pause-test");
-
-const settle = async (rounds = 40) => {
-  for (let i = 0; i < rounds; i++) await new Promise((resolve) => setImmediate(resolve));
-};
-const docOnDisk = () => JSON.parse(shell.docs.get("sync.json"));
-const syncFileNames = () => [...shell.docs.keys()].filter((name) => name.startsWith("sync-")).sort();
-const sealedFiles = () => Object.fromEntries(syncFileNames().map((name) => [name, shell.docs.get(name)]));
-
-const reads = [];
-const writes = [];
-shell.docs.get = function (name) {
-  reads.push(name);
-  return Map.prototype.get.call(this, name);
-};
-shell.docs.set = function (name, contents) {
-  writes.push(name);
-  return Map.prototype.set.call(this, name, contents);
-};
-
-function recovered(on) {
-  shell.launch.recoveredStart = on;
-  reloadLaunchConfigForTests();
-}
-
-function quiet() {
-  for (const key in calls) calls[key] = 0;
-  hold.unlock = hold.read = null;
-  unlockAnswer = true;
-  chainFails = false;
-  duringRead = null;
-  timers = [];
-  reads.length = 0;
-  writes.length = 0;
-  takeSyncPauseCounts();
-}
-
-let instances = 0;
-const engineInstance = () => import(`./engine.ts?pause${++instances}`);
-
-async function syncedProfile() {
-  quiet();
-  S().hydrate({});
-  useBrowser.setState({ bookmarksReady: { "": true } });
-  shell.docs.clear();
-  folder.clear();
-  recovered(false);
-  const first = await engineInstance();
-  first.startSync();
-  assert.ok("ok" in (await first.turnOnSync("/sync")));
-  S().addBookmark({ profileId: "default", url: "https://one.example/", title: "One" });
-  await first.syncNow();
-  await quit.finishQuitSaves(5_000);
-  S().addBookmark({ profileId: "default", url: "https://two.example/", title: "Two" });
-  await first.syncNow();
-  await settle();
-  const disk = new Map(shell.docs);
-  const shared = new Map(folder);
-  const seqs = docOnDisk().seqs;
-  assert.ok(Object.values(seqs).some((seq) => seq > 0), "the profile has written batches, so sync.json carries seqs");
-  assert.ok(shell.docs.get("sync-state.nns"), "and a sealed state");
-  assert.ok(syncFileNames().some((name) => /^sync-journal-\d+\.nns$/.test(name)), "and journal parts");
-  await first.stopSync();
-  folder.clear();
-  for (const [id, file] of shared) folder.set(id, file);
-  return { disk, seqs };
-}
-
-function restore(disk) {
-  shell.docs.clear();
-  for (const [name, contents] of disk) Map.prototype.set.call(shell.docs, name, contents);
-}
-
-const retire = (engine) => engine.stopSync();
-
-async function pausedStart(disk, { recoveredStart = true, keyMissing = false } = {}) {
-  restore(disk);
-  recovered(recoveredStart);
-  quiet();
-  unlockAnswer = !keyMissing;
-  const engine = await engineInstance();
-  engine.startSync();
-  await settle();
-  return engine;
-}
-
-async function timersRun() {
-  const due = timers;
-  timers = [];
-  for (const { fn } of due) fn();
-  await settle();
-}
 
 test("a recovered start with sync on loads nothing, schedules no cycle, and records the pause beside the seqs it read", async () => {
   const { disk, seqs } = await syncedProfile();
@@ -173,7 +18,7 @@ test("a recovered start with sync on loads nothing, schedules no cycle, and reco
   assert.equal(docOnDisk().pausedByGuard, true);
   assert.deepEqual(docOnDisk().seqs, seqs, "the seqs read from disk are kept");
   assert.deepEqual(sealedFiles(), sealedBefore, "the state and journal parts are untouched");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
 
   S().addBookmark({ profileId: "default", url: "https://three.example/", title: "Three" });
   await engine.syncNow();
@@ -222,7 +67,7 @@ test("Resume unlocks, loads, runs one cycle, and clears the pause only after tha
   const { disk } = await syncedProfile();
   const engine = await pausedStart(disk);
   let pausedDuringCycle = null;
-  duringRead = () => (pausedDuringCycle ??= docOnDisk().pausedByGuard === true);
+  stub.duringRead = () => (pausedDuringCycle ??= docOnDisk().pausedByGuard === true);
 
   await engine.resumeSync();
 
@@ -232,21 +77,21 @@ test("Resume unlocks, loads, runs one cycle, and clears the pause only after tha
   assert.equal(pausedDuringCycle, true, "the pause is still on disk while the cycle runs");
   assert.equal(engine.useSync.getState().status, "updated");
   assert.equal(docOnDisk().pausedByGuard, undefined, "and cleared once it finished");
-  assert.ok(timers.some(({ ms }) => ms === 15_000), "sync carries on as usual");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 1, sync_resumes_completed: 1 });
+  assert.ok(stub.timers.some(({ ms }) => ms === 15_000), "sync carries on as usual");
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1 });
   await retire(engine);
 });
 
 test("a Resume whose cycle fails stays paused, says why, and runs nothing more", async () => {
   const { disk } = await syncedProfile();
   const engine = await pausedStart(disk);
-  chainFails = true;
+  stub.chainFails = true;
   await engine.resumeSync();
   assert.equal(engine.useSync.getState().status, "paused");
   assert.equal(engine.useSync.getState().error, "The sync folder went away");
   assert.equal(docOnDisk().pausedByGuard, true);
   const cycles = calls.chainStatus;
-  chainFails = false;
+  stub.chainFails = false;
   await timersRun();
   assert.equal(calls.chainStatus, cycles, "no cycle follows on its own");
   quit.setQuitting(true);
@@ -258,7 +103,7 @@ test("a Resume whose cycle fails stays paused, says why, and runs nothing more",
     quit.setQuitting(false);
   }
   assert.deepEqual(sealedFiles(), before, "and quitting writes no state");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 1, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 0 });
 });
 
 const lockedMessage = "Enter your recovery phrase to keep syncing on this Mac.";
@@ -292,7 +137,7 @@ test("a Resume whose unlock fails asks for the recovery phrase, keeps the pause,
 test("entering the phrase after that finishes the resume and clears the pause after its cycle", async () => {
   const { engine } = await resumedWithoutKey();
   let pausedDuringCycle = null;
-  duringRead = () => (pausedDuringCycle ??= docOnDisk().pausedByGuard === true);
+  stub.duringRead = () => (pausedDuringCycle ??= docOnDisk().pausedByGuard === true);
   assert.ok("ok" in (await engine.enterRecoveryPhrase("/sync", "the words")));
   await settle();
   assert.equal(calls.enterPhrase, 1);
@@ -302,13 +147,13 @@ test("entering the phrase after that finishes the resume and clears the pause af
   assert.equal(pausedDuringCycle, true);
   assert.equal(engine.useSync.getState().status, "updated");
   assert.equal(docOnDisk().pausedByGuard, undefined);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 1, sync_resumes_completed: 1 }, "the phrase continues the press, it isn't a second one");
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1 }, "the phrase continues the press, it isn't a second one");
   await retire(engine);
 });
 
 test("entering the phrase when the resumed cycle fails leaves it paused", async () => {
   const { engine } = await resumedWithoutKey();
-  chainFails = true;
+  stub.chainFails = true;
   assert.ok("ok" in (await engine.enterRecoveryPhrase("/sync", "the words")));
   await settle();
   assert.equal(engine.useSync.getState().status, "paused");
@@ -326,16 +171,16 @@ test("without a pause, the phrase on a locked start goes down the ordinary path"
   assert.equal(calls.unlock, 1, "the launch unlock only");
   assert.ok(calls.openLocal > 0, "the saved state is loaded");
   assert.equal(engine.useSync.getState().status, "starting");
-  assert.ok(timers.some(({ ms }) => ms === 0), "and a cycle is scheduled at once");
+  assert.ok(stub.timers.some(({ ms }) => ms === 0), "and a cycle is scheduled at once");
   assert.equal(calls.chainStatus, 0);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
   await retire(engine);
 });
 
 test("a crash during Resume leaves the next start paused", async () => {
   const { disk } = await syncedProfile();
   const engine = await pausedStart(disk);
-  hold.read = true;
+  stub.hold.read = true;
   void engine.resumeSync();
   await settle();
   assert.equal(calls.read > 0, true, "the cycle is under way");
@@ -353,7 +198,7 @@ test("with sync off a recovered start changes nothing", async () => {
   assert.equal(engine.useSync.getState().status, "off");
   assert.equal(shell.docs.get("sync.json"), undefined);
   assert.deepEqual(writes.filter((name) => name.startsWith("sync")), []);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
   await engine.resumeSync();
   assert.equal(calls.unlock, 0);
 });
@@ -365,7 +210,7 @@ test("with sharing off nothing is counted", async () => {
     const engine = await pausedStart(disk);
     await engine.resumeSync();
     assert.equal(engine.useSync.getState().status, "updated");
-    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
     await retire(engine);
   } finally {
     setConsentPeriod(true, "sync-pause-test");
