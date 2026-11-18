@@ -202,7 +202,6 @@ test("the quit's stretches are test-only keys, the update installer quits with i
   const during = script("relaunch-during-quit.ps1");
   const steps = [
     "Test-LaunchBeforeTheQuitBegins",
-    "Test-LaunchWhileTheDownloadsQuestionShows",
     "Test-LaunchAtTheQuitSeam",
     "Test-LaunchDuringTheQuitWait",
     "Test-LaunchTakenInTheTurnOfTheAnswer",
@@ -216,6 +215,7 @@ test("the quit's stretches are test-only keys, the update installer quits with i
     "Test-QuitWithABeforeUnloadPage",
     "Test-TurnedAwayLaunchKeepsItsUserDataDir",
     "Test-LaunchRefusedForGood",
+    "Test-LaunchWhileTheDownloadsQuestionShows",
   ];
   for (const step of steps) assert.match(during, new RegExp(`\\n    ${step}\\n`), step);
   assert.match(during, new RegExp(`${steps.length} cases in`));

@@ -285,6 +285,9 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   while ((Get-Date) -lt $deadline -and -not [QuitPages]::DownloadsStarted) { Start-Sleep -Milliseconds 100 }
   if (-not [QuitPages]::DownloadsStarted) { Fail-Quit $what "the page never started its download" }
   Start-Sleep -Seconds 3
+  foreach ($other in @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid) | Where-Object { $_ -ne $old.Window })) { Close-Window ([pscustomobject]@{ Pid = $old.Pid; Window = $other }) }
+  $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
+  if ($left.Count -ne 1 -or $left[0] -ne $old.Window) { Fail-Quit $what "after closing the other windows, Ardia $($old.Pid) has $($left.Count) app windows, not just its first one" }
   Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
   [RelaunchCheck.Native]::PostMessageW($old.Window, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
   $question = $null
@@ -679,7 +682,6 @@ function Test-LaunchesDuringQuit {
   $watch = [Diagnostics.Stopwatch]::StartNew()
   try {
     Test-LaunchBeforeTheQuitBegins
-    Test-LaunchWhileTheDownloadsQuestionShows
     Test-LaunchAtTheQuitSeam
     Test-LaunchDuringTheQuitWait
     Test-LaunchTakenInTheTurnOfTheAnswer
@@ -693,6 +695,7 @@ function Test-LaunchesDuringQuit {
     Test-QuitWithABeforeUnloadPage
     Test-TurnedAwayLaunchKeepsItsUserDataDir
     Test-LaunchRefusedForGood
+    Test-LaunchWhileTheDownloadsQuestionShows
     Note "launches during a quit: 15 cases in $([int]$watch.Elapsed.TotalSeconds) s"
   } finally {
     Keep-QuitLog "final"
