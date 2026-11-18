@@ -4,24 +4,38 @@
 #import <AppKit/AppKit.h>
 #import <objc/runtime.h>
 
+@interface ArdiaWindowCaptureHold : NSObject
+@property(nonatomic) BOOL live;
+@property(nonatomic) BOOL screen;
+@property(nonatomic, readonly) NSMutableSet<NSNumber *> *windows;
+- (BOOL)covers:(NSWindow *)window;
+@end
+
+@implementation ArdiaWindowCaptureHold
+
+- (instancetype)init {
+  if ((self = [super init])) _windows = [NSMutableSet set];
+  return self;
+}
+
+- (BOOL)covers:(NSWindow *)window {
+  return _screen || [_windows containsObject:@(window.windowNumber)];
+}
+
+@end
+
 namespace {
 
-NSMutableDictionary<NSValue *, id> *HoldTable() {
-  static NSMutableDictionary<NSValue *, id> *holds = [NSMutableDictionary dictionary];
+NSMapTable<ArdiaCoreTab *, ArdiaWindowCaptureHold *> *Holds() {
+  static NSMapTable *holds = [NSMapTable weakToStrongObjectsMapTable];
   return holds;
 }
 
-NSValue *KeyFor(id owner) {
-  return [NSValue valueWithNonretainedObject:owner];
-}
-
-BOOL Targets(id targets, NSWindow *window) {
-  return targets == NSNull.null || [targets containsObject:@(window.windowNumber)];
-}
-
 BOOL IsHeld(NSWindow *window) {
-  for (id targets in HoldTable().objectEnumerator)
-    if (Targets(targets, window)) return YES;
+  for (ArdiaCoreTab *tab in Holds().keyEnumerator) {
+    ArdiaWindowCaptureHold *hold = [Holds() objectForKey:tab];
+    if (hold.live && !tab.closed && [hold covers:window]) return YES;
+  }
   return NO;
 }
 
@@ -41,43 +55,58 @@ BOOL InstallOcclusionHold() {
   return installed;
 }
 
-void Recheck(id targets) {
+void Recheck(ArdiaWindowCaptureHold *hold) {
   for (NSWindow *window in NSApp.windows)
-    if (Targets(targets, window))
+    if ([hold covers:window])
       [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidChangeOcclusionStateNotification object:window];
+}
+
+ArdiaWindowCaptureHold *HoldOf(ArdiaCoreTab *tab) {
+  ArdiaWindowCaptureHold *hold = [Holds() objectForKey:tab];
+  if (!hold) {
+    hold = [ArdiaWindowCaptureHold new];
+    [Holds() setObject:hold forKey:tab];
+  }
+  return hold;
 }
 
 }
 
 namespace ardia_window {
 
-BOOL HoldWindowsForCapture(id owner, NSString *sourceId) {
-  id targets = nil;
-  if ([sourceId hasPrefix:@"screen:"]) {
-    targets = NSNull.null;
-  } else if ([sourceId hasPrefix:@"window:"]) {
-    NSInteger number = [[sourceId componentsSeparatedByString:@":"][1] integerValue];
-    if (number > 0) targets = [NSSet setWithObject:@(number)];
+void ApproveCapture(ArdiaCoreTab *tab, NSString *sourceId) {
+  if (!tab) return;
+  const BOOL screen = [sourceId hasPrefix:@"screen:"];
+  const NSInteger number = [sourceId hasPrefix:@"window:"] ? [[sourceId componentsSeparatedByString:@":"][1] integerValue] : 0;
+  ArdiaWindowCaptureHold *hold = screen || number > 0 ? HoldOf(tab) : [Holds() objectForKey:tab];
+  if (!hold) return;
+  if (!hold.live) {
+    hold.screen = NO;
+    [hold.windows removeAllObjects];
   }
-  if (!targets) return NO;
-  if (!InstallOcclusionHold()) {
-    NSLog(@"[ardiacore-vis] -[NSWindow isOccluded] is missing, so %@ cannot keep its window drawing", sourceId);
-    return NO;
-  }
-  if ([HoldTable()[KeyFor(owner)] isEqual:targets]) return YES;
-  HoldTable()[KeyFor(owner)] = targets;
-  if ([ArdiaLaunchConfig.shared traced:@"visibility"]) NSLog(@"[ardiacore-vis] holding %@ visible while it is captured", sourceId);
-  Recheck(targets);
-  return YES;
+  hold.screen = hold.screen || screen;
+  if (number > 0) [hold.windows addObject:@(number)];
+  if (hold.live && InstallOcclusionHold()) Recheck(hold);
 }
 
-BOOL ReleaseWindowsForCapture(id owner) {
-  id targets = HoldTable()[KeyFor(owner)];
-  if (!targets) return NO;
-  [HoldTable() removeObjectForKey:KeyFor(owner)];
-  if ([ArdiaLaunchConfig.shared traced:@"visibility"]) NSLog(@"[ardiacore-vis] capture ended, its windows may be occluded again");
-  Recheck(targets);
-  return YES;
+void SetCaptureLive(ArdiaCoreTab *tab, BOOL live) {
+  ArdiaWindowCaptureHold *hold = [Holds() objectForKey:tab];
+  if (!live) {
+    if (!hold.live) return;
+    [Holds() removeObjectForKey:tab];
+    if ([ArdiaLaunchConfig.shared traced:@"visibility"]) NSLog(@"[ardiacore-vis] capture ended, its windows may be occluded again");
+    Recheck(hold);
+    return;
+  }
+  hold = HoldOf(tab);
+  if (hold.live) return;
+  hold.live = YES;
+  if (!InstallOcclusionHold()) {
+    NSLog(@"[ardiacore-vis] -[NSWindow isOccluded] is missing, so a shared window cannot keep drawing");
+    return;
+  }
+  if ([ArdiaLaunchConfig.shared traced:@"visibility"]) NSLog(@"[ardiacore-vis] holding captured windows visible");
+  Recheck(hold);
 }
 
 }

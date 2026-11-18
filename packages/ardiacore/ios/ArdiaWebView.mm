@@ -171,7 +171,6 @@ void AcceptDrops(NSView *root, BOOL accept) {
 - (void)dealloc {
   if (_interfaceScaleObserver) [NSNotificationCenter.defaultCenter removeObserver:_interfaceScaleObserver];
   if (_sightObserver) [NSNotificationCenter.defaultCenter removeObserver:_sightObserver];
-  ardia_window::ReleaseWindowsForCapture(self);
   [self leaveScreenAhead];
   [self closeBrowser];
 }

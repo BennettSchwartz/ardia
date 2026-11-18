@@ -77,8 +77,7 @@ constexpr NSSize kExtensionPopupMaximum = {800, 600};
 - (void)tab:(ArdiaCoreTab *)tab didChangeMediaAccess:(NSDictionary<NSString *, NSNumber *> *)access {
   BOOL screen = [access[@"screen"] boolValue];
   _reports.capturing = [access[@"camera"] boolValue] || [access[@"microphone"] boolValue] || screen;
-  if (screen && _reports.captureSource) ardia_window::HoldWindowsForCapture(self, _reports.captureSource);
-  else if (!screen && ardia_window::ReleaseWindowsForCapture(self)) _reports.captureSource = nil;
+  ardia_window::SetCaptureLive(tab, screen);
   [self emit:@"mediaAccess" payload:access ?: @{}];
   [self autoPictureInPictureInputsChanged];
 }

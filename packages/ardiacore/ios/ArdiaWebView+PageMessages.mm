@@ -303,13 +303,14 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   [_reports.displayRequests removeObjectForKey:requestId];
   if (sourceId.length && ![ArdiaHost mayCaptureDesktopSource:sourceId]) sourceId = nil;
   NSString *audio = shareAudio && sourceId.length ? DisplayMediaAudioFor(Field<NSDictionary>(request, @"audio"), sourceId) : nil;
-  if (sourceId.length && _tab)
+  if (sourceId.length && _tab) {
     [ArdiaCoreEngine allowDesktopCapture:sourceId
-                                  tab:_tab
-                                frame:[request[@"frame"] length] ? request[@"frame"] : nil
-                               origin:request[@"origin"]
-                                audio:audio];
-  _reports.captureSource = sourceId.length && _tab && ([sourceId hasPrefix:@"window:"] || [sourceId hasPrefix:@"screen:"]) ? sourceId : nil;
+                                     tab:_tab
+                                   frame:[request[@"frame"] length] ? request[@"frame"] : nil
+                                  origin:request[@"origin"]
+                                   audio:audio];
+    ardia_window::ApproveCapture(_tab, sourceId);
+  }
   [self callFrame:request[@"frame"] kind:@"displayMedia"
              json:JSONText(@{@"id" : request[@"id"], @"sourceId" : sourceId.length ? sourceId : NSNull.null, @"audio" : @(audio != nil)})];
 }

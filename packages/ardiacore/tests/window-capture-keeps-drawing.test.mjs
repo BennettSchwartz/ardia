@@ -34,31 +34,54 @@ test("holding a window posts the occlusion notification, so Chrome re-checks at 
   assert.doesNotMatch(source, /setImplementation:[^;]*occlusionState/);
 });
 
-test("the picker's approval of a window or screen source is kept, after the engine allows the capture", () => {
+test("the picker's approval of a window or screen source is kept for the tab, after the engine allows the capture", () => {
   const source = read("../ios/ArdiaWebView+PageMessages.mm");
   const resolve = body(source, "- (void)resolveDisplayMedia:");
   const allow = resolve.indexOf("allowDesktopCapture");
-  const kept = resolve.indexOf("captureSource");
+  const kept = resolve.indexOf("ardia_window::ApproveCapture(_tab, sourceId)");
   assert.notEqual(allow, -1);
-  assert.notEqual(kept, -1, "resolveDisplayMedia remembers the source it approved");
+  assert.notEqual(kept, -1, "resolveDisplayMedia hands the approved source to the tab's hold");
   assert.ok(kept > allow, "a source the engine refused is never kept");
-  assert.match(resolve, /window:/, "the window id is read from the approved window: source");
-  assert.match(resolve, /screen:/, "a whole-screen share holds every Ardia window");
+  const capture = read(CAPTURE);
+  assert.match(capture, /window:/, "the window id is read from the approved window: source");
+  assert.match(capture, /screen:/, "a whole-screen share holds every Ardia window");
 });
 
-test("the hold starts when the engine reports the share running, and lets go when it ends and when the page goes away", () => {
+test("the hold starts when the engine reports the share running and lets go when it ends", () => {
   const site = read("../ios/ArdiaWebView+Site.mm");
   const changed = body(site, "- (void)tab:(ArdiaCoreTab *)tab didChangeMediaAccess:");
-  assert.match(changed, /HoldWindowsForCapture\(self, _reports\.captureSource\)/, "a share the page then fails is never held");
-  assert.match(changed, /ReleaseWindowsForCapture/);
-  assert.match(changed, /@"screen"/, "the engine's screen flag is the start and the end of a window or screen share");
+  assert.match(changed, /ardia_window::SetCaptureLive\(tab, screen\)/, "the engine's screen flag is the start and the end of a share");
+  assert.match(changed, /@"screen"/);
+});
+
+test("the hold belongs to the tab, so it follows the page when its view moves to another window", () => {
+  const capture = read(CAPTURE);
+  assert.match(capture, /weakToStrongObjectsMapTable/, "holds are keyed by the tab, and a tab that is gone takes its hold with it");
+  assert.doesNotMatch(capture, /valueWithNonretainedObject/, "no key outlives its owner");
 
   const view = read("../ios/ArdiaWebView.mm");
-  assert.match(body(view, "- (void)dealloc"), /ReleaseWindowsForCapture/, "a page closed mid-share does not leave its window held");
+  assert.doesNotMatch(body(view, "- (void)dealloc"), /ardia_window::\w*Capture/, "a view going away after a move must not release the live tab's hold");
+  assert.doesNotMatch(read("../ios/ArdiaWebViewInternal.h"), /captureSource/, "the source is not per-view state that a move leaves behind");
+
+  const tab = read("../ios/ArdiaWebView+Tab.mm");
+  const closing = body(tab, "- (void)tabWillClose:");
+  const ended = closing.indexOf("ardia_window::SetCaptureLive(tab, NO)");
+  assert.notEqual(ended, -1, "closing the tab lets its windows go");
+  assert.ok(ended < closing.indexOf("tab != _tab"), "a tab closing under a view that already let it go still ends its hold");
+});
+
+test("a window shared while another share is already running is held too, though the engine's flag did not change", () => {
+  const capture = read(CAPTURE);
+  const approve = body(capture, "void ApproveCapture(");
+  assert.match(approve, /if \(hold\.live && /, "an approval during a live share takes effect at once");
+  assert.match(approve, /addObject/, "windows are added to the tab's hold, not swapped for the new one");
+  assert.match(approve, /removeAllObjects/, "an approval whose share never started is replaced, not carried");
+  const live = body(capture, "void SetCaptureLive(");
+  assert.match(live, /if \(!hold\.live\) return/, "a camera or microphone change keeps an approval waiting for its share");
 });
 
 test("the hold is declared next to the other window helpers and built with the app", () => {
   const header = read("../ios/ArdiaChromeWindowInternal.h");
-  assert.match(header, /HoldWindowsForCapture/);
-  assert.match(header, /ReleaseWindowsForCapture/);
+  assert.match(header, /ApproveCapture\(ArdiaCoreTab \*tab, NSString \*sourceId\)/);
+  assert.match(header, /SetCaptureLive\(ArdiaCoreTab \*tab, BOOL live\)/);
 });
