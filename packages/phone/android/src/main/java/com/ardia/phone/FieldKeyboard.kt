@@ -79,7 +79,9 @@ internal class FieldKeyboard(
         private fun inputMethods(view: View) = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
 
         fun requestShow(view: View) {
-            inputMethods(view)?.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            inputMethods(view)?.showSoftInput(view, 0)
+            @Suppress("DEPRECATION")
+            ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())
         }
 
         fun requestHide(view: View) {
