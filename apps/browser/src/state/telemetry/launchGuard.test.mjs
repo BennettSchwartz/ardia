@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 globalThis.__DEV__ = false;
 await import("../../test-native/index.ts");
-const { launchGuardProperties, waitedForPreviousBucket, quitWaitBucket, LAUNCH_GUARD_DOC } = await import("./diagnostics.ts");
+const { launchGuardProperties, waitedForPreviousBucket, quitWaitBucket, LAUNCH_GUARD_DOC } = await import("./launchGuard.ts");
 
 const reading = (contents) => (name) => (name === LAUNCH_GUARD_DOC ? contents : null);
 
