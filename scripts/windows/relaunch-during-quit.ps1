@@ -305,12 +305,13 @@ function Answer-QuitDialog($dialog, [int]$button) {
 function Test-LaunchWhileTheDownloadsQuestionShows {
   $what = "a launch while the question about running downloads is on screen"
   $old = Open-QuitInstance $what "appDialog" -Visible
+  $startedBefore = [QuitPages]::DownloadsStarted
   $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);")) -Visible
   if (-not $starter.WaitForExit(30000) -or $starter.ExitCode -ne 0) { Fail-Quit $what "the launch that opens the download page didn't hand over and exit 0" }
   Wait-QuitLinkOnce $what "download"
   $deadline = (Get-Date).AddSeconds(30)
-  while ((Get-Date) -lt $deadline -and -not [QuitPages]::DownloadsStarted) { Start-Sleep -Milliseconds 100 }
-  if (-not [QuitPages]::DownloadsStarted) { Fail-Quit $what "the page never started its download" }
+  while ((Get-Date) -lt $deadline -and [QuitPages]::DownloadsStarted -le $startedBefore) { Start-Sleep -Milliseconds 100 }
+  if ([QuitPages]::DownloadsStarted -le $startedBefore) { Fail-Quit $what "the page never started its download" }
   Start-Sleep -Seconds 5
   if (@([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid)).Count -gt 1) { Close-Window $old }
   $deadline = (Get-Date).AddSeconds(15)
@@ -365,18 +366,48 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   Assert-LoadedOnce $what "asking"
   Assert-NoQuitLine '\[quit\] not asked on a hidden instance' $what "the shown Ardia logged itself as a hidden instance that didn't ask"
   $askedLines = @(@(Quit-Log) | Where-Object { $_ -match '\[quit\] asked: ' })
-  $askLog = "the build doesn't log the quit question yet"
-  if ($askedLines.Count) {
-    $cancelled = @($askedLines | Where-Object { $_ -match 'answered cancel' })
-    if ($cancelled.Count) { Fail-Quit $what "the log has a quit question answered cancel, which the case never gave: $($cancelled -join ' | ')" }
-    $downloadAsks = @($askedLines | Where-Object { $_ -match '\[quit\] asked: [1-9]\d* downloads? in progress, warning (on|off); answered quit' })
-    if ($downloadAsks.Count -ne $answers) { Fail-Quit $what "the log has $($downloadAsks.Count) quit questions about downloads answered quit, not the $answers the case answered: $($askedLines -join ' | ')" }
-    $askLog = "the log has $($downloadAsks.Count) '[quit] asked: ... downloads in progress ...; answered quit' line(s), one per question"
-  }
+  $cancelled = @($askedLines | Where-Object { $_ -match 'answered cancel' })
+  if ($cancelled.Count) { Fail-Quit $what "the log has a quit question answered cancel, which the case never gave: $($cancelled -join ' | ')" }
+  $downloadAsks = @($askedLines | Where-Object { $_ -match '\[quit\] asked: 1 download in progress, warning (on|off); answered quit' })
+  if ($downloadAsks.Count -ne $answers -or $askedLines.Count -ne $answers) { Fail-Quit $what "the log has $($askedLines.Count) '[quit] asked:' line(s), $($downloadAsks.Count) of them '1 download in progress ...; answered quit', not exactly one per the $answers question(s) the case answered Quit: $($askedLines -join ' | ')" }
   [QuitPages]::ReleaseDownloads()
   Keep-QuitLog $what
   $before = if ($earlier.Count) { " after $($earlier -join ', ')" } else { "" }
-  Note "$what`: in a shown Ardia (no ARDIA_BACKGROUND, which answers every question unseen), the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once (in Little Ardia) with no quit begun, and Quit then ended it through the normal quit with its 'process ending' ($answers download question(s) answered Quit, the last when its last window closed; $askLog)"
+  Note "$what`: in a shown Ardia (no ARDIA_BACKGROUND, which answers every question unseen), the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once (in Little Ardia) with no quit begun, and Quit then ended it through the normal quit with its 'process ending' ($answers download question(s) answered Quit, the last when its last window closed; the log has one '[quit] asked: 1 download in progress, ...; answered quit' line per question)"
+}
+
+function Test-HiddenQuitWithADownloadIsLogged {
+  $what = "a hidden Ardia's quit with a download running"
+  $old = Open-QuitInstance $what ""
+  $startedBefore = [QuitPages]::DownloadsStarted
+  $starter = Start-WithTest "" @((Quit-Link "hidden-download" "setTimeout(() => { location.href = '/download-held'; }, 300);"))
+  if (-not $starter.WaitForExit(30000) -or $starter.ExitCode -ne 0) { Fail-Quit $what "the launch that opens the download page didn't hand over and exit 0" }
+  Wait-QuitLinkOnce $what "hidden-download"
+  $deadline = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $deadline -and [QuitPages]::DownloadsStarted -le $startedBefore) { Start-Sleep -Milliseconds 100 }
+  if ([QuitPages]::DownloadsStarted -le $startedBefore) { Fail-Quit $what "the page never started its download" }
+  Start-Sleep -Seconds 5
+  if (@([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid)).Count -gt 1) { Close-Window $old }
+  $deadline = (Get-Date).AddSeconds(15)
+  $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
+  while ((Get-Date) -lt $deadline -and $left.Count -ne 1) {
+    Start-Sleep -Milliseconds 200
+    $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
+  }
+  if ($left.Count -ne 1) { Fail-Quit $what "15 s after closing the first window, Ardia $($old.Pid) has $($left.Count) app windows, not just the one with the download page" }
+  if ([QuitPages]::DownloadsOpen -lt 1) { Fail-Quit $what "the browser dropped the held download (at $([QuitPages]::DownloadClosedAt) UTC) before the last window closed" }
+  $ended = Count-QuitsEnded
+  [RelaunchCheck.Native]::PostMessageW($left[0], 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
+  Wait-Exit $old.Pid $what | Out-Null
+  Assert-QuitsEnded $what ($ended + 1)
+  $notAsked = @(@(Quit-Log) | Where-Object { $_ -match '\[quit\] not asked on a hidden instance: 1 download in progress, warning (on|off)' })
+  if ($notAsked.Count -ne 1) { Fail-Quit $what "the hidden Ardia's quit with a download running logged $($notAsked.Count) '[quit] not asked on a hidden instance: 1 download in progress' line(s), not one" }
+  Assert-NoQuitLine '\[quit\] asked: ' $what "a hidden Ardia logged a quit question as shown"
+  $deadline = (Get-Date).AddSeconds(10)
+  while ((Get-Date) -lt $deadline -and [QuitPages]::DownloadsOpen -gt 0) { Start-Sleep -Milliseconds 200 }
+  if ([QuitPages]::DownloadsOpen -gt 0) { Fail-Quit $what "the held download was still open on the page server 10 s after Ardia ended" }
+  Keep-QuitLog $what
+  Note "$what`: closing its last window quit it with no question, and the log says it saw the download: '$($notAsked[0] -replace '^.*\[quit\] ', '[quit] ')'"
 }
 
 function Test-LaunchAtTheQuitSeam {
@@ -781,6 +812,7 @@ function Test-LaunchesDuringQuit {
     "Test-QuitWithABeforeUnloadPage",
     "Test-TurnedAwayLaunchKeepsItsUserDataDir",
     "Test-LaunchRefusedForGood",
+    "Test-HiddenQuitWithADownloadIsLogged",
     "Test-LaunchWhileTheDownloadsQuestionShows"
   )
   $script:QuitFailures = @()
