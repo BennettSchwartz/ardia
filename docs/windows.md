@@ -705,7 +705,7 @@ is plain Chromium.
   `sync.json` read again (a clear refused but staged anyway is overwritten with the paused document). The promise that
   the state and journal stay byte for byte as they were is for a paused start; a failed Resume can still let a
   checkpoint it had already handed to the native save land, which is a true state with its journal kept. A missing
-  chain during Resume never resets this device. No cycle runs before the saved state is loaded, at any start. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
+  chain during Resume never resets this device. No cycle runs before the saved state is loaded, at any start; a load that failed is tried again by Sync Now (once per press), never by the 15 s timer. Every write of `sync.json` goes through one ordered queue, and the quit waits for it to drain. Stop Syncing first saves the document as off and waits for that write, then forgets the key and clears the files, so a crash in between leaves Sync off. Stop pressed during a start's load waits for the load and runs the usual last cycle. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
   for the recovery phrase, and entering it finishes the resume. Stop Syncing while paused turns Sync off here without
   a last cycle and never deletes the sync folder's data. Only Windows sets the flag today; the switch is shared
   (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`

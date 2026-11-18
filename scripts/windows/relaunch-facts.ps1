@@ -109,21 +109,22 @@ function Read-SyncDocWhileRunning([string]$Path) {
   return Read-SyncDoc $Path
 }
 
+function Get-LinesHash([string[]]$Lines, [int]$Count) {
+  if ($Count -le 0) { return "" }
+  $text = (@($Lines) | Select-Object -First $Count) -join "`n"
+  return [System.Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($text)))
+}
+
 function Get-LogMark([string[]]$Current, [string[]]$Previous) {
-  return [pscustomobject]@{
-    From = @($Current).Count
-    First = if (@($Current).Count) { @($Current)[0] } else { $null }
-    PreviousFirst = if (@($Previous).Count) { @($Previous)[0] } else { $null }
-  }
+  $Current = @($Current)
+  return [pscustomobject]@{ From = $Current.Count; Hash = Get-LinesHash $Current $Current.Count }
 }
 
 function Get-RunLines($Mark, [string[]]$Current, [string[]]$Previous) {
   $Current = @($Current)
   $Previous = @($Previous)
   if (-not $Mark.From) { return $Current }
-  $currentChanged = $Current.Count -lt $Mark.From -or $Current[0] -ne $Mark.First
-  $previousTookIt = $Previous.Count -ge $Mark.From -and $Previous[0] -eq $Mark.First -and $Previous[0] -ne $Mark.PreviousFirst
-  if (-not $currentChanged -and -not $previousTookIt) { return @($Current | Select-Object -Skip $Mark.From) }
-  $straddled = if ($Previous.Count -ge $Mark.From -and $Previous[0] -eq $Mark.First) { @($Previous | Select-Object -Skip $Mark.From) } else { @() }
+  if ($Current.Count -ge $Mark.From -and (Get-LinesHash $Current $Mark.From) -eq $Mark.Hash) { return @($Current | Select-Object -Skip $Mark.From) }
+  $straddled = if ($Previous.Count -ge $Mark.From -and (Get-LinesHash $Previous $Mark.From) -eq $Mark.Hash) { @($Previous | Select-Object -Skip $Mark.From) } else { @() }
   return @($straddled) + $Current
 }

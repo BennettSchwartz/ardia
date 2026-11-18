@@ -112,7 +112,7 @@ export function guardResume(steps: ResumeSteps) {
         await steps.persist({ pausedByGuard: undefined });
       } catch (error) {
         warnFor(consent, "[sync] couldn't save the resumed state", error);
-        await steps.persist().catch(() => {});
+        void steps.persist().catch(() => {});
         return steps.settlePaused(CLEAR_UNSAVED);
       }
       delete steps.doc().pausedByGuard;

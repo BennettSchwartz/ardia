@@ -139,6 +139,9 @@ Check "a rotation with nothing more in the old log reads the new log alone" 93 (
 $sameFirst = @($before[0], "launch 20 another start's line")
 Check "a rotated log that happens to start with the same line is still read whole" 2 (Get-RunLines $mark $sameFirst $before).Count
 Check "an empty log at the mark gives every line" 2 (Get-RunLines (Get-LogMark @() @()) @("a", "b") @()).Count
+$twin = @($before[0], "info 41 [sync] test: recoveredStart false, status starting", "launch 9001 process ending")
+Check "a rotated log with the same length and first line as the marked one is read whole" "launch 9001 process ending" (@(Get-RunLines $mark $twin $before) -join "|").Split("|")[-1]
+Check "and every one of its lines is read" 3 @(Get-RunLines $mark $twin $before).Count
 
 if ($failures.Count) {
   $failures | ForEach-Object { Write-Host "::error::$_" }

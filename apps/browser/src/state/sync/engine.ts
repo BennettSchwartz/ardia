@@ -24,6 +24,7 @@ import { openTabsClosed, recordOpenTabCloses } from "./openTabCloses";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
+import { syncStopper } from "./syncStop";
 import { CHAIN_MISSING, guardResume, pauseAfterRecoveredStart, pauseAfterUnsettledStarts, pausedByGuard, QUIT_DURING_RESUME, SYNC_LOCKED, SYNC_PAUSED_REFUSAL, unsettledStarts } from "./syncPause";
 
 export { onTabsReceived } from "./sentTabs";
@@ -58,10 +59,12 @@ let forcePasswordsNext = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let outcome: Partial<SyncUi> | null = null;
 let counting = true;
-let stopping = false;
+let keyUnlocked = false;
+let loading: Promise<void> | null = null;
 const paused = () => pausedByGuard(doc);
 const refused = () => paused() || !!running();
-const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded } = syncFiles(() => doc);
+const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded, docsSettled } = syncFiles(() => doc);
+const loadOnce = () => (loading ??= (starts.arm(), loadSavedState()).finally(() => (loading = null)));
 const report = (patch: Partial<SyncUi>) => void (paused() ? (outcome = patch) : publishUi(patch));
 const standsDown = () => paused() && isQuitting() && (report({ status: "stalled", error: QUIT_DURING_RESUME }), true);
 
@@ -100,7 +103,9 @@ function scheduleSync(delay = AFTER_EDIT_MS) {
 }
 
 export async function syncNow() {
-  if (!refused()) await runCycle({ forcePasswords: true });
+  if (refused()) return;
+  if (!loaded() && keyUnlocked && !loading && doc.enabled) await loadOnce().catch((error: unknown) => publishUi({ status: "stalled", error: errorText(error) }));
+  await runCycle({ forcePasswords: true });
 }
 
 type CycleOptions = { retiring?: boolean; forcePasswords?: boolean };
@@ -270,11 +275,11 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
   if (doc.enabled && doc.deviceId && useSync.getState().status === "locked") {
     const asked = doc;
     const result = await native.enterPhrase(doc.deviceId, text, doc.folder ?? folder);
-    if (doc !== asked || stopping || !doc.enabled) return result;
+    if (doc !== asked || stopper.stopping() || !doc.enabled) return result;
     if ("ok" in result && paused()) void continueAfterPhrase();
     else if ("ok" in result) {
-      starts.arm();
-      await loadSavedState();
+      keyUnlocked = true;
+      await loadOnce();
       publishUi({ status: "starting", error: null });
       scheduleSync(0);
     }
@@ -287,30 +292,13 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
   return result;
 }
 
-export async function stopSync({ deleteData = false } = {}) {
-  const native = SyncNative;
-  if (!native || !doc.enabled) return;
-  const consent = consentToken();
-  stopping = true;
-  try {
-    await running();
-    clearTimeout(timer);
-    const wasPaused = paused();
-    const reportFailure = (error: unknown) => warnFor(consent, "[sync] the last cycle before stopping failed", error);
-    while (cycle) await cycle.catch(reportFailure);
-    if (!wasPaused && useSync.getState().status !== "locked") await runCycle({ retiring: true }).catch(reportFailure);
-    clearTimeout(timer);
-    const folder = doc.folder;
-    if (deleteData && folder && !wasPaused) await native.deleteChain(folder).catch((error: unknown) => warnFor(consent, "[sync] deleting sync data failed", error));
-    if (doc.deviceId) await native.forget(doc.deviceId);
-    doc = { ...emptyDoc(), folder, types: doc.types };
-    forgetScopeAdapters();
-    startOver();
-    publishUi({ status: "off", error: null });
-  } finally {
-    stopping = false;
-  }
+async function cyclesDone(report: (error: unknown) => void) {
+  while (cycle) await cycle.catch(report);
 }
+
+const stopper = syncStopper({ native: () => SyncNative, doc: () => doc, replaceDoc: (next) => void (doc = next), paused, locked: () => useSync.getState().status === "locked", running: () => running(), loading: () => loading, cyclesDone, retire: () => runCycle({ retiring: true }), clearTimers: () => clearTimeout(timer), persist: () => saveDocNow(), forgetAdapters: forgetScopeAdapters, startOver, publish: publishUi });
+
+export const stopSync = (options?: { deleteData?: boolean }) => stopper.stopSync(consentToken(), options);
 
 const docChanged = () => void (save(), publishUi(), scheduleSync(0));
 
@@ -339,7 +327,7 @@ function settlePaused(error: string | null) {
 
 const starts = unsettledStarts({ doc: () => doc, persist: () => saveDocNow(), counting: () => counting });
 const resumeCycle = async () => ((outcome = null), await runCycle({}, true), outcome);
-const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => !!(await SyncNative?.unlock(deviceId)), load: loadSavedState, countLoad: starts.countLoad, arm: starts.arm, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS) });
+const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => (keyUnlocked = !!(await SyncNative?.unlock(deviceId))), load: loadSavedState, countLoad: starts.countLoad, arm: starts.arm, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS) });
 export { resumeSync };
 
 export function startSync({ countStarts = true } = {}) {
@@ -353,13 +341,15 @@ export function startSync({ countStarts = true } = {}) {
   if (!paused()) watchExtensions();
   if (doc.enabled && doc.deviceId && !paused()) {
     const deviceId = doc.deviceId;
+    const started = doc;
     void starts
       .countLoad(consent)
       .then(() => native.unlock(deviceId))
       .then(async (ok) => {
+        if (isQuitting() || doc !== started) return;
         if (!ok) return publishUi({ status: "locked", error: SYNC_LOCKED });
-        starts.arm();
-        await loadSavedState();
+        keyUnlocked = true;
+        await loadOnce();
         publishUi();
         scheduleSync(500);
       })
@@ -371,9 +361,11 @@ export function startSync({ countStarts = true } = {}) {
   saveBeforeQuit("sync", async () => {
     starts.stop();
     await running();
-    if (paused()) return;
-    await checkpoint();
-    await starts.settle();
+    if (!paused()) {
+      await checkpoint();
+      await starts.settle();
+    }
+    await docsSettled();
   });
   onProfilesOpened(() => {
     if (!doc.enabled || !doc.deviceId || paused()) return;

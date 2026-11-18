@@ -272,13 +272,15 @@ export function syncFiles(current: () => SyncDoc) {
     return run;
   }
 
+  const forgetIssued = (json: string) => void (docFile.json === json && Object.assign(docFile, { json: "", lasting: "" }));
+
   const saveDocNow = (patch: Partial<SyncDoc> = {}) =>
     inDocTurn(async () => {
       const json = issueDoc(true, patch)!;
       try {
         await saveDocument(DOC, json);
       } catch (error) {
-        if (docFile.json === json) Object.assign(docFile, { json: "", lasting: "" });
+        forgetIssued(json);
         throw error;
       }
     });
@@ -292,11 +294,17 @@ export function syncFiles(current: () => SyncDoc) {
 
   function writeDocNow() {
     const json = issueDoc(false);
-    if (json !== null) writeDocument(DOC, json);
+    if (json === null) return;
+    let refused = true;
+    try {
+      refused = (writeDocument(DOC, json) as unknown) === false;
+    } finally {
+      if (refused) forgetIssued(json);
+    }
   }
 
   function saveDoc() {
-    if (docWrites) void inDocTurn(async () => writeDocNow());
+    if (docWrites) void inDocTurn(async () => writeDocNow()).catch((error: unknown) => warnFor(null, "[sync] couldn't save sync.json", error));
     else writeDocNow();
   }
 
@@ -362,5 +370,5 @@ export function syncFiles(current: () => SyncDoc) {
     });
   }
 
-  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded };
+  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded, docsSettled: () => docQueue };
 }
