@@ -85,7 +85,7 @@ export function SettingsWindow() {
   const scroller = useRef<ScrollView>(null);
   const key = shown ? settingsPlaceKey(shown) : "";
   const page = shown ? settingsPageKey(shown) : "";
-  const scrollMemory = useSettingsScrollMemory(page, scroller);
+  const scrollMemory = useSettingsScrollMemory(shown && key === settingsPlaceKey(nav) ? nav.visit : null, scroller);
   useEffect(() => closeProfileIconPickerIn(SETTINGS_WINDOW_ID), [key]);
   const content = useRef<View>(null);
   const scrollTop = useRef(0);
@@ -96,6 +96,7 @@ export function SettingsWindow() {
   const switched = useRef(key);
   useEffect(() => {
     if (!reveal) return;
+    scrollMemory.endHold();
     if (nav.pane !== revealPane) return void clearSettingsReveal();
     if (shown?.pane !== revealPane) return;
     const animated = switched.current === key;
@@ -150,10 +151,11 @@ export function SettingsWindow() {
           scrollEventThrottle={16}
           onScroll={({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }) => {
             scrollTop.current = contentOffset.y;
-            scrollMemory.onOffset(contentOffset.y);
+            scrollMemory.onScroll(contentOffset.y, layoutMeasurement.height, contentSize.height);
             noteSettingsScroll(contentOffset.y, layoutMeasurement.height, contentSize.height);
           }}
           onLayout={(e) => void (viewport.current = e.nativeEvent.layout.height)}
+          onScrollBeginDrag={scrollMemory.endHold}
           onContentSizeChange={scrollMemory.onContentSizeChange}
           contentContainerStyle={PANE_SCROLL}>
           <View key={page} ref={content} collapsable={false} style={PANE_COLUMN}>
