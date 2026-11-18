@@ -73,3 +73,15 @@ onAndroid("leaving My Filters puts the keyboard away, so it doesn't stay up over
   unmount(root);
   expect(dismissed).toHaveBeenCalled();
 });
+
+onAndroid("My Filters' back arrow blurs its field and puts the keyboard away before the page pops, not only when it unmounts", () => {
+  const dismissed = jest.spyOn(Keyboard, "dismiss");
+  const popped = jest.spyOn(require("../state/settings/nav"), "popSettings").mockImplementation(() => true);
+  const root = material(<MyFiltersPage />);
+  act(() => {
+    root.root.findAll((found) => found.props.testID === "materialSettingsBack" && typeof found.props.onPress === "function")[0]!.props.onPress();
+  });
+  expect(dismissed).toHaveBeenCalled();
+  expect(popped).toHaveBeenCalled();
+  unmount(root);
+});
