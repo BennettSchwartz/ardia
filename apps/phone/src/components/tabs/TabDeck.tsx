@@ -114,9 +114,11 @@ export function deckShownIds(order: readonly string[], leaving: readonly Leaving
   return shown;
 }
 
-const deckScrollFor = (ids: readonly string[], target: string | null) => {
+export const deckOpeningScroll = (index: number, count: number, centred: boolean) => (centred ? index : openingDeckScroll(index, count));
+
+const deckScrollFor = (ids: readonly string[], target: string | null, centred = false) => {
   const index = target ? ids.indexOf(target) : -1;
-  return index >= 0 ? openingDeckScroll(index, ids.length) : initialDeckScroll(ids.length);
+  return index >= 0 ? deckOpeningScroll(index, ids.length, centred) : initialDeckScroll(ids.length);
 };
 
 const entrancePhase = (ids: readonly string[], target: string | null): Phase => (target && ids.includes(target) ? { kind: "opening", id: target } : SETTLED);
@@ -172,7 +174,7 @@ export const TabDeck = memo(function TabDeck() {
     return {
       ids,
       phase,
-      scroll: deckScrollFor(ids, target),
+      scroll: deckScrollFor(ids, target, material),
       shownPhase: shown ? phase : SETTLED,
       expanded: shown ? index : -1,
       progress: shown && index < 0 ? 1 : 0,
@@ -195,7 +197,7 @@ export const TabDeck = memo(function TabDeck() {
   if (syncedShown.current !== shown || (!shown && syncedTabs.current !== allTabs)) {
     const ids = allTabs.map((t) => t.id);
     const target = shown ? (grid ? null : peekDeckEntrance()) : heldSelected;
-    const nextAnchor = focusedIndex(deckScrollFor(ids, target), ids.length);
+    const nextAnchor = focusedIndex(deckScrollFor(ids, target, material), ids.length);
     const nextPhase = entrancePhase(ids, target);
     if (!sameOrder(order, ids)) setOrder(ids);
     if (nextAnchor !== anchor) setAnchor(nextAnchor);
@@ -334,7 +336,7 @@ export const TabDeck = memo(function TabDeck() {
     clearTimeout(landingCap.current);
     stopDrawnWait.current();
     setOpeningCard(null);
-    placeCards(order, deckScrollFor(order, heldSelected));
+    placeCards(order, deckScrollFor(order, heldSelected, material));
     deckPhase.value = DECK_PHASE.settled;
     expandedIndex.value = -1;
     scaleProgress.value = 0;
@@ -349,7 +351,7 @@ export const TabDeck = memo(function TabDeck() {
     searchedFor.current = needle;
     const entrance = peekDeckEntrance();
     const index = entrance ? order.indexOf(entrance) : -1;
-    placeCards(order, index >= 0 ? openingDeckScroll(index, order.length) : initialDeckScroll(order.length));
+    placeCards(order, index >= 0 ? deckOpeningScroll(index, order.length, material) : initialDeckScroll(order.length));
     if (!entrance || index < 0 || grid) {
       deckPhase.value = DECK_PHASE.settled;
       expandedIndex.value = -1;

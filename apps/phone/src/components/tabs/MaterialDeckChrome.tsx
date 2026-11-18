@@ -186,6 +186,7 @@ export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, 
         />
         {text ? <MaterialIconButton testID="materialDeckSearchClear" icon="xmark" label="Clear Search" scheme={scheme} onPress={() => change("")} /> : null}
       </Pressable>
+      <View testID="materialDeckFabShadow" style={[styles.fabShadow, { backgroundColor: scheme.primaryContainer }]}>
       <MenuTrigger
         items={plusMenuItems(incognito, canReopen)}
         trigger="longPress"
@@ -197,7 +198,6 @@ export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, 
         style={styles.fabSlot}
       >
         {({ onLongPress }) => (
-          <View testID="materialDeckFabShadow" style={[styles.fabShadow, { backgroundColor: scheme.primaryContainer }]}>
             <Pressable
               testID="materialDeckFab"
               accessibilityRole="button"
@@ -211,9 +211,9 @@ export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, 
             >
               <Symbol name="plus" size={materialSize.icon} color={scheme.onPrimaryContainer} />
             </Pressable>
-          </View>
         )}
       </MenuTrigger>
+      </View>
     </Animated.View>
   );
 }

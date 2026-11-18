@@ -2,7 +2,7 @@ import { Keyboard, Platform, StyleSheet } from "react-native";
 import { getAnimatedStyle } from "react-native-reanimated";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { cardMenuItems } from "../components/tabs/DeckCard";
-import { TabDeck } from "../components/tabs/TabDeck";
+import { deckOpeningScroll, TabDeck } from "../components/tabs/TabDeck";
 import { deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { fitsMaterialChrome, MATERIAL_DECK, materialCloseCenter, materialCloseHit, materialDeckGeometry, materialOnScreen } from "../components/tabs/MaterialDeckLayout";
 import { getByGestureTestId } from "react-native-gesture-handler/jest-utils";
@@ -267,5 +267,19 @@ onAndroid("a tap on the bottom row's Search Tabs field never dismisses the keybo
   const root = deck();
   tapDeckAt(150, 873 - SAFE.bottom - MATERIAL_DECK.edge - 28);
   expect(dismissed).not.toHaveBeenCalled();
+  unmount(root);
+});
+
+test("the Material deck opens on the active card itself, so a last tab opens fully on screen; the other designs keep main's peek", () => {
+  expect(deckOpeningScroll(2, 3, true)).toBe(2);
+  expect(deckOpeningScroll(2, 3, false)).toBe(1);
+  expect(deckOpeningScroll(0, 3, true)).toBe(0);
+});
+
+onAndroid("the FAB's shadow view wraps its menu trigger, so the trigger's native view can't clip the shadow to a hard edge", () => {
+  const root = deck();
+  const shadow = host(root, "materialDeckFabShadow")!;
+  expect(shadow.findAll((found) => found.type === MenuTrigger)).toHaveLength(1);
+  expect(StyleSheet.flatten(shadow.props.style)).toMatchObject({ borderRadius: 16, elevation: MATERIAL_DECK.fabElevation });
   unmount(root);
 });
