@@ -273,7 +273,7 @@ export function materialMenuWidth(entries: readonly MaterialMenuEntry[]): number
   return Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, Math.ceil(widest / MENU_WIDTH_STEP) * MENU_WIDTH_STEP));
 }
 
-export const materialMenuFill = (scheme: { surfaceContainer: string; surfaceContainerHigh: string }, dark: boolean) => (dark ? scheme.surfaceContainerHigh : scheme.surfaceContainer);
+export const materialMenuFill = (scheme: { surfaceContainer: string; surfaceContainerHighest: string }, dark: boolean) => (dark ? scheme.surfaceContainerHighest : scheme.surfaceContainer);
 
 export function materialMenuGroups(entries: readonly MaterialMenuEntry[]): { entry: MaterialMenuEntry; index: number }[][] {
   const groups: { entry: MaterialMenuEntry; index: number }[][] = [[]];

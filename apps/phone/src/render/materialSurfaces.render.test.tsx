@@ -167,8 +167,9 @@ onAndroid("with Android's Remove animations the material sheet comes and goes at
   expect(materialSheetMs(false, false)).toBe(200);
 });
 
-onAndroid("in dark, drawn menus sit on surfaceContainerHigh so they stand off the dark page behind them, as the native menus do; light keeps surfaceContainer", () => {
+onAndroid("in dark, drawn menus sit on surfaceContainerHighest, a tone above the page and above the search view's surfaceContainerHigh, so a suggestion's menu stands off the search behind it; light keeps surfaceContainer", () => {
   const dark = SEEDED_SCHEMES.ardia.dark;
-  expect(materialMenuFill(dark, true)).toBe(dark.surfaceContainerHigh);
+  expect(materialMenuFill(dark, true)).toBe(dark.surfaceContainerHighest);
+  expect(materialMenuFill(dark, true)).not.toBe(dark.surfaceContainerHigh);
   expect(materialMenuFill(LIGHT, false)).toBe(LIGHT.surfaceContainer);
 });
