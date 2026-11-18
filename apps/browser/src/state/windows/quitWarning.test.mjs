@@ -481,3 +481,96 @@ test("on Windows, a close that quits with a download running asks first, whateve
   assert.deepEqual(seen.windowOpenedDuringTheWarning, { asked: [warning], open: false, openedStays: true }, "a window opened while the warning was up keeps Ardia running, so the downloads question isn't asked");
   assert.deepEqual(seen.withoutSharing, { asked: [one], open: true, counts: { quit_warnings_after_tabs_confirm: 0, quit_warnings_after_tabs_confirm_cancelled: 0, quit_warnings_with_downloads: 0, quit_warnings_with_downloads_cancelled: 0 } }, "with sharing off the question still asks and nothing is counted");
 });
+
+const quitLogLines = (hidden) => `
+const { shellNativeModules, windows } = await import("./src/test-native/shell.ts");
+shellNativeModules.ArdiaSystem.backgroundInstance = ${hidden};
+const said = [];
+console.info = (...args) => { if (String(args[0]).startsWith("[quit]")) said.push(args.join(" ")); };
+const { useBrowser } = await import("./src/state/browser/store.ts");
+const { requestWindowClose } = await import("./src/state/windows/windowClose.ts");
+const { closeLittleArdia } = await import("./src/state/littleArdia/actions.ts");
+const S = () => useBrowser.getState();
+const settle = async () => { for (let turn = 0; turn < 12; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+let asked = 0;
+let answers = [];
+shellNativeModules.ArdiaDialogs.confirm = () => { asked += 1; return Promise.resolve({ confirmed: answers.shift() ?? false, suppressed: false }); };
+const download = (id, extra = {}) => ({ id, url: "https://dl.example/" + id, filename: id, path: "/tmp/" + id, state: "downloading", paused: false, received: 0, total: 1, speed: 0, mimeType: "", profile: "", ...extra });
+const fresh = (settings, downloads) => {
+  S().hydrate({ profiles: { default: { id: "default", name: "Personal", color: "plum", icon: null, createdAt: 0 } }, profileOrder: ["default"] });
+  S().updateSettings({ warnBeforeQuitting: false, warnBeforeClosingWindow: false, warnBeforeClosingLastTab: false, ...settings });
+  windows.open.clear();
+  for (const each of downloads) S().upsertDownload(each);
+  said.length = 0;
+  asked = 0;
+};
+const lone = (options = {}) => {
+  const id = S().createWindow({ url: "https://a.example/", ...options });
+  windows.open.set(id, {});
+  return id;
+};
+const closing = async (id, close, replies) => {
+  answers = [...replies];
+  close(id);
+  await settle();
+  return { said: [...said], asked, open: !!S().windows[id] };
+};
+const byButton = (id) => requestWindowClose(id);
+const seen = {};
+
+fresh({}, [download("one")]);
+let w = lone();
+seen.cancelled = await closing(w, byButton, [false]);
+if (S().windows[w]) seen.quit = await closing(w, byButton, [true]);
+
+fresh({ warnBeforeQuitting: true }, [download("one"), download("two", { paused: true })]);
+w = lone();
+seen.warningAndSeveral = await closing(w, byButton, [true, true]);
+
+fresh({ warnBeforeQuitting: true }, []);
+w = lone({ kind: "small" });
+seen.littleArdiaWarning = await closing(w, closeLittleArdia, [true]);
+
+fresh({}, [download("one")]);
+w = lone({ kind: "small" });
+seen.littleArdiaDownload = await closing(w, closeLittleArdia, [true]);
+
+fresh({}, [download("one")]);
+const other = lone();
+w = lone();
+seen.besideAnotherWindow = await closing(w, byButton, []);
+
+fresh({}, []);
+w = lone();
+seen.nothingToAsk = await closing(w, byButton, []);
+console.log(JSON.stringify(seen));
+`;
+
+const quitLogRun = (hidden) => {
+  const run = spawnSync(process.execPath, ["--no-warnings", "--import", "./src/test-loader.mjs", "--import", `data:text/javascript,${encodeURIComponent(ON_WINDOWS)}`, "--input-type=module", "-e", quitLogLines(hidden)], { cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8" });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout.trim().split("\n").at(-1));
+};
+
+test("on Windows, a close that asked the quit question says in the log what it asked about and how it was answered, and one that asked nothing says nothing", () => {
+  const seen = quitLogRun(false);
+  assert.deepEqual(seen.cancelled, { said: ["[quit] asked: 1 download in progress, warning off; answered cancel"], asked: 1, open: true });
+  assert.deepEqual(seen.quit, { said: ["[quit] asked: 1 download in progress, warning off; answered cancel", "[quit] asked: 1 download in progress, warning off; answered quit"], asked: 2, open: false });
+  assert.deepEqual(seen.warningAndSeveral, { said: ["[quit] asked: 2 downloads in progress, warning on; answered quit"], asked: 2, open: false }, "two questions, one line");
+  assert.deepEqual(seen.littleArdiaWarning.said, ["[quit] asked: 0 downloads in progress, warning on; answered quit"]);
+  assert.deepEqual(seen.littleArdiaDownload.said, ["[quit] asked: 1 download in progress, warning off; answered quit"]);
+  assert.deepEqual(seen.besideAnotherWindow, { said: [], asked: 0, open: false }, "another window stays open, so nothing quits and nothing is said");
+  assert.deepEqual(seen.nothingToAsk, { said: [], asked: 0, open: false });
+});
+
+test("on Windows, a hidden instance never asks, and says once per window that a quitting close went unasked, with the downloads running and the warning setting", () => {
+  const seen = quitLogRun(true);
+  assert.deepEqual(seen.cancelled, { said: ["[quit] not asked on a hidden instance: 1 download in progress, warning off"], asked: 0, open: false });
+  assert.equal(seen.quit, undefined, "the first close already closed it");
+  assert.deepEqual(seen.warningAndSeveral, { said: ["[quit] not asked on a hidden instance: 2 downloads in progress, warning on"], asked: 0, open: false });
+  assert.deepEqual(seen.littleArdiaWarning.said, ["[quit] not asked on a hidden instance: 0 downloads in progress, warning on"]);
+  assert.deepEqual(seen.littleArdiaDownload.said, ["[quit] not asked on a hidden instance: 1 download in progress, warning off"], "Little Ardia as the last window says it too");
+  assert.equal(seen.littleArdiaDownload.asked, 0);
+  assert.deepEqual(seen.besideAnotherWindow, { said: [], asked: 0, open: false }, "a close that doesn't quit says nothing");
+  assert.deepEqual(seen.nothingToAsk, { said: [], asked: 0, open: false }, "nothing running and the warning off: nothing would have been asked");
+});
