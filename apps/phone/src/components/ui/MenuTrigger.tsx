@@ -5,7 +5,6 @@ import type { Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
-import { useOverlayLayers } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
@@ -67,9 +66,9 @@ function submenu(item: MenuSubmenu, id: string, actions: Map<string, () => void>
 
 const withoutEmpty = (item: NativeMenuItem): NativeMenuItem => Object.fromEntries(Object.entries(item).filter(([, value]) => value !== undefined && value !== false)) as NativeMenuItem;
 
-let nativeMenuOpened: () => void = () => undefined;
+let nativeMenuOpened: (privately: boolean) => void = () => undefined;
 
-export const onNativeMenuOpened = (handler: () => void) => {
+export const onNativeMenuOpened = (handler: (privately: boolean) => void) => {
   nativeMenuOpened = handler;
 };
 
@@ -77,16 +76,16 @@ export function MenuTrigger(props: Props) {
   return nativeMenus() ? <NativeTrigger {...props} /> : <DrawnTrigger {...props} />;
 }
 
-function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClose, disabled, dark, style, testID, children }: Props) {
+function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClose, disabled, privately = false, dark, style, testID, children }: Props) {
   const theme = useTheme();
   const menu = nativeMenu(items);
   const actions = useRef(menu.actions);
   actions.current = menu.actions;
   const select = useCallback((id: string) => actions.current.get(id)?.(), []);
   const opened = useCallback(() => {
-    nativeMenuOpened();
+    nativeMenuOpened(privately);
     onOpen?.();
-  }, [onOpen]);
+  }, [onOpen, privately]);
   return (
     <ContextMenuView testID={testID} style={style} collapsable={false} items={disabled ? [] : menu.items} trigger={trigger} fixedOrder={fixedOrder} onSelect={select} onOpen={opened} onClose={onClose} appearance={{ dark: dark ?? theme.dark }}>
       {children({})}
@@ -102,7 +101,10 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
 function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
-  const layers = useOverlayLayers();
+  const restore = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (restore.current) clearTimeout(restore.current);
+  }, []);
   const frost = useMenuFrost();
   const [opened, setOpened] = useState<{ at: Point | null } | null>(null);
   useEffect(() => {
@@ -120,11 +122,19 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
     },
     [disabled, haptic, onOpen, trigger],
   );
-  const dismiss = useCallback(() => {
-    setOpened(null);
-    onClose?.();
-    setTimeout(() => focusForScreenReader(() => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0], () => layers() === 0), menuMotion.heldClose + menuMotion.contentFade);
-  }, [onClose]);
+  const dismiss = useCallback(
+    (chosen?: boolean) => {
+      setOpened(null);
+      onClose?.();
+      if (chosen) return;
+      if (restore.current) clearTimeout(restore.current);
+      restore.current = setTimeout(() => {
+        restore.current = null;
+        focusForScreenReader(() => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0]);
+      }, menuMotion.heldClose);
+    },
+    [onClose],
+  );
   const held = trigger === "longPress";
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>

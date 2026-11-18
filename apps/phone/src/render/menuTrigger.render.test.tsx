@@ -2,7 +2,6 @@ import { BackHandler, Platform, Pressable, Text } from "react-native";
 import { act } from "react-test-renderer";
 import { renderSurface, unmount } from "../../test/render/harness";
 import { mockNative, resetNativeMenus } from "./nativeMenusMock";
-import { menuMotion } from "../components/ui/motion";
 
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
@@ -28,10 +27,7 @@ const ITEMS: MenuItem[] = [
 
 const contextMenus = (root: Root) => root.root.findAll((node) => node.type === ("ContextMenuView" as never));
 const menuLabels = (root: Root) => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").map((node) => node.props.accessibilityLabel);
-const pickMenu = (root: Root, label: string) => {
-  act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
-  act(() => jest.advanceTimersByTime(menuMotion.heldClose));
-};
+const pickMenu = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
 
 function trigger(trigger: "tap" | "longPress") {
   return renderSurface(
@@ -289,48 +285,82 @@ test("a menu taller than a landscape screen is cut to the safe room and its rows
   unmount(root);
 });
 
-test("a menu is placed from its measured rows, so wrapped or scaled labels move it where it fits", () => {
+const rowsOf = (root: Root) => root.root.findAll((node) => node.props.testID === "drawnMenuRows" && typeof node.props.onContentSizeChange === "function")[0]!;
+const panelOf = (root: Root) => root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")[0]!;
+const flat = (style: unknown) => require("react-native").StyleSheet.flatten(style);
+const setWindow = (window: object) => act(() => (require("react-native").Dimensions as { set: (dims: object) => void }).set({ window, screen: window }));
+
+test("a placed menu stays hidden until its rows are measured, then shows where they fit, so it never jumps across the finger", () => {
   const { pointPlacer } = require("../components/ui") as typeof import("../components/ui");
   const placer = pointPlacer({ x: 60, y: 600 }, { width: 393, height: 873 }, { top: 40, bottom: 24, left: 0, right: 0 }, 250);
-  const root = renderSurface(<Menu items={[{ label: "One", onPress: run("one") }]} placer={placer} onDismiss={() => undefined} />);
-  const top = () => require("react-native").StyleSheet.flatten(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")[0]!.props.style).top;
-  expect(top()).toBe(600);
-  act(() => root.root.findAll((node) => node.props.testID === "drawnMenuRows" && typeof node.props.onContentSizeChange === "function")[0]!.props.onContentSizeChange(250, 300));
-  expect(top()).toBe(600 - 301);
+  const five: MenuItem[] = Array.from({ length: 5 }, (_, at): MenuItem => ({ label: `Row ${at}`, onPress: run(`row${at}`) }));
+  const root = renderSurface(<Menu items={five} placer={placer} onDismiss={() => undefined} />);
+  expect(flat(panelOf(root).props.style).opacity).toBe(0);
+  const hiddenLayer = () => root.root.findAll((node) => typeof node.type === "string" && node.props.pointerEvents === "none" && node.props.accessibilityElementsHidden === true);
+  expect(hiddenLayer()).toHaveLength(1);
+  act(() => rowsOf(root).props.onContentSizeChange(250, 300));
+  const shown = flat(panelOf(root).props.style);
+  expect(shown.opacity).not.toBe(0);
+  expect(hiddenLayer()).toHaveLength(0);
+  expect(shown.top).toBe(600 - 301);
   unmount(root);
 });
 
-test("turning the phone closes an open drawn menu, as UIKit's do", () => {
+test("when a submenu's page is taller, the menu re-measures and stays on its side of the finger", () => {
+  const { pointPlacer } = require("../components/ui") as typeof import("../components/ui");
+  const placer = pointPlacer({ x: 60, y: 500 }, { width: 393, height: 873 }, { top: 40, bottom: 24, left: 0, right: 0 }, 250);
+  const root = renderSurface(<Menu items={ITEMS} placer={placer} onDismiss={() => undefined} />);
+  act(() => rowsOf(root).props.onContentSizeChange(250, 250));
+  expect(flat(panelOf(root).props.style).top).toBe(500);
+  pickMenu(root, "Send to Device");
+  act(() => rowsOf(root).props.onContentSizeChange(250, 420));
+  const page = flat(panelOf(root).props.style);
+  expect(page.top).toBeLessThan(500);
+  expect(page.top).toBe(841 - 421);
+  expect(page.top + page.maxHeight).toBeLessThanOrEqual(841);
+  unmount(root);
+});
+
+test("turning the phone closes an open drawn menu, as UIKit's do, but the keyboard coming up does not", () => {
   const { Dimensions } = require("react-native") as typeof import("react-native");
   const before = Dimensions.get("window");
   const closed = jest.fn();
   const root = renderSurface(<Menu items={ITEMS} place={{ top: 100, left: 20, width: 250 }} onDismiss={closed} />);
+  setWindow({ ...before, height: before.height - 300 });
   expect(closed).not.toHaveBeenCalled();
-  act(() => (Dimensions as unknown as { set: (dims: object) => void }).set({ window: { ...before, width: before.height, height: before.width }, screen: { ...before, width: before.height, height: before.width } }));
+  setWindow(before);
+  setWindow({ ...before, width: before.height, height: before.width });
   expect(closed).toHaveBeenCalledTimes(1);
-  act(() => (Dimensions as unknown as { set: (dims: object) => void }).set({ window: before, screen: before }));
+  setWindow(before);
   unmount(root);
 });
 
-test("a chosen row runs once, after the menu's close, as iOS runs it after the menu has gone", () => {
+test("a chosen row runs at once, and only once however often it is tapped, while the menu plays its close", () => {
   const closed = jest.fn();
   const chosen = jest.fn();
-  const root = renderSurface(<Menu items={[{ label: "Close All Tabs", destructive: true, onPress: chosen }]} place={{ top: 100, left: 20, width: 250 }} onDismiss={closed} />);
+  const root = renderSurface(<Menu items={[{ label: "Close Tab", destructive: true, onPress: chosen }]} place={{ top: 100, left: 20, width: 250 }} onDismiss={closed} />);
   const row = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.props.onPress === "function")[0]!;
   act(() => row.props.onPress());
-  act(() => row.props.onPress());
-  expect(closed).toHaveBeenCalledTimes(1);
-  expect(chosen).not.toHaveBeenCalled();
-  act(() => jest.advanceTimersByTime(menuMotion.close - 1));
-  expect(chosen).not.toHaveBeenCalled();
-  act(() => jest.advanceTimersByTime(1));
   expect(chosen).toHaveBeenCalledTimes(1);
+  act(() => row.props.onPress());
+  expect(chosen).toHaveBeenCalledTimes(1);
+  expect(closed).toHaveBeenCalledTimes(1);
   act(() => jest.advanceTimersByTime(1000));
   expect(chosen).toHaveBeenCalledTimes(1);
   unmount(root);
 });
 
-test("TalkBack moves to the first enabled row only once the menu is placed and shown, and back to the control that opened it unless something new opened over it", () => {
+test("rows scroll under a tap with the keyboard up, in the menu and in the confirmation", () => {
+  const root = renderSurface(<Menu items={ITEMS} place={{ top: 100, left: 20, width: 250 }} onDismiss={() => undefined} />);
+  expect(rowsOf(root).props.keyboardShouldPersistTaps).toBe("handled");
+  unmount(root);
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
+  expect(sheet.root.findAll((node) => node.props.testID === "drawnConfirmationScroll" && typeof node.type !== "string")[0]!.props.keyboardShouldPersistTaps).toBe("handled");
+  unmount(sheet);
+});
+
+test("TalkBack moves to the first enabled row once the menu is shown, and back to the control that opened it only when the menu is dismissed without a choice", () => {
   const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
   const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => undefined);
   const hidden = renderSurface(<Menu items={ITEMS} place={{ top: 100, left: 20, width: 250 }} shown={false} onDismiss={() => undefined} />);
@@ -339,52 +369,54 @@ test("TalkBack moves to the first enabled row only once the menu is placed and s
   const shown = renderSurface(<Menu items={ITEMS} place={{ top: 100, left: 20, width: 250 }} onDismiss={() => undefined} />);
   expect(asked).toHaveBeenCalledTimes(1);
   unmount(shown);
-  asked.mockClear();
   const opener = { opener: true };
+  const restored = () => asked.mock.calls.filter(([target]) => target() === opener).length;
   const back = pressBack();
-  const root = renderSurface(
-    <MenuTrigger items={ITEMS} trigger="tap">
-      {({ onPress }) => (
-        <Pressable accessibilityLabel="Trigger" onPress={onPress}>
-          <Text>Trigger</Text>
-        </Pressable>
-      )}
-    </MenuTrigger>,
-  );
-  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: opener, nativeEvent: {} }));
-  asked.mockClear();
+  const root = trigger("tap");
+  const open = () => act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: opener, nativeEvent: {} }));
+  open();
   back();
   act(() => jest.advanceTimersByTime(1000));
-  const [target, still] = asked.mock.calls.at(-1)!;
-  expect(target()).toBe(opener);
-  expect(still!()).toBe(true);
-  unmount(root);
-  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
-  const { useState } = require("react") as typeof import("react");
-  function Asking() {
-    const [asking, setAsking] = useState(false);
-    return (
-      <>
-        <MenuTrigger items={[{ label: "Close All Tabs", destructive: true, onPress: () => setAsking(true) }]} trigger="tap">
-          {({ onPress }) => (
-            <Pressable accessibilityLabel="More" onPress={onPress}>
-              <Text>More</Text>
-            </Pressable>
-          )}
-        </MenuTrigger>
-        {asking ? <ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => setAsking(false)} /> : null}
-      </>
-    );
-  }
-  const asking = renderSurface(<Asking />);
-  act(() => asking.root.findAll((node) => node.props.accessibilityLabel === "More" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: opener, nativeEvent: {} }));
-  asked.mockClear();
-  pickMenu(asking, "Close All Tabs");
+  expect(restored()).toBe(1);
+  open();
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.props.onPress === "function")[0]!.props.onPress({ nativeEvent: {} }));
   act(() => jest.advanceTimersByTime(1000));
-  expect(asking.root.findAll((node) => node.props.testID === "drawnActionSheet" && typeof node.type === "string")).toHaveLength(1);
-  const restore = asked.mock.calls.find(([target]) => target() === opener)!;
-  expect(restore[1]!()).toBe(false);
-  unmount(asking);
+  expect(restored()).toBe(2);
+  open();
+  pickMenu(root, "Copy Link");
+  act(() => jest.advanceTimersByTime(1000));
+  expect(restored()).toBe(2);
+  open();
+  back();
+  unmount(root);
+  act(() => jest.advanceTimersByTime(1000));
+  expect(restored()).toBe(2);
+});
+
+test("an Incognito card's native menu on iPhone is not counted either", () => {
+  if (Platform.OS !== "ios") return;
+  mockNative.contextMenu = true;
+  const { onNativeMenuOpened } = require("../components/ui/MenuTrigger") as typeof import("../components/ui/MenuTrigger");
+  const opened = jest.fn();
+  onNativeMenuOpened(opened);
+  const root = renderSurface(
+    <MenuTrigger items={ITEMS} trigger="longPress" privately>
+      {() => <Text>Card</Text>}
+    </MenuTrigger>,
+  );
+  act(() => contextMenus(root)[0]!.props.onOpen());
+  expect(opened).toHaveBeenCalledWith(true);
+  unmount(root);
+  const telemetry = require("../state/telemetry/telemetry") as typeof import("../state/telemetry/telemetry");
+  const counted = jest.spyOn(telemetry, "countUsage").mockImplementation(() => undefined);
+  const { countNativeMenu } = require("../state/browse/menuCounts") as typeof import("../state/browse/menuCounts");
+  const { useTabs } = require("../state/tabs/store") as typeof import("../state/tabs/store");
+  act(() => useTabs.setState({ incognito: false }));
+  countNativeMenu(true);
+  expect(counted).not.toHaveBeenCalled();
+  countNativeMenu(false);
+  expect(counted).toHaveBeenCalledWith("native_menus_opened");
+  onNativeMenuOpened(() => undefined);
 });
 
 test("drawn_menus_opened is never counted while browsing privately: on the deck's Incognito side, on an Incognito page, or for an Incognito card's menu", () => {

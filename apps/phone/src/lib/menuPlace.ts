@@ -27,24 +27,24 @@ export function tallestMenuPage(items: readonly Entry[]): number {
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
 
-export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: number, wanted: number, margin: number): MenuSpot {
+export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean): MenuSpot {
   const roomTop = room.y + margin;
   const roomBottom = room.y + room.height - margin;
   const height = Math.min(wanted, roomBottom - roomTop);
   const trailing = anchor.x + anchor.width / 2 > room.x + room.width / 2;
   const x = clamp(trailing ? anchor.x + anchor.width - width : anchor.x, room.x + margin, room.x + room.width - width - margin);
   const anchorBottom = anchor.y + anchor.height;
-  const below = anchor.y + height <= roomBottom || anchorBottom - height < roomTop;
+  const below = keepBelow ?? (anchor.y + height <= roomBottom || anchorBottom - height < roomTop);
   const y = clamp(below ? anchor.y : anchorBottom - height, roomTop, roomBottom - height);
   return { left: x - host.x, top: y - host.y, height, origin: `${trailing ? "right" : "left"} ${below ? "top" : "bottom"}` };
 }
 
-export function menuAt(point: Point, host: Rect, room: Rect, width: number, wanted: number, margin: number): MenuSpot {
+export function menuAt(point: Point, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean): MenuSpot {
   const roomTop = room.y + margin;
   const roomBottom = room.y + room.height - margin;
   const height = Math.min(wanted, roomBottom - roomTop);
   const fitsRight = point.x + width + margin <= room.x + room.width;
-  const fitsBelow = point.y + height <= roomBottom;
+  const fitsBelow = keepBelow ?? point.y + height <= roomBottom;
   const x = clamp(fitsRight ? point.x : point.x - width, room.x + margin, room.x + room.width - width - margin);
   const y = clamp(fitsBelow ? point.y : point.y - height, roomTop, roomBottom - height);
   return { left: x - host.x, top: y - host.y, height, origin: `${fitsRight ? "left" : "right"} ${fitsBelow ? "top" : "bottom"}` };

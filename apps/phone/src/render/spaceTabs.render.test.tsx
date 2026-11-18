@@ -24,7 +24,6 @@ import { deckOrder, launchTabs } from "../state/tabs/tabsState";
 import { readOpenTabs } from "../state/store/browserDatabase";
 import { browserDatabase } from "../state/store/database";
 import { renderSurface, someTabs, unmount } from "../../test/render/harness";
-import { menuMotion } from "../components/ui/motion";
 
 const profile = (syncId: string, name: string, isDefault = false): SyncedProfile => ({
   syncId,
@@ -104,10 +103,7 @@ const cards = (root: Root) =>
     .map((node) => node.props.tab.id as string);
 const sorted = (ids: readonly string[]) => [...ids].sort();
 const menuLabels = (root: Root) => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").map((node) => node.props.accessibilityLabel);
-const pickMenu = (root: Root, label: string) => {
-  act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
-  act(() => jest.advanceTimersByTime(menuMotion.heldClose));
-};
+const pickMenu = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
 const pressable = (root: Root, label: string) => root.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!;
 
 function holdCard(root: Root, design: Design, id: string) {

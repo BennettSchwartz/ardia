@@ -54,7 +54,7 @@ import { countUsage, reportLaunch, startTelemetry } from "./state/telemetry/tele
 import { useIncognito, useSelectedTab } from "./state/tabs/hooks";
 import { setRootSize } from "./state/app/rootSize";
 import { syncOffered } from "./state/sync/offer";
-import { browsingPrivately, countDrawnMenu } from "./state/browse/menuCounts";
+import { countDrawnMenu, countNativeMenu } from "./state/browse/menuCounts";
 
 export default function App() {
   useState(() =>
@@ -108,9 +108,7 @@ export default function App() {
 
 const SYSTEM_SHEETS = Platform.OS === "ios";
 
-onNativeMenuOpened(() => {
-  if (!browsingPrivately()) countUsage("native_menus_opened");
-});
+onNativeMenuOpened(countNativeMenu);
 onDrawnMenuOpened(countDrawnMenu);
 
 export function Surfaces() {

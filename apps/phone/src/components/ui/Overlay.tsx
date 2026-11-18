@@ -3,7 +3,7 @@ import { StyleSheet, View, type ViewInstance } from "react-native";
 
 export type WindowRect = { x: number; y: number; width: number; height: number };
 
-type Overlay = { show: (id: number, node: ReactNode | null) => void; frame: () => Promise<WindowRect>; layers: () => number };
+type Overlay = { show: (id: number, node: ReactNode | null) => void; frame: () => Promise<WindowRect> };
 
 const OverlayContext = createContext<Overlay | null>(null);
 
@@ -18,8 +18,6 @@ const measure = (view: ViewInstance | null): Promise<WindowRect> =>
 export function OverlayHost({ children }: { children: ReactNode }) {
   const root = useRef<ViewInstance>(null);
   const [layers, setLayers] = useState<{ id: number; node: ReactNode }[]>([]);
-  const shownLayers = useRef(0);
-  shownLayers.current = layers.length;
   const overlay = useMemo<Overlay>(
     () => ({
       show: (id, node) =>
@@ -28,7 +26,6 @@ export function OverlayHost({ children }: { children: ReactNode }) {
           return now.some((layer) => layer.id === id) ? now.map((layer) => (layer.id === id ? { id, node } : layer)) : [...now, { id, node }];
         }),
       frame: () => measure(root.current),
-      layers: () => shownLayers.current,
     }),
     [],
   );
@@ -64,8 +61,3 @@ export function useOverlayFrame() {
 export const measureAnchor = (anchor: RefObject<ViewInstance | null>) => measure(anchor.current);
 
 const styles = StyleSheet.create({ content: { flex: 1 } });
-
-export function useOverlayLayers() {
-  const overlay = useContext(OverlayContext);
-  return overlay ? overlay.layers : () => 0;
-}

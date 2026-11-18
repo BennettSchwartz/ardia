@@ -8,6 +8,11 @@ export function browsingPrivately(): boolean {
   return state.incognito || (useBrowse.getState().surface === "browsing" && selectedTab(state)?.isPrivate === true);
 }
 
+export function countNativeMenu(privately: boolean) {
+  if (privately || browsingPrivately()) return;
+  countUsage("native_menus_opened");
+}
+
 export function countDrawnMenu(privately: boolean) {
   if (privately || browsingPrivately()) return;
   countUsage("drawn_menus_opened");

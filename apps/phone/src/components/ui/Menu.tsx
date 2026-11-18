@@ -31,7 +31,7 @@ export const onDrawnMenuOpened = (handler: (privately: boolean) => void) => {
 
 export const countDrawnMenuOpened = (privately = false) => drawnMenuOpened(privately);
 
-export type MenuPlacer = (height: number) => { place: ViewStyle; origin: string; maxHeight?: number };
+export type MenuPlacer = (height: number, keepBelow?: boolean) => { place: ViewStyle; origin: string; maxHeight?: number };
 
 const MenuFrostContext = createContext<string | null>(SURFACES_FROST);
 
@@ -55,16 +55,7 @@ const HELD_CLOSE = shrinkAway(menuMotion.heldClose);
 const PRESS = menuLook.pressInset;
 const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
 
-type Props = { items: MenuItem[]; place?: ViewStyle; placer?: MenuPlacer; onDismiss: () => void; dimmed?: boolean; origin?: string; frost?: string | null; shown?: boolean; privately?: boolean };
-
-const runOnce = (action: () => void) => {
-  let ran = false;
-  return () => {
-    if (ran) return;
-    ran = true;
-    action();
-  };
-};
+type Props = { items: MenuItem[]; place?: ViewStyle; placer?: MenuPlacer; onDismiss: (chosen?: boolean) => void; dimmed?: boolean; origin?: string; frost?: string | null; shown?: boolean; privately?: boolean };
 
 export function Menu({ items, place, placer, onDismiss, dimmed = false, origin = "top", frost, shown = true, privately = false }: Props) {
   const theme = useTheme();
@@ -75,20 +66,23 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const [page, setPage] = useState<MenuSubmenu | null>(null);
   const rows = page ? page.children : items;
   const [content, setContent] = useState<number | null>(null);
-  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? MENU_ROW : 0)) : { place: place ?? {}, origin, maxHeight: undefined };
+  const revealed = shown && (placer === undefined || content !== null);
+  const side = useRef<boolean | undefined>(undefined);
+  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? MENU_ROW : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined };
+  if (revealed && placer && side.current === undefined) side.current = spot.origin.includes("top");
   const firstRow = useRef<ViewInstance>(null);
   const chosen = useRef(false);
   const window = useWindowDimensions();
-  const opening = useRef({ width: window.width, height: window.height });
+  const openedWidth = useRef(window.width);
   useEffect(() => {
-    if (opening.current.width !== window.width || opening.current.height !== window.height) onDismiss();
-  }, [window.width, window.height]);
+    if (openedWidth.current !== window.width) onDismiss();
+  }, [window.width]);
   useEffect(() => {
     countDrawnMenuOpened(privately);
   }, []);
   useEffect(() => {
-    if (shown) focusForScreenReader(() => firstRow.current);
-  }, [shown, page]);
+    if (revealed) focusForScreenReader(() => firstRow.current);
+  }, [revealed, page]);
   useEffect(() => {
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       if (page) setPage(null);
@@ -99,14 +93,14 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   }, [onDismiss, page]);
   const opened = useSharedValue(reduceMotion ? 1 : 0);
   useEffect(() => {
-    if (shown && !reduceMotion) opened.value = withSpring(1, menuMotion.open);
-  }, [shown]);
+    if (revealed && !reduceMotion) opened.value = withSpring(1, menuMotion.open);
+  }, [revealed]);
   const grow = useAnimatedStyle(() => ({ transform: [{ scale: menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value }] }));
   const choose = (action: () => void) => {
     if (chosen.current) return;
     chosen.current = true;
-    onDismiss();
-    setTimeout(runOnce(action), reduceMotion ? 0 : dimmed ? menuMotion.heldClose : menuMotion.close);
+    onDismiss(true);
+    action();
   };
   const firstEnabled = page ? -1 : rows.findIndex((item) => typeof item === "object" && !("heading" in item) && !item.disabled);
   const checks = rows.some((item) => typeof item === "object" && !("heading" in item) && !isSubmenu(item) && item.checked === true);
@@ -177,21 +171,21 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     );
   });
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={shown ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!shown} importantForAccessibility={shown ? "auto" : "no-hide-descendants"}>
+    <View style={StyleSheet.absoluteFill} pointerEvents={revealed ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!revealed} importantForAccessibility={revealed ? "auto" : "no-hide-descendants"}>
       {dimmed ? (
         <Animated.View entering={reduceMotion ? undefined : FadeIn.duration(menuMotion.heldOpen)} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.heldClose)} style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }]} />
       ) : null}
-      <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onDismiss} />
+      <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={() => onDismiss()} />
       <Animated.View
         testID="drawnMenu"
         accessibilityRole="menu"
         accessibilityViewIsModal
         exiting={reduceMotion ? FadeOut.duration(menuMotion.contentFade) : dimmed ? HELD_CLOSE : TAP_CLOSE}
-        style={[styles.panel, { boxShadow: menuLook.shadow, borderColor: paint.rim, transformOrigin: spot.origin }, spot.place, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight }, shown ? null : styles.unseen, grow]}
+        style={[styles.panel, { boxShadow: menuLook.shadow, borderColor: paint.rim, transformOrigin: spot.origin }, spot.place, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight }, revealed ? null : styles.unseen, grow]}
       >
         <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={[styles.material, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight - 2 * menuLook.rim }]}>
           <View pointerEvents="none" style={[styles.specular, { backgroundColor: paint.specular }]} />
-          <ScrollView testID="drawnMenuRows" style={styles.scroll} contentContainerStyle={styles.rows} bounces={false} overScrollMode="never" onContentSizeChange={(_width, height) => setContent(height + 2 * menuLook.rim)}>
+          <ScrollView testID="drawnMenuRows" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.rows} bounces={false} overScrollMode="never" onContentSizeChange={(_width, height) => setContent(height + 2 * menuLook.rim)}>
           {page ? (
             <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={() => setPage(null)} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
               <MenuIcon name="chevronLeft" color={paint.label} left={iconLeft} />
@@ -227,15 +221,15 @@ type Insets = { top: number; bottom: number; left: number; right: number };
 
 export function pointPlacer(at: Point, screen: { width: number; height: number }, insets: Insets, width: number): MenuPlacer {
   const host = { x: 0, y: 0, width: screen.width, height: screen.height };
-  return (height) => {
-    const spot = menuAt(at, host, insetRect(host, insets), width, height, MENU_MARGIN);
+  return (height, keepBelow) => {
+    const spot = menuAt(at, host, insetRect(host, insets), width, height, MENU_MARGIN, keepBelow);
     return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height };
   };
 }
 
 function triggerPlacer(row: Rect, host: Rect, insets: Insets, width: number): MenuPlacer {
-  return (height) => {
-    const spot = menuOnTrigger(row, host, host.width > 0 ? insetRect(host, insets) : host, width, height, MENU_MARGIN);
+  return (height, keepBelow) => {
+    const spot = menuOnTrigger(row, host, host.width > 0 ? insetRect(host, insets) : host, width, height, MENU_MARGIN, keepBelow);
     return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height };
   };
 }
