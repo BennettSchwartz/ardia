@@ -1,12 +1,14 @@
 package com.ardia.phone
 
 import android.content.Context
+import android.content.res.Configuration
 import android.view.GestureDetector
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
@@ -131,6 +133,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     var scheme: Map<String, String>? = null
     private var host: ComposeView? = null
     private var expanded: MutableState<Boolean>? = null
+    private var shownColors: MutableState<ColorScheme>? = null
     private var downX = 0f
     private var downY = 0f
     private var downAt: Long? = null
@@ -185,14 +188,14 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         val here = IntArray(2).also(::getLocationInWindow)
         val origin = IntArray(2).also(content::getLocationInWindow)
         val bounds = MaterialMenuRules.anchor(here[0] - origin[0], here[1] - origin[1], width, height, resources.displayMetrics.density, pressX, pressY)
-        val colors = MaterialScheme.colorScheme(appContext.currentActivity ?: context, NativeMenuRules.isDark(context, dark), scheme)
+        val colors = mutableStateOf(currentColors())
         val rows = NativeMenuRules.rows(items)
         val open = mutableStateOf(true)
         val view = ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             setContent {
-                MaterialMenu(colors, open, rows, onPick = { id ->
+                MaterialMenu(colors.value, open, rows, onPick = { id ->
                     onSelect(mapOf("id" to id))
                     close()
                 }, onDismiss = ::close)
@@ -204,6 +207,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         })
         host = view
         expanded = open
+        shownColors = colors
         onOpen(emptyMap())
     }
 
@@ -212,12 +216,28 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         if (!open.value) return
         open.value = false
         expanded = null
+        shownColors = null
         onClose(emptyMap())
         val view = host
         postDelayed({
             (view?.parent as? ViewGroup)?.removeView(view)
             if (host === view) host = null
         }, MaterialMenuRules.EXIT_MS)
+    }
+
+    private fun currentColors(): ColorScheme {
+        val fresh = appContext.currentActivity ?: context
+        return MaterialScheme.colorScheme(fresh, NativeMenuRules.isDark(fresh, dark), scheme)
+    }
+
+    internal fun refreshColors() {
+        val shown = shownColors ?: return
+        shown.value = currentColors()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration?) {
+        super.onConfigurationChanged(newConfig)
+        post { refreshColors() }
     }
 
     fun dismissMenu() {
@@ -277,6 +297,7 @@ class MenusModule : Module() {
             Prop("appearance") { view: NativeContextMenuView, value: MenuAppearanceRecord? ->
                 view.dark = value?.dark
                 view.scheme = value?.scheme
+                view.refreshColors()
             }
 
             AsyncFunction("show") { view: NativeContextMenuView, pressX: Double?, pressY: Double? -> view.showFromCode(pressX, pressY) }.runOnQueue(Queues.MAIN)
