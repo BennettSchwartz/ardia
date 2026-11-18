@@ -2352,9 +2352,10 @@ while ($true) {
     while ($line = $reader.ReadLine()) { }
     $path = if ($request) { ($request.Split(" ")[1]) -replace '\?.*$', '' } else { "" }
     if ($path -eq "/download") {
-      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/octet-stream`r`nContent-Disposition: attachment; filename=`"tour-download.txt`"`r`nContent-Length: 104857600`r`nConnection: keep-alive`r`n`r`n")
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/octet-stream`r`nX-Content-Type-Options: nosniff`r`nContent-Disposition: attachment; filename=`"tour-download.txt`"`r`nContent-Length: 104857600`r`nConnection: keep-alive`r`n`r`n")
       $stream.Write($head, 0, $head.Length)
-      $stream.Write([byte[]](116, 111, 117, 114), 0, 4)
+      $first = [System.Text.Encoding]::ASCII.GetBytes("t" * 65536)
+      $stream.Write($first, 0, $first.Length)
       $stream.Flush()
       $held.Add($client)
       continue
@@ -2545,6 +2546,36 @@ function Wait-AppEnded($Session, [int]$Milliseconds) {
   return [pscustomobject]@{ Ended = $ended; LastLine = $last; Clean = $clean }
 }
 
+function Find-DownloadFiles($Session, [datetime]$Since) {
+  $folders = @((Join-Path $Session.Data "Downloads"), (Join-Path ([Environment]::GetFolderPath("UserProfile")) "Downloads"))
+  return @($folders | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object { Get-ChildItem -LiteralPath $_ -File -ErrorAction SilentlyContinue } | Where-Object { $_.LastWriteTime -ge $Since -and ($_.Name -like "tour-download*" -or $_.Extension -eq ".crdownload") } | ForEach-Object { $_.FullName })
+}
+
+function Wait-DownloadStarted($Session, [datetime]$Since, [int]$Milliseconds) {
+  $listed = $false
+  $files = @()
+  $deadline = (Get-Date).AddMilliseconds($Milliseconds)
+  while ((Get-Date) -lt $deadline -and -not $Session.Process.HasExited) {
+    $listed = @(Find-Named $Session.Main "tour-download.txt").Count -gt 0
+    $files = @(Find-DownloadFiles $Session $Since)
+    if ($listed -or $files.Count) { break }
+    Start-Sleep -Milliseconds 250
+  }
+  return [pscustomobject]@{ Started = $listed -or [bool]$files.Count; Listed = $listed; Files = $files }
+}
+
+function Format-DownloadStart($Download, [int]$Milliseconds) {
+  $files = if ($Download.Files.Count) { ($Download.Files | ForEach-Object { "'$_'" }) -join ", " } else { "none" }
+  return "a download started within $([int]($Milliseconds / 1000)) s: $($Download.Started) (the window lists 'tour-download.txt' through UI Automation: $($Download.Listed); new files in the session's and the user's Downloads folders: $files)"
+}
+
+function Note-QuitWithoutAsking($Session, $Stop) {
+  if (-not $Session.Process.HasExited) { return }
+  $end = Wait-AppEnded $Session 2000
+  if ($end.Clean) { $Session.Summary = "Quit without asking on the tour's close, which the stop counts against it (exit code $($Session.Process.ExitCode))." }
+  $Stop.Facts.Add("the app quit without asking; its launch log's last line: '$($end.LastLine)'")
+}
+
 function Invoke-QuitDownloadsTour {
   if (-not (Start-TourPages)) {
     $script:Lines.Add("- The quit-downloads part found no loopback page server on port $($script:TourPagesPort).")
@@ -2555,7 +2586,7 @@ function Invoke-QuitDownloadsTour {
   $expectedMessage = "You have 1 download in progress. If you quit now, this download will be cancelled."
   Invoke-Stop $session "quit-download" "Alt+F4 with a download running asks before quitting; Cancel keeps Ardia, Quit ends it (#2488)" {
     param($stop)
-    $stop.Did = "One browser window, Warn before quitting off (the default). Opened 127.0.0.1:$($script:TourPagesPort)/download in a new tab, which sends a 100 MB attachment's first 4 bytes and then holds the connection, so the download stays in progress. Pressed Alt+F4 and waited for a dialog; pressed Cancel (TDM_CLICK_BUTTON with IDCANCEL); pressed Alt+F4 again and pressed Quit (TDM_CLICK_BUTTON with 1001)."
+    $stop.Did = "One browser window, Warn before quitting off (the default). Opened 127.0.0.1:$($script:TourPagesPort)/download in a new tab, which sends a 100 MB attachment's first 64 KB (marked nosniff, so the engine doesn't wait to guess its type) and then holds the connection, so the download stays in progress. Waited for the download to show up; pressed Alt+F4 and waited for a dialog; pressed Cancel (TDM_CLICK_BUTTON with IDCANCEL); pressed Alt+F4 again and pressed Quit (TDM_CLICK_BUTTON with 1001)."
     $stop.Expected = "Alt+F4 asks '$expectedTitle' / '$expectedMessage' in a dialog of the app; after Cancel the window and the process are still there and the dialog is gone; after Quit the process ends and its launch log ends with 'process ending'."
     if (-not (Test-Usable $session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
     Focus-Window $session $session.Main $stop | Out-Null
@@ -2564,18 +2595,21 @@ function Invoke-QuitDownloadsTour {
     $opened = Wait-Command $session $mark "newTab"
     Start-Sleep -Milliseconds 700
     Send-Address "127.0.0.1:$($script:TourPagesPort)/download"
+    $since = (Get-Date).AddSeconds(-2)
     Send-Key 0x0D 0
     Send-Key 0x0D 2
-    $listed = Wait-Until $session { @(Find-Named $session.Main "tour-download.txt").Count -gt 0 } 15000
+    $download = Wait-DownloadStarted $session $since 15000
     Start-Sleep -Milliseconds 1000
-    $stop.Facts.Add("newTab logged: $opened; the download listed in the window (UI Automation found 'tour-download.txt'): $listed")
+    $stop.Facts.Add("newTab logged: $opened; $(Format-DownloadStart $download 15000)")
     $panel = Measure-Screen ($stop.Shot -replace '\.png$', '-downloading.png') $session.Main
+    if (-not $download.Started) { $stop.Seen = "no download started"; $stop.Facts.Add("didn't press Alt+F4: with no download there is nothing for the question to be about"); return }
     Focus-Window $session $session.Main $stop | Out-Null
     Send-Chord @(0x12) 0x73
     $dialog = Wait-QuitDialog $session 8000
     if (-not $dialog) {
       $stop.Seen = "no"
       $stop.Facts.Add("no dialog within 8 s of Alt+F4; the app is still running: $(-not $session.Process.HasExited); windows: $(Format-Windows (Get-TopWindows $session))")
+      Note-QuitWithoutAsking $session $stop
       return
     }
     $asked = Measure-Screen ($stop.Shot -replace '\.png$', '-asked.png') $dialog.Handle
@@ -2603,16 +2637,18 @@ function Invoke-QuitDownloadsTour {
   $lastTab = Start-Ardia "quit-last-tab" -Onboarded -Settings @{ appearance = "light" }
   Invoke-Stop $lastTab "quit-last-tab" "Ctrl+W on the only tab with a download running: Close 1 tab?, then the downloads question; Cancel keeps the window (#2488, defaults)" {
     param($stop)
-    $stop.Did = "One browser window, default settings (Warn before closing the last tab on, Warn before quitting off). Opened 127.0.0.1:$($script:TourPagesPort)/startdownload in the window's only tab; the page starts the held download from that tab and stays. Pressed Ctrl+W, answered the first dialog with its confirm button (TDM_CLICK_BUTTON 1001), then answered the second with Cancel (IDCANCEL)."
+    $stop.Did = "One browser window, default settings (Warn before closing the last tab on, Warn before quitting off). Opened 127.0.0.1:$($script:TourPagesPort)/startdownload in the window's only tab; the page starts the held download from that tab and stays. Waited for the download to show up; pressed Ctrl+W, answered the first dialog with its confirm button (TDM_CLICK_BUTTON 1001), then answered the second with Cancel (IDCANCEL)."
     $stop.Expected = "a first dialog asking 'Close 1 tab?', then a second asking '$expectedMessage'; after Cancel the window, its tab and the process are still there."
     if (-not (Test-Usable $lastTab)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    $since = (Get-Date).AddSeconds(-2)
     $opened = Open-TourPage $lastTab $stop "/startdownload" "tour download page"
-    $listed = Wait-Until $lastTab { @(Find-Named $lastTab.Main "tour-download.txt").Count -gt 0 } 15000
-    $stop.Facts.Add("the page shows: $opened; the download listed in the window: $listed; the window's title: '$([ArdiaTour]::TitleOf($lastTab.Main))'")
+    $download = Wait-DownloadStarted $lastTab $since 15000
+    $stop.Facts.Add("the page shows: $opened; $(Format-DownloadStart $download 15000); the window's title: '$([ArdiaTour]::TitleOf($lastTab.Main))'")
+    if (-not $download.Started) { $stop.Seen = "no download started"; $stop.Facts.Add("didn't press Ctrl+W: with no download there is nothing for the question to be about"); return }
     Focus-Window $lastTab $lastTab.Main $stop | Out-Null
     Send-Chord @(0x11) 0x57
     $first = Wait-QuitDialog $lastTab 8000
-    if (-not $first) { $stop.Seen = "no"; $stop.Facts.Add("no dialog within 8 s of Ctrl+W; the app is still running: $(-not $lastTab.Process.HasExited)"); return }
+    if (-not $first) { $stop.Seen = "no"; $stop.Facts.Add("no dialog within 8 s of Ctrl+W; the app is still running: $(-not $lastTab.Process.HasExited)"); Note-QuitWithoutAsking $lastTab $stop; return }
     $firstTexts = @(Read-DialogTexts $first.Handle)
     $stop.Facts.Add("first dialog's text: $(($firstTexts | ForEach-Object { "'$_'" }) -join ', ')")
     [ArdiaTour]::PostMessageW($first.Handle, 0x0466, [IntPtr]1001, [IntPtr]::Zero) | Out-Null
