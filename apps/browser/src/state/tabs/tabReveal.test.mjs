@@ -157,26 +157,69 @@ test("the native switch is on from the start on this platform, and off while a t
   assert.deepEqual(stub.nativeTabSwitches, [false, true], "it's told only when that changes");
 });
 
-test("a plain press that leaves its row's tab in the background takes back the page native code showed for it", async () => {
+test("a press carries its native sequence to the switch it makes, and one that leaves its tab behind takes back only its own reveal", async () => {
   const held = await import("../sidebar/heldTabPress.ts");
+  const presses = stub.nativeTabPresses;
   let start = 5000;
-  const press = (tabId, mods = {}) => held.holdTabPress("w1", tabId, { nativeEvent: { identifier: "0", pageX: 10, pageY: 10, ...mods }, touchHistory: { touchBank: [{ startTimeStamp: ++start }] } });
+  const event = (mods = {}) => ({ nativeEvent: { identifier: "0", pageX: 10, pageY: 10, ...mods }, touchHistory: { touchBank: [{ startTimeStamp: ++start }] } });
+  const press = (tabId, mods = {}) => held.holdTabPress("w1", tabId, event(mods));
+  const dropped = () => presses.dropped.splice(0);
   setup();
+  presses.next.push(7);
   press("b");
-  assert.deepEqual(revealed(), ["b"], "a press that switches is shown by the switch itself, nothing to take back");
-  press("b");
-  assert.deepEqual(revealed(), [], "nor a press on the tab already in front");
-  press("c", { metaKey: true });
-  assert.deepEqual(revealed(), [], "native code doesn't show a modified click, so nothing to take back");
-  S().setSelection("w1", ["b", "c"]);
+  assert.deepEqual(revealed(), ["b by press 7"], "native code can tell this switch from the presses after it");
+  assert.deepEqual(dropped(), [], "the press switched, nothing to take back");
+  S().activate("c");
+  assert.deepEqual(revealed(), ["c"], "a selection no press made carries none, so it wins over any press");
   press("c");
-  assert.deepEqual(revealed(), ["drop over c"], "a press on a selected tab doesn't switch on press");
+  assert.deepEqual([revealed(), dropped()], [[], []], "a press on the tab already in front");
+  press("a", { metaKey: true });
+  assert.deepEqual([revealed(), dropped()], [[], []], "native code doesn't show a modified click, so nothing to take back");
+  S().setSelection("w1", ["a", "b"]);
+  presses.next.push(9);
+  const selected = press("b");
+  assert.deepEqual([revealed(), dropped()], [[], [9]], "a press on a selected tab doesn't switch on press: only press 9's reveal goes");
+  held.clickHeldTabPress("w1", "b", event(), selected);
+  assert.deepEqual(revealed(), ["b by press 9"], "its switch on release still belongs to that press");
   S().setSelection("w1", []);
   held.devTabPress.switchOnPress = false;
   try {
+    presses.next.push(12);
     press("a");
-    assert.deepEqual(revealed(), ["drop over a"], "with switching on press off, the press leaves it in the background");
+    assert.deepEqual([revealed(), dropped()], [[], [12]], "with switching on press off, the press leaves it in the background");
   } finally {
     held.devTabPress.switchOnPress = true;
   }
+});
+
+test("a switch the native view can't show still names the press that made it and the tab it goes to", async () => {
+  const held = await import("../sidebar/heldTabPress.ts");
+  setup();
+  S().updateTab("b", { page: { kind: "asleep" } });
+  revealed();
+  stub.nativeTabPresses.next.push(21);
+  held.holdTabPress("w1", "b", { nativeEvent: { identifier: "0", pageX: 10, pageY: 10 }, touchHistory: { touchBank: [{ startTimeStamp: 9001 }] } });
+  assert.deepEqual(revealed(), ["drop over a by press 21"], "so a page pressed after it stays on screen");
+});
+
+test("rows of tabs in a split are never tagged for the native reveal, and native code is told which tabs those are", async () => {
+  const { tabPressTag, PAGE_IDENTITY_TAG } = await import("./tabReveal.ts");
+  assert.equal(tabPressTag("a", false, false), "tab-switch:a");
+  assert.equal(tabPressTag("a", true, false), "tab-selected:a");
+  assert.equal(tabPressTag("a", false, true), undefined);
+  assert.equal(PAGE_IDENTITY_TAG, "page-identity");
+  setup();
+  stub.nativeTabPresses.splits.length = 0;
+  const id = S().createSplit(["b", "c"]);
+  assert.deepEqual([...stub.nativeTabPresses.splits.at(-1)].sort(), ["b", "c"]);
+  S().separateSplit?.(id);
+});
+
+test("the native switch is off while a page popover is open: it names the page under it", async () => {
+  const { setPopover } = await import("./pageState.ts");
+  setup();
+  stub.nativeTabSwitches.length = 0;
+  setPopover("a", "siteControls");
+  setPopover("a", null);
+  assert.deepEqual(stub.nativeTabSwitches, [false, true]);
 });

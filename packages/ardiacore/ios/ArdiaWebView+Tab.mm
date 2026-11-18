@@ -145,7 +145,7 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
   if (_tab.view.superview == self) [_tab.view removeFromSuperview];
   [self dropDevTools];
   [self resetBlocked:NO];
-  [self endReveal];
+  [self dropReveal];
   [self dropFront];
   [self finishFrameHold];
   [self finishStandIn];
@@ -382,6 +382,7 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
 
 - (void)tab:(ArdiaCoreTab *)tab rendererGone:(NSString *)status code:(int)code {
   _reports.crashed = YES;
+  [self dropReveal];
   [self resetPageMedia];
   [self emit:@"crashed" payload:@{@"status" : @(code), @"reason" : status ?: @"unknown", @"code" : @(code)}];
 }
@@ -428,6 +429,7 @@ const CFTimeInterval kHiddenNewTabLinkSeconds = 1;
 }
 
 - (void)tabDidChangeDiscarded:(ArdiaCoreTab *)tab {
+  if (tab.discarded) [self dropReveal];
   if (tab.discarded) [self emit:@"discarded" payload:@{@"url" : tab.url ?: @"", @"reason" : tab.discardReason ?: @""}];
   else [self emit:@"ready" payload:@{}];
 }

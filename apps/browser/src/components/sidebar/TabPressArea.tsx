@@ -9,6 +9,7 @@ import { dismissHover } from "../../state/sidebar/hover";
 import { openTabMenu } from "../../state/sidebar/menus";
 import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from "../../state/sidebar/heldTabPress";
 import { tabPressTag } from "../../state/tabs/tabReveal";
+import { useSplitOf } from "../../state/windows/card";
 import { ContextMenuArea } from "../ui";
 
 export function TabPressArea({
@@ -31,6 +32,7 @@ export function TabPressArea({
   children: ReactNode | ((state: { pressed: boolean }) => ReactNode);
 }) {
   const press = useRef<TabPress | null>(null);
+  const inSplit = !!useSplitOf(tab.id);
   const plainTooltip = useSettings((s) => !s.showTabHoverMenu);
   return (
     <ContextMenuArea
@@ -48,7 +50,7 @@ export function TabPressArea({
         onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
         onPressOut={(e) => pressOutTabPress(press.current, e)}
         style={pressStyle}
-        nativeID={tabPressTag(tab.id, selected)}
+        nativeID={tabPressTag(tab.id, selected, inSplit)}
         collapsable={false}
         hitSlop={hitSlop}
         tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}

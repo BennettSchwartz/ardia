@@ -62,12 +62,16 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 @interface ArdiaWebView (Reveals)
-+ (void)revealTab:(NSString *)transferKey;
-+ (void)dropTabReveals:(NSString *)transferKey;
++ (void)revealTab:(NSString *)transferKey press:(NSUInteger)press;
++ (void)dropTabReveals:(NSString *)transferKey press:(NSUInteger)press to:(NSString *)incomingKey;
++ (void)dropTabPress:(NSUInteger)press;
 + (void)setNativeTabSwitch:(BOOL)enabled;
++ (NSUInteger)claimTabPress:(NSString *)transferKey;
++ (void)setTabsInSplits:(NSArray<NSString *> *)transferKeys;
++ (void)setJavaScriptThread:(void (^)(void (^block)(void)))run;
 + (BOOL)revealForPress:(NSEvent *)event;
 + (void)dropNativeRevealsInWindow:(NSWindow *)window;
-+ (void)revealOffered:(NSString *)adoptId over:(NSString *)transferKey;
++ (void)revealOffered:(NSString *)adoptId over:(NSString *)transferKey press:(NSUInteger)press;
 + (BOOL)discardOffered:(NSString *)adoptId;
 @end
 

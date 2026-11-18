@@ -5,6 +5,7 @@ import { appInfo, percentile } from "./transport";
 import { jsStartedAt } from "./jsStart";
 import { fieldTiming } from "../../platform/fieldTiming";
 import { isAsleep } from "../tabs/pageSession";
+import { NATIVE_REVEAL_COUNTS, nativePressTime, type Mark } from "./nativeRevealMarks";
 
 let on = false;
 
@@ -49,10 +50,7 @@ function lastInput(now = Date.now()): number | null {
   return at > 0 && at <= now + 5 && now - at <= 1000 ? at : null;
 }
 
-type Mark = [kind: string, at: number];
 const marks = new Map<string, Mark[]>();
-
-const NATIVE_REVEAL_COUNTS: Record<string, string> = { nativeReveal: "j3_native", nativeRevealDropped: "j3_native_dropped", nativeRevealFocus: "j3_native_focus" };
 
 function pullMarks(now: number) {
   for (const [key, kind, at] of fieldTiming.drain()) {
@@ -296,9 +294,10 @@ function watchStore(s: BrowserState, prev: BrowserState) {
     const now = activeTabId(s, id);
     const before = activeTabId(prev, id);
     if (!now || now === before || s.windows[id]!.profileId !== prev.windows[id]?.profileId) continue;
-    const t0 = lastInput();
-    if (t0 === null) continue;
     const heard = Date.now();
+    if (prev.tabs[now]) pullMarks(heard);
+    const t0 = (prev.tabs[now] ? nativePressTime(marks, now, heard) : null) ?? lastInput(heard);
+    if (t0 === null) continue;
     if (!prev.tabs[now]) {
       if (!s.tabs[now]!.url) begin({ journey: "j2", key: now, t0, heard });
     } else if (before && s.tabs[before]?.windowId === id) {

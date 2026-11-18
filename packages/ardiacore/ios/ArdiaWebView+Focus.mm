@@ -37,6 +37,12 @@ static BOOL InTabPage(NSView *view) {
 + (BOOL)focusVisiblePageIn:(NSWindow *)window {
   ArdiaWebView *chosen = nil;
   for (ArdiaWebView *view in LiveViews().allObjects) {
+    if (view.window == window && view->_reveal.active && view->_reveal.inputTaken) {
+      [view focusPage];
+      return YES;
+    }
+  }
+  for (ArdiaWebView *view in LiveViews().allObjects) {
     NSView *page = view->_tab.view;
     if (view.window != window || !view->_visible || view->_standalone || !page || page.superview != view ||
         page.isHiddenOrHasHiddenAncestor)
@@ -118,6 +124,10 @@ static BOOL InTabPage(NSView *view) {
     return;
   }
   if (!_visible || page.isHiddenOrHasHiddenAncestor) return;
+  if (self.underNativeReveal) {
+    _focus.onActivate = NO;
+    return;
+  }
   [self takeFocusFromLingeringPane];
   _focus.onActivate = NO;
   NSResponder *responder = window.firstResponder;
@@ -138,13 +148,13 @@ static BOOL InTabPage(NSView *view) {
 - (void)focusAfterLingeringPane {
   NSWindow *window = self.window;
   NSView *page = _tab.view;
-  if (!window || !_visible || _standalone || !page || page.superview != self || page.isHiddenOrHasHiddenAncestor) return;
+  if (!window || !_visible || _standalone || !page || page.superview != self || page.isHiddenOrHasHiddenAncestor || self.underNativeReveal) return;
   if (![self focusRememberedDevToolsIn:window]) [self focusPage];
 }
 
 - (void)focusAfterLoad {
   if (!_tab) return;
-  if (_visible) return [self focusPage];
+  if (_visible && !self.underNativeReveal) return [self focusPage];
   _focus.page = ArdiaPageFocus::Page;
   _focus.devTools = nil;
   [self requestFocusRestore];

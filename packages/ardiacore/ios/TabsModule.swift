@@ -8,6 +8,7 @@ public class TabsModule: Module {
 
     OnCreate {
       ArdiaTabStrip.watchStrips()
+      ArdiaWebView.setJavaScriptThread { [weak self] block in self?.appContext?.executeOnJavaScriptThread(runBlock: block) }
     }
 
     Function("prepareTransfer") { (key: String) in
@@ -19,10 +20,13 @@ public class TabsModule: Module {
     Function("claimLaunchTab") { (key: String, url: String, profile: String) in
       ArdiaWebView.claimLaunchTab(key, url: url, profile: profile)
     }
-    Function("revealTab") { (key: String) in ArdiaWebView.revealTab(key) }
-    Function("dropTabReveals") { (key: String) in ArdiaWebView.dropTabReveals(key) }
+    Function("revealTab") { (key: String, press: Int) in ArdiaWebView.revealTab(key, press: UInt(max(press, 0))) }
+    Function("dropTabReveals") { (key: String, press: Int, incoming: String) in ArdiaWebView.dropTabReveals(key, press: UInt(max(press, 0)), to: incoming) }
+    Function("claimTabPress") { (key: String) -> Int in Int(ArdiaWebView.claimTabPress(key)) }
+    Function("dropTabPress") { (press: Int) in ArdiaWebView.dropTabPress(UInt(max(press, 0))) }
+    Function("setTabsInSplits") { (keys: [String]) in ArdiaWebView.setTabsInSplits(keys) }
     Function("setNativeTabSwitch") { (enabled: Bool) in ArdiaWebView.setNativeTabSwitch(enabled) }
-    Function("revealOffered") { (adoptId: String, key: String) in ArdiaWebView.revealOffered(adoptId, over: key) }
+    Function("revealOffered") { (adoptId: String, key: String, press: Int) in ArdiaWebView.revealOffered(adoptId, over: key, press: UInt(max(press, 0))) }
     AsyncFunction("discardOffered") { (adoptId: String) -> Bool in ArdiaWebView.discardOffered(adoptId) }.runOnQueue(.main)
 
     Self.calls.function

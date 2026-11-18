@@ -1,8 +1,7 @@
 import { AppState, type GestureResponderEvent } from "react-native";
 import { modifiersOf } from "../../lib/keys";
 import { activeTabId } from "../browser/model";
-import { dropTabReveals } from "../../platform/tabs";
-import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
+import { claimPress, pressLeftTabBehind, switchingByPress } from "../tabs/tabReveal";
 import { useBrowser } from "../browser/store";
 import { focusedWindowOf } from "../windows/ui";
 import { clickTab } from "./actions";
@@ -28,6 +27,7 @@ export type TabPress = {
   tabId: string;
   startedAt: number | undefined;
   switched: boolean;
+  nativePress: number;
   at: { x: number; y: number } | null;
   windowKey: boolean;
   answered: boolean;
@@ -103,15 +103,16 @@ export function holdTabPress(windowId: string, tabId: string, press: GestureResp
   }
   settleUnansweredPressOut();
   noteRowPressIn(windowId);
+  const nativePress = claimPress(tabId);
   const switched = switchesOnPress(windowId, tabId, press);
-  const held: TabPress = { windowId, tabId, startedAt, switched, at: pointOf(press), windowKey: windowIsKey(windowId), answered: false, out: false, drift: "unknown" };
+  const held: TabPress = { windowId, tabId, startedAt, switched, nativePress, at: pointOf(press), windowKey: windowIsKey(windowId), answered: false, out: false, drift: "unknown" };
   heldPress = held;
   notePressStarted(switched, held.windowKey);
   if (switched) {
     dismissHover();
-    clickTab(windowId, tabId);
+    switchingByPress(nativePress, () => clickTab(windowId, tabId));
   }
-  if (PLATFORM_FEATURES.nativeTabSwitch && plainPress(press) && activeTabId(useBrowser.getState(), windowId) !== tabId) dropTabReveals(tabId);
+  if (activeTabId(useBrowser.getState(), windowId) !== tabId) pressLeftTabBehind(nativePress);
   return held;
 }
 
@@ -127,7 +128,7 @@ export function clickHeldTabPress(windowId: string, tabId: string, release: Gest
   dismissHover();
   const start = pressStart(release);
   if (held?.switched && held.tabId === tabId && start !== undefined && held.startedAt === start) return;
-  clickTab(windowId, tabId, modifiersOf(release));
+  switchingByPress(press?.nativePress ?? 0, () => clickTab(windowId, tabId, modifiersOf(release)));
 }
 
 export function pressOutTabPress(press: TabPress | null, e: GestureResponderEvent) {
@@ -149,5 +150,5 @@ export function endHeldTabPress(tabIds: string[], release: GestureResponderEvent
   if (held.startedAt !== pressStart(release)) return dropped("start_mismatch");
   notePressEnded("dragClick", held.tabId);
   dismissHover();
-  if (!held.switched) clickTab(held.windowId, held.tabId, modifiersOf(release));
+  if (!held.switched) switchingByPress(held.nativePress, () => clickTab(held.windowId, held.tabId, modifiersOf(release)));
 }
