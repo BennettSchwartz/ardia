@@ -147,9 +147,11 @@ function Quit-Link([string]$name, [string]$pageScript = "") {
   return "http://127.0.0.1:$([QuitPages]::Port)/quit-$name.html"
 }
 
-function Start-WithTest([string]$test, [string[]]$arguments = @()) {
+function Start-WithTest([string]$test, [string[]]$arguments = @(), [switch]$Shown) {
   $saved = $env:ARDIA_TEST
+  $savedBackground = $env:ARDIA_BACKGROUND
   if ($test) { $env:ARDIA_TEST = $test } else { Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue }
+  if ($Shown) { Remove-Item -Path Env:ARDIA_BACKGROUND -ErrorAction SilentlyContinue }
   try {
     $started = if ($arguments.Count) { Start-Process -FilePath $exe -ArgumentList $arguments -PassThru } else { Start-Process -FilePath $exe -PassThru }
     $null = $started.Handle
@@ -157,6 +159,7 @@ function Start-WithTest([string]$test, [string[]]$arguments = @()) {
     return $started
   } finally {
     if ($null -eq $saved) { Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue } else { $env:ARDIA_TEST = $saved }
+    if ($null -eq $savedBackground) { Remove-Item -Path Env:ARDIA_BACKGROUND -ErrorAction SilentlyContinue } else { $env:ARDIA_BACKGROUND = $savedBackground }
   }
 }
 
@@ -177,10 +180,10 @@ function Assert-LoadedOnce([string]$what, [string]$name) {
   if ($loads -ne 1) { Fail-Quit $what "the link the launch carried (quit-$name.html) was loaded $loads times, not once" }
 }
 
-function Open-QuitInstance([string]$what, [string]$test) {
+function Open-QuitInstance([string]$what, [string]$test, [switch]$Shown) {
   if (@(Browsers).Count) { throw "$what`: an Ardia was still running before this case" }
   Clear-QuitLog
-  Start-WithTest $test | Out-Null
+  Start-WithTest $test -Shown:$Shown | Out-Null
   $shown = Wait-Window $what 120
   Wait-QuitLine "^launch \d+ process started inside the engine pid=$($shown.Pid)$" $what
   Wait-QuitLine 'events reach the UI' $what
@@ -301,8 +304,8 @@ function Answer-QuitDialog($dialog, [int]$button) {
 
 function Test-LaunchWhileTheDownloadsQuestionShows {
   $what = "a launch while the question about running downloads is on screen"
-  $old = Open-QuitInstance $what "appDialog"
-  $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);"))
+  $old = Open-QuitInstance $what "appDialog" -Shown
+  $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);")) -Shown
   if (-not $starter.WaitForExit(30000) -or $starter.ExitCode -ne 0) { Fail-Quit $what "the launch that opens the download page didn't hand over and exit 0" }
   Wait-QuitLinkOnce $what "download"
   $deadline = (Get-Date).AddSeconds(30)
@@ -326,14 +329,14 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   $earlier = @()
   for ($round = 0; $round -lt 3 -and -not $question; $round++) {
     $dialog = Find-QuitDialog $old.Pid 15
-    if (-not $dialog) { Fail-Quit $what "closing the last window brought no question within 15 s (held downloads open when it closed: $openAtClose, now: $([QuitPages]::DownloadsOpen), last dropped at $([QuitPages]::DownloadClosedAt) UTC; Ardia $($old.Pid) running: $($null -ne (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)))" }
+    if (-not $dialog) { Fail-Quit $what "closing the last window of a shown Ardia (no ARDIA_BACKGROUND, so the app may ask) brought no question within 15 s (held downloads open when it closed: $openAtClose, now: $([QuitPages]::DownloadsOpen), last dropped at $([QuitPages]::DownloadClosedAt) UTC; Ardia $($old.Pid) running: $($null -ne (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)))" }
     if ("$($dialog.Asked.message)" -match 'downloads? in progress') { $question = $dialog; break }
     $earlier += "'$($dialog.Asked.title)'"
     Answer-QuitDialog $dialog 1001
   }
   if (-not $question) { Fail-Quit $what "closing the window never asked about the running download (asked first: $($earlier -join ', '))" }
   $link = Quit-Link "asking"
-  $launched = Start-WithTest "" @($link)
+  $launched = Start-WithTest "" @($link) -Shown
   $shown = Assert-SameArdiaKeepsIt $what $old $launched "asking"
   if (-not (@([RelaunchCheck.Native]::DialogWindows([uint32]$old.Pid)) -contains $question.Window)) { Fail-Quit $what "the launch took the question about downloads off the screen" }
   Assert-NoQuitLine 'began \((user|update)\)' $what "a quit began although the question was still on screen"
@@ -360,10 +363,20 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   Assert-QuitLine 'the app answered yes after \d+ ms' $what "the app didn't answer the quit after the question"
   Assert-QuitsEnded $what ($ended + 1)
   Assert-LoadedOnce $what "asking"
+  Assert-NoQuitLine '\[quit\] not asked on a hidden instance' $what "the shown Ardia logged itself as a hidden instance that didn't ask"
+  $askedLines = @(@(Quit-Log) | Where-Object { $_ -match '\[quit\] asked: ' })
+  $askLog = "the build doesn't log the quit question yet"
+  if ($askedLines.Count) {
+    $cancelled = @($askedLines | Where-Object { $_ -match 'answered cancel' })
+    if ($cancelled.Count) { Fail-Quit $what "the log has a quit question answered cancel, which the case never gave: $($cancelled -join ' | ')" }
+    $downloadAsks = @($askedLines | Where-Object { $_ -match '\[quit\] asked: [1-9]\d* downloads? in progress, warning (on|off); answered quit$' })
+    if ($downloadAsks.Count -ne $answers) { Fail-Quit $what "the log has $($downloadAsks.Count) quit questions about downloads answered quit, not the $answers the case answered: $($askedLines -join ' | ')" }
+    $askLog = "the log has $($downloadAsks.Count) '[quit] asked: ... downloads in progress ...; answered quit' line(s), one per question"
+  }
   [QuitPages]::ReleaseDownloads()
   Keep-QuitLog $what
   $before = if ($earlier.Count) { " after $($earlier -join ', ')" } else { "" }
-  Note "$what`: the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once (in Little Ardia) with no quit begun, and Quit then ended it through the normal quit with its 'process ending' ($answers download question(s) answered Quit, the last when its last window closed)"
+  Note "$what`: in a shown Ardia (no ARDIA_BACKGROUND, which answers every question unseen), the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once (in Little Ardia) with no quit begun, and Quit then ended it through the normal quit with its 'process ending' ($answers download question(s) answered Quit, the last when its last window closed; $askLog)"
 }
 
 function Test-LaunchAtTheQuitSeam {
@@ -718,7 +731,7 @@ function Test-LaunchRefusedForGood {
   $shown = Open-QuitInstance "a launch after a refused start" ""
   $facts = Get-Content -LiteralPath (Join-Path $script:QuitData "launch-guard.json") -Raw | ConvertFrom-Json
   if ($facts.refusedStartsBefore -ne 1) { throw "$what`: the next start counted $($facts.refusedStartsBefore) refused starts, not 1" }
-  Note "$what`: it started itself again once, that start failed with the reason in the log ($($failed[0] -replace '^.*app start failed: ', '')), and the next start counted it"
+  Note "$what`: it started itself again once, that start failed with the reason in the log ($($failed[0] -replace '^.*app start failed: ', '')), and the next start counted it (a hidden instance shows no start-failure message, so this case doesn't check that message)"
   Close-QuitInstance $what $shown
 }
 
@@ -789,7 +802,7 @@ function Test-LaunchesDuringQuit {
         Save-QuitDumps $case
       }
     }
-    Note "launches during a quit (Little Ardia on, the default): $($cases.Count) cases in $([int]$watch.Elapsed.TotalSeconds) s, $($script:QuitFailures.Count) failed"
+    Note "launches during a quit (Little Ardia on, the default; hidden instances, except the downloads question, which runs shown): $($cases.Count) cases in $([int]$watch.Elapsed.TotalSeconds) s, $($script:QuitFailures.Count) failed"
   } finally {
     Keep-QuitLog "final"
     [QuitPages]::Stop()
