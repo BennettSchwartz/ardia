@@ -11,6 +11,11 @@ import { useSync } from "../state/sync/store";
 import { status } from "../../test/syncFixture";
 import { pressButton, renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const mockMotion = { reduced: false };
 jest.mock("../state/app/systemLook", () => ({ ...jest.requireActual("../state/app/systemLook"), useReduceMotion: () => mockMotion.reduced }));
 
