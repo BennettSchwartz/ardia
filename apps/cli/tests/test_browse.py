@@ -884,21 +884,45 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(named.message.startswith("`wait --download` needs Browser.setDownloadBehavior"))
         self.assertIn("blocks on purpose", named.message)
         self.assertTrue(named.message.endswith("(a detail)"))
-        # A method that is only waiting for the engine keeps its wording, upload included: it is being made to work.
-        for method, command in (("Network.getCookies", "cookies get"), ("DOM.setFileInputFiles", "upload")):
-            pending = Gated(method, command)
-            self.assertIn("It works once the engine's token policy allows it", pending.message)
-            self.assertNotIn("on purpose", pending.message)
         self.assertIn("blocks it on purpose", browse_help.COMMANDS["download"])
         self.assertIn("wait --download", browse_help.COMMANDS["download"])
         self.assertNotIn("--port", browse_help.COMMANDS["download"])
-        self.assertNotIn("on purpose", browse_help.COMMANDS["upload"])
+
+    def test_upload_says_the_block_is_on_purpose(self):
+        from ardia_cli.browse import help as browse_help
+
+        error = Gated("DOM.setFileInputFiles", "upload")
+        self.assertIn("`upload` needs DOM.setFileInputFiles", error.message)
+        self.assertIn("DOM.setFileInputFiles isn't allowed for the ardia command", error.message)
+        self.assertIn("blocks on purpose", error.message)
+        self.assertIn("Ask the person to choose the file in the page's own file picker", error.message)
+        for missing_feature in ("once the engine's token policy allows it", "--port", "until then"):
+            self.assertNotIn(missing_feature, error.message)
+        self.assertEqual((error.code, error.data), ("policy_refused", {"method": "DOM.setFileInputFiles", "reason": ""}))
+        named = error.during("upload", "a detail")
+        self.assertIn("blocks on purpose", named.message)
+        self.assertTrue(named.message.endswith("(a detail)"))
+        self.assertIn("blocks it on purpose", browse_help.COMMANDS["upload"])
+        self.assertIn("choose the file in the page's own file picker", browse_help.COMMANDS["upload"])
+        self.assertNotIn("--port", browse_help.COMMANDS["upload"])
+        self.assertNotIn("gated", browse_help.COMMANDS["upload"])
+
+    def test_the_overview_says_upload_and_download_are_blocked_on_purpose(self):
+        from ardia_cli.browse import help as browse_help
+
         lines = {line.split()[0]: line for line in browse_help.OVERVIEW.splitlines() if line.lstrip().startswith(("upload <sel>", "download <sel>"))}
         self.assertEqual(sorted(lines), ["download", "upload"])
-        self.assertIn("blocked on purpose", lines["download"])
-        self.assertNotIn("(gated", lines["download"])
-        self.assertIn("(gated", lines["upload"])
-        self.assertIn("download is blocked on purpose", " ".join(browse_help.OVERVIEW.split()))
+        for line in lines.values():
+            self.assertIn("blocked on purpose", line)
+            self.assertNotIn("(gated", line)
+        overview = " ".join(browse_help.OVERVIEW.split())
+        self.assertIn("upload and download are blocked on purpose, not pending", overview)
+
+    def test_a_method_still_waiting_for_the_engine_keeps_its_wording(self):
+        for method, command in (("Network.getCookies", "cookies get"), ("Fetch.enable", "network route")):
+            pending = Gated(method, command)
+            self.assertIn("It works once the engine's token policy allows it", pending.message)
+            self.assertNotIn("on purpose", pending.message)
 
     def test_a_viewport_refused_on_a_tab_the_command_didnt_open_says_where_it_works(self):
         from ardia_cli.browse.errors import refusal_reason

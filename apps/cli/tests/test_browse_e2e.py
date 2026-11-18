@@ -1993,8 +1993,7 @@ class BrowseTokenPath(unittest.TestCase):
             self.assertEqual(done.returncode, 1, args)
             self.assertIn(f"needs {method}", done.stderr)
             self.assertIn("isn't allowed for the ardia command", done.stderr)
-            # Download is blocked on purpose and says so; the rest are still waiting for the engine.
-            blocked = args[0] == "download"
+            blocked = args[0] in ("upload", "download")
             self.assertEqual("blocks on purpose" in done.stderr, blocked, args)
             self.assertEqual("once the engine's token policy allows it" in done.stderr, not blocked, args)
         data = json.loads(self.browse("cookies", "--json", session=session, check=False).stdout)

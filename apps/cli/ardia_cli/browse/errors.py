@@ -46,14 +46,14 @@ REFUSAL_HINTS = {
 }
 
 
-# Methods Ardia keeps off the ardia-command policy on purpose. Their refusal isn't a missing allowance, so it says so
-# and says what to do instead. Keyed by method, so every command that needs one (`download`, `wait --download`) words
-# it the same way. `Browser.setDownloadBehavior` lets the caller choose a folder to write to, and the engine's token
-# client answers false to `MayWriteLocalFiles` (chromium-devtools-control-token.patch) for the same reason.
 ON_PURPOSE = {
     "Browser.setDownloadBehavior": (
         "it would let the ardia command write a page's download to any folder on this computer",
         "Ask the person to save the file from the page",
+    ),
+    "DOM.setFileInputFiles": (
+        "it would let the ardia command hand any file on this computer to a page",
+        "Ask the person to choose the file in the page's own file picker",
     ),
 }
 
