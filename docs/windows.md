@@ -52,7 +52,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | New tab, close, reopen closed tab (Ctrl+Shift+T) | Works | |
 | Ctrl+Z reopens closed tabs | Works once turned on in Settings › Shortcuts (off by default, as on the Mac) | |
 | New window | Works | |
-| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again) | #1453 |
+| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again). Its pages paint as fast as a normal window's: in run 44320319587 a page's own window showed 40 to 50 ms after Enter in both, the local page painted in 141 to 168 ms and DuckDuckGo in 375 to 411 ms on its first visit (100 to 118 ms again). The first walk's 6 to 9 s of white didn't reproduce; the tour's `private-pages` part keeps it under 5 s | #1453, #2653 |
 | Close-tabs confirm while other windows load | Works: the confirm (like the prompt and the file pickers) runs on its own thread, so other windows keep loading and taking input while it is open; it stays in front of its own window and comes forward with it (#1688's self-check holds a confirm while a page loads, on CI; not walked here) | #1672, #1688 |
 | Quit and relaunch with the session restored | Works (tabs, the split and the open windows came back) | |
 | Engine memory trimmed after tabs close, once input is idle | Works (logged after closes) | #1544 |
