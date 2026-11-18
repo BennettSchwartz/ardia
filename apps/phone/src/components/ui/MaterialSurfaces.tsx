@@ -259,6 +259,7 @@ export type MaterialMenuEntry =
   | { heading: string };
 
 const MENU_WIDTH_STEP = 56;
+const MATERIAL_MENU_GROUP_GAP = 4;
 const MENU_MIN_WIDTH = 112;
 const MENU_MAX_WIDTH = 280;
 const LABEL_CHAR_WIDTH = 8;
@@ -272,6 +273,18 @@ export function materialMenuWidth(entries: readonly MaterialMenuEntry[]): number
   return Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, Math.ceil(widest / MENU_WIDTH_STEP) * MENU_WIDTH_STEP));
 }
 
+export function materialMenuGroups(entries: readonly MaterialMenuEntry[]): { entry: MaterialMenuEntry; index: number }[][] {
+  const groups: { entry: MaterialMenuEntry; index: number }[][] = [[]];
+  entries.forEach((entry, index) => {
+    if (entry === "divider") {
+      if (groups[groups.length - 1]!.length) groups.push([]);
+      return;
+    }
+    groups[groups.length - 1]!.push({ entry, index });
+  });
+  return groups.filter((group) => group.length > 0);
+}
+
 export function MaterialMenuPanel({ entries, place, panel }: { entries: MaterialMenuEntry[]; place: ViewStyle; panel?: React.RefObject<ViewInstance | null> }) {
   const { scheme } = useMaterialTheme();
   const ripple = useMaterialRipple();
@@ -281,37 +294,41 @@ export function MaterialMenuPanel({ entries, place, panel }: { entries: Material
   }, []);
   const enter = useAnimatedStyle(() => ({ opacity: Math.min(1, shown.value * 3), transform: [{ scaleY: 0.8 + 0.2 * shown.value }] }));
   return (
-    <Animated.View ref={panel} testID="materialMenu" accessibilityViewIsModal style={[styles.menu, { width: materialMenuWidth(entries) }, place, { backgroundColor: scheme.surfaceContainer }, enter]}>
-      {entries.map((entry, index) => {
-        if (entry === "divider") return <View key={`d${index}`} style={[styles.menuDivider, { backgroundColor: scheme.outlineVariant }]} />;
-        if ("heading" in entry)
-          return (
-            <Text key={`h${index}`} style={[materialType.titleSmall, styles.menuHeading, { color: scheme.onSurfaceVariant }]}>
-              {entry.heading}
-            </Text>
-          );
-        const destructive = !entry.submenu && entry.destructive;
-        const color = entry.disabled ? withAlpha(scheme.onSurface, MATERIAL_STATE.disabledContent) : destructive ? scheme.error : scheme.onSurface;
-        const iconColor = entry.disabled ? color : destructive ? scheme.error : scheme.onSurfaceVariant;
-        return (
-          <Pressable
-            key={`${index}:${entry.label}`}
-            accessibilityRole="menuitem"
-            accessibilityLabel={entry.label}
-            accessibilityState={entry.submenu ? { disabled: entry.disabled, expanded: false } : { checked: entry.checked, disabled: entry.disabled }}
-            disabled={entry.disabled}
-            android_ripple={ripple}
-            onPress={entry.onPress}
-            style={styles.menuItem}
-          >
-            {entry.icon ? <Symbol name={entry.icon} size={materialSize.icon} color={iconColor} /> : null}
-            <Text style={[materialType.labelLarge, styles.menuLabel, { color }]} numberOfLines={1}>
-              {entry.label}
-            </Text>
-            {entry.submenu ? <Symbol name="chevronRight" size={materialSize.icon} color={iconColor} /> : entry.checked ? <Symbol name="checkmark" size={materialSize.icon} color={scheme.primary} /> : null}
-          </Pressable>
-        );
-      })}
+    <Animated.View ref={panel} testID="materialMenu" accessibilityViewIsModal style={[styles.menu, { width: materialMenuWidth(entries) }, place, enter]}>
+      {materialMenuGroups(entries).map((group, groupIndex) => (
+        <View key={groupIndex} testID="materialMenuGroup" style={[styles.menuGroup, { backgroundColor: scheme.surfaceContainer }]}>
+          {group.map(({ entry, index }) => {
+            if (entry === "divider") return null;
+            if ("heading" in entry)
+              return (
+                <Text key={`h${index}`} style={[materialType.titleSmall, styles.menuHeading, { color: scheme.onSurfaceVariant }]}>
+                  {entry.heading}
+                </Text>
+              );
+            const destructive = !entry.submenu && entry.destructive;
+            const color = entry.disabled ? withAlpha(scheme.onSurface, MATERIAL_STATE.disabledContent) : destructive ? scheme.error : scheme.onSurface;
+            const iconColor = entry.disabled ? color : destructive ? scheme.error : scheme.onSurfaceVariant;
+            return (
+              <Pressable
+                key={`${index}:${entry.label}`}
+                accessibilityRole="menuitem"
+                accessibilityLabel={entry.label}
+                accessibilityState={entry.submenu ? { disabled: entry.disabled, expanded: false } : { checked: entry.checked, disabled: entry.disabled }}
+                disabled={entry.disabled}
+                android_ripple={ripple}
+                onPress={entry.onPress}
+                style={styles.menuItem}
+              >
+                {entry.icon ? <Symbol name={entry.icon} size={materialSize.icon} color={iconColor} /> : null}
+                <Text style={[materialType.labelLarge, styles.menuLabel, { color }]} numberOfLines={1}>
+                  {entry.label}
+                </Text>
+                {entry.submenu ? <Symbol name="chevronRight" size={materialSize.icon} color={iconColor} /> : entry.checked ? <Symbol name="checkmark" size={materialSize.icon} color={scheme.primary} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
     </Animated.View>
   );
 }
@@ -338,9 +355,9 @@ const styles = StyleSheet.create({
   dialog: { minWidth: 280, maxWidth: 560, width: "100%", borderRadius: materialShape.extraLarge, padding: 24, gap: 16, elevation: 3 },
   dialogButtons: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
   textButton: { minHeight: materialSize.touchTarget, minWidth: materialSize.touchTarget, paddingHorizontal: 12, justifyContent: "center", alignItems: "center", borderRadius: materialShape.full, overflow: "hidden" },
-  menu: { position: "absolute", minWidth: 112, maxWidth: 280, borderRadius: materialShape.extraSmall, paddingVertical: 8, elevation: 3, overflow: "hidden", transformOrigin: "top" },
+  menu: { position: "absolute", minWidth: 112, maxWidth: 280, gap: MATERIAL_MENU_GROUP_GAP, transformOrigin: "top" },
+  menuGroup: { borderRadius: materialShape.large, paddingVertical: 4, elevation: 3, overflow: "hidden" },
   menuItem: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: materialSize.touchTarget, paddingHorizontal: 12 },
   menuLabel: { flex: 1 },
   menuHeading: { paddingHorizontal: 12, paddingVertical: 8 },
-  menuDivider: { height: 1, marginVertical: 8 },
 });

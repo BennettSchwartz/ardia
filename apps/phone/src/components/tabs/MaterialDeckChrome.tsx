@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, type ViewInstance } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, TextInput, View, type ViewInstance } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { withAlpha } from "../../lib/color";
 import type { MaterialScheme } from "../../lib/material/schemes";
@@ -135,7 +135,7 @@ export function MaterialIconButton({ testID, icon, label, hint, scheme, turned =
 
 type BottomProps = Menus & { shown: boolean; safeSide: number; safeBottom: number; deckHeight: number; incognito: boolean; onQuery: (needle: string) => void };
 
-export const materialKeyboardLift = (keyboard: number, safeBottom: number) => Math.max(0, keyboard + MATERIAL_DECK.keyboardGap - safeBottom - MATERIAL_DECK.edge);
+export const materialKeyboardLift = (keyboard: number, safeBottom: number, os: string) => Math.max(0, keyboard + MATERIAL_DECK.keyboardGap - (os === "android" ? 0 : safeBottom) - MATERIAL_DECK.edge);
 
 export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, onQuery, menusShown, onMenu }: BottomProps) {
   const scheme = useDeckScheme(incognito);
@@ -143,7 +143,7 @@ export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, 
   const search = useSearchTabs(shown, incognito, onQuery);
   const { input, text, focused, change, focus, blur } = search;
   const keyboard = useKeyboardHeight(shown);
-  const lift = focused && keyboard > 0 ? materialKeyboardLift(keyboard, safeBottom) : 0;
+  const lift = focused && keyboard > 0 ? materialKeyboardLift(keyboard, safeBottom, Platform.OS) : 0;
   const rise = useSharedValue(0);
   useEffect(() => {
     rise.value = materialMove(-lift, "emphasized", materialDuration.medium2);

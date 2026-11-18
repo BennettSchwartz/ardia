@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ARCHIVE_SEARCH_DELAY_MS, archiveDayTitle } from "../../lib/archiveDay";
 import { parseColor } from "../../lib/color";
 import { haptics } from "../../state/app/haptics";
 import { ArchiveTile } from "./ArchiveTile";
-import { BackHandler, Platform, Pressable, SectionList, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { BackHandler, Platform, Pressable, SectionList, StyleSheet, Text, TextInput, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { closeArchive } from "../../state/browse/store";
 import { canShareTab, copyTabLink, deleteArchivedTab, menuOpenedHaptic, openArchivedTab, shareTab } from "../../state/browse/tabMenus";
@@ -28,7 +28,7 @@ export function ArchiveView() {
   const loaded = useArchiveLoaded();
   const interval = usePreferences((p) => p.autoArchiveInterval);
   const [query, setQuery] = useState("");
-  const [rowMenu, setRowMenu] = useState<{ tab: BrowserTab; y: number } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ tab: BrowserTab; y: number; anchor: RefObject<ViewInstance | null> } | null>(null);
   useEffect(() => loadArchive(), []);
   const [searched, setSearched] = useState("");
   useEffect(() => {
@@ -169,9 +169,9 @@ export function ArchiveView() {
               <ArchiveRow
                 tab={item}
                 faviconSize={ROW_FAVICON * Math.min(fontScale, ROW_FAVICON_SCALE_CAP)}
-                onMenu={(y) => {
+                onMenu={(y, anchor) => {
                   menuOpenedHaptic();
-                  setRowMenu({ tab: item, y });
+                  setRowMenu({ tab: item, y, anchor });
                 }}
               />
             )}
@@ -181,6 +181,7 @@ export function ArchiveView() {
       {rowMenu ? (
         <FloatingMenu
           items={rowMenuItems(rowMenu.tab)}
+          anchor={material ? rowMenu.anchor : undefined}
           place={{ top: rowMenu.y, left: space.xl, width: Math.min(tabsLayout.menuWidth, width - space.xl * 2) }}
           onDismiss={() => setRowMenu(null)}
         />
@@ -210,16 +211,18 @@ function restoreRow(tab: BrowserTab) {
   openArchivedTab(tab);
 }
 
-function ArchiveRow({ tab, faviconSize, onMenu }: { tab: BrowserTab; faviconSize: number; onMenu: (y: number) => void }) {
+function ArchiveRow({ tab, faviconSize, onMenu }: { tab: BrowserTab; faviconSize: number; onMenu: (y: number, anchor: RefObject<ViewInstance | null>) => void }) {
   const theme = useTheme();
+  const row = useRef<ViewInstance>(null);
   const shown = display(tab.url);
   return (
     <SwipeToDelete onDelete={() => deleteArchivedTab(tab)} revealsOnly={Platform.OS === "ios"}>
       <Pressable
+        ref={row}
         accessibilityRole="button"
         accessibilityHint="Reopens the tab."
         onPress={() => restoreRow(tab)}
-        onLongPress={(event) => onMenu(event.nativeEvent.pageY)}
+        onLongPress={(event) => onMenu(event.nativeEvent.pageY, row)}
         delayLongPress={tabsMotion.longPress}
         style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}
       >

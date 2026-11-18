@@ -9,6 +9,7 @@ import { getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { deckGeometry } from "../lib/deckGeometry";
 import { DesignProvider } from "../components/ui";
 import { MenuTrigger } from "../components/ui/MenuTrigger";
+import { materialKeyboardLift } from "../components/tabs/MaterialDeckChrome";
 import type { Design } from "../lib/design";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
 import { setDynamicScheme } from "../state/app/dynamicScheme";
@@ -282,4 +283,9 @@ onAndroid("the FAB's shadow view wraps its menu trigger, so the trigger's native
   expect(shadow.findAll((found) => found.type === MenuTrigger)).toHaveLength(1);
   expect(StyleSheet.flatten(shadow.props.style)).toMatchObject({ borderRadius: 16, elevation: MATERIAL_DECK.fabElevation });
   unmount(root);
+});
+
+test("the deck's search row rises by the whole keyboard on Android, whose reported height leaves out the navigation bar", () => {
+  expect(materialKeyboardLift(300, 48, "android")).toBe(300 + MATERIAL_DECK.keyboardGap - MATERIAL_DECK.edge);
+  expect(materialKeyboardLift(300, 34, "ios")).toBe(300 + MATERIAL_DECK.keyboardGap - 34 - MATERIAL_DECK.edge);
 });

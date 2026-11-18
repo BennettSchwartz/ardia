@@ -129,7 +129,10 @@ onAndroid("a menu in the material design is Material's: surfaceContainer, 4 dp c
   const picked = jest.fn();
   const dismissed = jest.fn();
   const root = material(<Menu place={{ top: 100, left: 20 }} onDismiss={dismissed} items={[{ label: "New Incognito Tab", icon: "eyes", onPress: picked }, "divider", { label: "Close All Tabs", destructive: true, onPress: () => undefined }]} />);
-  expect(flat(host(root, "materialMenu"))).toMatchObject({ backgroundColor: LIGHT.surfaceContainer, borderRadius: 4, top: 100, left: 20 });
+  expect(flat(host(root, "materialMenu"))).toMatchObject({ top: 100, left: 20 });
+  const groups = root.root.findAll((found) => found.props.testID === "materialMenuGroup" && typeof found.type === "string");
+  expect(groups).toHaveLength(2);
+  for (const group of groups) expect(flat(group)).toMatchObject({ backgroundColor: LIGHT.surfaceContainer, borderRadius: 16 });
   const item = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.props.onPress === "function")[0]!;
   expect(flat(item).minHeight).toBe(48);
   expect(item.props.android_ripple).toBeDefined();
