@@ -734,6 +734,12 @@ is plain Chromium.
   (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`
   carries `sync_paused_by_launch_guard`, `sync_resumes` and `sync_resumes_completed`: resumes well below pauses means
   people don't find Resume, and completed well below resumes means the crash comes back when Sync loads.
+  On Windows `recoveredStart` is true only when the engine's `launch-guard.json` in the data folder parses, says
+  `"restoreStateSetAside": true`, and was written at or after this process started (`AppModule.h` `LaunchGuard`); a
+  missing, unreadable or stale file, or the app outside the engine, reads false. A test instance logs
+  `[sync] test: recoveredStart …, status …` and each Sync status after it, writes `[sync] unlock finished: unlocked`
+  (or `not unlocked`) when the native unlock returns, just before the load and its 2-minute timer begin, and
+  `ARDIA_TEST=syncTurnOn=1` turns Sync on in the `syncFolder` folder after the first window.
 - Sync keeps its own count of unsettled starts, because the launch guard misses a Sync crash that comes later than
   15 s (#2570's profile died at 5.2, 19.4, 3.8, 18.9 and 4.6 s, so the guard's count went 1, 0, 1, 0, 1). It's shared
   code, so it holds on the Mac too; Linux doesn't keep it, because its Sync starts again at every handover between
@@ -748,6 +754,16 @@ is plain Chromium.
   when it ends updated, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
   count is kept. `recoveredStart` stays a second trigger. On the dashboard,
   `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
+- `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
+  Sync on, checks an ordinary start reports `recoveredStart` false, writes `unsettledStarts` 1 before it unlocks,
+  keeps it through a finished cycle and leaves 0 after a clean quit; a full run (`FULL`, `-SettleCheck`) also keeps a
+  start alive until `sync.json`, sampled while the app runs and before its window is closed, shows the count back at 0,
+  between 110 and 200 s after its `[sync] unlock finished: unlocked` line (the load's start); a start whose key didn't
+  unlock is never asserted to reach 0. Then it records two unfinished
+  starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`,
+  `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
+  the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and
+  `sync_paused_after_unsettled_starts` never) in the local telemetry copy. The start after it must still be paused.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens

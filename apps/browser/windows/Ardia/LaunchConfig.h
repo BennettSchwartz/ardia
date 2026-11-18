@@ -68,7 +68,7 @@ inline std::vector<std::string_view> const &TestKeys() noexcept {
       "externalProtocolNoLaunch", "externalProtocolApp", "mediaRouteProvider", "systemMediaPermission", "applyProfileGate", "contextMenu",
       "loginsDelay", "loginsReleaseAfter", "cdpTabsVisible",
       "pipSelfTest", "pipHover", "selfCheckOnly", "meadowWebGL", "meadowReadyMs", "introStartDelayMs", "fakeFullScreenMs", "shadersKeyWindow", "peekStrict", "importSecret", "importDiaBundleId", "importDiaWindows",
-      "cliInstallScript", "legacySource", "legacyCrashAfter", "bangsUrl", "onboarding", "whatsNew", "telemetry",
+      "cliInstallScript", "legacySource", "legacyCrashAfter", "bangsUrl", "onboarding", "whatsNew", "telemetry", "syncTurnOn",
       "liveMock", "calendarFixture", "appMenu", "appDialog", "loginsTimeout", "externalAppLaunch", "nativeDragRefused", "httpPages", "publicPages", "httpsPages", "selfCheckStage",
       "keyHold", "keyHoldReadyMs",
       "fadeLab", "rawBackgrounds", "downloadFlightFromPage",
