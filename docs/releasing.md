@@ -375,8 +375,8 @@ Ardia. The script searches the app releases (`v<version>`, nightlies included) a
 first, and `--tag v<version>` goes straight to one. `release.sh` packs `Ardia.app.dSYM` from the archive's `dSYMs`
 through `scripts/lib/pack-symbols.sh --app` after `verify.sh`, and refuses an app whose executable's UUID no dSYM in the
 archive carries. `publish.sh` uploads the two files whenever `dist` holds them (refusing a half pair, and noting it when there are
-none). A local release always has them; the CI publish job has only what the sign job's `release` artifact lists, so
-that list in `.github/workflows/release.yml` names both. Releases from before the app's symbols were uploaded have none: the build artifact that
+none). A local release always has them; the CI publish job has only what the sign job's `release` artifact (in
+`.github/workflows/release.yml`) lists, so that list has to name both. Releases from before the app's symbols were uploaded have none: the build artifact that
 held their archive has expired, so their `Ardia + 0x…` frames stay unnamed.
 
 Engines published before the symbols were uploaded have none: the next build
