@@ -70,9 +70,11 @@ export function findBookmarkFolder(items: readonly BookmarkItem[], key: string):
   return null;
 }
 
-type MenuState = { items: MenuItem[]; y: number } | null;
+const MENU_END_INSET = 8;
 
-type ShowMenu = (items: MenuItem[], event: GestureResponderEvent) => void;
+type MenuState = { items: MenuItem[]; y: number; atEnd: boolean } | null;
+
+type ShowMenu = (items: MenuItem[], event: GestureResponderEvent, atEnd?: boolean) => void;
 
 export function MaterialLibrary() {
   const open = useLibrary((s) => s.open);
@@ -166,10 +168,10 @@ function MaterialLibraryView({ open, onGone }: { open: boolean; onGone: () => vo
     transform: [{ translateY: (1 - shown.value) * ENTER_RISE + back.value * 24 }, { scale: 1 - 0.1 * back.value }],
     borderRadius: back.value * materialShape.extraLarge,
   }));
-  const showMenu = useCallback<ShowMenu>((items, event) => {
+  const showMenu = useCallback<ShowMenu>((items, event, atEnd = false) => {
     if (!items.length) return;
     menuOpenedHaptic();
-    setMenu({ items, y: event.nativeEvent.pageY });
+    setMenu({ items, y: event.nativeEvent.pageY, atEnd });
   }, []);
   const askDeleteAll = useCallback(() => {
     const run = () => {
@@ -198,7 +200,7 @@ function MaterialLibraryView({ open, onGone }: { open: boolean; onGone: () => vo
       <View style={[styles.content, { paddingBottom: insets.bottom }]}>
         {section === "history" ? <HistoryList open={open} query={query} showMenu={showMenu} /> : section === "bookmarks" ? <BookmarkList query={query} folderKey={folderKey} showMenu={showMenu} /> : <DownloadList open={open} showMenu={showMenu} />}
       </View>
-      {menu ? <FloatingMenu items={menu.items} place={{ top: menu.y, left: materialSize.listInset }} onDismiss={() => setMenu(null)} /> : null}
+      {menu ? <FloatingMenu items={menu.items} place={menu.atEnd ? { top: menu.y, right: MENU_END_INSET } : { top: menu.y, left: materialSize.listInset }} onDismiss={() => setMenu(null)} /> : null}
       {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
   );
@@ -234,7 +236,7 @@ function LibraryTopBar({ section, folderKey, onBack, onSearch, onDeleteAll, show
           label="More"
           icon="ellipsis"
           color={scheme.onSurfaceVariant}
-          onPress={(event) => showMenu([{ label: "Delete All", icon: "trash", destructive: true, disabled: !hasFiles, onPress: onDeleteAll }], event)}
+          onPress={(event) => showMenu([{ label: "Delete All", icon: "trash", destructive: true, disabled: !hasFiles, onPress: onDeleteAll }], event, true)}
         />
       ) : null}
     </View>
