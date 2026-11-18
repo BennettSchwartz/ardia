@@ -18,6 +18,10 @@ public static class QuitPages {
   static readonly ManualResetEvent downloadsReleased = new ManualResetEvent(false);
   static int downloadsStarted;
   public static int DownloadsStarted { get { return Volatile.Read(ref downloadsStarted); } }
+  static int downloadsClosed;
+  static long downloadClosedAt;
+  public static int DownloadsOpen { get { return Volatile.Read(ref downloadsStarted) - Volatile.Read(ref downloadsClosed); } }
+  public static string DownloadClosedAt { get { long at = Interlocked.Read(ref downloadClosedAt); return at == 0 ? "never" : new DateTime(at, DateTimeKind.Utc).ToString("HH:mm:ss.fff"); } }
   public static void ReleaseDownloads() { downloadsReleased.Set(); }
   public static void Start() {
     listener = new TcpListener(IPAddress.Loopback, 0);
@@ -57,7 +61,15 @@ public static class QuitPages {
           stream.Write(first, 0, first.Length);
           stream.Flush();
           Interlocked.Increment(ref downloadsStarted);
-          downloadsReleased.WaitOne();
+          byte[] more = Encoding.ASCII.GetBytes("r");
+          while (!downloadsReleased.WaitOne(250)) {
+            try { stream.Write(more, 0, more.Length); stream.Flush(); }
+            catch {
+              Interlocked.Exchange(ref downloadClosedAt, DateTime.UtcNow.Ticks);
+              Interlocked.Increment(ref downloadsClosed);
+              return;
+            }
+          }
           return;
         }
         string status = "404 Not Found";
@@ -297,20 +309,24 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   while ((Get-Date) -lt $deadline -and -not [QuitPages]::DownloadsStarted) { Start-Sleep -Milliseconds 100 }
   if (-not [QuitPages]::DownloadsStarted) { Fail-Quit $what "the page never started its download" }
   Start-Sleep -Seconds 5
-  foreach ($other in @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid) | Where-Object { $_ -ne $old.Window })) { Close-Window ([pscustomobject]@{ Pid = $old.Pid; Window = $other }) }
+  if (@([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid)).Count -gt 1) { Close-Window $old }
   $deadline = (Get-Date).AddSeconds(15)
   $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
-  while ((Get-Date) -lt $deadline -and ($left.Count -ne 1 -or $left[0] -ne $old.Window)) {
+  while ((Get-Date) -lt $deadline -and $left.Count -ne 1) {
     Start-Sleep -Milliseconds 200
     $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
   }
-  if ($left.Count -ne 1 -or $left[0] -ne $old.Window) { Fail-Quit $what "15 s after closing the other windows, Ardia $($old.Pid) has $($left.Count) app windows, not just its first one" }
+  if ($left.Count -ne 1) { Fail-Quit $what "15 s after closing the first window, Ardia $($old.Pid) has $($left.Count) app windows, not just the one with the download page" }
+  if ([QuitPages]::DownloadsOpen -lt 1) { Fail-Quit $what "the browser dropped the held download (at $([QuitPages]::DownloadClosedAt) UTC) before the last window closed" }
+  $last = $left[0]
   Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
-  [RelaunchCheck.Native]::PostMessageW($old.Window, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
+  $openAtClose = [QuitPages]::DownloadsOpen
+  [RelaunchCheck.Native]::PostMessageW($last, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
   $question = $null
   $earlier = @()
   for ($round = 0; $round -lt 3 -and -not $question; $round++) {
-    $dialog = Wait-QuitDialog $what $old.Pid
+    $dialog = Find-QuitDialog $old.Pid 15
+    if (-not $dialog) { Fail-Quit $what "closing the last window brought no question within 15 s (held downloads open when it closed: $openAtClose, now: $([QuitPages]::DownloadsOpen), last dropped at $([QuitPages]::DownloadClosedAt) UTC; Ardia $($old.Pid) running: $($null -ne (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)))" }
     if ("$($dialog.Asked.message)" -match 'downloads? in progress') { $question = $dialog; break }
     $earlier += "'$($dialog.Asked.title)'"
     Answer-QuitDialog $dialog 1001
@@ -510,6 +526,7 @@ function Test-TurnedAwayWhosePredecessorIsGone {
   $what = "a launch turned away when the Ardia that held the profile is already gone"
   Clear-QuitLog
   $link = Quit-Link "gone"
+  New-Item -ItemType Directory -Force -Path (Join-Path $script:QuitData "Chromium") | Out-Null
   $lock = [IO.File]::Open((Join-Path $script:QuitData "Chromium\lockfile"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read)
   try {
     $launched = Start-WithTest "" @($link)
@@ -665,13 +682,20 @@ function Test-TurnedAwayLaunchKeepsItsUserDataDir {
   Assert-LoadedOnce $what "custom"
   if (@(Browsers).Count -ne 1) { Keep-Log $what; throw "$what`: $(@(Browsers).Count) browsers at the end, not one: $(Describe-Browsers)" }
   Note "$what`: it waited for the closing Ardia, then started again ($freshId) on its own --user-data-dir, with the link loaded once, still there $($script:StillThereSeconds) s later"
-  Close-Window ([pscustomobject]@{ Pid = $freshId; Window = [RelaunchCheck.Native]::AppWindows([uint32]$freshId)[0] })
-  Wait-Exit $freshId $what | Out-Null
+  $windows = @([RelaunchCheck.Native]::AppWindows([uint32]$freshId))
+  foreach ($window in $windows) { Close-Window ([pscustomobject]@{ Pid = $freshId; Window = $window }) }
+  try {
+    Wait-Exit $freshId $what | Out-Null
+  } catch {
+    Keep-Log $what
+    Fail-Quit $what "Ardia ($freshId) was still running 60 s after its $($windows.Count) app window(s) were closed, with $(@([RelaunchCheck.Native]::AppWindows([uint32]$freshId)).Count) still open"
+  }
 }
 
 function Test-LaunchRefusedForGood {
   $what = "a launch whose profile another program holds"
   Clear-QuitLog
+  New-Item -ItemType Directory -Force -Path (Join-Path $script:QuitData "Chromium") | Out-Null
   $lock = [IO.File]::Open((Join-Path $script:QuitData "Chromium\lockfile"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read)
   try {
     $launched = Start-WithTest "" @((Quit-Link "held"))
