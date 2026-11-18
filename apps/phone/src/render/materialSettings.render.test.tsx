@@ -38,11 +38,11 @@ const settings = () =>
     </DesignProvider>,
   );
 
-onAndroid("Settings in the material design opens on a Material top app bar: 64 dp on surface, the title in titleLarge, and no iOS chevrons on its rows", () => {
+onAndroid("Settings in the material design opens on a Material top app bar: 64 dp on surfaceContainer, the title in titleLarge, and no iOS chevrons on its rows", () => {
   const root = settings();
-  expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(LIGHT.surface);
+  expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(LIGHT.surfaceContainer);
   const bar = node(root, "materialTopAppBar")!;
-  expect(flat(bar).backgroundColor).toBe(LIGHT.surface);
+  expect(flat(bar).backgroundColor).toBe(LIGHT.surfaceContainer);
   expect(flat(bar.findAll((found) => typeof found.type === "string" && flat(found).minHeight === 64)[0])).toMatchObject({ minHeight: 64 });
   expect(flat(node(root, "settingsTitle"))).toMatchObject({ fontSize: 22, color: LIGHT.onSurface });
   const row = node(root, "materialSettingsRow:Search Engine")!;
@@ -52,21 +52,23 @@ onAndroid("Settings in the material design opens on a Material top app bar: 64 d
   unmount(root);
 });
 
-onAndroid("the app bar takes surfaceContainer once the list scrolls under it, as Material's top app bar does", () => {
+onAndroid("the app bar takes surfaceContainerHigh once the list scrolls under it, as Material's top app bar does", () => {
   const root = settings();
   const list = root.root.findAll((found) => found.type === ScrollView)[0]!;
   act(() => list.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 80 } } }));
-  expect(flat(node(root, "materialTopAppBar")).backgroundColor).toBe(LIGHT.surfaceContainer);
-  expect(materialAppBarFill(LIGHT, false)).toBe(LIGHT.surface);
+  expect(flat(node(root, "materialTopAppBar")).backgroundColor).toBe(LIGHT.surfaceContainerHigh);
+  expect(materialAppBarFill(LIGHT, false)).toBe(LIGHT.surfaceContainer);
   unmount(root);
 });
 
-onAndroid("groups are flat sections split by full-width outlineVariant dividers, with no row dividers inside", () => {
+onAndroid("groups are Material 3 Expressive: rows as surfaceBright segments 2 dp apart, 20 dp outer corners and 4 dp inner ones, and no dividers", () => {
   const root = settings();
-  const dividers = root.root.findAll((found) => found.props.testID === "materialSettingsDivider" && typeof found.type === "string");
-  expect(dividers.length).toBeGreaterThan(2);
-  for (const divider of dividers) expect(flat(divider)).toMatchObject({ height: 1, backgroundColor: LIGHT.outlineVariant });
-  expect(dividers.every((divider) => !flat(divider).marginLeft)).toBe(true);
+  expect(root.root.findAll((found) => found.props.testID === "materialSettingsDivider")).toHaveLength(0);
+  const group = root.root.findAll((found) => found.props.testID === "materialSettingsGroup" && typeof found.type === "string" && found.findAll((inner) => inner.props.testID === "materialSettingsSegment" && typeof inner.type === "string").length > 2)[0]!;
+  const segments = group.findAll((found) => found.props.testID === "materialSettingsSegment" && typeof found.type === "string");
+  expect(flat(segments[0])).toMatchObject({ borderTopLeftRadius: 20, borderBottomLeftRadius: 4, backgroundColor: LIGHT.surfaceBright });
+  expect(flat(segments[1])).toMatchObject({ borderTopLeftRadius: 4, borderBottomLeftRadius: 4 });
+  expect(flat(segments.at(-1))).toMatchObject({ borderTopLeftRadius: 4, borderBottomLeftRadius: 20 });
   unmount(root);
 });
 

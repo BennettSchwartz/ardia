@@ -69,7 +69,15 @@ export function MaterialDeckTopBar({ safeTop, safeSide, incognito, privateCount,
         {current && spaces.length > 1 ? (
           <MenuTrigger items={spaceItems} {...menu} place={{ top: below, left: side + MATERIAL_DECK.titleInset }}>
             {({ onPress }) => (
-              <Pressable testID="materialDeckSpace" accessibilityRole="button" accessibilityLabel={`Space, ${current.name}`} accessibilityHint="Shows your Mac’s spaces." android_ripple={ripple(scheme)} onPress={onPress} style={styles.spaceButton}>
+              <Pressable
+                testID="materialDeckSpace"
+                accessibilityRole="button"
+                accessibilityLabel={`Space, ${current.name}`}
+                accessibilityHint="Shows your Mac’s spaces."
+                android_ripple={ripple(scheme)}
+                onPress={onPress}
+                style={styles.spaceButton}
+              >
                 <Text numberOfLines={1} style={[materialType.titleLarge, styles.shrink, { color: scheme.onSurface }]}>
                   {current.name}
                 </Text>
@@ -178,21 +186,32 @@ export function MaterialDeckBottomRow({ shown, safeSide, safeBottom, incognito, 
         />
         {text ? <MaterialIconButton testID="materialDeckSearchClear" icon="xmark" label="Clear Search" scheme={scheme} onPress={() => change("")} /> : null}
       </Pressable>
-      <MenuTrigger items={plusMenuItems(incognito, canReopen)} trigger="longPress" haptic={menuOpenedHaptic} disabled={!menusShown} onOpen={() => onMenu(true)} onClose={() => onMenu(false)} place={{ bottom: materialSize.fab + MATERIAL_DECK.keyboardGap, right: 0 }} style={styles.fabSlot}>
+      <MenuTrigger
+        items={plusMenuItems(incognito, canReopen)}
+        trigger="longPress"
+        haptic={menuOpenedHaptic}
+        disabled={!menusShown}
+        onOpen={() => onMenu(true)}
+        onClose={() => onMenu(false)}
+        place={{ bottom: materialSize.fab + MATERIAL_DECK.keyboardGap, right: 0 }}
+        style={styles.fabSlot}
+      >
         {({ onLongPress }) => (
-          <Pressable
-            testID="materialDeckFab"
-            accessibilityRole="button"
-            accessibilityLabel={fabLabel}
-            accessibilityHint="Touch and hold for more options."
-            android_ripple={ripple(scheme, scheme.onPrimaryContainer)}
-            onPressIn={haptics.barPress}
-            onPress={newTab}
-            onLongPress={onLongPress}
-            style={[styles.fab, { backgroundColor: scheme.primaryContainer }]}
-          >
-            <Symbol name="plus" size={materialSize.icon} color={scheme.onPrimaryContainer} />
-          </Pressable>
+          <View testID="materialDeckFabShadow" style={[styles.fabShadow, { backgroundColor: scheme.primaryContainer }]}>
+            <Pressable
+              testID="materialDeckFab"
+              accessibilityRole="button"
+              accessibilityLabel={fabLabel}
+              accessibilityHint="Touch and hold for more options."
+              android_ripple={ripple(scheme, scheme.onPrimaryContainer)}
+              onPressIn={haptics.barPress}
+              onPress={newTab}
+              onLongPress={onLongPress}
+              style={[styles.fab, { backgroundColor: scheme.primaryContainer }]}
+            >
+              <Symbol name="plus" size={materialSize.icon} color={scheme.onPrimaryContainer} />
+            </Pressable>
+          </View>
         )}
       </MenuTrigger>
     </Animated.View>
@@ -230,7 +249,8 @@ const styles = StyleSheet.create({
   search: { flex: 1, height: materialSize.searchBar, flexDirection: "row", alignItems: "center", gap: MATERIAL_DECK.searchGap, paddingLeft: MATERIAL_DECK.edge, paddingRight: 4, borderRadius: materialShape.full, overflow: "hidden" },
   field: { flex: 1, paddingVertical: 0, includeFontPadding: false },
   fabSlot: { width: materialSize.fab, height: materialSize.fab },
-  fab: { width: materialSize.fab, height: materialSize.fab, borderRadius: materialShape.large, alignItems: "center", justifyContent: "center", overflow: "hidden", elevation: MATERIAL_DECK.fabElevation },
+  fabShadow: { width: materialSize.fab, height: materialSize.fab, borderRadius: materialShape.large, elevation: MATERIAL_DECK.fabElevation },
+  fab: { width: materialSize.fab, height: materialSize.fab, borderRadius: materialShape.large, alignItems: "center", justifyContent: "center", overflow: "hidden" },
   empty: { position: "absolute", left: 24, right: 24, alignItems: "center", gap: 8 },
   centered: { textAlign: "center" },
   textButton: { minHeight: materialSize.touchTarget, minWidth: materialSize.touchTarget, paddingHorizontal: 12, justifyContent: "center", alignItems: "center", borderRadius: materialShape.full, overflow: "hidden", marginTop: 8 },

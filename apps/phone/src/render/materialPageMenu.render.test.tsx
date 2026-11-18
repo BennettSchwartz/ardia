@@ -52,7 +52,7 @@ async function openMenu(wrap: (menu: React.ReactElement) => React.ReactNode = (m
   return renderSurface(wrap(<PageMenu tabId={selectedTab(useTabs.getState())!.id} open onHidden={() => undefined} />) as React.ReactElement);
 }
 
-onAndroid("the material page menu is a Material bottom sheet: a title row, navigation as 48 dp icon buttons, Reader, Copy Link and Share as tonal buttons, and list rows split by outlineVariant dividers", async () => {
+onAndroid("the material page menu is a Material bottom sheet: a title row, navigation as 48 dp icon buttons, Reader, Copy Link and Share as tonal buttons, and list rows in Material 3 Expressive groups: rounded segments 2 dp apart, no dividers", async () => {
   const root = await openMenu();
   expect(node(root, "materialSheet")).toBeDefined();
   expect(node(root, "materialPageMenu")).toBeDefined();
@@ -71,9 +71,13 @@ onAndroid("the material page menu is a Material bottom sheet: a title row, navig
   const row = node(root, "pageMenuRow:Find on Page");
   expect(flat(row).minHeight).toBe(56);
   expect(pressable(root, "pageMenuRow:Find on Page").props.android_ripple).toMatchObject({ borderless: false });
-  const dividers = root.root.findAll((found) => found.props.testID === "materialMenuDivider" && typeof found.type === "string");
-  expect(dividers.length).toBeGreaterThanOrEqual(3);
-  for (const divider of dividers) expect(flat(divider)).toMatchObject({ height: 1, backgroundColor: LIGHT.outlineVariant });
+  expect(root.root.findAll((found) => found.props.testID === "materialMenuDivider")).toHaveLength(0);
+  const group = root.root.findAll((found) => found.props.testID === "materialMenuGroup" && typeof found.type === "string")[1]!;
+  expect(flat(group).gap).toBe(2);
+  const segments = group.findAll((found) => found.props.testID === "materialMenuSegment" && typeof found.type === "string");
+  expect(segments).toHaveLength(3);
+  expect(flat(segments[0])).toMatchObject({ borderTopLeftRadius: 20, borderBottomLeftRadius: 4, backgroundColor: LIGHT.surfaceContainerHighest });
+  expect(flat(segments.at(-1))).toMatchObject({ borderTopLeftRadius: 4, borderBottomLeftRadius: 20 });
   unmount(root);
 });
 

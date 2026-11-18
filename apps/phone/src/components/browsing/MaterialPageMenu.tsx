@@ -1,4 +1,4 @@
-import { Children, Fragment, type ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { withAlpha } from "../../lib/color";
@@ -37,7 +37,7 @@ import { Favicon, Symbol, Toggle, type MenuItem, type SymbolName } from "../ui";
 import { MATERIAL_STATE } from "../ui/materialRoles";
 import { useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
-import { materialDuration, materialShape, materialSize, materialType } from "../ui/materialTokens";
+import { MATERIAL_SEGMENT_GAP, materialDuration, materialSegmentCorners, materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { MenuTrigger } from "../ui/MenuTrigger";
 import { barAddress } from "./FloatingBar";
 
@@ -190,24 +190,22 @@ function TonalButton({ icon, title, enabled, onPress }: { icon: SymbolName; titl
 }
 
 function Groups({ children }: { children: ReactNode }) {
-  const { scheme } = useMaterialTheme();
-  const groups = Children.toArray(children);
-  return (
-    <View>
-      {groups.map((group, index) => (
-        <Fragment key={index}>
-          <View testID="materialMenuDivider" style={[styles.divider, { backgroundColor: scheme.outlineVariant }]} />
-          {group}
-        </Fragment>
-      ))}
-    </View>
-  );
+  return <View style={styles.groups}>{children}</View>;
 }
 
 function Group({ children }: { children: ReactNode }) {
+  const { scheme } = useMaterialTheme();
   const rows = Children.toArray(children);
   if (!rows.length) return null;
-  return <View testID="materialMenuGroup">{rows}</View>;
+  return (
+    <View testID="materialMenuGroup" style={styles.group}>
+      {rows.map((row, index) => (
+        <View key={index} testID="materialMenuSegment" style={[styles.segment, materialSegmentCorners(index, rows.length), { backgroundColor: scheme.surfaceContainerHighest }]}>
+          {row}
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function RowContent({ icon, title, enabled, supporting, trailing }: { icon: SymbolName; title: string; enabled: boolean; supporting?: string | null; trailing?: ReactNode }) {
@@ -324,19 +322,21 @@ function ZoomRow({ model, large }: { model: MenuModel; large: boolean }) {
 }
 
 const styles = StyleSheet.create({
-  column: { paddingBottom: 8 },
+  column: { paddingBottom: 16 },
+  groups: { gap: 12, paddingHorizontal: 16, paddingTop: 8 },
+  group: { gap: MATERIAL_SEGMENT_GAP },
+  segment: { overflow: "hidden" },
   flex: { flex: 1 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingHorizontal: 24 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 12, minHeight: materialSize.touchTarget + 8 },
   iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
   actions: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
   tonal: { flex: 1, height: TONAL_BUTTON_HEIGHT, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12 },
-  divider: { height: 1, marginVertical: 8 },
-  row: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingLeft: 24, paddingRight: 24, paddingVertical: 8 },
+  row: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingLeft: 16, paddingRight: 16, paddingVertical: 8 },
   rowTwoLine: { minHeight: materialSize.listItemTwoLine },
   digits: { fontVariant: ["tabular-nums"] },
   zoom: { flexDirection: "row", alignItems: "center", marginRight: -12 },
-  zoomStacked: { paddingHorizontal: 24, paddingVertical: 8, minHeight: materialSize.listItemTwoLine },
+  zoomStacked: { paddingHorizontal: 16, paddingVertical: 8, minHeight: materialSize.listItemTwoLine },
   zoomHeading: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.touchTarget },
   zoomBelow: { flexDirection: "row", alignItems: "center", marginLeft: materialSize.icon + 16 - 12 },
   zoomReset: { minWidth: 56, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },

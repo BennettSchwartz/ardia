@@ -22,7 +22,15 @@ export const materialType = {
   labelSmall: { fontSize: 11, lineHeight: 16, fontWeight: "500", letterSpacing: 0.5 },
 } as const satisfies Record<string, TypeRole>;
 
-export const materialShape = { none: 0, extraSmall: 4, small: 8, medium: 12, large: 16, extraLarge: 28, full: 9999 } as const;
+export const materialShape = { none: 0, extraSmall: 4, small: 8, medium: 12, large: 16, largeIncreased: 20, extraLarge: 28, full: 9999 } as const;
+
+export const MATERIAL_SEGMENT_GAP = 2;
+
+export const materialSegmentCorners = (index: number, count: number) => {
+  const top = index === 0 ? materialShape.largeIncreased : materialShape.extraSmall;
+  const bottom = index === count - 1 ? materialShape.largeIncreased : materialShape.extraSmall;
+  return { borderTopLeftRadius: top, borderTopRightRadius: top, borderBottomLeftRadius: bottom, borderBottomRightRadius: bottom };
+};
 
 export const materialSize = {
   touchTarget: 48,

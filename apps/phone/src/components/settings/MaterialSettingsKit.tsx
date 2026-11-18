@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Children, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { withAlpha } from "../../lib/color";
@@ -7,14 +7,14 @@ import { Symbol, ToggleTrack, useSheetFrame, type SymbolName } from "../ui";
 import { MATERIAL_STATE } from "../ui/materialRoles";
 import { MaterialDialog, useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
-import { materialShape, materialSize, materialType } from "../ui/materialTokens";
+import { MATERIAL_SEGMENT_GAP, materialSegmentCorners, materialShape, materialSize, materialType } from "../ui/materialTokens";
 
 const AVATAR = 40;
 const RADIO = 20;
 
 type PageProps = { title: string; onBack?: () => void; leading?: ReactNode; trailing?: ReactNode; children: ReactNode; scroll?: boolean; onRefresh?: () => Promise<unknown>; heroTitle?: boolean; overlay?: ReactNode; dismissesKeyboard?: boolean };
 
-export const materialAppBarFill = (scheme: { surface: string; surfaceContainer: string }, scrolled: boolean) => (scrolled ? scheme.surfaceContainer : scheme.surface);
+export const materialAppBarFill = (scheme: { surfaceContainer: string; surfaceContainerHigh: string }, scrolled: boolean) => (scrolled ? scheme.surfaceContainerHigh : scheme.surfaceContainer);
 
 export function MaterialSettingsPage({ title, onBack, leading, trailing, children, scroll = true, onRefresh, overlay, dismissesKeyboard = false }: PageProps) {
   const { scheme } = useMaterialTheme();
@@ -32,7 +32,7 @@ export function MaterialSettingsPage({ title, onBack, leading, trailing, childre
     : null;
   const sheetList = frame?.list(refresh !== null);
   return (
-    <View testID="materialSettingsPage" style={[StyleSheet.absoluteFill, { backgroundColor: scheme.surface }]}>
+    <View testID="materialSettingsPage" style={[StyleSheet.absoluteFill, { backgroundColor: scheme.surfaceContainer }]}>
       <View testID="materialTopAppBar" style={[styles.appBar, { paddingTop: frame ? 0 : insets.top, paddingLeft: insets.left + 4, paddingRight: insets.right + 4, backgroundColor: materialAppBarFill(scheme, scrolled) }]}>
         <View style={styles.appBarRow}>
           {onBack ? (
@@ -89,15 +89,21 @@ export function MaterialBarButton({ title, onPress, emphasized, enabled = true }
 
 export function MaterialGroup({ header, footer, children }: { header?: string; footer?: string | null; children: ReactNode }) {
   const { scheme } = useMaterialTheme();
+  const rows = Children.toArray(children);
   return (
-    <View testID="materialSettingsGroup">
-      <View testID="materialSettingsDivider" style={[styles.divider, { backgroundColor: scheme.outlineVariant }]} />
+    <View testID="materialSettingsGroup" style={styles.group}>
       {header ? (
         <Text accessibilityRole="header" style={[materialType.titleSmall, styles.header, { color: scheme.primary }]}>
           {header}
         </Text>
       ) : null}
-      <View style={header ? null : styles.groupTop}>{children}</View>
+      <View style={styles.segments}>
+        {rows.map((row, index) => (
+          <View key={index} testID="materialSettingsSegment" style={[styles.segment, materialSegmentCorners(index, rows.length), { backgroundColor: scheme.surfaceBright }]}>
+            {row}
+          </View>
+        ))}
+      </View>
       {footer ? <Text style={[materialType.bodyMedium, styles.footer, { color: scheme.onSurfaceVariant }]}>{footer}</Text> : null}
     </View>
   );
@@ -244,12 +250,13 @@ const styles = StyleSheet.create({
   title: { flex: 1 },
   textButton: { minHeight: materialSize.touchTarget - 8, minWidth: materialSize.touchTarget, paddingHorizontal: 12, marginHorizontal: 4, borderRadius: materialShape.full, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   list: { flex: 1 },
-  content: { marginTop: -1, paddingBottom: 32 },
+  content: { paddingTop: 8, paddingBottom: 32 },
   fill: { flex: 1 },
-  divider: { height: 1 },
-  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
-  groupTop: { paddingTop: 8 },
-  footer: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 16 },
+  group: { paddingTop: 16, marginHorizontal: 16 },
+  header: { paddingHorizontal: 16, paddingBottom: 8 },
+  segments: { gap: MATERIAL_SEGMENT_GAP },
+  segment: { overflow: "hidden" },
+  footer: { paddingHorizontal: 16, paddingTop: 8 },
   avatar: { alignItems: "center", justifyContent: "center" },
   row: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingHorizontal: 16, paddingVertical: 8 },
   rowTwoLine: { minHeight: materialSize.listItemTwoLine },
