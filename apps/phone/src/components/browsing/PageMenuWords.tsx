@@ -44,7 +44,7 @@ function openFromMenu(section: LibrarySection) {
   openLibrary(section);
 }
 
-const useAccessibilityText = () => useWindowDimensions().fontScale >= pageMenuLayout.accessibilityTextScale;
+const useAccessibilityText = () => useWindowDimensions().fontScale >= copy().menuLargeTextScale;
 
 export function PageMenuWords({ tabId, model, onTranslate }: { tabId: string; model: MenuModel; onTranslate: () => void }) {
   const large = useAccessibilityText();

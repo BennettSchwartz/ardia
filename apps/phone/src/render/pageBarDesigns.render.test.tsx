@@ -40,9 +40,9 @@ const page = (design: Design, tab = currentTabs().open[0]!) =>
 
 const host = (root: ReturnType<typeof renderSurface>, testID: string) => root.root.findAll((node) => node.props.testID === testID && typeof node.type === "string")[0];
 
-test("the design is chosen in one place: the redesign on iPhone and the original on Android, and the app runs the one its phone gets", () => {
+test("the design is chosen in one place: the redesign on both phones, as the owner decided on 2026-11-15, and the app runs the one its phone gets", () => {
   expect(designFor("ios")).toBe("redesigned");
-  expect(designFor("android")).toBe("original");
+  expect(designFor("android")).toBe("redesigned");
   expect(appDesign).toBe(designFor(Platform.OS));
 });
 

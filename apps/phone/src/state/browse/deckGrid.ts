@@ -6,7 +6,7 @@ import { countUsage } from "../telemetry/telemetry";
 
 export const DECK_GRID_KEY = "tabs.deckGrid";
 
-export const deckGridOffered = () => Platform.OS === "ios";
+export const deckGridOffered = () => true;
 
 const useDeckGridStore = create<{ grid: boolean | null }>()(() => ({ grid: null }));
 
