@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
-const { folderSymbolFor } = await import("../../../../packages/expo-windows/src/views/folderSymbol.ts");
+const { FOLDER_SWAP_MS, folderSwapMs, folderSymbolFor } = await import("../../../../packages/expo-windows/src/views/folderSymbol.ts");
 const { labelTextStyle } = await import("../../../../packages/expo-windows/src/views/labelStyle.ts");
 
 const repo = new URL("../../../../", import.meta.url);
@@ -38,6 +38,16 @@ test("a group's folder is the folder symbol, filled while open, sized to its box
   assert.deepEqual(folderSymbolFor(false, 16), { name: "folder", size: 12.8 });
   assert.deepEqual(folderSymbolFor(true, 20), { name: "folder.fill", size: 16 });
   assert.deepEqual(folderSymbolFor(false, undefined), { name: "folder", size: 12.8 });
+});
+
+test("a group's folder swaps over the Mac's 0.2 s, less in proportion when it turns back part way, and at once with animation effects off", () => {
+  assert.equal(FOLDER_SWAP_MS, 200);
+  assert.equal(folderSwapMs(0, 1, false), 200);
+  assert.equal(folderSwapMs(1, 0, false), 200);
+  assert.equal(folderSwapMs(0.25, 0, false), 50);
+  assert.equal(folderSwapMs(0.6, 1, false), 80);
+  assert.equal(folderSwapMs(1, 1, false), 0);
+  assert.equal(folderSwapMs(0, 1, true), 0);
 });
 
 test("a label asked to strike its text through draws the line, and one not asked draws none", () => {
