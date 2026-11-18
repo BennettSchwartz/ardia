@@ -93,7 +93,7 @@ import { PageBarGhost } from "../browsing/PageBarGhost";
 import { screenCornerRadius } from "../../state/app/displayCorner";
 import { TabGrid, type GridFrame } from "./TabGrid";
 import { tabGridMotion } from "./tabGridLayout";
-import { deckGridOffered, useDeckGrid } from "../../state/browse/deckGrid";
+import { useDeckGrid } from "../../state/browse/deckGrid";
 import { deckPullGrowing, endDeckPull, growDeckPull, peekDeckPullEntrance, publishDeckStandby, showGrowingPage, takeDeckPullEntrance } from "../../state/browse/deckPull";
 import { pullTarget, stackPullTarget } from "../../lib/deckPull";
 import { useBarGlyphFade, useDeckPulled } from "./deckPulled";
@@ -140,7 +140,7 @@ export const TabDeck = memo(function TabDeck() {
   const design = useDesign();
   const redesigned = design === "redesigned";
   const glassChrome = redesigned && usesGlass();
-  const gridAvailable = redesigned && deckGridOffered();
+  const gridAvailable = redesigned;
   const gridChosen = useDeckGrid();
   const grid = gridAvailable && gridChosen;
   const column = useColumn();

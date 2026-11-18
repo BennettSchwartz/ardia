@@ -9,7 +9,7 @@ import { usePreferences } from "../../state/settings/hooks";
 import { popSettings, pushSettings } from "../../state/settings/nav";
 import { matchMyMac } from "../../state/sync/actions";
 import { useSyncEnabled } from "../../state/sync/hooks";
-import { deckGridOffered, setDeckGrid, useDeckGrid } from "../../state/browse/deckGrid";
+import { setDeckGrid, useDeckGrid } from "../../state/browse/deckGrid";
 import { useIncognito } from "../../state/tabs/hooks";
 import { capsule, font, PROFILE_COLORS, settingsLayout, settingsMotion, settingsTint, space, Symbol, useProfileLook, useTheme, type ProfileColor } from "../ui";
 import { Divider, Group, IconTile, NavRow, SettingsPage, ToggleRow } from "./SettingsKit";
@@ -49,12 +49,10 @@ export function AppearancePage() {
           <CheckRow key={choice} title={SCHEME_NAMES[choice]} checked={scheme === choice} divider={index < schemeChoices.length - 1} onPress={() => setSchemeChoice(choice)} />
         ))}
       </Group>
-      {deckGridOffered() ? (
-        <Group header="Tabs" footer={TABS_STYLE_FOOTER}>
-          <CheckRow title="Stack" checked={!grid} divider onPress={() => setDeckGrid(false, !incognito)} />
-          <CheckRow title="Grid" checked={grid} divider={false} onPress={() => setDeckGrid(true, !incognito)} />
-        </Group>
-      ) : null}
+      <Group header="Tabs" footer={TABS_STYLE_FOOTER}>
+        <CheckRow title="Stack" checked={!grid} divider onPress={() => setDeckGrid(false, !incognito)} />
+        <CheckRow title="Grid" checked={grid} divider={false} onPress={() => setDeckGrid(true, !incognito)} />
+      </Group>
     </SettingsPage>
   );
 }

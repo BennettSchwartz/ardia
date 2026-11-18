@@ -239,7 +239,7 @@ test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-p
 
 const incognitoSwitch = (root: Root) => root.root.findAll((node) => node.props.accessibilityLabel === "Incognito" && node.props.accessibilityRole === "switch" && typeof node.props.onPress === "function")[0];
 
-test("the bar's left button is an Incognito switch: Ardia's eyes glyph on 48-point glass, read as a switch with a hint, and only in the redesign Android's app doesn't run", () => {
+test("the bar's left button is an Incognito switch: Ardia's eyes glyph on 48-point glass, read as a switch with a hint, on both phones and only in the redesign", () => {
   const root = deck();
   const toggle = incognitoSwitch(root)!;
   expect(toggle.props.accessibilityState).toMatchObject({ checked: false });
@@ -248,10 +248,11 @@ test("the bar's left button is an Incognito switch: Ardia's eyes glyph on 48-poi
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true)).toHaveLength(0);
   expect(host(root, "deckBarIncognitoOn")).toBeUndefined();
   unmount(root);
-  const android = deck(designFor("android"));
-  expect(incognitoSwitch(android)).toBeUndefined();
-  expect(host(android, "deckBarIncognito")).toBeUndefined();
-  unmount(android);
+  expect(designFor("android")).toBe("redesigned");
+  const original = deck("original");
+  expect(incognitoSwitch(original)).toBeUndefined();
+  expect(host(original, "deckBarIncognito")).toBeUndefined();
+  unmount(original);
 });
 
 test("a tap on the switch shows only the Incognito tabs on Incognito glass, the plus makes Incognito tabs, and a second tap brings the normal deck back; only the switch to Incognito is counted", () => {
@@ -329,9 +330,9 @@ test("closing the last Incognito card from the deck keeps the empty Incognito si
   unmount(root);
 });
 
-test("Android's original deck keeps its private tabs among the others, as before the switch", () => {
+test("the original deck keeps its private tabs among the others, as before the switch", () => {
   withPrivateTabs(2);
-  const root = deck(designFor("android"));
+  const root = deck("original");
   expect(hosts(root, "deckCard")).toHaveLength(11);
   act(() => useTabs.setState({ incognito: true }));
   act(() => jest.advanceTimersByTime(600));
