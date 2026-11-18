@@ -447,7 +447,7 @@ function Test-LaunchAfterThePointOfNoReturn {
   $shown = Assert-OneFreshArdia $what $old.Pid "after"
   Assert-QuitLine 'launch guard: waited \d+ ms for the previous Ardia on this profile to finish exiting' $what "the launch didn't wait for the closing Ardia"
   Assert-QuitsEnded $what 1
-  Note "$what`: the launch waited for the closing Ardia, then one fresh Ardia ($($shown.Pid)) with the link, loaded once, still there $($script:StillThereSeconds) s later"
+  Note "$what`: the launch waited for the closing Ardia, then one fresh Ardia ($($shown.Pid)) with the link, loaded once (opened in Little Ardia, as a single outside link is when Little Ardia is on, beside the restored window), still there $($script:StillThereSeconds) s later"
   Close-QuitInstance $what $shown
 }
 
