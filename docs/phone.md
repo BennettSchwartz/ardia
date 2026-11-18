@@ -1270,6 +1270,13 @@ the share sheet and the tray's predictive back. The owner's open choices are in 
 nobody has seen working on a phone is the tester checklist below.
 iPhone follows the SwiftUI app on main since the merge of main (8203d0b3c, 2026-11-15), and main's redesign of that app (a2cf29dac, d199b885c) moved the reference: what iPhone needs now is "The iPhone redesign" below. The audit above predates it.
 
+### Decided by the owner (2026-11-17): Android's redesign is parked
+
+- The owner tested the redesigned Android build on the POCO F4 and rejected it: "hate it … the … dropdowns are weird everywhere … we keeping android ones for later." Android keeps the classic design on main, and the plan below (flip, phone pass, delete the classic design) is stopped until he takes Android up again.
+- The complaint he named is the dropdowns. He gave no more detail, so which dropdowns and what is wrong with them is not known; find that out before fixing anything. His words and the state of the work are in #2496.
+- The stopped work is the draft #2477 (branch `t3/android-redesign`): the switch, the page bar kept drawn while a deck card opens, the page menu's large layout from 1.3×, and the deck's grid on Android. It is not to be merged as it is. #2472, #2474 and #2475 stay open for it.
+- The classic design and its tests stay in the tree. iPhone is not affected and goes on to TestFlight on the owner's word.
+
 ### Decided by the owner (2026-11-15)
 
 - One design on both phones: Android takes main's iPhone redesign too ("the same look on Android and iPhone … keep one design, not two"). Plan: flip Android to the redesign, run both suites and an Android phone pass, then delete the classic design and its tests in one commit, so there is never a third state. Where a platform has a native element it uses its own: on iPhone the system context menus with lift and blur and the action sheets, on Android their native equivalents, behind one JavaScript component; the drawn menus go once both are in. Android's native needs for the redesign are with the Android agent:
@@ -1890,6 +1897,9 @@ published without the owner's OK. iPhone's counterpart is "The Expo app on TestF
 **Which build goes public first.** Not the Android of today. The APK goes public with the release that follows the Expo
 work being finished, iPhone and Android together. On Android that means the redesign switched on, the release checks
 passing, and a phone pass on the candidate. Until then the workflow and the candidates are rehearsals.
+
+Parked on 2026-11-17: the owner rejected the redesign on Android ("Decided by the owner (2026-11-17)"), so no Android
+candidate is built for release until he takes Android up again.
 
 **The workflow.** `.github/workflows/android-release.yml`, dispatch-only. It reaches `main` with the Expo branch's own
 pull request (#1556, which also closes #2160), and can't be dispatched before that merge. Then the commands are:
