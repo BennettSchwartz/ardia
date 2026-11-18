@@ -71,4 +71,10 @@ extern std::unique_ptr<RenderViewContextMenuBase> (*g_ardia_win_context_menu)(
 extern bool (*g_ardia_win_relaunched)(const base::CommandLine& command_line,
                                       const base::FilePath& cur_dir);
 
+enum class ArdiaHandOff { kTurnedAway, kTaken, kNotOurs };
+
+extern ArdiaHandOff (*g_ardia_win_answers_hand_off)(
+    const base::CommandLine& command_line,
+    const base::FilePath& current_directory);
+
 #endif
