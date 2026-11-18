@@ -739,12 +739,14 @@ is plain Chromium.
   count is kept. `recoveredStart` stays a second trigger. On the dashboard,
   `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
 - Sync judges its saved state before it loads it (#2623), with the checks it already applies to files from the sync
-  folder: every record has a stamp, an origin and a value, every base entry is text, every batch is a well-formed log
-  file, and the bookkeeping the load walks has the right shape. It's shared code (`savedStateChecks.ts`, with the
-  checks from `packages/sync`'s `fileChecks.ts`). A state that fails loads nothing: no scope, journal count or clock
+  folder: every record has a stamp the clock can read, an origin and a value, every base entry is text, this device's
+  batches are well-formed log files, and the bookkeeping and maps the load, the summary and the first cycle walk have
+  the right shape, as do `covers`, the saved clocks and `sync.json`'s sequence numbers. Only what the load uses is
+  judged: another device's batches, and an unlinked scope's base, are not. It's shared code (`savedStateChecks.ts`,
+  with the checks from `packages/sync`'s `fileChecks.ts` and `isStamp` in `hlc.ts`). A state that fails loads nothing: no scope, journal count or clock
   changes, no cycle runs, and nothing is written, deleted or rebuilt. Settings says "Sync's saved data on this PC is
   damaged, so Sync can't load it. To rebuild it, stop syncing here, then turn Sync on again with your recovery
-  phrase." (stalled after a start or Sync Now, paused after a Resume), and Stop Syncing stays offered. It doesn't
+  phrase." (stalled after a start or Sync Now, paused after a Resume), and Stop Syncing stays offered; it clears the old single journal file too, so the rejoin doesn't meet it again. It doesn't
   rebuild by itself because an emptied scope also loses the device's record of what it last synced: without it, the
   next cycle would publish old local values with fresh stamps, putting back what other devices deleted and
   overwriting their newer edits. Stopping and joining again with the recovery phrase gives the device a new identity

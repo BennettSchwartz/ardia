@@ -62,6 +62,7 @@ for (const kind of Object.keys(DAMAGE)) {
     const files = syncFiles(() => doc);
     const counts = files.journalCounts();
     const sealed = sealedFiles();
+    const seqsOnDisk = docOnDisk().seqs;
     await assert.rejects(files.loadState(), (error) => error instanceof SyncStateDamaged && !(error instanceof TypeError));
     assert.equal(doc.scopes, before.scopes);
     assert.deepEqual(doc.scopes, {});
@@ -73,15 +74,19 @@ for (const kind of Object.keys(DAMAGE)) {
     await files.checkpoint();
     await settle();
     assert.deepEqual(sealedFiles(), sealed, "nothing is written to the state or the journal");
+    assert.deepEqual(docOnDisk().seqs, seqsOnDisk, "and sync.json keeps its seqs");
   });
 }
 
 test("a null in a part's changes is the deletion mark and still loads, and an old checkpoint without the newer fields loads", async () => {
   const { disk } = await syncedProfile();
+  let deleted = null;
   damagePart(disk, withChanges, (part) => {
-    const change = firstChange(part);
-    change.records[Object.keys(change.records)[0]] = null;
-    change.base = { ...change.base, "bm:deleted": null };
+    const [scope, change] = Object.entries(part.changes).find(([, c]) => Object.keys(c.records).length);
+    const key = Object.keys(change.records)[0];
+    deleted = { scope, key };
+    change.records[key] = null;
+    change.base = { ...change.base, [key]: null };
   });
   const state = opened(disk, "sync-state.nns");
   for (const scope of Object.values(state.scopes)) for (const field of Object.keys(scope)) if (field !== "records" && field !== "base") delete scope[field];
@@ -92,6 +97,8 @@ test("a null in a part's changes is the deletion mark and still loads, and an ol
   await files.loadState();
   assert.equal(files.loaded(), true);
   assert.ok(Object.keys(doc.scopes).length > 0);
+  assert.equal(deleted.key in doc.scopes[deleted.scope].records, false, "the deletion was replayed");
+  assert.equal(deleted.key in doc.scopes[deleted.scope].base, false);
 });
 
 test("a damaged state at the start ends stalled in plain words, runs no cycle, and leaves the files as they were through a quit", async () => {
@@ -102,9 +109,11 @@ test("a damaged state at the start ends stalled in plain words, runs no cycle, a
   assert.equal(ui(engine).error, SYNC_DAMAGED);
   assert.equal(calls.chainStatus, 0);
   assert.deepEqual(sealedFiles(), sealed);
+  const seqsOnDisk = docOnDisk().seqs;
   quit.setQuitting(true);
   await quit.finishQuitSaves(5_000);
   assert.deepEqual(sealedFiles(), sealed, "the quit writes no state and no journal part");
+  assert.deepEqual(docOnDisk().seqs, seqsOnDisk);
 });
 
 test("Sync Now meets the same damage the same way, counts it once and runs no cycle", async () => {
@@ -158,12 +167,15 @@ test("with sharing off a damaged load isn't counted", async () => {
 test("Stop Syncing is offered from a damaged state, stalled or paused, and leaves Sync off", async () => {
   assert.ok(syncControls({ status: "stalled", paused: false }).advanced.includes("stop"));
   assert.ok(syncControls({ status: "paused", paused: true }).advanced.includes("stop"));
-  const disk = await damagedProfile("a journal part whose changes hold a bad record");
+  const { disk } = await syncedProfile();
+  const covers = opened(disk, "sync-state.nns").covers;
+  disk.set("sync-journal.nns", seal({ id: covers + 1, journal: { app: [{ v: 1, kind: "log", device: "devP", seq: 99, at: 1, ops: [{ k: "bm:old", v: null }] }] }, version: 1 }));
   const engine = await ordinaryStart(disk);
-  assert.equal(ui(engine).error, SYNC_DAMAGED);
+  assert.equal(ui(engine).error, SYNC_DAMAGED, "the old single journal holds a batch without a stamp");
   await engine.stopSync();
   await settle();
   assert.equal(ui(engine).status, "off");
   assert.equal(docOnDisk().enabled, false);
+  assert.ok(!shell.docs.get("sync-journal.nns"), "the old single journal is emptied too, so a rejoin doesn't meet it again");
   assert.equal(calls.chainStatus, 0, "no cycle on the damaged state, not even a last one");
 });

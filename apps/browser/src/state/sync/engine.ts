@@ -7,7 +7,7 @@ import { settingsToReapply } from "./settingsAdapter";
 import { stopWatchingExtensionIntents, watchExtensionIntents } from "./extensions";
 import { appAdapters, extensionsOf, forgetScopeAdapters, profileAdapters, typeSynced } from "./scopeAdapters";
 import { APP_SCOPE, defaultTypes, emptyDoc, type SyncDoc, type SyncUi } from "./syncDoc";
-import { syncFiles } from "./syncFiles";
+import { syncFiles, SyncStateDamaged } from "./syncFiles";
 import { settleThemeAdoption } from "./syncThemes";
 import { editClock, startEditClock } from "./editClock";
 import { appScopeOf, linkProfiles, readyToPair } from "./profileLinks";
@@ -66,7 +66,7 @@ const refused = () => paused() || !!running();
 const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded, docsSettled } = syncFiles(() => doc);
 const loadOnce = () => (loading ??= (starts.arm(), loadSavedState()).finally(() => (loading = null)));
 const damaged = damagedLoads();
-const loadRefused = (consent: ReturnType<typeof consentToken>, warning = "[sync] loading the saved state failed") => (error: unknown) => void publishUi({ status: "stalled", error: damaged(error, consent) ?? (warnFor(consent, warning, error), errorText(error)) });
+const loadRefused = (consent: ReturnType<typeof consentToken>, warning?: string) => (error: unknown) => void publishUi({ status: "stalled", error: damaged(error, consent) ?? (warning && warnFor(consent, warning, error), errorText(error)) });
 const report = (patch: Partial<SyncUi>) => void (paused() ? (outcome = patch) : publishUi(patch));
 const standsDown = () => paused() && isQuitting() && (report({ status: "stalled", error: QUIT_DURING_RESUME }), true);
 
@@ -282,7 +282,8 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
     if ("ok" in result && paused()) void continueAfterPhrase();
     else if ("ok" in result) {
       keyUnlocked = true;
-      if (!(await loadOnce().then(() => true, (error: unknown) => (loadRefused(consent)(error), false)))) return result;
+      const stateDamaged = await loadOnce().then(() => false, (error: unknown) => (error instanceof SyncStateDamaged ? (loadRefused(consent)(error), true) : Promise.reject(error)));
+      if (stateDamaged) return result;
       publishUi({ status: "starting", error: null });
       scheduleSync(0);
     }

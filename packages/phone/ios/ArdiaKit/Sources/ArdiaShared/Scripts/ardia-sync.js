@@ -53,6 +53,7 @@ function sortKeys(value         )          {
 });
 __define("packages/sync/src/hlc.ts", function (exports, __require) {
   __export(exports, "hlcWall", () => hlcWall);
+  __export(exports, "isStamp", () => isStamp);
   __export(exports, "Clock", () => Clock);
                          
 
@@ -69,6 +70,14 @@ function parseHLC(h     )                                                    {
 }
 
 const hlcWall = (h     ) => parseInt(h.slice(0, WALL_DIGITS), 36);
+
+const STAMP = /^[0-9a-z]+\.[0-9a-z]+\./;
+
+function isStamp(h         )           {
+  if (typeof h !== "string" || !STAMP.test(h)) return false;
+  const { wall, counter } = parseHLC(h);
+  return Number.isSafeInteger(wall) && Number.isSafeInteger(counter);
+}
 
 class Clock {
           wall = 0;
