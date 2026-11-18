@@ -3,6 +3,7 @@ param(
   [Parameter(Mandatory = $true)][string]$Out,
   [int]$Seconds = 25,
   [int]$SelfCheckSeconds = 300,
+  [int]$MediaSelfCheckSeconds = 300,
   [switch]$NoInput,
   [ValidateSet("all", "launch", "gate")][string]$Part = "all"
 )
@@ -479,10 +480,18 @@ $httpPagesFolder = New-DataDirectory "http-pages"
 $httpPagesScript = Join-Path $httpPagesFolder "serve.ps1"
 $httpPagesLog = Join-Path $httpPagesFolder "requests.log"
 Set-Content -LiteralPath $httpPagesScript -Encoding utf8NoBOM -Value @'
-param([int]$Port, [string]$Log)
+param([int]$Port, [string]$Log, [string]$Pfx)
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
 $listener.Start()
+$tls = if ($Pfx) { [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($Pfx, "ardia-pages") } else { $null }
 $held = [System.Collections.Generic.List[object]]::new()
+$artHits = 0
+$artCounts = @{}
+$holdCounts = @{}
+$heldOnce = [System.Collections.Generic.List[object]]::new()
+$released = [System.Collections.Generic.List[object]]::new()
+$artCookies = [System.Collections.Generic.List[string]]::new()
+$bigArt = $null
 $rate = 8000
 $count = $rate * 2
 $wav = [byte[]]::new(44 + 2 * $count)
@@ -499,22 +508,74 @@ $wav = [byte[]]::new(44 + 2 * $count)
 [System.Text.Encoding]::ASCII.GetBytes("data").CopyTo($wav, 36)
 [BitConverter]::GetBytes([int](2 * $count)).CopyTo($wav, 40)
 for ($i = 0; $i -lt $count; $i++) { [BitConverter]::GetBytes([int16]([Math]::Sin($i * 0.345) * 3000)).CopyTo($wav, 44 + 2 * $i) }
+$longCount = $rate * 30
+$longWav = [byte[]]::new(44 + 2 * $longCount)
+[Array]::Copy($wav, $longWav, 44)
+[BitConverter]::GetBytes([int](36 + 2 * $longCount)).CopyTo($longWav, 4)
+[BitConverter]::GetBytes([int](2 * $longCount)).CopyTo($longWav, 40)
+for ($i = 0; $i -lt $longCount; $i++) { $longWav[44 + 2 * $i] = $wav[44 + 2 * ($i % $count)]; $longWav[45 + 2 * $i] = $wav[45 + 2 * ($i % $count)] }
 while ($true) {
-  $client = $listener.AcceptTcpClient()
+  $replay = $null
+  if ($released.Count) {
+    $replay = $released[0]
+    $released.RemoveAt(0)
+    $client = $replay.Client
+  } else { $client = $listener.AcceptTcpClient() }
   $keep = $false
   try {
-    $client.ReceiveTimeout = 2000
-    $stream = $client.GetStream()
-    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
-    $request = $reader.ReadLine()
+    if ($replay) {
+      $stream = $replay.Stream
+      $request = $replay.Request
+      $headers = $replay.Headers
+    } else {
+      $client.ReceiveTimeout = 2000
+      $stream = $client.GetStream()
+      if ($tls) {
+        $secure = [System.Net.Security.SslStream]::new($stream, $false)
+        $secure.AuthenticateAsServer($tls)
+        $stream = $secure
+      }
+      $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+      $request = $reader.ReadLine()
+      $headers = [System.Collections.Generic.List[string]]::new()
+      while ($line = $reader.ReadLine()) { $headers.Add($line) }
+    }
     $socketKey = $null
-    while ($line = $reader.ReadLine()) { if ($line -match '^Sec-WebSocket-Key:\s*(\S+)') { $socketKey = $Matches[1] } }
+    $fetchSite = $null
+    $cookie = $null
+    $ranged = $false
+    $rangeFrom = ""
+    $rangeTo = ""
+    foreach ($line in $headers) { if ($line -match '^Sec-WebSocket-Key:\s*(\S+)') { $socketKey = $Matches[1] }; if ($line -match '^Sec-Fetch-Site:\s*(\S+)') { $fetchSite = $Matches[1] }; if ($line -match '^Cookie:\s*(.*)$') { $cookie = $Matches[1] }; if ($line -match '^Range:\s*bytes=(\d*)-(\d*)\s*$') { $ranged = $true; $rangeFrom = $Matches[1]; $rangeTo = $Matches[2] } }
     $path = if ($request) { $request.Split(" ")[1] } else { "" }
     if ($Log -and $path) { Add-Content -LiteralPath $Log -Value $path }
     if (($path -replace '\?.*$', '') -eq "/hold") {
       $held.Add($client)
       $keep = $true
       continue
+    }
+    if (($path -replace '\?.*$', '') -eq "/release" -and $path -match '[?&]holdonce=([A-Za-z0-9]+)') {
+      $token = $Matches[1]
+      $freed = @($heldOnce | Where-Object { $_.Token -eq $token })
+      foreach ($entry in $freed) {
+        [void]$heldOnce.Remove($entry)
+        $released.Add($entry)
+      }
+      $answer = [System.Text.Encoding]::ASCII.GetBytes([string]$freed.Count)
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nCache-Control: no-store`r`nContent-Length: $($answer.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($answer, 0, $answer.Length)
+      $stream.Flush()
+      continue
+    }
+    if ($path -match '[?&]holdonce=([A-Za-z0-9]+)') {
+      $token = $Matches[1]
+      $holdCounts[$token] = 1 + [int]$holdCounts[$token]
+      if ($holdCounts[$token] -eq 2) {
+        $heldOnce.Add([pscustomobject]@{ Token = $token; Client = $client; Stream = $stream; Request = $request; Headers = $headers })
+        $keep = $true
+        continue
+      }
     }
     if (($path -replace '\?.*$', '') -eq "/ws" -and $socketKey) {
       $accept = [Convert]::ToBase64String([System.Security.Cryptography.SHA1]::HashData([System.Text.Encoding]::ASCII.GetBytes($socketKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")))
@@ -526,9 +587,28 @@ while ($true) {
       continue
     }
     if (($path -replace '\?.*$', '') -eq "/tone.wav") {
-      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: audio/wav`r`nContent-Length: $($wav.Length)`r`nConnection: close`r`n`r`n")
+      $sound = if ($path -match '\?long') { $longWav } else { $wav }
+      $total = [long]$sound.Length
+      $from = [long]0
+      $to = $total - 1
+      $code = "200 OK"
+      $partial = ""
+      if ($ranged) {
+        if ($rangeFrom -eq "" -and $rangeTo -ne "") { $from = [Math]::Max([long]0, $total - [long]$rangeTo) }
+        elseif ($rangeFrom -ne "") { $from = [long]$rangeFrom; if ($rangeTo -ne "") { $to = [Math]::Min([long]$rangeTo, $total - 1) } }
+        if ($from -ge $total -or $from -gt $to) {
+          $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 416 Range Not Satisfiable`r`nAccept-Ranges: bytes`r`nContent-Range: bytes */$total`r`nContent-Length: 0`r`nConnection: close`r`n`r`n")
+          $stream.Write($head, 0, $head.Length)
+          $stream.Flush()
+          continue
+        }
+        $code = "206 Partial Content"
+        $partial = "Content-Range: bytes $from-$to/$total`r`n"
+      }
+      $length = $to - $from + 1
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 $code`r`nContent-Type: audio/wav`r`nAccept-Ranges: bytes`r`n$($partial)Content-Length: $length`r`nConnection: close`r`n`r`n")
       $stream.Write($head, 0, $head.Length)
-      $stream.Write($wav, 0, $wav.Length)
+      $stream.Write($sound, [int]$from, [int]$length)
       $stream.Flush()
       continue
     }
@@ -552,9 +632,76 @@ while ($true) {
       $stream.Flush()
       continue
     }
-    $name = @{ "/a" = "a"; "/b" = "b"; "/field" = "field"; "/opener" = "opener"; "/hover" = "hover"; "/sleep" = "sleep"; "/links" = "links"; "/drag" = "drag"; "/media" = "media"; "/framed" = "framed"; "/event/hovered" = "event"; "/event/left" = "event"; "/event/pressed" = "event"; "/event/selected" = "event"; "/event/released" = "event"; "/event/dragstart" = "event"; "/event/fullscreen" = "event"; "/event/windowed" = "event"; "/event/local-state-start" = "event"; "/event/local-state-stop" = "event" }[$($path -replace '\?.*$', '')]
+    if (($path -replace '\?.*$', '') -eq "/art-wait.png") {
+      $artHits++
+      Start-Sleep -Milliseconds 400
+    }
+    if (($path -replace '\?.*$', '') -like "/art-*.png") {
+      $counted = ($path -replace '\?.*$', '') + $(if ($path -match '[?&]probe') { "?probe" } else { "" })
+      $artCounts[$counted] = 1 + [int]$artCounts[$counted]
+    }
+    if (($path -replace '\?.*$', '') -eq "/art-cookie.png") { $artCookies.Add("$(if ($path -match '[?&]probe') { "probe" } else { "art" }) $(if ($fetchSite) { $fetchSite } else { "unknown" }) $(if ($cookie) { $cookie } else { "none" })") }
+    if (($path -replace '\?.*$', '') -eq "/art-count") {
+      $counts = [System.Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -Compress -InputObject $artCounts))
+      if ($path -match '\?reset') { $artCounts.Clear() }
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: application/json`r`nCache-Control: no-store`r`nContent-Length: $($counts.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($counts, 0, $counts.Length)
+      $stream.Flush()
+      continue
+    }
+    if (($path -replace '\?.*$', '') -eq "/art-cookies") {
+      $seen = [System.Text.Encoding]::UTF8.GetBytes(($artCookies -join "|"))
+      if ($path -match '\?reset') { $artCookies.Clear() }
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nCache-Control: no-store`r`nContent-Length: $($seen.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($seen, 0, $seen.Length)
+      $stream.Flush()
+      continue
+    }
+    if (($path -replace '\?.*$', '') -eq "/set-cookie") {
+      $page = [System.Text.Encoding]::UTF8.GetBytes("<!doctype html><meta charset=utf-8><title>cookie set</title>")
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/html; charset=utf-8`r`nSet-Cookie: npsecure=1; Path=/; SameSite=None; Secure`r`nSet-Cookie: nplax=1; Path=/`r`nContent-Length: $($page.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($page, 0, $page.Length)
+      $stream.Flush()
+      continue
+    }
+    if (($path -replace '\?.*$', '') -eq "/art-hits") {
+      if ($path -match '\?reset') { $artHits = 0 }
+      $count = [System.Text.Encoding]::ASCII.GetBytes([string]$artHits)
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nCache-Control: no-store`r`nContent-Length: $($count.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($count, 0, $count.Length)
+      $stream.Flush()
+      continue
+    }
+    if (($path -replace '\?.*$', '') -eq "/art-slow.png") { Start-Sleep -Milliseconds 1500 }
+    if (($path -replace '\?.*$', '') -in @("/art.png", "/art.svg", "/art-slow.png", "/art-wait.png", "/art-cookie.png", "/art-big.png", "/art-lna.png", "/art-mixed.png")) {
+      $png = ($path -replace '\?.*$', '') -ne "/art.svg"
+      $art = if ($png) { [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAASwAAAEsCAIAAAD2HxkiAAACe0lEQVR42u3TMQ0AAAgEsZeEJKQjBQ1MLE2q4JLLVAOPIgGYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCCZUAUwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYETAgmBEwIJgRMCCYEE6oAJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEEwImBBMCJgQTAiYEE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCQETggkBE4IJAROCCcGEEoAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEgAnBhIAJwYSACcGEwM0Crp18mDPA/9wAAAAASUVORK5CYII=") } else { [System.Text.Encoding]::UTF8.GetBytes("<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><rect width='96' height='96' fill='#2060e0'/></svg>") }
+      if (($path -replace '\?.*$', '') -eq "/art-big.png") {
+        if (-not $bigArt) {
+          $chunk = 3 * 1024 * 1024
+          $at = $art.Length - 12
+          $bigArt = [byte[]]::new($art.Length + 12 + $chunk)
+          [Array]::Copy($art, $bigArt, $at)
+          ([byte[]](0x00, 0x30, 0x00, 0x00, 0x6E, 0x70, 0x41, 0x72)).CopyTo($bigArt, $at)
+          ([byte[]](0x00, 0x30, 0x29, 0x5B)).CopyTo($bigArt, $at + 8 + $chunk)
+          [Array]::Copy($art, $at, $bigArt, $at + 12 + $chunk, 12)
+        }
+        $art = $bigArt
+      }
+      $type = if ($png) { "image/png" } else { "image/svg+xml" }
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: $type`r`nContent-Length: $($art.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($art, 0, $art.Length)
+      $stream.Flush()
+      continue
+    }
+    $name = @{ "/a" = "a"; "/b" = "b"; "/field" = "field"; "/opener" = "opener"; "/hover" = "hover"; "/sleep" = "sleep"; "/links" = "links"; "/drag" = "drag"; "/media" = "media"; "/framed" = "framed"; "/nowplaying" = "nowplaying"; "/npframe" = "npframe"; "/event/hovered" = "event"; "/event/left" = "event"; "/event/pressed" = "event"; "/event/selected" = "event"; "/event/released" = "event"; "/event/dragstart" = "event"; "/event/fullscreen" = "event"; "/event/windowed" = "event"; "/event/local-state-start" = "event"; "/event/local-state-stop" = "event" }[$($path -replace '\?.*$', '')]
     $status = if ($name -eq "event") { "204 No Content" } elseif ($name) { "200 OK" } else { "404 Not Found" }
-    $text = if ($name -eq "event") { "" } elseif ($name -eq "links") { "<!doctype html><meta charset=utf-8><title>links page</title><style>body{margin:0}a{position:absolute;left:10px;width:200px;height:40px;display:block;background:#ddd}</style><a id=peek style='top:10px' href='/a'>peek</a><a id=blank style='top:70px' target=_blank href='/b'>blank</a><a id=app style='top:130px' href='ardia-sleep-check-link:woke'>app</a><script>window.downs = 0; window.restored = false; window.lastClick = null; addEventListener('pointerdown', (event) => { if (event.isTrusted) downs++; }, true); addEventListener('pageshow', (event) => { restored = event.persisted; }); addEventListener('mouseup', (event) => { lastClick = { up: true, clicked: false, prevented: false, shift: event.shiftKey, alt: event.altKey }; }, true); addEventListener('click', (event) => { if (lastClick) { lastClick.clicked = true; lastClick.prevented = event.defaultPrevented; } });</script>" } elseif ($name -eq "opener") { "<!doctype html><meta charset=utf-8><title>opener page</title><style>body{margin:0}#open{position:absolute;left:0;top:0;width:100%;height:100%;font:24px sans-serif}</style><button id=open>open a pop-up</button><script>document.getElementById('open').addEventListener('click', () => window.open('/field', 'snapcheck', 'popup,width=560,height=420'));</script>" } elseif ($name -eq "field") { "<!doctype html><meta charset=utf-8><title>field page</title><style>body{margin:0}#field{position:absolute;left:0;top:0;width:100%;height:100%;border:0;font:24px sans-serif}</style><input id=field><script>const field = document.getElementById('field'); field.addEventListener('input', () => fetch('/event/typed?' + encodeURIComponent(field.value)));</script>" } elseif ($name -eq "sleep") { "<!doctype html><meta charset=utf-8><title>sleep page</title><body style='margin:0;height:6000px'><input id=field></body>" } elseif ($name -eq "drag") { "<!doctype html><meta charset=utf-8><title>drag page</title><style>body{margin:0;font:18px sans-serif}#words{position:absolute;left:40px;top:120px;width:560px;margin:0}#link{position:absolute;left:40px;top:240px}#full{position:absolute;left:40px;top:320px;width:160px;height:40px}</style><p id=words>Plain words to select by dragging across them, plain words to select by dragging across them.</p><a id=link href='/a'>a link to drag</a><button id=full>full screen</button><script>const report = (name) => fetch('/event/' + name); addEventListener('mousedown', () => report('pressed')); addEventListener('mouseup', () => report(getSelection().toString().length > 0 ? 'selected' : 'released')); addEventListener('dragstart', () => report('dragstart')); document.getElementById('full').addEventListener('click', (event) => { event.stopPropagation(); document.documentElement.requestFullscreen(); }); addEventListener('fullscreenchange', () => report(document.fullscreenElement ? 'fullscreen' : 'windowed'));</script>" } elseif ($name -eq "media") { "<!doctype html><meta charset=utf-8><title>media page</title><style>body{margin:0}#m{width:160px;height:90px}#go{position:absolute;left:0;top:100px;width:200px;height:60px}#next{position:absolute;left:0;top:170px;width:200px;height:30px;display:block;background:#ddd}</style><video id=m src='/tone.wav' loop></video><button id=go>play</button><a id=next href='/media?second'>next</a><script>const m = document.getElementById('m'); if (location.search.includes('muted')) m.muted = true; window.tries = []; const attempt = () => m.play().then(() => 'played', (error) => error.name).then((result) => tries.push(result)); if (location.search.includes('auto')) attempt(); const burst = () => { for (let i = 0; i < 25; i++) new Audio().play().catch(() => {}); }; if (location.search.includes('burst')) burst(); if (location.search.includes('again')) addEventListener('pageshow', (event) => { if (event.persisted) burst(); }); if (location.search.includes('session')) navigator.mediaSession.setActionHandler('play', () => attempt()); if (location.search.includes('touchplay')) addEventListener('pointerdown', (event) => { if (event.pointerType === 'touch') attempt(); }); document.getElementById('go').addEventListener('click', attempt); addEventListener('message', (event) => { if (event.data === 'play-muted') { m.muted = true; attempt(); } if (event.data === 'play-again') attempt(); }); if (parent !== window) setInterval(() => parent.postMessage({ paused: m.paused, time: m.currentTime, tries, active: !!(navigator.userActivation && navigator.userActivation.hasBeenActive) }, '*'), 200);</script>" } elseif ($name -eq "framed") { "<!doctype html><meta charset=utf-8><title>framed page</title><style>body{margin:0}iframe{width:280px;height:200px;border:0}</style><body><script>window.frameState = null; window.restored = false; addEventListener('message', (event) => { frameState = event.data; }); window.showPlay = null; addEventListener('pageshow', (event) => { restored = event.persisted; const shows = Number(sessionStorage.getItem('ardia-shows') || 0) + 1; sessionStorage.setItem('ardia-shows', String(shows)); if (shows > 1 && location.search.includes('showplay')) Object.assign(document.createElement('video'), { muted: true, loop: true, src: '/tone.wav' }).play().then(() => 'played', (error) => error.name).then((result) => { showPlay = result; }); }); if (location.search.includes('burst')) for (let i = 0; i < 25; i++) new Audio().play().catch(() => {}); const frame = document.createElement('iframe'); frame.allow = 'autoplay'; frame.src = (location.search.includes('same') ? location.origin : 'http://localhost:$Port') + '/media' + (location.search.includes('burst') ? '?again' : location.search.includes('quiet') ? '' : '?auto-muted'); document.body.append(frame);</script>" } elseif ($name -eq "hover") { "<!doctype html><meta charset=utf-8><title>ready</title><style>body{margin:0}#strip{height:160px;background:#ddd}</style><div id=strip>hover strip</div><script>const strip = document.getElementById('strip'); strip.addEventListener('mouseenter', () => { document.title = 'hovered'; fetch('/event/hovered'); }); strip.addEventListener('mouseleave', () => { document.title = 'left'; fetch('/event/left'); });</script>" } elseif ($name) { "<!doctype html><meta charset=utf-8><p>cached page $name</p><script>addEventListener('pageshow', (event) => { document.title = (event.persisted ? 'restored ' : 'loaded ') + '$name'; });</script>" } else { "" }
+    $text = if ($name -eq "event") { "" } elseif ($name -eq "links") { "<!doctype html><meta charset=utf-8><title>links page</title><style>body{margin:0}a{position:absolute;left:10px;width:200px;height:40px;display:block;background:#ddd}</style><a id=peek style='top:10px' href='/a'>peek</a><a id=blank style='top:70px' target=_blank href='/b'>blank</a><a id=app style='top:130px' href='ardia-sleep-check-link:woke'>app</a><script>window.downs = 0; window.restored = false; window.lastClick = null; addEventListener('pointerdown', (event) => { if (event.isTrusted) downs++; }, true); addEventListener('pageshow', (event) => { restored = event.persisted; }); addEventListener('mouseup', (event) => { lastClick = { up: true, clicked: false, prevented: false, shift: event.shiftKey, alt: event.altKey }; }, true); addEventListener('click', (event) => { if (lastClick) { lastClick.clicked = true; lastClick.prevented = event.defaultPrevented; } });</script>" } elseif ($name -eq "opener") { "<!doctype html><meta charset=utf-8><title>opener page</title><style>body{margin:0}#open{position:absolute;left:0;top:0;width:100%;height:100%;font:24px sans-serif}</style><button id=open>open a pop-up</button><script>document.getElementById('open').addEventListener('click', () => window.open('/field', 'snapcheck', 'popup,width=560,height=420'));</script>" } elseif ($name -eq "field") { "<!doctype html><meta charset=utf-8><title>field page</title><style>body{margin:0}#field{position:absolute;left:0;top:0;width:100%;height:100%;border:0;font:24px sans-serif}</style><input id=field><script>const field = document.getElementById('field'); field.addEventListener('input', () => fetch('/event/typed?' + encodeURIComponent(field.value)));</script>" } elseif ($name -eq "sleep") { "<!doctype html><meta charset=utf-8><title>sleep page</title><body style='margin:0;height:6000px'><input id=field></body>" } elseif ($name -eq "drag") { "<!doctype html><meta charset=utf-8><title>drag page</title><style>body{margin:0;font:18px sans-serif}#words{position:absolute;left:40px;top:120px;width:560px;margin:0}#link{position:absolute;left:40px;top:240px}#full{position:absolute;left:40px;top:320px;width:160px;height:40px}</style><p id=words>Plain words to select by dragging across them, plain words to select by dragging across them.</p><a id=link href='/a'>a link to drag</a><button id=full>full screen</button><script>const report = (name) => fetch('/event/' + name); addEventListener('mousedown', () => report('pressed')); addEventListener('mouseup', () => report(getSelection().toString().length > 0 ? 'selected' : 'released')); addEventListener('dragstart', () => report('dragstart')); document.getElementById('full').addEventListener('click', (event) => { event.stopPropagation(); document.documentElement.requestFullscreen(); }); addEventListener('fullscreenchange', () => report(document.fullscreenElement ? 'fullscreen' : 'windowed'));</script>" } elseif ($name -eq "media") { "<!doctype html><meta charset=utf-8><title>media page</title><style>body{margin:0}#m{width:160px;height:90px}#go{position:absolute;left:0;top:100px;width:200px;height:60px}#next{position:absolute;left:0;top:170px;width:200px;height:30px;display:block;background:#ddd}</style><video id=m src='/tone.wav' loop></video><button id=go>play</button><a id=next href='/media?second'>next</a><script>const m = document.getElementById('m'); if (location.search.includes('muted')) m.muted = true; window.tries = []; const attempt = () => m.play().then(() => 'played', (error) => error.name).then((result) => tries.push(result)); if (location.search.includes('auto')) attempt(); const burst = () => { for (let i = 0; i < 25; i++) new Audio().play().catch(() => {}); }; if (location.search.includes('burst')) burst(); if (location.search.includes('again')) addEventListener('pageshow', (event) => { if (event.persisted) burst(); }); if (location.search.includes('session')) navigator.mediaSession.setActionHandler('play', () => attempt()); if (location.search.includes('touchplay')) addEventListener('pointerdown', (event) => { if (event.pointerType === 'touch') attempt(); }); document.getElementById('go').addEventListener('click', attempt); addEventListener('message', (event) => { if (event.data === 'play-muted') { m.muted = true; attempt(); } if (event.data === 'play-again') attempt(); }); if (parent !== window) setInterval(() => parent.postMessage({ paused: m.paused, time: m.currentTime, tries, active: !!(navigator.userActivation && navigator.userActivation.hasBeenActive) }, '*'), 200);</script>" } elseif ($name -eq "framed") { "<!doctype html><meta charset=utf-8><title>framed page</title><style>body{margin:0}iframe{width:280px;height:200px;border:0}</style><body><script>window.frameState = null; window.restored = false; addEventListener('message', (event) => { frameState = event.data; }); window.showPlay = null; addEventListener('pageshow', (event) => { restored = event.persisted; const shows = Number(sessionStorage.getItem('ardia-shows') || 0) + 1; sessionStorage.setItem('ardia-shows', String(shows)); if (shows > 1 && location.search.includes('showplay')) Object.assign(document.createElement('video'), { muted: true, loop: true, src: '/tone.wav' }).play().then(() => 'played', (error) => error.name).then((result) => { showPlay = result; }); }); if (location.search.includes('burst')) for (let i = 0; i < 25; i++) new Audio().play().catch(() => {}); const frame = document.createElement('iframe'); frame.allow = 'autoplay'; frame.src = (location.search.includes('same') ? location.origin : 'http://localhost:$Port') + '/media' + (location.search.includes('burst') ? '?again' : location.search.includes('quiet') ? '' : '?auto-muted'); document.body.append(frame);</script>" } elseif ($name -eq "nowplaying") { "<!doctype html><meta charset=utf-8><title>now playing page</title><style>body{margin:0}#go{position:absolute;left:0;top:0;width:280px;height:200px}iframe{position:absolute;left:0;top:210px;width:200px;height:60px;border:0}</style><audio id=m src='/tone.wav' loop></audio><button id=go>play</button><script>const m = document.getElementById('m'); const q = location.search; const session = navigator.mediaSession; const plain = q.includes('plain') || q.includes('adframe'); window.calls = []; window.adState = null; window.burstDone = false; if (q.includes('long')) m.src = '/tone.wav?long'; window.v = null; if (q.includes('preview')) { v = document.createElement('video'); v.muted = true; v.loop = true; v.src = '/tone.wav'; m.parentNode.insertBefore(v, m); } if (q.includes('once') || q.includes('long')) m.loop = false; window.rewound = false; if (q.includes('rewind')) m.addEventListener('timeupdate', () => { if (!rewound && m.currentTime > 1.6) { rewound = true; m.currentTime = 0; } }); const play = () => m.play().then(() => 'played', (error) => error.name).then((result) => calls.push('play:' + result)); document.getElementById('go').addEventListener('click', () => play()); const at = (position) => { if (!plain) session.setPositionState({ duration: 120, playbackRate: 1, position: position }); }; const art = q.includes('lnaart') ? [{ src: 'http://127.0.0.1:' + new URLSearchParams(q).get('lnaart') + '/art-lna.png', sizes: '300x300', type: 'image/png' }] : q.includes('mixedart') ? [{ src: 'http://npmixed.test:' + new URLSearchParams(q).get('mixedart') + '/art-mixed.png', sizes: '300x300', type: 'image/png' }] : q.includes('cookieart') ? [{ src: '/art-cookie.png', sizes: '300x300', type: 'image/png' }] : q.includes('bigart') ? [{ src: '/art-big.png', sizes: '300x300', type: 'image/png' }] : q.includes('slowart') ? [{ src: 'http://localhost:$Port/art-slow.png', sizes: '300x300', type: 'image/png' }] : q.includes('longart') ? [{ src: '/art.png?' + 'x'.repeat(3000), sizes: '300x300', type: 'image/png' }] : [{ src: '/art.svg', sizes: '96x96', type: 'image/svg+xml' }, { src: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPSc5NicgaGVpZ2h0PSc5Nic+PHJlY3Qgd2lkdGg9Jzk2JyBoZWlnaHQ9Jzk2JyBmaWxsPScjMjA2MGUwJy8+PC9zdmc+', sizes: '96x96', type: 'image/svg+xml' }, { src: '/art.png', sizes: '300x300', type: 'image/png' }]; window.n = null; if (q.includes('second')) { n = document.createElement('audio'); n.src = '/tone.wav?long'; document.body.append(n); } window.flapDone = false; window.triedMuted = null; if (!plain) { session.metadata = new MediaMetadata({ title: 'Ardia Song', artist: 'Ardia Band', album: 'Ardia Album', artwork: art }); m.addEventListener('play', () => { session.playbackState = 'playing'; }); m.addEventListener('pause', () => { session.playbackState = 'paused'; }); if (!q.includes('once')) m.addEventListener('playing', () => at(0), { once: true }); } const handlers = { play: () => { calls.push('play'); play(); }, pause: () => { calls.push('pause'); m.pause(); }, nexttrack: () => calls.push('nexttrack'), previoustrack: () => calls.push('previoustrack'), seekto: (details) => { calls.push('seekto:' + details.seekTime); at(details.seekTime); }, seekforward: (details) => calls.push('seekforward:' + details.seekOffset) }; const only = { prevonly: ['previoustrack'], seekonly: ['seekto'], fwdonly: ['seekforward'] }; const picked = Object.keys(only).find((token) => q.includes(token)); const wanted = picked ? only[picked] : ['play', 'pause', 'nexttrack', 'previoustrack', 'seekto']; if (!plain && !q.includes('bare')) for (const action of wanted) session.setActionHandler(action, handlers[action]); window.rotate = (i) => { session.metadata = new MediaMetadata({ title: 'Ardia Song', artist: 'Ardia Band', album: 'Ardia Album', artwork: [{ src: '/art-wait.png?r=' + i, sizes: '300x300', type: 'image/png' }] }); }; window.flap = () => { let i = 0; const tick = () => { for (let k = 0; k < 20 && i < 200; k++, i++) { if (i % 2 === 0) m.pause(); else m.play().catch(() => {}); } if (i < 200) setTimeout(tick, 100); else flapDone = true; }; tick(); }; window.burst = () => { let i = 0; const tick = () => { for (let k = 0; k < 20 && i < 1000; k++, i++) { session.metadata = new MediaMetadata({ title: 'Burst ' + i, artist: 'Ardia Band', album: 'Ardia Album' }); session.setPositionState({ duration: 120, playbackRate: 1, position: i / 10 }); } if (i < 1000) setTimeout(tick, 20); else burstDone = true; }; tick(); }; addEventListener('message', (event) => { if (event.data && event.data.ad) adState = event.data; if (event.data === 'np-probe') { const probe = new Image(); probe.src = '/art-cookie.png?probe'; } if (event.data === 'np-play') { if (v) v.play().catch(() => {}); play(); } if (event.data === 'np-try-muted') { const v = document.createElement('video'); v.muted = true; v.src = '/tone.wav'; v.play().then(() => 'played', (error) => error.name).then((result) => { triedMuted = result; }); } }); if (q.includes('repost') && !q.includes('posted')) { const form = document.createElement('form'); form.method = 'post'; form.action = location.pathname + location.search + '&posted'; document.body.append(form); form.submit(); } if (q.includes('withad')) { const ad = document.createElement('iframe'); ad.src = 'http://localhost:$Port/nowplaying?adframe'; document.body.append(ad); } if (parent !== window) setInterval(() => parent.postMessage({ media: !q.includes('adframe'), ad: q.includes('adframe'), paused: m.paused, time: m.currentTime, calls: calls, active: navigator.userActivation.hasBeenActive, tried: triedMuted, preview: v ? !v.paused : null }, '*'), 200);</script>" } elseif ($name -eq "npframe") { "<!doctype html><meta charset=utf-8><title>now playing frame</title><style>body{margin:0}iframe{width:280px;height:200px;border:0}</style><body><script>window.frameState = null; addEventListener('message', (event) => { if (event.data && event.data.media) frameState = event.data; }); window.m = null; if (location.search.includes('preload')) { m = document.createElement('audio'); m.preload = 'auto'; m.src = '/tone.wav?long'; document.body.append(m); } window.mainSession = (art) => { navigator.mediaSession.metadata = new MediaMetadata({ title: 'Main Song', artwork: [{ src: art, sizes: '300x300', type: 'image/png' }] }); return m.play().then(() => 'played', (error) => error.name); }; const frame = document.createElement('iframe'); frame.allow = 'autoplay'; frame.src = 'http://localhost:$Port/nowplaying' + location.search; document.body.append(frame);</script>" } elseif ($name -eq "hover") { "<!doctype html><meta charset=utf-8><title>ready</title><style>body{margin:0}#strip{height:160px;background:#ddd}</style><div id=strip>hover strip</div><script>const strip = document.getElementById('strip'); strip.addEventListener('mouseenter', () => { document.title = 'hovered'; fetch('/event/hovered'); }); strip.addEventListener('mouseleave', () => { document.title = 'left'; fetch('/event/left'); });</script>" } elseif ($name) { "<!doctype html><meta charset=utf-8><p>cached page $name</p><script>addEventListener('pageshow', (event) => { document.title = (event.persisted ? 'restored ' : 'loaded ') + '$name'; });</script>" } else { "" }
     $body = [System.Text.Encoding]::UTF8.GetBytes($text)
     $policy = if ($name -eq "links" -and $path -match '\?sandboxed') { "Content-Security-Policy: sandbox allow-scripts allow-popups`r`n" } else { "" }
     $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 $status`r`nContent-Type: text/html; charset=utf-8`r`n$($policy)Content-Length: $($body.Length)`r`nConnection: close`r`n`r`n")
@@ -573,6 +720,37 @@ while (-not $httpPagesUp -and (Get-Date) -lt $httpPagesBy -and -not $httpPages.H
   if (-not $httpPagesUp) { Start-Sleep -Milliseconds 300 }
 }
 if (-not $httpPagesUp) { $failures += "the loopback page server never listened on port $httpPagesPort" }
+function Wait-Listening([int]$Port, $Process) {
+  $by = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $by -and -not $Process.HasExited) {
+    $probe = New-Object System.Net.Sockets.TcpClient
+    try { if ($probe.ConnectAsync("127.0.0.1", $Port).Wait(1000) -and $probe.Connected) { return $true } } catch { } finally { $probe.Dispose() }
+    Start-Sleep -Milliseconds 300
+  }
+  return $false
+}
+$publicPagesPort = 9354
+$publicPages = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-NonInteractive", "-File", "`"$httpPagesScript`"", "-Port", $publicPagesPort -WindowStyle Hidden -PassThru
+$publicPagesUp = Wait-Listening $publicPagesPort $publicPages
+if (-not $publicPagesUp) { Write-Host "the page server for a public address space never listened on port $publicPagesPort; the local network artwork check is skipped" }
+$httpsPagesPort = 9355
+$httpsPagesUp = $false
+$httpsPages = $null
+$httpsSpki = ""
+try {
+  $tlsKey = [System.Security.Cryptography.RSA]::Create(2048)
+  $tlsRequest = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new("CN=127.0.0.1", $tlsKey, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+  $tlsNames = [System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
+  $tlsNames.AddIpAddress([System.Net.IPAddress]::Loopback)
+  $tlsRequest.CertificateExtensions.Add($tlsNames.Build())
+  $tlsCert = $tlsRequest.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(7))
+  $tlsPfx = Join-Path $httpPagesFolder "pages.pfx"
+  [System.IO.File]::WriteAllBytes($tlsPfx, $tlsCert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx, "ardia-pages"))
+  $httpsSpki = [Convert]::ToBase64String([System.Security.Cryptography.SHA256]::HashData($tlsCert.PublicKey.ExportSubjectPublicKeyInfo()))
+  $httpsPages = Start-Process -FilePath (Get-Process -Id $PID).Path -ArgumentList "-NoProfile", "-NonInteractive", "-File", "`"$httpPagesScript`"", "-Port", $httpsPagesPort, "-Pfx", "`"$tlsPfx`"" -WindowStyle Hidden -PassThru
+  $httpsPagesUp = Wait-Listening $httpsPagesPort $httpsPages
+} catch { Write-Host "the https page server could not start: $($_.Exception.Message)" }
+if (-not $httpsPagesUp) { Write-Host "the https page server never listened on port $httpsPagesPort; the mixed content artwork check is skipped" }
 $withEngineForEdge = Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $App).Path) "chrome.dll")
 
 $browserLog = Join-Path $Out "browser.log"
@@ -1795,6 +1973,39 @@ public static class ArdiaFirstFramesFront {
   }
 }
 
+$pageTestKeys = "httpPages=$httpPagesPort" + $(if ($publicPagesUp) { ",publicPages=$publicPagesPort" } else { "" }) + $(if ($httpsPagesUp) { ",httpsPages=$httpsPagesPort" } else { "" })
+$pageSwitches = @()
+if ($publicPagesUp) { $pageSwitches += "--ip-address-space-overrides=127.0.0.1:$publicPagesPort=public" }
+if ($httpsPagesUp) { $pageSwitches += @("--host-resolver-rules=`"MAP npmixed.test 127.0.0.1`"", "--ignore-certificate-errors-spki-list=$httpsSpki") }
+
+if ($Part -ne "gate" -and $httpPagesUp -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent (Resolve-Path -LiteralPath $App).Path) "chrome.dll"))) {
+  $mediaLog = Join-Path $Out "self-check-media.log"
+  $env:ARDIA_DATA_DIR = New-DataDirectory "media-self-check-data"
+  $env:ARDIA_CONFIG_DIR = $env:ARDIA_DATA_DIR
+  $env:ARDIA_BACKGROUND = "1"
+  $env:ARDIA_TEST = "selfCheckStage=media,$pageTestKeys"
+  $mediaRun = Start-Process -FilePath $App -ArgumentList (@("--self-check", "--log-file=`"$mediaLog`"") + $pageSwitches) -PassThru
+  $env:ARDIA_TEST = ""
+  try {
+    if (-not $mediaRun.WaitForExit($MediaSelfCheckSeconds * 1000)) { $failures += "the media self-check did not finish within $MediaSelfCheckSeconds s" }
+    elseif ($mediaRun.ExitCode -ne 0) { $failures += "the media self-check launch exited with code $($mediaRun.ExitCode)" }
+  } finally {
+    if (-not $mediaRun.HasExited) {
+      Save-Screenshot (Join-Path $Out "self-check-media-stuck.png")
+      Stop-Process -Id $mediaRun.Id -Force
+      $mediaRun.WaitForExit(10000) | Out-Null
+    }
+  }
+  if (Test-Path $mediaLog) {
+    Select-String -Path $mediaLog -Pattern "self-check|now playing |^(js-error|fatal|error) " | ForEach-Object { Write-Host "media: $($_.Line)" }
+    $mediaDone = Select-String -Path $mediaLog -Pattern "self-check done: (\d+) passed, (\d+) failed" | Select-Object -First 1
+    if (-not $mediaDone) { $failures += "the media self-check never reported its result" }
+    elseif ([int]$mediaDone.Matches[0].Groups[2].Value -gt 0) { $failures += "$($mediaDone.Matches[0].Groups[2].Value) media self-checks failed" }
+    elseif ([int]$mediaDone.Matches[0].Groups[1].Value -eq 0) { $failures += "the media self-check ran no checks" }
+    if (Select-String -Path $mediaLog -Pattern "^(js-error|fatal|error) " -Quiet) { $failures += "the media self-check log has errors" }
+  } else { $failures += "the media self-check wrote no log" }
+}
+
 if ($Part -ne "gate" -and $withEngineForEdge -and $httpPagesUp) {
   if (-not ([System.Management.Automation.PSTypeName]"ArdiaContrast").Type) {
     Add-Type @"
@@ -1991,7 +2202,8 @@ foreach ($fixture in @(@("firefox", "Firefox\Profiles\abcd1234.default-release")
 }
 $env:ARDIA_CONFIG_DIR = $env:ARDIA_DATA_DIR
 $env:ARDIA_BACKGROUND = "1"
-$env:ARDIA_TEST = "pipHover=first,pipHover=last,httpPages=$httpPagesPort"
+$env:ARDIA_TEST = "pipHover=first,pipHover=last,$pageTestKeys"
+$selfCheckArguments = @("--self-check", "--log-file=`"$checkLog`"")
 $leftover = Join-Path $env:ARDIA_DATA_DIR "Chromium\Ardia self-check-stuck (removing)"
 $held = $null
 $check = $null
@@ -2057,7 +2269,7 @@ try {
   New-Item -ItemType Directory -Force -Path $leftover | Out-Null
   $held = [System.IO.File]::Open((Join-Path $leftover "held.txt"), [System.IO.FileMode]::Create, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
   [LocalStateRace]::Start((Join-Path $env:ARDIA_DATA_DIR "Chromium\Local State"), $httpPagesLog)
-  $check = Start-Process -FilePath $App -ArgumentList "--self-check", "--log-file=`"$checkLog`"" -PassThru
+  $check = Start-Process -FilePath $App -ArgumentList $selfCheckArguments -PassThru
   $env:ARDIA_TEST = ""
   if (-not $check.WaitForExit($SelfCheckSeconds * 1000)) { $failures += "the self-check did not finish within $SelfCheckSeconds s" }
   elseif ($check.ExitCode -ne 0) { $failures += "the self-check launch exited with code $($check.ExitCode)" }
@@ -2082,6 +2294,8 @@ try {
     if ($held) { $held.Dispose() }
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $leftover
     if (-not $httpPages.HasExited) { Stop-Process -Id $httpPages.Id -Force -ErrorAction SilentlyContinue }
+    if ($publicPages -and -not $publicPages.HasExited) { Stop-Process -Id $publicPages.Id -Force -ErrorAction SilentlyContinue }
+    if ($httpsPages -and -not $httpsPages.HasExited) { Stop-Process -Id $httpsPages.Id -Force -ErrorAction SilentlyContinue }
   }
 }
 
@@ -2092,6 +2306,19 @@ if (Test-Path $checkLog) {
   elseif ([int]$done.Matches[0].Groups[2].Value -gt 0) { $failures += "$($done.Matches[0].Groups[2].Value) self-checks failed" }
   elseif ([int]$done.Matches[0].Groups[1].Value -eq 0) { $failures += "the self-check ran no checks" }
   if (Select-String -Path $checkLog -Pattern "^(js-error|fatal|error) " -Quiet) { $failures += "the self-check log has errors" }
+  if (Select-String -Path $checkLog -Pattern "\[ardia windows\] self-check (pass|FAIL): launch log: " -Quiet) {
+    $raceApp = [System.Collections.Generic.HashSet[int]]::new()
+    $raceEngine = [System.Collections.Generic.HashSet[int]]::new()
+    $raceTorn = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in [System.IO.File]::ReadLines($checkLog)) {
+      if ($line -notmatch "launch[- ]log[- ]race") { continue }
+      if ($line -match "^info \d+ \[ardia windows\] launch log race app (\d{4})$") { [void]$raceApp.Add([int]$Matches[1]) }
+      elseif ($line -match "^engine 0 host call tab\.close launch-log-race-(\d{4})$") { [void]$raceEngine.Add([int]$Matches[1]) }
+      elseif ($line -notmatch "^info \d+ \[ardia windows\] launch log race wrote 3000 app lines and asked the engine for 3000$") { $raceTorn.Add($line) }
+    }
+    Write-Host "Launch log race: $($raceApp.Count) of 3000 app lines and $($raceEngine.Count) of 3000 engine lines whole, $($raceTorn.Count) torn"
+    if ($raceApp.Count -ne 3000 -or $raceEngine.Count -ne 3000 -or $raceTorn.Count) { $failures += "the launch log lost or tore lines the app and the engine wrote at once (#2426): $($raceApp.Count) of 3000 app lines and $($raceEngine.Count) of 3000 engine lines whole; torn: $(($raceTorn | Select-Object -First 3) -join ' | ')" }
+  }
 } else {
   $failures += "the self-check wrote no log"
 }

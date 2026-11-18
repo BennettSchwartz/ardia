@@ -3,7 +3,6 @@
 #include <windows.h>
 
 #include <knownfolders.h>
-#include <share.h>
 #include <shlobj.h>
 #include <stdio.h>
 
@@ -203,13 +202,18 @@ void AppendLog(const std::string& line) {
   if (path.empty()) {
     return;
   }
-  FILE* file = _wfsopen(path.c_str(), L"ab", _SH_DENYNO);
-  if (!file) {
+  HANDLE file = ::CreateFileW(
+      path.c_str(), FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
     return;
   }
   const std::string text = LaunchLogLine(line);
-  fwrite(text.data(), 1, text.size(), file);
-  fclose(file);
+  DWORD wrote = 0;
+  ::WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &wrote,
+              nullptr);
+  ::CloseHandle(file);
 }
 
 void NoteAfterRotation(const std::string& line) {

@@ -14,6 +14,7 @@
 #include "ardia/win/autoplay.h"
 #include "ardia/win/external_apps.h"
 #include "ardia/win/kept_pages.h"
+#include "ardia/win/now_playing.h"
 #include "ardia/win/page_links.h"
 #include "ardia/win/tab_events.h"
 #include "base/containers/span.h"
@@ -99,8 +100,7 @@ constexpr char kEvaluationEnd[] =
     "\n})((kind, json) => {if (kind === 'result') "
     "resolve(typeof json === 'string' ? json : 'null');});})";
 
-constexpr char kMediaCommandStart[] =
-    "((command) => {"
+constexpr char kWokenPageMediaChoice[] =
     "const all = [];"
     "const collect = (doc) => {"
     "all.push(...doc.querySelectorAll('video,audio'));"
@@ -113,25 +113,18 @@ constexpr char kMediaCommandStart[] =
     "const playing = (m) => !m.paused && !m.ended;"
     "const playable = (m) => m.currentSrc || m.srcObject || m.src || "
     "m.querySelector('source[src]');"
-    "const el = all.find(playing) || all.find(playable) || null;"
-    "if (!el) return;"
-    "const seconds = Number(command.seconds) || 0;"
-    "switch (command.action) {"
-    "case 'play': el.play(); break;"
-    "case 'pause': case 'stop': el.pause(); break;"
-    "case 'toggle':"
-    "if (navigator.mediaSession?.playbackState === 'playing' || !el.paused)"
-    " el.pause(); else el.play();"
-    "break;"
-    "case 'seekBy':"
-    "el.currentTime = Math.max(0, Math.min(el.duration || Infinity, "
-    "el.currentTime + seconds));"
-    "break;"
-    "case 'seekTo': el.currentTime = seconds; break;"
-    "}"
-    "})(";
+    "return all.find(playing) || all.find(playable) || null;";
 
-constexpr char kMediaCommandEnd[] = ")";
+constexpr char kWokenPagePlaysStart[] =
+    "((from) => {"
+    "const el = (() => {";
+
+constexpr char kWokenPagePlaysEnd[] =
+    "})();"
+    "if (!el) return;"
+    "if (Number.isFinite(from) && from >= 0) el.currentTime = from;"
+    "el.play();"
+    "})(";
 
 using DevToolsReply =
     base::OnceCallback<void(std::optional<base::DictValue> result,
@@ -601,15 +594,52 @@ void GetSecurityInfo(content::WebContents* contents,
 void MediaCommand(content::WebContents* contents,
                   const base::DictValue& args,
                   Reply reply) {
-  ThawHiddenPage(contents);
-  const std::string action = Text(args, "action");
-  base::DictValue command;
-  command.Set("action", action);
-  command.Set("seconds", args.FindDouble("seconds").value_or(0));
-  if (std::optional<std::string> json = base::WriteJson(command)) {
-    RunMediaCommand(contents, kMediaCommandStart + *json + kMediaCommandEnd);
+  const std::optional<MediaCommandArgs> parsed = ParseMediaCommand(args);
+  if (!parsed) {
+    std::move(reply).Run(
+        Error("mediaCommand requires a known action and finite seconds"));
+    return;
   }
-  std::move(reply).Run(Ok());
+  ThawHiddenPage(contents);
+  base::DictValue answer = Ok();
+  const MediaCommandOutcome outcome = NowPlaying::Command(contents, *parsed);
+  switch (outcome.result) {
+    case MediaCommandResult::kDone:
+      answer.Set("done", true);
+      std::move(reply).Run(std::move(answer));
+      return;
+    case MediaCommandResult::kNotDone:
+      answer.Set("done", false);
+      std::move(reply).Run(std::move(answer));
+      return;
+    case MediaCommandResult::kRefused:
+      std::move(reply).Run(Error("the page's media session does not take that"));
+      return;
+    case MediaCommandResult::kSeekRecorded:
+      answer.Set("done", true);
+      answer.Set("recorded", true);
+      std::move(reply).Run(std::move(answer));
+      return;
+    case MediaCommandResult::kPlayByScript:
+      RunMediaCommand(
+          contents,
+          std::string(kWokenPagePlaysStart) + kWokenPageMediaChoice +
+              kWokenPagePlaysEnd +
+              (outcome.play_from ? base::NumberToString(*outcome.play_from)
+                                 : std::string("null")) +
+              ")");
+      break;
+  }
+  answer.Set("done", true);
+  answer.Set("byScript", true);
+  std::move(reply).Run(std::move(answer));
+}
+
+void DownloadImage(content::WebContents* contents,
+                   const base::DictValue& args,
+                   Reply reply) {
+  ThawHiddenPage(contents);
+  NowPlaying::DownloadArtwork(contents, args, std::move(reply));
 }
 
 void SiteDataCleared(void* context, const char* json) {
@@ -703,6 +733,7 @@ void Discard(content::WebContents* contents,
              const base::DictValue& args,
              Reply reply) {
   const char* outcome = "refused";
+  NowPlaying::CancelWake(contents);
   if (args.FindBool("unload").value_or(false)) {
     outcome = "unsupported";
   } else if (contents->WasDiscarded()) {
@@ -1100,6 +1131,7 @@ constexpr NamedMethod kMethods[] = {
     {"runPageCommand", &RunNamedPageCommand},
     {"getSecurityInfo", &GetSecurityInfo},
     {"mediaCommand", &MediaCommand},
+    {"downloadImage", &DownloadImage},
     {"clearSiteData", &ClearSiteData},
     {"pageCookies", &PageCookies},
     {"openBlockedPopup", &OpenBlockedPopup},
@@ -1110,6 +1142,8 @@ constexpr NamedMethod kMethods[] = {
     {"touchForTest", &TouchForTest},
     {"reattachLinksForTest", &ReattachLinksForTest},
     {"mediaSessionActionForTest", &MediaSessionActionForTest},
+    {"audioFocusForTest", &NowPlaying::AudioFocusForTest},
+    {"activeSessionForTest", &NowPlaying::ActiveSessionForTest},
     {"testClient", &TestClientForTest},
     {"discardEligibilityForTest", &DiscardEligibilityForTest},
     {"setFrozen", &SetFrozen},
