@@ -64,6 +64,22 @@ function Assert-ShutDownFinished([int]$processId, [string]$what) {
   }
 }
 
+function Quit-Writes([string]$file) {
+  $closed = $null
+  $parts = New-Object System.Collections.Generic.List[string]
+  foreach ($line in @(Get-Content -LiteralPath $file -ErrorAction SilentlyContinue)) {
+    if ($line -match 'process started inside the engine') { $closed = $null; $parts.Clear() }
+    elseif ($line -match '^window (\d+) closed ') { $closed = [int]$Matches[1] }
+    elseif ($line -match '^launch (\d+) quitting' -and $null -ne $closed) { $parts.Add("quit began $([int]$Matches[1] - $closed) ms after the last window closed") }
+    elseif ($line -match '\[quit\] last saves: (.+)$') { $parts.Add("the UI's last saves: $($Matches[1])") }
+    elseif ($line -match 'telemetry drained in (\d+) ms') { $parts.Add("telemetry drained in $($Matches[1]) ms") }
+    elseif ($line -match 'document (.+) of (\d+) bytes written at quit in (\d+) ms') { $parts.Add("$($Matches[1]) of $($Matches[2]) bytes in $($Matches[3]) ms") }
+    elseif ($line -match 'telemetry and documents written in (\d+) ms(.*)$') { $parts.Add("all writes in $($Matches[1]) ms$($Matches[2])") }
+  }
+  if (-not $parts.Count) { return "nothing logged" }
+  return $parts -join ', '
+}
+
 function Wait-Window([string]$what, [int]$seconds = 120) {
   $deadline = (Get-Date).AddSeconds($seconds)
   while ((Get-Date) -lt $deadline) {
@@ -142,6 +158,7 @@ try {
     if ($shown.Pid -ne $previous) {
       Wait-Exit $previous "relaunch $round" | Out-Null
       Assert-ShutDownFinished $previous "relaunch $round right after closing"
+      Note "relaunch $round right after closing: the previous Ardia's quit: $(Quit-Writes (Join-Path $data "Logs\launch.previous.log"))"
     }
     Start-Sleep -Seconds 2
     Assert-OneBrowser "relaunch $round right after closing"
@@ -152,6 +169,7 @@ try {
   $exitMs = Wait-Exit $shown.Pid "closing"
   if ($exitMs -gt 15000) { throw "closing: the browser took $exitMs ms to exit after its window closed; it must end once Chromium's shutdown returns (#1706 lingered about 30 s)" }
   Note "closing: the browser exited $exitMs ms after its window closed"
+  Note "closing: $(Quit-Writes $log)"
   Start-Ardia | Out-Null
   $shown = Wait-Window "relaunch after a full exit"
   Assert-OneBrowser "relaunch after a full exit"
@@ -195,6 +213,7 @@ try {
 
   Close-Window $shown
   Wait-Exit $shown.Pid "before the stuck profile" | Out-Null
+  Note "closing before the stuck profile: $(Quit-Writes $log)"
   Set-Content -LiteralPath (Join-Path $data "launch-starts.txt") -Value "2" -Encoding ascii
   if (-not (Test-Path -LiteralPath (Join-Path $data "session.json"))) { Set-Content -LiteralPath (Join-Path $data "session.json") -Value "{}" -Encoding ascii }
   Start-Ardia | Out-Null
