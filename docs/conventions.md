@@ -330,6 +330,7 @@ still counts:
 | `set-state` | `.setState(` in `components/` |
 | `store-reads` | `useBrowser(` in `components/` (read through `state/<domain>/hooks.ts`) |
 | `store-shape` | a zustand store not created as `create<T>()(() => init)` (a `set`/`get` creator, or the uncurried form) |
+| `native-loops` | `Animated.loop(` around `Animated.sequence(`, `parallel(` or `stagger(`: React Native can't run those as a native loop, so JS restarts every leg and macOS starts a new display link each time. Use `nativeLoop(value, legs)` from `components/ui/motion.ts` |
 | `size` | a file over its line cap |
 | `env` | an environment read outside the launch config and the three exempt engine lines |
 | `naming` | a `Cef`, `AC*`/app-side `ArdiaCore*`, `Netnyahoo` or `NN*` name |

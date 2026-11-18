@@ -32,7 +32,8 @@ import { startExtensionsBridge } from "../extensions/bridge";
 import { useExtensions } from "../extensions/actions";
 import { useReader } from "../reader/reader";
 import { answerQuitAfterSaves, isQuitting, setQuitting } from "./quit";
-import { menuInputsChanged, trackedMenuState, type MenuReads } from "../commands/menuState";
+import { liveReachesMenu, menuInputsChanged, trackedMenuState, type MenuReads } from "../commands/menuState";
+import { onLiveChange } from "../tabs/tabLive";
 import { usePages } from "../tabs/pageState";
 import { openFromWindowlessPage } from "../tabs/openFromWindowlessPage";
 import { startCaptionRegionSync } from "../windows/captionRegions";
@@ -142,6 +143,9 @@ export function startNativeSync() {
   store.subscribe((s, prev) => {
     windows.sync(s, prev);
     if (!menuReads || menuInputsChanged(menuReads, s, prev)) menuTimer ??= setTimeout(syncMenu, 120);
+  });
+  onLiveChange((tabId) => {
+    if (liveReachesMenu(store.getState(), tabId)) menuTimer ??= setTimeout(syncMenu, 120);
   });
   usePages.subscribe((p, prev) => {
     if (p.pages !== prev.pages) menuTimer ??= setTimeout(syncMenu, 120);

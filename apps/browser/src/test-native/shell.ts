@@ -127,7 +127,7 @@ const windowsModule: Modules["ArdiaAppWindows"] & { requestClose(id: string): Pr
 
 export const pressesWithoutRelease = { count: 0 };
 export const focusHandoffCounts = {
-  pending: {} as Record<string, number>,
+  pending: {} as Record<string, Record<string, number>>,
   take() {
     const taken = this.pending;
     this.pending = {};
