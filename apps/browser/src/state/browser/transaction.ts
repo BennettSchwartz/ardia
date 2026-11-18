@@ -36,7 +36,10 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
         const prev = heard;
         if (prev === null) return;
         heard = null;
-        if (api.getState() === prev) return;
+        if (api.getState() === prev) {
+          settledAt = null;
+          return;
+        }
         const held = depth;
         depth = 0;
         try {
@@ -49,7 +52,7 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
         if (settling) return;
         if (!depth) return publish(prev);
         heard ??= prev;
-        if (together) settledAt = settleNow(prev);
+        if (together) settledAt = settleNow(settledAt ?? heard);
         else if (heardAlone?.(s, prev)) hear();
       });
       api.subscribe = (listener) => {
@@ -62,12 +65,13 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
     };
 
   const transaction = (run: () => void, o: { together?: boolean } = {}) => {
+    const joint = Boolean(o.together);
     depth++;
-    if (o.together) together++;
+    if (joint) together++;
     try {
       run();
     } finally {
-      if (o.together) together--;
+      if (joint) together--;
       if (--depth === 0) {
         try {
           hear();
