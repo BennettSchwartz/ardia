@@ -7,10 +7,13 @@ export type DownloadFlightMark = {
   height: number;
   ms: number;
   fromPageEdge: boolean;
+  waitedMs: number;
 };
 
 export type MarkDownloadFlight = (stage: "start" | "landed", flight: DownloadFlightMark) => void;
 
 export const downloadFlightFromPageEdge = (): boolean => false;
+
+export const downloadFlightWaitsForIcon = (): boolean => false;
 
 export const markDownloadFlight: MarkDownloadFlight = () => {};

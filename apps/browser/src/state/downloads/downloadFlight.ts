@@ -1,1 +1,1 @@
-export { downloadFlightFromPageEdge, markDownloadFlight } from "../../platform/downloadFlight";
+export { downloadFlightFromPageEdge, downloadFlightWaitsForIcon, markDownloadFlight } from "../../platform/downloadFlight";

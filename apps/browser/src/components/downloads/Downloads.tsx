@@ -48,13 +48,13 @@ import { useDownloadsPlacement } from "./useDownloadsPlacement";
 import { sameSize, useSettled, type Size } from "../ui/useSettled";
 import { DOWNLOADS_LIST as L, FILE_ICON_GLYPH_SHARE, MAGNET, useDownloadsColors } from "./tokens";
 import { magnetPath, magnetPoint } from "./magnetPath";
-import { downloadFlightFromPageEdge, markDownloadFlight } from "../../state/downloads/downloadFlight";
+import { downloadFlightFromPageEdge, downloadFlightWaitsForIcon, markDownloadFlight } from "../../state/downloads/downloadFlight";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 
 const rowFill = (theme: Theme, hovered: boolean, pressed: boolean) => (hovered || pressed ? menuRowFill(theme, pressed) : undefined);
 
 const iconCache = new Map<string, string | null>();
-export const FileIcon = memo(function FileIcon({ path, size = L.fileIcon }: { path: string; size?: number }) {
+export const FileIcon = memo(function FileIcon({ path, size = L.fileIcon, onShown }: { path: string; size?: number; onShown?: () => void }) {
   const theme = useTheme();
   const key = `${path}@${size}`;
   const [uri, setUri] = useState(() => iconCache.get(key) ?? null);
@@ -70,7 +70,7 @@ export const FileIcon = memo(function FileIcon({ path, size = L.fileIcon }: { pa
     };
   }, [key]);
   return uri ? (
-    <Image source={{ uri }} style={{ width: size, height: size }} />
+    <Image source={{ uri }} style={{ width: size, height: size }} onLoad={onShown} onError={onShown} />
   ) : (
     <Symbol name="doc" size={size * FILE_ICON_GLYPH_SHARE} color={theme.icon} style={{ width: size, height: size }} />
   );
@@ -286,19 +286,36 @@ export function DownloadMagnet() {
   const flightMark = { ...path, icon: MAGNET.icon, width: size.width, height: size.height, ms: MAGNET.flight.duration };
   const mark = useRef(flightMark);
   mark.current = flightMark;
+  const waiting = useRef<{ id: string; at: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+
+  const fly = (id: string) => {
+    const asked = waiting.current;
+    if (!asked || asked.id !== id) return;
+    clearTimeout(asked.timer);
+    waiting.current = null;
+    const started = { ...mark.current, waitedMs: Date.now() - asked.at };
+    markDownloadFlight("start", started);
+    Animated.timing(t, { toValue: 1, ...MAGNET.flight, useNativeDriver: true }).start(({ finished }) => {
+      if (!finished) return;
+      markDownloadFlight("landed", started);
+      setFlight(null);
+    });
+  };
 
   useEffect(() => {
-    return watchNewDownloads(windowId, (fresh) => {
+    const stop = watchNewDownloads(windowId, (fresh) => {
       t.setValue(0);
+      if (waiting.current) clearTimeout(waiting.current.timer);
       setFlight({ id: fresh.id, path: fresh.path || fresh.filename });
-      const started = mark.current;
-      markDownloadFlight("start", started);
-      Animated.timing(t, { toValue: 1, ...MAGNET.flight, useNativeDriver: true }).start(({ finished }) => {
-        if (!finished) return;
-        markDownloadFlight("landed", started);
-        setFlight(null);
-      });
+      const waitsForIcon = downloadFlightWaitsForIcon();
+      waiting.current = { id: fresh.id, at: Date.now(), timer: setTimeout(() => fly(fresh.id), waitsForIcon ? MAGNET.iconWaitMs : 0) };
+      if (!waitsForIcon) fly(fresh.id);
     });
+    return () => {
+      stop();
+      if (waiting.current) clearTimeout(waiting.current.timer);
+      waiting.current = null;
+    };
   }, [windowId]);
 
   const icon = MAGNET.icon;
@@ -321,7 +338,7 @@ export function DownloadMagnet() {
             transform: [{ translateX: x }, { translateY: y }, { scale: t.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0.6, MAGNET.peakScale, 0.3] }) }],
           }}
         >
-          <FileIcon path={flight.path} size={icon} />
+          <FileIcon path={flight.path} size={icon} onShown={() => fly(flight.id)} />
         </Animated.View>
       )}
     </View>

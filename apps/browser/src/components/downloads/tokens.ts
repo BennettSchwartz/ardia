@@ -61,6 +61,7 @@ export const MAGNET = {
   arc: 90,
   startShare: 0.45,
   pageEdgeGap: 6,
+  iconWaitMs: 300,
   topStripTarget: { right: 25, y: 21 },
   sidebarTarget: { right: 24 },
   closedTarget: { x: 24, y: 24 },

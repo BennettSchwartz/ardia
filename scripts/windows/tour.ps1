@@ -2890,11 +2890,11 @@ function Save-FlightFrame($Capture, $Frame, [string]$Path) {
 }
 
 function Read-FlightLine([string]$Line) {
-  if ($Line -notmatch "download flight start from (-?\d+),(-?\d+) to (-?\d+),(-?\d+) arc (\d+(?:\.\d+)?) icon (\d+) in (\d+)x(\d+) over (\d+) ms (from the page \w+) at (\d+)") { return $null }
+  if ($Line -notmatch "download flight start from (-?\d+),(-?\d+) to (-?\d+),(-?\d+) arc (\d+(?:\.\d+)?) icon (\d+) in (\d+)x(\d+) over (\d+) ms (from the page \w+) after (\d+) ms for its icon at (\d+)") { return $null }
   return [pscustomobject]@{
     StartX = [double]$Matches[1]; StartY = [double]$Matches[2]; TargetX = [double]$Matches[3]; TargetY = [double]$Matches[4]
     Arc = [double]$Matches[5]; Icon = [double]$Matches[6]; Width = [double]$Matches[7]; Height = [double]$Matches[8]; Ms = [double]$Matches[9]
-    From = $Matches[10]; AtUtc = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$Matches[11]).UtcDateTime
+    From = $Matches[10]; WaitedMs = [int]$Matches[11]; AtUtc = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$Matches[12]).UtcDateTime
   }
 }
 
@@ -2949,7 +2949,7 @@ function Invoke-DownloadFlightStop($Session, [string]$Slug, [string]$Title, [boo
     $where = if ($FromPageEdge) { "the sidebar beside the page" } else { "the middle of the page, as on the Mac (ARDIA_TEST downloadFlightFromPage=1)" }
     $stop.Did = "One browser window, sidebar on the left, Downloads in its footer (the default). Opened 127.0.0.1:$($script:TourPagesPort)/flightdownload in the starting tab: a blue page that starts the held download 3 s after it loads, so the page's window covers the card when the flight starts at $where. Captured the window as fast as it reads until 900 ms after the app logged the flight, and judged each capture during the flight at the icon's place on its logged path (the move curve, the scale and opacity keyframes), against the capture just before the flight."
     if ($FromPageEdge) {
-      $stop.Expected = "the app logs a flight 'from the page edge'; in every capture from 12% to 50% of the flight the icon's place is outside the page's window and pixels changed there."
+      $stop.Expected = "the app logs a flight 'from the page edge', started once its icon showed; in at least three quarters of the captures from 12% to 50% of the flight the icon is drawn at its place, which is never over the page's window."
     } else {
       $stop.Expected = "report only: from the page's middle the icon is under the page's window, so captures from 12% to 50% of the flight show nothing at its place (#2603)."
     }
@@ -2965,7 +2965,7 @@ function Invoke-DownloadFlightStop($Session, [string]$Slug, [string]$Title, [boo
     $flight = Read-FlightLine $line
     $stop.Facts.Add("captures: $($capture.Captures), kept $($capture.Frames.Count); the flight logged: $($capture.Seen); the page's window: $(if ($pageBox) { "$($pageBox.Left),$($pageBox.Top) $($pageBox.Width)x$($pageBox.Height) in the client area" } else { 'not found' })")
     if (-not $flight) { $stop.Seen = "no"; $stop.Facts.Add("no flight line in the log: '$line'"); $capture.Frames.Clear(); return }
-    $stop.Facts.Add("flight $($flight.From) from $($flight.StartX),$($flight.StartY) to $($flight.TargetX),$($flight.TargetY), arc $($flight.Arc), over $($flight.Ms) ms, in a $($flight.Width)x$($flight.Height) layout drawn at $($capture.Width)x$($capture.Height)")
+    $stop.Facts.Add("flight $($flight.From) from $($flight.StartX),$($flight.StartY) to $($flight.TargetX),$($flight.TargetY), arc $($flight.Arc), over $($flight.Ms) ms, started $($flight.WaitedMs) ms after the download came, once its icon showed, in a $($flight.Width)x$($flight.Height) layout drawn at $($capture.Width)x$($capture.Height)")
     $measured = Measure-DownloadFlight $capture $flight $pageBox
     $rows = @($measured.Rows)
     $stop.Facts.Add("captures during the flight (ms after it started: the icon's place, over the page or the app, changed samples, drawn): $(($rows | ForEach-Object { "+$($_.Ms) $($_.X),$($_.Y) $(if ($_.OverPage) { 'page' } else { 'app' }) $($_.Changed) $(if ($_.Drawn) { 'drawn' } else { '-' })" }) -join '; ')")
