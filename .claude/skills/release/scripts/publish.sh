@@ -43,7 +43,7 @@ if [ -f "$app_symbols" ] || [ -f "$app_uuids" ]; then
   done
   echo "PASS  the app's symbols join the release"
 else
-  echo "note: no $(basename "$app_symbols") in $dist: the release ships without the app's symbols (scripts/release.sh makes them, and the Release workflow's release artifact carries them)"
+  echo "note: no $(basename "$app_symbols") in $dist: the release ships without the app's symbols (scripts/release.sh makes them; in CI the Release workflow's release artifact has to list them)"
 fi
 linux="$dist/linux"
 if [ -d "$linux" ]; then
