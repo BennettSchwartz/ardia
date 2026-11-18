@@ -71,6 +71,39 @@ test("a write heardAlone names is heard as it lands, with what was pending; the 
   assert.deepEqual(heard, [["00", "11"], ["11", "22"], ["22", "23"]]);
 });
 
+test("a transaction run together settles each write as it lands, hears none alone, even one heardAlone names, and is heard once at the end", () => {
+  const settled = [];
+  const t = transactional(
+    (s, prev) => s.a !== prev.a,
+    (s, prev) => {
+      settled.push(`${prev.a}${prev.sum}>${s.a}${s.sum}`);
+      return s.sum === s.a + s.b ? s : { ...s, sum: s.a + s.b };
+    },
+  );
+  const store = createStore(t.middleware((set) => ({ a: 0, b: 0, sum: 0, bump: (k) => set((s) => ({ [k]: s[k] + 1 })) })));
+  const heard = [];
+  store.subscribe((s, prev) => heard.push(`${prev.a}${prev.b}${prev.sum}>${s.a}${s.b}${s.sum}`));
+  t.transaction(
+    () => {
+      store.getState().bump("a");
+      assert.equal(store.getState().sum, 1, "the write is settled at once");
+      store.getState().bump("b");
+      store.getState().bump("a");
+      assert.equal(store.getState().sum, 3);
+      assert.deepEqual(heard, []);
+    },
+    { together: true },
+  );
+  assert.deepEqual(heard, ["000>213"], "heard once, from the state before the first write");
+  assert.deepEqual(settled, ["00>10", "11>11", "12>22"], "each write was settled once, against the settled state before it, and the end settled nothing again");
+  t.transaction(() => {
+    store.getState().bump("a");
+    assert.deepEqual(heard, ["000>213", "213>314"], "outside a run together, a write heardAlone names is heard as it lands again");
+    store.getState().bump("b");
+  });
+  assert.deepEqual(heard, ["000>213", "213>314", "314>325"]);
+});
+
 test("while a write is heard alone, a listener's own write is heard at once, nested, as zustand does", () => {
   const t = transactional((s, prev) => s.n !== prev.n);
   const store = createStore(t.middleware(() => ({ n: 0, echo: 0, other: 0 })));

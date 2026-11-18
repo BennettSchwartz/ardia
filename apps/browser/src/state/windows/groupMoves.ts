@@ -4,6 +4,7 @@ import { newId, pinKeyOf } from "../browser/model";
 import { descendantIds, nestGroups, withGroupsPlaced, withParent } from "../groups/groups";
 import { keyField } from "../pins/pinMirror";
 import { splitTabIds } from "../splits/splits";
+import { noteGroupMoveSplits } from "../telemetry/groupMoveSplits";
 
 let moveTransaction: (run: () => void) => void = (run) => run();
 export const setGroupMoveTransaction = (transaction: (run: () => void) => void) => void (moveTransaction = transaction);
@@ -58,12 +59,15 @@ export function splitsWithin(s: Pick<BrowserState, "splits">, tabIds: string[]):
 export function withSplitsBack(s: BrowserState, kept: SplitView[], windowId: string): BrowserState {
   const taken = new Set(Object.values(s.splits).flatMap((v) => splitTabIds(v)));
   let splits = s.splits;
+  let restored = 0;
   for (const v of kept) {
     const profileId = s.tabs[splitTabIds(v)[0]!]?.profileId;
     if (!splitTabIds(v).every((id) => s.tabs[id]?.windowId === windowId && s.tabs[id]?.profileId === profileId && !taken.has(id))) continue;
     const id = splits[v.id] ? newId("split") : v.id;
     splits = { ...splits, [id]: { ...v, id, windowId } };
     splitTabIds(v).forEach((t) => taken.add(t));
+    restored++;
   }
+  if (kept.length) noteGroupMoveSplits(kept.length, restored);
   return splits === s.splits ? s : { ...s, splits };
 }

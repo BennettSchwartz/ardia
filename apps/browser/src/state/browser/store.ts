@@ -103,7 +103,7 @@ export const storeTransaction = transactions.transaction;
 export const afterStoreTransactionIdempotent = transactions.afterTransactionIdempotent;
 export const inStoreTransaction = transactions.inTransaction;
 setHeldReportsTransaction(storeTransaction);
-setGroupMoveTransaction(storeTransaction);
+setGroupMoveTransaction((run) => storeTransaction(run, { together: true }));
 
 export const useBrowser = create<BrowserState>()(actionsApart(transactions.middleware(batched((...a) => ({
   ...createProfilesSlice(...a),
