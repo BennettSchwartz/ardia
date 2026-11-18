@@ -256,6 +256,20 @@ export type MaterialMenuEntry =
   | "divider"
   | { heading: string };
 
+const MENU_WIDTH_STEP = 56;
+const MENU_MIN_WIDTH = 112;
+const MENU_MAX_WIDTH = 280;
+const LABEL_CHAR_WIDTH = 8;
+
+export function materialMenuWidth(entries: readonly MaterialMenuEntry[]): number {
+  const widest = entries.reduce((most, entry) => {
+    if (entry === "divider" || "heading" in entry) return most;
+    const icons = (entry.icon ? materialSize.icon + 12 : 0) + (entry.submenu || ("checked" in entry && entry.checked) ? materialSize.icon + 12 : 0);
+    return Math.max(most, 24 + icons + entry.label.length * LABEL_CHAR_WIDTH);
+  }, 0);
+  return Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, Math.ceil(widest / MENU_WIDTH_STEP) * MENU_WIDTH_STEP));
+}
+
 export function MaterialMenuPanel({ entries, place, panel }: { entries: MaterialMenuEntry[]; place: ViewStyle; panel?: React.RefObject<ViewInstance | null> }) {
   const { scheme } = useMaterialTheme();
   const ripple = useMaterialRipple();
@@ -265,7 +279,7 @@ export function MaterialMenuPanel({ entries, place, panel }: { entries: Material
   }, []);
   const enter = useAnimatedStyle(() => ({ opacity: Math.min(1, shown.value * 3), transform: [{ scaleY: 0.8 + 0.2 * shown.value }] }));
   return (
-    <Animated.View ref={panel} testID="materialMenu" accessibilityViewIsModal style={[styles.menu, place, { backgroundColor: scheme.surfaceContainer }, enter]}>
+    <Animated.View ref={panel} testID="materialMenu" accessibilityViewIsModal style={[styles.menu, { width: materialMenuWidth(entries) }, place, { backgroundColor: scheme.surfaceContainer }, enter]}>
       {entries.map((entry, index) => {
         if (entry === "divider") return <View key={`d${index}`} style={[styles.menuDivider, { backgroundColor: scheme.outlineVariant }]} />;
         if ("heading" in entry)

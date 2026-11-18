@@ -44,9 +44,14 @@ export function materialDeckGeometry(width: number, height: number, safeTop: num
   return { ...between, safeBottom };
 }
 
+export function materialOnScreen(g: DeckGeometry, left: number, visible: number): number {
+  "worklet";
+  return Math.max(0, Math.min(visible, g.width - g.safeSide - MATERIAL_DECK.edge - left));
+}
+
 export function materialCloseCenter(g: DeckGeometry, relative: number, isLast: boolean): { x: number; y: number; visible: number } {
   "worklet";
-  const visible = deckVisibleWidth(g, relative, isLast);
+  const visible = materialOnScreen(g, deckLeading(g, relative), deckVisibleWidth(g, relative, isLast));
   const cardTop = g.cardCenterY - g.cardHeight / 2;
   return { x: deckLeading(g, relative) + visible - materialSize.touchTarget / 2, y: cardTop - tabsLayout.headerGap - tabsLayout.headerHeight / 2, visible };
 }
@@ -56,6 +61,12 @@ export function materialCloseHit(g: DeckGeometry, relative: number, isLast: bool
   const close = materialCloseCenter(g, relative, isLast);
   const half = materialSize.touchTarget / 2;
   return close.visible >= MATERIAL_DECK.closeShownFrom && Math.abs(x - close.x) <= half && Math.abs(y - close.y) <= half;
+}
+
+export function materialCloseAt(g: DeckGeometry, count: number, scroll: number, x: number, y: number): number {
+  "worklet";
+  for (let index = count - 1; index >= 0; index--) if (materialCloseHit(g, index - scroll, index === count - 1, x, y)) return index;
+  return -1;
 }
 
 export function useIncognitoScheme(): MaterialScheme {

@@ -214,7 +214,7 @@ const styles = StyleSheet.create({
   header: { height: HEADER_HEIGHT, flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 4 },
   iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },
   flipped: { transform: [{ scaleX: -1 }] },
-  input: { flex: 1, paddingVertical: 0 },
+  input: { flex: 1, paddingVertical: 0, height: materialSize.touchTarget },
   divider: { height: 1 },
   rows: { paddingVertical: 8 },
   note: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },

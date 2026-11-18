@@ -87,8 +87,8 @@ import { deckArchiveBottom, DeckHeader, deckHeaderBottom } from "./DeckHeader";
 import { DeckEmpty, IncognitoChip } from "./DeckChrome";
 import { MaterialDeckCard } from "./MaterialDeckCard";
 import { MaterialDeckBackdrop, MaterialDeckChrome, MaterialDeckEmpty } from "./MaterialDeckChrome";
-import { materialBottomRowCenter, materialCloseHit, materialDeckGeometry } from "./MaterialDeckLayout";
-import { materialDuration, materialMove } from "../ui/materialTokens";
+import { MATERIAL_DECK, materialBottomRowCenter, materialCloseAt, materialDeckGeometry } from "./MaterialDeckLayout";
+import { materialDuration, materialMove, materialSize } from "../ui/materialTokens";
 import { PageBarGhost } from "../browsing/PageBarGhost";
 import { screenCornerRadius } from "../../state/app/displayCorner";
 import { TabGrid } from "./TabGrid";
@@ -811,7 +811,16 @@ export const TabDeck = memo(function TabDeck() {
       if (card >= 0) runOnJS(showCardMenu)(card, e.x, e.y);
     });
   const tapFrom = useSharedValue({ x: 0, y: 0 });
+  const bottomRowTop = g.height - materialBottomRowCenter(insets.bottom) - materialSize.fab / 2 - MATERIAL_DECK.keyboardGap;
+  const closeFromX = (index: number) => {
+    const id = order[index];
+    if (!id || leavingIds.current.has(id)) return;
+    haptics.barPress();
+    if (!tabs.get(id)?.isPrivate) countUsage("card_close_tapped");
+    close(index, 0);
+  };
   const tap = Gesture.Manual()
+    .withTestId("deckTap")
     .hitSlop(barBand)
     .onTouchesDown((e) => {
       const touch = e.allTouches[0];
@@ -820,10 +829,11 @@ export const TabDeck = memo(function TabDeck() {
     .onTouchesUp((e, manager) => {
       const touch = e.changedTouches[0];
       if (touch && deckIsTap(touch.x - tapFrom.value.x, touch.y - tapFrom.value.y)) {
+        const closing = material ? materialCloseAt(g, count, scroll.value, touch.x, touch.y) : -1;
         const card = deckCardAt(g, count, scroll.value, touch.x, touch.y);
-        if (card >= 0) {
-          if (!(material && materialCloseHit(g, card - scroll.value, card === count - 1, touch.x, touch.y))) runOnJS(open)(card);
-        } else if (searchChrome) runOnJS(dismissKeyboard)();
+        if (closing >= 0) runOnJS(closeFromX)(closing);
+        else if (card >= 0) runOnJS(open)(card);
+        else if (redesigned || (material && touch.y < bottomRowTop)) runOnJS(dismissKeyboard)();
       }
       manager.fail();
     });

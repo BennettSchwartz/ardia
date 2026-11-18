@@ -136,8 +136,11 @@ function centredOn(row: WindowRect, host: WindowRect, across: ViewStyle): ViewSt
   return { width, left: Math.max(MENU_MARGIN, Math.min(left, host.width - width - MENU_MARGIN)) };
 }
 
+export const MATERIAL_MENU_BELOW_FINGER = 36;
+
 export function FloatingMenu({ items, place, onDismiss, anchor }: Props & { anchor?: RefObject<ViewInstance | null> }) {
   const hostFrame = useOverlayFrame();
+  const below = useDesign() === "material" ? MATERIAL_MENU_BELOW_FINGER : 0;
   const [placed, setPlaced] = useState<ViewStyle | null>(null);
   useEffect(() => {
     let live = true;
@@ -147,7 +150,7 @@ export function FloatingMenu({ items, place, onDismiss, anchor }: Props & { anch
         const { top: _top, bottom: _bottom, ...across } = place;
         setPlaced({ ...across, ...centredOn(row, host, across), top: menuTop(row, host, menuHeight(items), MENU_MARGIN) });
       } else if (typeof place.top === "number") {
-        setPlaced({ ...place, top: Math.max(MENU_MARGIN, Math.min(place.top - host.y, host.height - menuHeight(items) - MENU_MARGIN)) });
+        setPlaced({ ...place, top: Math.max(MENU_MARGIN, Math.min(place.top - host.y + below, host.height - menuHeight(items) - MENU_MARGIN)) });
       } else setPlaced(place);
     });
     return () => {

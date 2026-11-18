@@ -60,6 +60,8 @@ onAndroid("search in the material design is a full-screen Material search view: 
     expect(flat(node(root, id))).toMatchObject({ width: 48, height: 48 });
     expect(pressable(root, id).props.android_ripple).toMatchObject({ borderless: true });
   }
+  const field = root.root.findAll((found) => found.props.accessibilityLabel === "Search or Enter Address" && typeof found.type === "string")[0]!;
+  expect(flat(field)).toMatchObject({ height: 48, flex: 1 });
   act(() => typeSearch("site"));
   act(() => jest.advanceTimersByTime(50));
   expect(textOf(root)).toContain("Site 1");

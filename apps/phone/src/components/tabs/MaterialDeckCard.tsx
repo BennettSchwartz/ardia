@@ -1,24 +1,21 @@
-import { countUsage } from "../../state/telemetry/telemetry";
 import { memo, useMemo } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
-import Animated, { useAnimatedStyle } from "react-native-reanimated";
-import { withAlpha } from "../../lib/color";
+import { StyleSheet, View } from "react-native";
+import Animated, { useAnimatedStyle, useDerivedValue } from "react-native-reanimated";
 import { DECK_HEADER, deckBarBand, deckHeaderIconReveal, deckStatusStrip, titleReveal } from "../../lib/deckGeometry";
 import { shownTone } from "../../lib/pageTone";
 import { snapshotPageTop } from "../../lib/shownSnapshots";
 import { isUnseenReceived } from "../../lib/tabFace";
-import { haptics } from "../../state/app/haptics";
 import { countRender } from "../../state/app/interactionPerf";
 import { useHeldPageTone } from "../../state/browse/deckHold";
 import { display } from "../../state/search/omnibox";
 import { useIncognito } from "../../state/tabs/hooks";
 import type { BrowserTab } from "../../state/tabs/tabModels";
 import { barHeight, FadeView, Favicon, screenReaderActions, Symbol, TabFace, tabsInk, tabsLayout, usePageUnderBars, useTheme } from "../ui";
-import { MATERIAL_STATE, rolesFromScheme } from "../ui/materialRoles";
+import { rolesFromScheme } from "../ui/materialRoles";
 import { materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { nativeMenus } from "../ui/MenuTrigger";
 import { DeckCardMenu, deckCardStyles, ReceivedBadge, sameCard, useCardPlacement, type DeckCardProps } from "./DeckCard";
-import { MATERIAL_DECK, useDeckScheme } from "./MaterialDeckLayout";
+import { MATERIAL_DECK, materialOnScreen, useDeckScheme } from "./MaterialDeckLayout";
 
 export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geometry: g, motion, onOpen, onClose, onCloseNow }: DeckCardProps) {
   countRender("DeckCard");
@@ -29,17 +26,21 @@ export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geo
   const tone = shownTone(useHeldPageTone(tab.id), tab.themeColorHex);
   const { scaleProgress } = motion;
   const { placed, cardStyle, reachStyle } = useCardPlacement(tab.id, g, motion, materialShape.large);
+  const shownWidth = useDerivedValue(() => {
+    const p = placed.value.pose;
+    return materialOnScreen(g, p.x - (g.cardWidth * p.scale) / 2, p.visible);
+  }, [g]);
   const headerStyle = useAnimatedStyle(() => {
     const { pose: p, top } = placed.value;
     const left = p.x - (g.cardWidth * p.scale) / 2;
-    return { zIndex: placed.value.z + 1, opacity: p.header, transform: [{ translateX: left + p.visible - g.cardWidth }, { translateY: top }] };
+    return { zIndex: placed.value.z + 1, opacity: p.header, transform: [{ translateX: left + shownWidth.value - g.cardWidth }, { translateY: top }] };
   });
   const rowStyle = useAnimatedStyle(() => {
-    const room = placed.value.pose.visible - materialSize.touchTarget;
-    return { opacity: deckHeaderIconReveal(room, tabsLayout.faviconSize), transform: [{ translateX: g.cardWidth - placed.value.pose.visible + MATERIAL_DECK.headerInset }] };
+    const room = shownWidth.value - materialSize.touchTarget;
+    return { opacity: deckHeaderIconReveal(room, tabsLayout.faviconSize), transform: [{ translateX: g.cardWidth - shownWidth.value + MATERIAL_DECK.headerInset }] };
   });
-  const titleStyle = useAnimatedStyle(() => ({ opacity: titleReveal(placed.value.pose.visible - materialSize.touchTarget) }));
-  const closeStyle = useAnimatedStyle(() => ({ opacity: Math.min(Math.max((placed.value.pose.visible - MATERIAL_DECK.closeShownFrom) / DECK_HEADER.iconFade + 1, 0), 1) }));
+  const titleStyle = useAnimatedStyle(() => ({ opacity: titleReveal(shownWidth.value - materialSize.touchTarget) }));
+  const closeStyle = useAnimatedStyle(() => ({ opacity: Math.min(Math.max((shownWidth.value - MATERIAL_DECK.closeShownFrom) / DECK_HEADER.iconFade + 1, 0), 1) }));
   const underBars = usePageUnderBars();
   const pageTop = (tab.snapshotFileName ? snapshotPageTop(tab.snapshotFileName) : null) ?? (underBars ? 0 : g.safeTop);
   const faceStyle = useAnimatedStyle(() => ({ transform: [{ translateY: placed.value.expanded ? deckStatusStrip(g, scaleProgress.value, pageTop) : 0 }] }), [g, pageTop]);
@@ -97,38 +98,18 @@ export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geo
           </Animated.View>
         </FadeView>
         <Animated.View style={[styles.closeSlot, closeStyle]}>
-          <MaterialCardClose
-            title={title}
-            color={backdrop.onSurfaceVariant}
-            ripple={withAlpha(backdrop.onSurface, MATERIAL_STATE.pressed)}
-            onPress={() => {
-              const { header, visible } = placed.value.pose;
-              if (header <= 0.5 || visible < MATERIAL_DECK.closeShownFrom) return;
-              if (!tab.isPrivate) countUsage("card_close_tapped");
-              onClose(index);
-            }}
-          />
+          <MaterialCardClose color={backdrop.onSurfaceVariant} />
         </Animated.View>
       </Animated.View>
     </>
   );
 }, sameCard);
 
-function MaterialCardClose({ title, color, ripple, onPress }: { title: string; color: string; ripple: string; onPress: () => void }) {
+function MaterialCardClose({ color }: { color: string }) {
   return (
-    <Pressable
-      testID="materialCardClose"
-      accessibilityRole="button"
-      accessibilityLabel={`Close ${title}`}
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      android_ripple={{ color: ripple, borderless: true, radius: MATERIAL_DECK.closeRipple }}
-      onPressIn={haptics.barPress}
-      onPress={onPress}
-      style={styles.close}
-    >
+    <View testID="materialCardClose" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.close}>
       <Symbol name="xmark" size={MATERIAL_DECK.closeIcon} color={color} />
-    </Pressable>
+    </View>
   );
 }
 

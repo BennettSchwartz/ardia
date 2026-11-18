@@ -1,10 +1,11 @@
-import { Platform, StyleSheet } from "react-native";
+import { Keyboard, Platform, StyleSheet } from "react-native";
 import { getAnimatedStyle } from "react-native-reanimated";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { cardMenuItems } from "../components/tabs/DeckCard";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { deckHeaderBottom } from "../components/tabs/DeckHeader";
-import { fitsMaterialChrome, MATERIAL_DECK, materialCloseCenter, materialCloseHit, materialDeckGeometry } from "../components/tabs/MaterialDeckLayout";
+import { fitsMaterialChrome, MATERIAL_DECK, materialCloseCenter, materialCloseHit, materialDeckGeometry, materialOnScreen } from "../components/tabs/MaterialDeckLayout";
+import { getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { deckGeometry } from "../lib/deckGeometry";
 import { DesignProvider } from "../components/ui";
 import { MenuTrigger } from "../components/ui/MenuTrigger";
@@ -86,18 +87,40 @@ onAndroid("the material deck's cards are elevated Material cards: surfaceContain
   unmount(root);
 });
 
-onAndroid("each card's close is a 48 dp icon button with an unbounded ripple in the scheme's state colour, and pressing it closes that tab", () => {
+const tapDeckAt = (x: number, y: number) => {
+  const tap = getByGestureTestId("deckTap") as unknown as { handlers: { onTouchesDown: (event: unknown, manager: unknown) => void; onTouchesUp: (event: unknown, manager: unknown) => void } };
+  const manager = { fail: () => undefined, activate: () => undefined, end: () => undefined, begin: () => undefined };
+  const touch = { id: 0, x, y, absoluteX: x, absoluteY: y };
+  act(() => {
+    tap.handlers.onTouchesDown({ allTouches: [touch], changedTouches: [touch] }, manager);
+    tap.handlers.onTouchesUp({ allTouches: [touch], changedTouches: [touch] }, manager);
+  });
+};
+
+onAndroid("each card's close is a 48 dp mark at the end of its title row, and a tap on it, taken by the deck's own tap gesture, closes that tab, counts card_close_tapped and gives the press haptic", () => {
   const closed = jest.spyOn(browse, "closeTabFromDeck").mockImplementation(() => undefined);
   const counted = jest.spyOn(telemetry, "countUsage");
   const root = deck();
-  const close = root.root.findAll((node) => node.props.testID === "materialCardClose" && typeof node.props.onPress === "function").at(-1)!;
+  const close = hosts(root, "materialCardClose").at(-1)!;
   expect(flat(close)).toMatchObject({ width: 48, height: 48 });
-  expect(close.props.android_ripple).toMatchObject({ borderless: true, radius: 20, color: "rgba(23, 29, 26, 0.1)" });
-  act(() => close.props.onPress());
+  expect(close.props.pointerEvents).toBe("none");
+  const g = materialDeckGeometry(393, 873, SAFE.top, SAFE.bottom, 0, "android", deckHeaderBottom(), 55);
+  const relatives = [0, 1, -1].map((relative) => ({ relative, ...materialCloseCenter(g, relative, relative === 1) })).filter((spot) => spot.visible >= MATERIAL_DECK.closeShownFrom);
+  expect(relatives.length).toBeGreaterThan(0);
+  const spot = relatives[0]!;
+  tapDeckAt(spot.x, spot.y);
   act(() => jest.advanceTimersByTime(1000));
-  expect(closed).toHaveBeenCalledWith(useTabs.getState().open.at(-1)!.id);
+  expect(closed).toHaveBeenCalledTimes(1);
   expect(counted).toHaveBeenCalledWith("card_close_tapped");
+  expect(haptics.barPress).toHaveBeenCalled();
   unmount(root);
+});
+
+onAndroid("the × and title stop at the screen's edge on a card that runs off it, so a peeking last card never shows a cut-off ×", () => {
+  const g = materialDeckGeometry(393, 873, SAFE.top, SAFE.bottom, 0, "android", deckHeaderBottom(), 55);
+  const peeking = materialCloseCenter(g, 1, true);
+  expect(peeking.x + 24).toBeLessThanOrEqual(g.width - MATERIAL_DECK.edge);
+  expect(materialOnScreen(g, g.width - 100, 300)).toBe(100 - MATERIAL_DECK.edge);
 });
 
 test("card menus carry icons only in the material design, so the iPhone's menu is unchanged", () => {
@@ -232,10 +255,17 @@ onAndroid("the classic and redesigned decks keep their own chrome and cards: no 
   }
 });
 
-onAndroid("the card close and the More button give the bar's press haptic on press down", () => {
+onAndroid("the More button gives the bar's press haptic on press down", () => {
   const root = deck();
   act(() => pressable(root, "materialDeckMore")!.props.onPressIn());
-  act(() => root.root.findAll((node) => node.props.testID === "materialCardClose" && typeof node.props.onPressIn === "function").at(-1)!.props.onPressIn());
-  expect(haptics.barPress).toHaveBeenCalledTimes(2);
+  expect(haptics.barPress).toHaveBeenCalledTimes(1);
+  unmount(root);
+});
+
+onAndroid("a tap on the bottom row's Search Tabs field never dismisses the keyboard, so the field keeps the focus it just took", () => {
+  const dismissed = jest.spyOn(Keyboard, "dismiss");
+  const root = deck();
+  tapDeckAt(150, 873 - SAFE.bottom - MATERIAL_DECK.edge - 28);
+  expect(dismissed).not.toHaveBeenCalled();
   unmount(root);
 });
