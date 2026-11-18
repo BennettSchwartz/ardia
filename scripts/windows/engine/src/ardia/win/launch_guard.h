@@ -2,7 +2,8 @@
 #define ARDIA_WIN_LAUNCH_GUARD_H_
 
 #include <string>
-#include <string_view>
+
+#include "base/win/windows_types.h"
 
 namespace base {
 class CommandLine;
@@ -16,39 +17,27 @@ inline constexpr int kPredecessorWaitSeconds = 45;
 inline constexpr int kPredecessorPollMs = 200;
 inline constexpr int kClaimRetryMs = 250;
 inline constexpr int kClaimAttempts = 240;
-inline constexpr char kReplayedLaunchSwitch[] = "ardia-replayed-launch";
-inline constexpr char kReplayedFromQuittingApp[] = "quitting";
-inline constexpr char kReplayedAfterRefusal[] = "refused";
+inline constexpr int kLockFileFreeWaitMs = 5000;
+inline constexpr wchar_t kRestartedAfterRefusalVariable[] =
+    L"ARDIA_RESTARTED_AFTER_REFUSAL";
 
 struct LaunchGuardFacts {
   int predecessor_wait_ms = -1;
   int unfinished_starts_before = 0;
   std::wstring recovered_to;
   bool profile_held_by_another = false;
-  std::string replayed_from;
-  int replayed_launches = 0;
-  int refused_starts_before = 0;
+  bool restarted_after_refusal = false;
+};
+
+struct QuittingOwner {
+  HANDLE process = nullptr;
+  DWORD process_id = 0;
+  bool exiting = false;
 };
 
 std::wstring AppDataDirectory();
 
 std::wstring LaunchLogPath();
-
-void AppendLaunchLog(const std::string& line);
-
-std::string ReplayedLaunchValue(std::string_view from, int launches);
-
-bool ReadReplayedLaunch(std::string_view value,
-                        std::string* from,
-                        int* launches);
-
-bool WaitForPreviousToEnd(int budget_ms, int* waited_ms);
-
-void LetGoOfGuard();
-
-void CountRefusedStart();
-
-int TakeRefusedStarts();
 
 void RotateLaunchLog();
 
@@ -57,15 +46,33 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
 
 void MarkExiting();
 
-void ClearExiting();
-
 void MarkStartSettled();
 
 void ClaimGuard();
 
 bool OwnsGuard();
 
+void LetGoOfGuard();
+
+void NoteRestartedAfterRefusal();
+
 const LaunchGuardFacts& GuardFacts();
+
+bool FindQuittingOwner(QuittingOwner* owner);
+
+bool WaitForOwnerToEnd(const QuittingOwner& owner, int budget_ms, int* waited_ms);
+
+void CloseOwner(QuittingOwner* owner);
+
+bool WaitForLockFileFree(int most_ms);
+
+void CountRefusedStart();
+
+int TakeRefusedStarts();
+
+void SaveLastQuit(const std::string& json);
+
+std::string TakeLastQuit();
 
 int NextUnfinishedStarts(int recorded, bool* recover);
 

@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 globalThis.__DEV__ = false;
 await import("../../test-native/index.ts");
-const { launchGuardProperties, waitedForPreviousBucket, LAUNCH_GUARD_DOC } = await import("./diagnostics.ts");
+const { launchGuardProperties, waitedForPreviousBucket, quitWaitBucket, LAUNCH_GUARD_DOC } = await import("./diagnostics.ts");
 
 const reading = (contents) => (name) => (name === LAUNCH_GUARD_DOC ? contents : null);
 
@@ -42,53 +42,52 @@ test("the wait for a previous Ardia is sent as a bucket, never in milliseconds",
   assert.ok(!Object.values(properties).includes(4321), "the raw wait is not sent");
 });
 
-test("a launch replayed after a quitting Ardia ended is reported with how many launches it carried", () => {
+test("a start made again after the closing Ardia turned the last launch away, and earlier refused starts, are reported", () => {
   assert.deepEqual(
-    launchGuardProperties(
-      reading('{"waitedForPreviousMs":3800,"unfinishedStartsBefore":0,"restoreStateSetAside":false,"profileHeldByAnother":false,"refusedStartsBefore":0,"replayedFrom":"quitting","replayedLaunches":2}'),
-    ),
-    {
-      launch_waited_for_previous: "<10s",
-      launch_unfinished_starts_before: 0,
-      launch_restore_state_set_aside: false,
-      launch_profile_held_by_another: false,
-      launch_refused_starts_before: 0,
-      launch_replayed_from: "quitting",
-      launch_replayed_launches: 2,
-    },
-  );
-});
-
-test("a launch started again after Chromium refused it, and earlier refused starts, are reported", () => {
-  assert.deepEqual(
-    launchGuardProperties(
-      reading('{"waitedForPreviousMs":0,"unfinishedStartsBefore":0,"restoreStateSetAside":false,"profileHeldByAnother":false,"refusedStartsBefore":3,"replayedFrom":"refused","replayedLaunches":1}'),
-    ),
+    launchGuardProperties(reading('{"waitedForPreviousMs":0,"unfinishedStartsBefore":0,"restoreStateSetAside":false,"profileHeldByAnother":false,"refusedStartsBefore":3,"restartedAfterRefusal":true}')),
     {
       launch_waited_for_previous: "0",
       launch_unfinished_starts_before: 0,
       launch_restore_state_set_aside: false,
       launch_profile_held_by_another: false,
       launch_refused_starts_before: 3,
-      launch_replayed_from: "refused",
-      launch_replayed_launches: 1,
+      launch_restarted_after_refusal: true,
     },
   );
 });
 
-test("an unknown replay source or a replay without launches adds no replay properties", () => {
-  const base = '"waitedForPreviousMs":0,"unfinishedStartsBefore":0,"restoreStateSetAside":false';
-  for (const replay of ['"replayedFrom":"somewhere","replayedLaunches":1', '"replayedFrom":"quitting","replayedLaunches":0', '"replayedFrom":"quitting"', '"replayedLaunches":2']) {
-    const properties = launchGuardProperties(reading(`{${base},${replay}}`));
-    assert.equal(properties.launch_replayed_from, undefined, replay);
-    assert.equal(properties.launch_replayed_launches, undefined, replay);
+test("the last quit's wait for the app's answer is sent as a range with its answer, reason and the quits a launch cancelled", () => {
+  assert.deepEqual(
+    [0, 99, 100, 499, 500, 999, 1000, 1999, 2000, 2999, 3000, 15_000].map(quitWaitBucket),
+    ["<100ms", "<100ms", "<500ms", "<500ms", "<1s", "<1s", "<2s", "<2s", "<3s", "<3s", "3s+", "3s+"],
+  );
+  const properties = launchGuardProperties(
+    reading('{"waitedForPreviousMs":0,"unfinishedStartsBefore":0,"restoreStateSetAside":false,"lastQuitWaitMs":2875,"lastQuitAnswer":"yes","lastQuitReason":"user","quitsCancelledByLaunch":2}'),
+  );
+  assert.equal(properties.launch_last_quit_wait, "<3s");
+  assert.equal(properties.launch_last_quit_answer, "yes");
+  assert.equal(properties.launch_last_quit_reason, "user");
+  assert.equal(properties.launch_quits_cancelled_by_launch, 2);
+  assert.ok(!Object.values(properties).includes(2875), "the raw wait is not sent");
+  assert.equal(launchGuardProperties(reading('{"lastQuitWaitMs":3000,"lastQuitAnswer":"timeout","lastQuitReason":"update"}')).launch_last_quit_wait, "3s+");
+});
+
+test("an unknown quit answer or reason, or a wait without an answer, adds no quit properties", () => {
+  for (const quit of ['"lastQuitWaitMs":10,"lastQuitAnswer":"maybe"', '"lastQuitWaitMs":10', '"lastQuitAnswer":"yes"', '"lastQuitWaitMs":-5,"lastQuitAnswer":"yes"']) {
+    const properties = launchGuardProperties(reading(`{${quit},"quitsCancelledByLaunch":1}`));
+    assert.equal(properties.launch_last_quit_wait, undefined, quit);
+    assert.equal(properties.launch_last_quit_answer, undefined, quit);
+    assert.equal(properties.launch_quits_cancelled_by_launch, undefined, quit);
   }
+  const unknownReason = launchGuardProperties(reading('{"lastQuitWaitMs":10,"lastQuitAnswer":"yes","lastQuitReason":"restart"}'));
+  assert.equal(unknownReason.launch_last_quit_answer, "yes");
+  assert.equal(unknownReason.launch_last_quit_reason, undefined);
 });
 
 test("no file, a broken file or odd values add nothing", () => {
   assert.deepEqual(launchGuardProperties(reading(null)), {});
   assert.deepEqual(launchGuardProperties(reading("{not json")), {});
   assert.deepEqual(launchGuardProperties(reading("[]")), {});
-  assert.deepEqual(launchGuardProperties(reading('{"waitedForPreviousMs":-4,"unfinishedStartsBefore":"2","restoreStateSetAside":"yes","profileHeldByAnother":1,"refusedStartsBefore":-1,"replayedFrom":7}')), {});
+  assert.deepEqual(launchGuardProperties(reading('{"waitedForPreviousMs":-4,"unfinishedStartsBefore":"2","restoreStateSetAside":"yes","profileHeldByAnother":1,"refusedStartsBefore":-1,"restartedAfterRefusal":"yes","lastQuitWaitMs":"9","lastQuitAnswer":7}')), {});
   assert.deepEqual(launchGuardProperties(() => { throw new Error("no documents"); }), {});
 });

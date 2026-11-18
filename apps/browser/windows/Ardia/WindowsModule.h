@@ -111,7 +111,7 @@ struct WindowsModule {
 
   REACT_METHOD(replyToTerminate)
   void replyToTerminate(bool ok, Promise promise) noexcept {
-    OnUI(promise, [ok]() noexcept { WindowManager::Shared().ReplyToTerminate(ok); });
+    OnUI(promise, [ok]() noexcept { WindowManager::Shared().AnswerTerminate(ok); });
   }
 
   REACT_METHOD(beginWindowDrag)
@@ -195,8 +195,8 @@ struct WindowsModule {
   }
 
   REACT_METHOD(quit)
-  void quit(Promise promise) noexcept {
-    OnUI(promise, []() noexcept { WindowManager::Shared().Quit(); });
+  void quit(std::string reason, Promise promise) noexcept {
+    OnUI(promise, [reason]() noexcept { WindowManager::Shared().Quit(reason); });
   }
 
  private:

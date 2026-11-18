@@ -650,6 +650,38 @@ is plain Chromium.
   wait, with no second browser), once with two unfinished starts recorded (the session must be set aside), and
   once with `Microsoft.ReactNative.dll` hidden (it must exit 0 with the reason logged). Every launch must show one
   window from one browser, and Windows must log no Ardia crash, Crashpad no dump and the launch log no fatal line.
+- A launch that meets a quitting Ardia (#2441). The quit has three stretches, and the new launch always carries
+  itself: the closing copy never starts a process.
+  - Between the last window closing and the quit (400 ms): the running Ardia takes the launch. A launch in that wait
+    holds the quit until its window opens, at most 5 s, because the window opens a JS round trip later.
+  - While the quit waits for the app's answer to `willQuit` (3 s at most): the app tells the engine
+    (`app.quitting` phase `asking`), a launch still goes to this Ardia, and it cancels the quit (`quitCancelled`, the
+    windows asked for meanwhile open). A quit with the reason `update` (the updater's `quit("update")`) isn't
+    cancelled: the launch is ignored and the installer opens Ardia again. JS answers every `willQuit` once, so the
+    app counts the answers it owes and an answer to a cancelled quit never finishes a later one. The launch log says
+    `quit … began (user|update)` and `the app answered yes after N ms`, `no answer in 3000 ms` or `cancelled by a
+    relaunch after N ms`; `app_launched` reports the last one as a range.
+  - From `Finish()` (phase `final`, the point of no return): the engine marks the profile exiting, so a new launch
+    waits in the launch guard for this process to end. A launch already past the guard is turned away by
+    `chromium-win-hand-off-refused-after-quit.patch` (`ProcessSingletonNotificationCallback` answers false), which
+    Chromium turns into `PROFILE_IN_USE` after one retry. `AfterChromeMain` then finds the profile's owner (published
+    by the guard as `Local\ArdiaBrowser.<key>.owner`: its pid and start time), waits for that process and the
+    `lockfile`, and starts itself once with its own command line, folder and environment plus
+    `ARDIA_RESTARTED_AFTER_REFUSAL=1`; a restarted launch turned away again shows the start-failure message. Nothing is
+    written to the log after the wait, so `process ending` stays the closing copy's last line, and the guard writes its
+    own wait after it rotates the log.
+  - The engine's quit (`QuitApp`) closes every tab without running `beforeunload` (`chrome::ExitIgnoreUnloadHandlers`;
+    the app has already asked about downloads), and a quit Chromium hasn't finished after 10 s ends after the
+    document flush.
+  - Known gap: a launch Chromium accepts in the same message-loop turn as the point of no return reaches the engine
+    after it and is lost, with a log line. A session end is Chromium's own `SessionEnding()`, which never goes
+    through the app's quit and pumps no messages until it ends the process: a launch then gets no answer
+    (`SendMessageTimeout`, 20 s), and once the window is gone Chromium retries and the launch starts as the only Ardia
+    (or Chromium's hung-browser path applies if the copy looks hung). Nothing restarts and nothing is cancelled.
+  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, stages each stretch with test-only `ARDIA_TEST` keys
+    (`lastWindowWaitMs`, `windowOpenHoldMs`, `quitWaitMs`, `quitReason`, `quitAnswerHoldMs`, `quitUnloadHoldMs`,
+    `quitFlushHoldMs`, `handOffHoldMs`, and `quitByMessage`, which lets the registered message `ArdiaTestQuit` start a
+    quit with windows open) and requires the link opened exactly once in exactly one Ardia, still there 20 s later.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and
   file addresses on it. The app treats them as links from another app (`onOpenURLs`: a Little Ardia window or a tab,

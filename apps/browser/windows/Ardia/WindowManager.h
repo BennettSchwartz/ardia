@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -102,6 +103,7 @@ struct WindowManager {
 
   void Attach(winrt::Microsoft::ReactNative::ReactContext const &context) noexcept {
     m_context = context;
+    m_answersOwed = 0;
   }
 
   void Detach() noexcept {
@@ -193,11 +195,17 @@ struct WindowManager {
     SetWindowPos(hwnd, atTopOfBand ? HWND_TOP : after, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
-  void Open(OpenWindowRequest const &request) noexcept {
+  void Open(OpenWindowRequest const &request, bool heldForTest = false) noexcept {
     if (m_quitting) {
-      LaunchLog::Write(L"window", std::wstring(L"not opened ").append(Paths::Wide(request.id)).append(L": Ardia is quitting"));
+      try {
+        m_opensDuringQuit.push_back(request);
+      } catch (...) {
+      }
+      LaunchLog::Write(L"window", std::wstring(L"held ").append(Paths::Wide(request.id)).append(L" until the quit ends: it opens if the quit is cancelled"));
       return;
     }
+    if (!heldForTest && HoldOpenForTest(request)) return;
+    m_launchAwaitingWindow = 0;
     if (ManagedWindow *existing = Find(request.id)) {
       bool wasClosing = !existing->exits.empty() || (existing->fade && (existing->fade->phase == WindowFade::Phase::Leaving || existing->fade->phase == WindowFade::Phase::Lingering));
       StopClosing(*existing);
@@ -499,33 +507,99 @@ struct WindowManager {
     return entry && entry->IsPopup();
   }
 
-  void ReplyToTerminate(bool ok) noexcept {
-    if (!m_quitting || m_finished) return;
-    if (ok) {
-      if (m_quitHeldUntil && GetTickCount64() < m_quitHeldUntil) return;
-      return Finish();
-    }
-    m_quitting = false;
-    m_quitHeldUntil = 0;
-    m_quitGeneration++;
-    TellEngineQuitting(false);
-    EmitApp("quitCancelled");
+  void AnswerTerminate(bool ok) noexcept {
+    std::optional<int> held = AppLaunch::TestMilliseconds("quitAnswerHoldMs", kQuitTestHoldMostMs);
+    if (!held) return ReplyToTerminate(ok);
+    LaunchLog::Write(L"quit", std::wstring(L"test: the app's answer is held ").append(std::to_wstring(*held)).append(L" ms"));
+    After(std::chrono::milliseconds(*held), [this, ok]() noexcept { ReplyToTerminate(ok); });
   }
 
-  void Quit() noexcept {
-    if (m_quitting) return;
+  void ReplyToTerminate(bool ok) noexcept {
+    if (m_answersOwed > 0) m_answersOwed--;
+    if (!m_quitting || m_finished) {
+      LaunchLog::Write(L"quit", L"an answer came after its quit was cancelled or had finished; ignored");
+      return;
+    }
+    if (m_answersOwed > 0) {
+      LaunchLog::Write(L"quit", L"an answer to an earlier, cancelled quit came during this one; ignored");
+      return;
+    }
+    if (!ok) {
+      NoteQuitWait(L"the app answered no");
+      return CancelQuit();
+    }
+    NoteQuitWait(L"the app answered yes");
+    m_quitAnswer = kAnsweredYes;
+    if (m_quitHeldUntil && GetTickCount64() < m_quitHeldUntil) return;
+    Finish();
+  }
+
+  void Quit(std::string_view reason) noexcept {
+    if (m_quitting) {
+      if (reason == kUpdateQuit && m_quitReason != kUpdateQuit && !m_finished) {
+        m_quitReason = kUpdateQuit;
+        TellEngineQuitting("asking");
+        LaunchLog::Write(L"quit", L"the quit under way is now an update's quit; a launch no longer cancels it");
+      }
+      return;
+    }
     m_quitting = true;
-    TellEngineQuitting(true);
+    m_quitReason = reason == kUpdateQuit ? kUpdateQuit : kUserQuit;
+    m_quitAskedAt = GetTickCount64();
+    m_quitWaitMs = 0;
+    m_quitAnswer = m_context ? kAnswerPending : kNoAppToAsk;
+    m_launchAwaitingWindow = 0;
+    TellEngineQuitting("asking");
     std::optional<int> held = AppLaunch::TestMilliseconds("quitWaitMs", kQuitTestHoldMostMs);
+    LaunchLog::Write(L"quit", std::wstring(L"began (").append(Paths::Wide(m_quitReason)).append(m_context ? L"), asking the app to save" : L"), with no app to ask"));
     if (!m_context && !held) return Finish();
     if (held) {
-      m_quitHeldUntil = GetTickCount64() + static_cast<ULONGLONG>(*held);
+      m_quitHeldUntil = m_quitAskedAt + static_cast<ULONGLONG>(*held);
       LaunchLog::Write(L"launch", std::wstring(L"test: the quit waits ").append(std::to_wstring(*held)).append(L" ms before it unloads"));
     }
-    if (m_context) EmitApp("willQuit");
-    After(std::chrono::milliseconds(held.value_or(kQuitAnswerWaitMs)), [this, generation = ++m_quitGeneration]() noexcept {
-      if (m_quitting && generation == m_quitGeneration) Finish();
+    if (m_context) {
+      m_answersOwed++;
+      EmitApp("willQuit");
+    }
+    const int wait = held.value_or(kQuitAnswerWaitMs);
+    After(std::chrono::milliseconds(wait), [this, wait, generation = ++m_quitGeneration]() noexcept {
+      if (!m_quitting || generation != m_quitGeneration) return;
+      if (m_quitAnswer == kAnswerPending) {
+        m_quitWaitMs = wait;
+        m_quitAnswer = kNoAnswer;
+        LaunchLog::Write(L"quit", std::wstring(L"no answer in ").append(std::to_wstring(wait)).append(L" ms (").append(Paths::Wide(m_quitReason)).append(L"); quitting"));
+      }
+      Finish();
     });
+  }
+
+  void LaunchArrived() noexcept {
+    if (m_finished) return;
+    if (!m_quitting) {
+      if (NoWindowStays()) m_launchAwaitingWindow = GetTickCount64();
+      return;
+    }
+    if (m_quitReason == kUpdateQuit) {
+      LaunchLog::Write(L"quit", L"a launch during an update's quit doesn't cancel it");
+      return;
+    }
+    NoteQuitWait(L"cancelled by a relaunch");
+    CancelQuit();
+  }
+
+  void QuitByTestMessage() noexcept {
+    LaunchLog::Write(L"quit", L"test: asked to quit by a message");
+    Quit(WindowlessQuitReason());
+  }
+
+  static std::string_view WindowlessQuitReason() noexcept {
+    std::optional<std::string> reason = AppLaunch::TestValue("quitReason");
+    return reason && *reason == kUpdateQuit ? kUpdateQuit : kUserQuit;
+  }
+
+  static UINT TestQuitMessage() noexcept {
+    static const UINT message = AppLaunch::TestFlag("quitByMessage") ? RegisterWindowMessageW(L"ArdiaTestQuit") : 0;
+    return message;
   }
 
   HWND TakePageLeftBySecondaryPress(HWND app, ULONGLONG withinMs) noexcept {
@@ -546,7 +620,15 @@ struct WindowManager {
 
   static constexpr UINT_PTR kSubclassId = 0xA2D1A;
   static constexpr int kQuitAnswerWaitMs = 3000;
+  static constexpr int kLastWindowWaitMs = 400;
+  static constexpr ULONGLONG kLaunchWindowWaitMs = 5000;
   static constexpr int kQuitTestHoldMostMs = 15000;
+  static constexpr std::string_view kUserQuit = "user";
+  static constexpr std::string_view kUpdateQuit = "update";
+  static constexpr std::string_view kAnswerPending = "pending";
+  static constexpr std::string_view kAnsweredYes = "yes";
+  static constexpr std::string_view kNoAnswer = "timeout";
+  static constexpr std::string_view kNoAppToAsk = "none";
   static constexpr double kPopupMinWidth = 200;
   static constexpr double kPopupMinPageHeight = 150;
   static constexpr double kPopupChromeHeight = 60;
@@ -955,9 +1037,9 @@ struct WindowManager {
     for (auto &waiter : revealWaiters) waiter();
     After(std::chrono::milliseconds(1), [closedWindow]() noexcept {});
     if (m_windows.empty() && !m_quitting) {
-      After(std::chrono::milliseconds(400), [this]() noexcept {
-        if (m_windows.empty()) Quit();
-      });
+      std::optional<int> stretched = AppLaunch::TestMilliseconds("lastWindowWaitMs", kQuitTestHoldMostMs);
+      if (stretched) LaunchLog::Write(L"launch", std::wstring(L"test: the quit waits ").append(std::to_wstring(*stretched)).append(L" ms after the last window closed"));
+      After(std::chrono::milliseconds(stretched.value_or(kLastWindowWaitMs)), [this]() noexcept { QuitWhenWindowless(); });
     }
   }
 
@@ -1297,6 +1379,10 @@ struct WindowManager {
     if (message == WM_EXITSIZEMOVE) {
       manager->m_systemMove = false;
       manager->m_captionPressed = nullptr;
+    }
+    if (UINT quitMessage = TestQuitMessage(); quitMessage && message == quitMessage) {
+      manager->QuitByTestMessage();
+      return 0;
     }
     if (message == WM_ACTIVATE && LOWORD(wParam) != WA_INACTIVE && DialogParts::BringModalForward(hwnd)) return 0;
     if (message == WM_ACTIVATE && LOWORD(wParam) != WA_INACTIVE) manager->Activated(hwnd, reinterpret_cast<HWND>(lParam));
@@ -1774,9 +1860,62 @@ struct WindowManager {
     }
   }
 
+  bool NoWindowStays() const noexcept {
+    for (auto const &item : m_windows) {
+      ManagedWindow const &entry = item.second;
+      bool closing = !entry.exits.empty() || (entry.fade && (entry.fade->phase == WindowFade::Phase::Leaving || entry.fade->phase == WindowFade::Phase::Lingering));
+      if (!closing) return false;
+    }
+    return true;
+  }
+
+  void QuitWhenWindowless() noexcept {
+    if (!m_windows.empty() || m_quitting) return;
+    if (m_launchAwaitingWindow) {
+      ULONGLONG waited = GetTickCount64() - m_launchAwaitingWindow;
+      if (waited < kLaunchWindowWaitMs) {
+        LaunchLog::Write(L"quit", L"not begun: a launch arrived after the last window closed, and its window is on its way");
+        After(std::chrono::milliseconds(static_cast<long long>(kLaunchWindowWaitMs - waited)), [this]() noexcept { QuitWhenWindowless(); });
+        return;
+      }
+      LaunchLog::Write(L"quit", std::wstring(L"a launch's window didn't open in ").append(std::to_wstring(kLaunchWindowWaitMs)).append(L" ms; quitting"));
+      m_launchAwaitingWindow = 0;
+    }
+    Quit(WindowlessQuitReason());
+  }
+
+  void NoteQuitWait(std::wstring const &outcome) noexcept {
+    m_quitWaitMs = static_cast<int>((std::min)(GetTickCount64() - m_quitAskedAt, static_cast<ULONGLONG>(3600000)));
+    LaunchLog::Write(L"quit", std::wstring(outcome).append(L" after ").append(std::to_wstring(m_quitWaitMs)).append(L" ms (").append(Paths::Wide(m_quitReason)).append(L")"));
+  }
+
+  void CancelQuit() noexcept {
+    m_quitting = false;
+    m_quitHeldUntil = 0;
+    m_quitGeneration++;
+    TellEngineQuitting("cancelled");
+    EmitApp("quitCancelled");
+    std::vector<OpenWindowRequest> remembered = std::move(m_opensDuringQuit);
+    m_opensDuringQuit.clear();
+    for (auto const &request : remembered) Open(request, true);
+  }
+
+  bool HoldOpenForTest(OpenWindowRequest const &request) noexcept {
+    std::optional<int> held = AppLaunch::TestMilliseconds("windowOpenHoldMs", kQuitTestHoldMostMs);
+    if (!held) return false;
+    LaunchLog::Write(L"window", std::wstring(L"test: opening ").append(Paths::Wide(request.id)).append(L" waits ").append(std::to_wstring(*held)).append(L" ms"));
+    After(std::chrono::milliseconds(*held), [this, request]() noexcept { Open(request, true); });
+    return true;
+  }
+
   void Finish() noexcept {
     if (m_finished) return;
     m_finished = true;
+    TellEngineFinal();
+    if (!m_opensDuringQuit.empty()) {
+      LaunchLog::Write(L"window", std::to_wstring(m_opensDuringQuit.size()).append(L" window(s) asked for during the quit stay closed: the quit went ahead"));
+      m_opensDuringQuit.clear();
+    }
     SavePlacement();
     LaunchLog::Write(L"launch", L"quitting");
     try {
@@ -1796,10 +1935,25 @@ struct WindowManager {
     After(std::chrono::milliseconds(*held), []() noexcept { EndLoop(); });
   }
 
-  static void TellEngineQuitting(bool quitting) noexcept {
+  void TellEngineQuitting(std::string_view phase) const noexcept {
     const ArdiaEngineApi *engine = Host::Engine();
     if (!engine || !engine->hostCall) return;
-    engine->hostCall("app.quitting", quitting ? "{\"quitting\":true}" : "{\"quitting\":false}", 0, nullptr, nullptr);
+    std::string args = std::string("{\"phase\":\"").append(phase).append("\",\"reason\":\"").append(m_quitReason).append("\"}");
+    engine->hostCall("app.quitting", args.c_str(), 0, nullptr, nullptr);
+  }
+
+  void TellEngineFinal() const noexcept {
+    const ArdiaEngineApi *engine = Host::Engine();
+    if (!engine || !engine->hostCall) return;
+    std::string_view answer = m_quitAnswer == kAnswerPending ? kNoAnswer : m_quitAnswer;
+    std::string args = std::string("{\"phase\":\"final\",\"reason\":\"")
+                           .append(m_quitReason)
+                           .append("\",\"waitMs\":")
+                           .append(std::to_string(m_quitWaitMs))
+                           .append(",\"answer\":\"")
+                           .append(answer)
+                           .append("\"}");
+    engine->hostCall("app.quitting", args.c_str(), 0, nullptr, nullptr);
   }
 
   static void EndLoop() noexcept {
@@ -1839,7 +1993,14 @@ struct WindowManager {
   winrt::Windows::Graphics::PointInt32 m_dragOrigin{};
   std::string m_dragId;
   int m_quitGeneration{0};
+  int m_answersOwed{0};
+  int m_quitWaitMs{0};
+  ULONGLONG m_quitAskedAt{0};
   ULONGLONG m_quitHeldUntil{0};
+  ULONGLONG m_launchAwaitingWindow{0};
+  std::string_view m_quitReason{kUserQuit};
+  std::string_view m_quitAnswer{kNoAppToAsk};
+  std::vector<OpenWindowRequest> m_opensDuringQuit;
   bool m_finished{false};
 };
 
