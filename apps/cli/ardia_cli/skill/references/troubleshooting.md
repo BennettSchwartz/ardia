@@ -68,8 +68,10 @@ at its own size), `network route`, `highlight`, `clipboard`, `trace`, `profiler`
 fail with exit 1 and name the refused method (`code: "policy_refused"` in `--json`). Use `storage local|session`,
 `eval`, or ask the user to do that step. `upload`, `download` and `wait --download` are blocked on purpose, not
 pending: the error says so, and nothing makes them work from here. Ask the user to choose the file in the page's own
-file picker (`upload`) or to save the file from the page (`download`), then carry on with what the page shows. A refusal that says "which Ardia allows for the ardia command, but not …" is about the tab or address, not the
-command: it gives the reason (`data.reason`) and, for a tab, what Ardia has there. Pick another tab or `open` a web page. Not here at all: `connect`, `install`, `upgrade`, `doctor`, `dashboard`, `chat`, `mcp`, `profiles`,
+file picker (`upload`) or to save the file from the page (`download`), then carry on with what the page shows. A
+refusal that says "which Ardia allows for the ardia command, but not …" is about the tab or address, not the
+command: it gives the reason (`data.reason`) and, for a tab, what Ardia has there. Pick another tab or `open` a web
+page. Not here at all: `connect`, `install`, `upgrade`, `doctor`, `dashboard`, `chat`, `mcp`, `profiles`,
 `confirm`/`deny`, iOS, cloud providers and launch flags (`--headed`, `--profile`, `--proxy`, …).
 
 ## Tabs and sessions

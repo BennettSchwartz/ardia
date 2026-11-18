@@ -111,8 +111,8 @@ Options:
   --idle-timeout <time>   End an idle session after 10s, 3m, 1h or raw ms (default 1h)
 
 Gated: Ardia's ardia-command policy (the engine's token server) doesn't yet allow the CDP
-methods these need, so over the real connection they fail naming the refused method; they
-work against a plain --port test server.
+methods the commands marked (gated) need, so over the real connection they fail naming the
+refused method; they work against a plain --port test server.
 
 upload and download are blocked on purpose, not pending: letting the ardia command hand a page
 any file on the computer, or choose where a download is written, would give it the whole disk,
