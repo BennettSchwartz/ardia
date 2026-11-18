@@ -698,9 +698,10 @@ is plain Chromium.
   unlocks nothing and reads, writes or deletes none of its files; it only records the pause in `sync.json` (keeping the
   `seqs` it read), because a profile whose Sync load crashes the app (#2570) would otherwise crash every recovered
   start too. The pause sticks across starts until Settings › Sync › Resume, which unlocks, loads Sync's saved state and
-  runs one cycle, and clears the pause only once that cycle has finished; a failed unlock or cycle, or a crash during
-  Resume, leaves it paused. The switch is shared (`state/sync/syncPause.ts`), so the Mac's and Linux's guards can set
-  the same flag. On the dashboard, `usage_counts` carries `sync_paused_by_launch_guard`, `sync_resumes` and
+  runs one cycle, and clears the pause only once that cycle has finished; a failed cycle or a crash during Resume
+  leaves it paused. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and
+  asks for the recovery phrase, and entering it finishes the resume. The switch is shared (`state/sync/syncPause.ts`),
+  so the Mac's and Linux's guards can set the same flag. On the dashboard, `usage_counts` carries `sync_paused_by_launch_guard`, `sync_resumes` and
   `sync_resumes_completed`: resumes well below pauses means people don't find Resume, and completed well below resumes
   means the crash comes back when Sync loads.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored

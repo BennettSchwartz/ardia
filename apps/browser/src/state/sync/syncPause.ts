@@ -9,6 +9,7 @@ import type { SyncDoc, SyncUi } from "./syncDoc";
 
 export const SYNC_PAUSED = "Sync is paused because Ardia didn’t start properly.";
 export const SYNC_PAUSED_DETAIL = "Nothing was deleted. Resume loads Sync again.";
+export const SYNC_LOCKED = `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.`;
 
 export const pausedByGuard = (doc: SyncDoc) => doc.enabled && !!doc.pausedByGuard;
 
@@ -33,15 +34,15 @@ export type ResumeSteps = {
 export function guardResume(steps: ResumeSteps) {
   let resuming = false;
   const stayPaused = (error: string | null) => steps.publish({ status: "paused", error });
-  return async function resumeSync() {
+  return async function resumeSync(pressed = true) {
     const deviceId = steps.doc().deviceId;
     if (!pausedByGuard(steps.doc()) || !deviceId || resuming) return;
     const consent = consentToken();
-    noteSyncPause("sync_resumes", consent);
+    if (pressed) noteSyncPause("sync_resumes", consent);
     resuming = true;
     steps.publish({ status: "starting", error: null });
     try {
-      if (!(await steps.unlock(deviceId))) return stayPaused(`Sync couldn’t unlock its key on this ${PLATFORM_TERMS.computer}, so it’s still paused.`);
+      if (!(await steps.unlock(deviceId))) return steps.publish({ status: "locked", error: SYNC_LOCKED });
       await steps.load();
       await steps.cycle();
       const doc = steps.doc();

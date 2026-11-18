@@ -24,7 +24,7 @@ import { markOpenTabsSynced, openTabsClosed, recordOpenTabCloses } from "./openT
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
-import { guardResume, pauseAfterRecoveredStart, pausedByGuard } from "./syncPause";
+import { guardResume, pauseAfterRecoveredStart, pausedByGuard, SYNC_LOCKED } from "./syncPause";
 
 export { onTabsReceived } from "./sentTabs";
 export { takeSnapshotWrites } from "./snapshotWrites";
@@ -262,7 +262,8 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
   if (!native) return { error: "unavailable" };
   if (doc.enabled && doc.deviceId && useSync.getState().status === "locked") {
     const result = await native.enterPhrase(doc.deviceId, text, doc.folder ?? folder);
-    if ("ok" in result) {
+    if ("ok" in result && paused()) void resumeSync(false);
+    else if ("ok" in result) {
       await loadSavedState();
       publishUi({ status: "starting", error: null });
       scheduleSync(0);
@@ -357,7 +358,7 @@ export function startSync() {
   if (doc.enabled && doc.deviceId && !paused()) {
     void SyncNative.unlock(doc.deviceId)
       .then(async (ok) => {
-        if (!ok) return publishUi({ status: "locked", error: `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.` });
+        if (!ok) return publishUi({ status: "locked", error: SYNC_LOCKED });
         await loadSavedState();
         publishUi();
         scheduleSync(500);

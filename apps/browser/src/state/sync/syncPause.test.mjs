@@ -7,7 +7,7 @@ globalThis.clearTimeout = () => {};
 globalThis.__DEV__ = false;
 
 const folder = new Map();
-const calls = { unlock: 0, openLocal: 0, chainStatus: 0, read: 0 };
+const calls = { unlock: 0, openLocal: 0, chainStatus: 0, read: 0, enterPhrase: 0 };
 const hold = { unlock: null, read: null };
 let unlockAnswer = true;
 let chainFails = false;
@@ -49,6 +49,11 @@ globalThis.acTestNativeModules = {
       return sealed.startsWith("sealed:") ? sealed.slice(7) : null;
     },
     readPasswords: async () => null,
+    enterPhrase: async () => {
+      calls.enterPhrase++;
+      unlockAnswer = true;
+      return { ok: true };
+    },
   },
 };
 
@@ -102,6 +107,7 @@ let instances = 0;
 const engineInstance = () => import(`./engine.ts?pause${++instances}`);
 
 async function syncedProfile() {
+  quiet();
   S().hydrate({});
   useBrowser.setState({ bookmarksReady: { "": true } });
   shell.docs.clear();
@@ -135,10 +141,11 @@ function restore(disk) {
 
 const retire = (engine) => engine.stopSync();
 
-async function pausedStart(disk, { recoveredStart = true } = {}) {
+async function pausedStart(disk, { recoveredStart = true, keyMissing = false } = {}) {
   restore(disk);
   recovered(recoveredStart);
   quiet();
+  unlockAnswer = !keyMissing;
   const engine = await engineInstance();
   engine.startSync();
   await settle();
@@ -254,16 +261,75 @@ test("a Resume whose cycle fails stays paused, says why, and runs nothing more",
   assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 1, sync_resumes_completed: 0 });
 });
 
-test("a Resume whose unlock fails stays paused, says why, and loads nothing", async () => {
+const lockedMessage = "Enter your recovery phrase to keep syncing on this Mac.";
+
+async function resumedWithoutKey() {
   const { disk } = await syncedProfile();
-  const engine = await pausedStart(disk);
-  unlockAnswer = false;
+  const engine = await pausedStart(disk, { keyMissing: true });
+  assert.equal(engine.useSync.getState().status, "paused", "a start with the pause on disk and no key shows paused");
+  const sealedBefore = sealedFiles();
+  const docBefore = shell.docs.get("sync.json");
+  writes.length = 0;
   await engine.resumeSync();
-  assert.equal(engine.useSync.getState().status, "paused");
-  assert.match(engine.useSync.getState().error ?? "", /couldn’t unlock/);
+  return { engine, sealedBefore, docBefore };
+}
+
+test("a Resume whose unlock fails asks for the recovery phrase, keeps the pause, and writes nothing", async () => {
+  const { engine, sealedBefore, docBefore } = await resumedWithoutKey();
+  assert.equal(engine.useSync.getState().status, "locked");
+  assert.equal(engine.useSync.getState().error, lockedMessage);
+  assert.equal(calls.unlock, 1);
   assert.equal(calls.openLocal, 0);
   assert.equal(calls.chainStatus, 0);
+  assert.deepEqual(writes, []);
+  assert.deepEqual(sealedFiles(), sealedBefore);
+  assert.equal(shell.docs.get("sync.json"), docBefore);
   assert.equal(docOnDisk().pausedByGuard, true);
+  await timersRun();
+  assert.equal(calls.chainStatus, 0, "locked and paused, no cycle runs");
+});
+
+test("entering the phrase after that finishes the resume and clears the pause after its cycle", async () => {
+  const { engine } = await resumedWithoutKey();
+  let pausedDuringCycle = null;
+  duringRead = () => (pausedDuringCycle ??= docOnDisk().pausedByGuard === true);
+  assert.ok("ok" in (await engine.enterRecoveryPhrase("/sync", "the words")));
+  await settle();
+  assert.equal(calls.enterPhrase, 1);
+  assert.equal(calls.unlock, 2);
+  assert.ok(calls.openLocal > 0);
+  assert.equal(calls.chainStatus, 1, "one cycle");
+  assert.equal(pausedDuringCycle, true);
+  assert.equal(engine.useSync.getState().status, "updated");
+  assert.equal(docOnDisk().pausedByGuard, undefined);
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_resumes: 1, sync_resumes_completed: 1 }, "the phrase continues the press, it isn't a second one");
+  await retire(engine);
+});
+
+test("entering the phrase when the resumed cycle fails leaves it paused", async () => {
+  const { engine } = await resumedWithoutKey();
+  chainFails = true;
+  assert.ok("ok" in (await engine.enterRecoveryPhrase("/sync", "the words")));
+  await settle();
+  assert.equal(engine.useSync.getState().status, "paused");
+  assert.equal(engine.useSync.getState().error, "The sync folder went away");
+  assert.equal(docOnDisk().pausedByGuard, true);
+});
+
+test("without a pause, the phrase on a locked start goes down the ordinary path", async () => {
+  const { disk } = await syncedProfile();
+  const engine = await pausedStart(disk, { recoveredStart: false, keyMissing: true });
+  assert.equal(engine.useSync.getState().status, "locked");
+  assert.equal(engine.useSync.getState().error, lockedMessage);
+  assert.ok("ok" in (await engine.enterRecoveryPhrase("/sync", "the words")));
+  await settle();
+  assert.equal(calls.unlock, 1, "the launch unlock only");
+  assert.ok(calls.openLocal > 0, "the saved state is loaded");
+  assert.equal(engine.useSync.getState().status, "starting");
+  assert.ok(timers.some(({ ms }) => ms === 0), "and a cycle is scheduled at once");
+  assert.equal(calls.chainStatus, 0);
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  await retire(engine);
 });
 
 test("a crash during Resume leaves the next start paused", async () => {
