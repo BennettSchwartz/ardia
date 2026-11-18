@@ -25,6 +25,8 @@ export type AppEvent =
   | { type: "keyHoldReplay"; tag: number; count: number }
   | { type: "littleArdiaGlobalShortcut" }
   | { type: "windowDragLoop"; epoch: string }
+  | { type: "engineNotificationPresented"; handedToEngine: boolean; epoch: string }
+  | { type: "notificationSettings"; authorization: string; alertSetting: string; alertStyle: string; epoch: string }
   | {
       type: "pasteRefused";
       reason: string;
