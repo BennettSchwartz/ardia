@@ -6,7 +6,8 @@ import { useBrowser } from "../browser/store";
 import { keysOf } from "../browser/changes";
 import { takeOpenTabSyncCounts, takeSnapshotWrites, useSync } from "../sync/engine";
 import { takeSyncCodeCounts } from "../sync/recoveryKit";
-import { capture, endSession, flush, isSharing, markSettingsSnapshot, settingsSnapshotDay, startClient, watchConsentBoundary, withHourlyExtras } from "./usageClient";
+import { endSessionForQuit, reopenSessionAfterCancelledQuit } from "./sessionQuit";
+import { capture, flush, isSharing, markSettingsSnapshot, settingsSnapshotDay, startClient, watchConsentBoundary, withHourlyExtras } from "./usageClient";
 import { reportLocalStore, startLocalStore } from "./localStoreReport";
 import { startWatchChecks } from "./watch";
 import { appIconSetting, currentThemeFileSnapshot, customColorProfiles, narrowWindows, openTabSyncProfiles, SETTINGS_SNAPSHOT_EVENT, settingsSnapshot } from "./settingsSnapshot";
@@ -370,7 +371,10 @@ export function startUsage(continuing = false) {
       clearTimeout(launchCrashRead);
       stopContextSamples();
       sessionEnding();
-    } else if (e.type === "quitCancelled") startContextSamples();
+    } else if (e.type === "quitCancelled") {
+      startContextSamples();
+      reopenSessionAfterCancelledQuit();
+    }
   });
 }
 
@@ -379,8 +383,7 @@ export const emitWindowUsage = () => [() => withHourlyExtras(emitCounts), emitOm
 export function sessionEnding() {
   emitWindowUsage();
   journeysEnding();
-  capture("app_session_ended", { duration_minutes: Math.round((Date.now() - startedAt) / 60_000) });
-  endSession();
+  endSessionForQuit({ duration_minutes: Math.round((Date.now() - startedAt) / 60_000) });
 }
 
 export async function devHourly() {

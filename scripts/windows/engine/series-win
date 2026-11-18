@@ -20,4 +20,4 @@ chromium chromium-win-discard-asks-the-host.patch
 chromium chromium-win-devtools-other-clients.patch
 chromium chromium-win-autoplay-policy.patch
 chromium chromium-win-hosted-theme-change.patch
-chromium chromium-win-hand-off-refused-after-quit.patch
+chromium chromium-win-hand-off-asks-the-app.patch

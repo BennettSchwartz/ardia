@@ -1,0 +1,49 @@
+--- a/chrome/browser/chrome_browser_main.cc
++++ b/chrome/browser/chrome_browser_main.cc
+@@ -359,6 +359,18 @@
+ #include "components/component_updater/component_updater_service.h"
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++// Ardia: set by //ardia/win. The app takes the launch, or turns it away, inside
++// the window message whose reply the launching process reads: it starts its
++// launch hold or cancels its quit there and then, or answers false once its
++// quit is past the point of no return, so no taken launch is left unowned.
++bool (*g_ardia_win_takes_hand_off)() = nullptr;
++// Ardia: set by //ardia/win. True while Ardia quits for an update, in every
++// phase: the launch is taken and dropped, so it never waits on the files the
++// installer replaces, and the installer's own start opens Ardia again.
++bool (*g_ardia_win_drops_hand_off)() = nullptr;
++#endif
++
+ namespace {
+ 
+ #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || \
+@@ -585,6 +597,13 @@
+   // starts running. So, an additional check needs to happen when it starts.
+   // But regardless of any future check, there is no reason to post the task
+   // now if we know we're already shutting down.
++#if BUILDFLAG(IS_WIN)
++  // Ardia: before the shutdown check, so an update's quit takes and drops the
++  // launch even while it shuts down; true is the reply that it was taken.
++  if (g_ardia_win_drops_hand_off && g_ardia_win_drops_hand_off()) {
++    return true;
++  }
++#endif
+   if (!g_browser_process || g_browser_process->IsShuttingDown()) {
+     return false;
+   }
+@@ -628,6 +647,13 @@
+   // cross-apartment shell objects (via IVirtualDesktopManager). That is not
+   // allowed within a SendMessage handler, which this function is a part of.
+   // So, we post a task to asynchronously finish the command line processing.
++#if BUILDFLAG(IS_WIN)
++  // Ardia: after every drop above, so the app commits only to a launch this
++  // reply acknowledges; false is the reply that turns it away.
++  if (g_ardia_win_takes_hand_off && !g_ardia_win_takes_hand_off()) {
++    return false;
++  }
++#endif
+   return base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE, base::BindOnce(&ProcessSingletonNotificationCallbackImpl,
+                                 std::move(command_line), current_directory));

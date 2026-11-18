@@ -444,7 +444,7 @@ jobs:
       - name: Close and reopen the installed app
         id: relaunch
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
-        timeout-minutes: 26
+        timeout-minutes: 22
         shell: pwsh
         run: |
           scripts/windows/relaunch-check.ps1 -Setup "${{ runner.temp }}/installer/Ardia-Setup-$env:SLUG.exe" -Out "${{ runner.temp }}/relaunch"

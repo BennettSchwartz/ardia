@@ -68,6 +68,8 @@ extern std::unique_ptr<RenderViewContextMenuBase> (*g_ardia_win_context_menu)(
 extern bool (*g_ardia_win_relaunched)(const base::CommandLine& command_line,
                                       const base::FilePath& cur_dir);
 
-extern bool (*g_ardia_win_refuses_hand_off)();
+extern bool (*g_ardia_win_takes_hand_off)();
+
+extern bool (*g_ardia_win_drops_hand_off)();
 
 #endif

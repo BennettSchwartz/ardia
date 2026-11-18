@@ -672,38 +672,87 @@ is plain Chromium.
   wait, with no second browser), once with two unfinished starts recorded (the session must be set aside), and
   once with `Microsoft.ReactNative.dll` hidden (it must exit 0 with the reason logged). Every launch must show one
   window from one browser, and Windows must log no Ardia crash, Crashpad no dump and the launch log no fatal line.
-- A launch that meets a quitting Ardia (#2441). The quit has three stretches, and the new launch always carries
-  itself: the closing copy never starts a process.
-  - Between the last window closing and the quit (400 ms): the running Ardia takes the launch. A launch in that wait
-    holds the quit until its window opens, at most 5 s, because the window opens a JS round trip later.
-  - While the quit waits for the app's answer to `willQuit` (3 s at most): the app tells the engine
-    (`app.quitting` phase `asking`), a launch still goes to this Ardia, and it cancels the quit (`quitCancelled`, the
-    windows asked for meanwhile open). A quit with the reason `update` (the updater's `quit("update")`) isn't
-    cancelled: the launch is ignored and the installer opens Ardia again. JS answers every `willQuit` once, so the
-    app counts the answers it owes and an answer to a cancelled quit never finishes a later one. The launch log says
-    `quit … began (user|update)` and `the app answered yes after N ms`, `no answer in 3000 ms` or `cancelled by a
-    relaunch after N ms`; `app_launched` reports the last one as a range.
+- A launch that meets a quitting Ardia (#2441). The new launch always carries itself: the closing copy never starts a
+  process. Every launch that reaches a running Ardia is answered inside Chromium's single-instance window message
+  (`chromium-win-hand-off-asks-the-app.patch`: `ProcessSingletonNotificationCallback`, after Chromium's own drops,
+  asks `g_ardia_win_takes_hand_off`). The engine calls the app's `ArdiaAppLaunchArriving` on the same UI thread, and
+  the app commits there and then: it starts its launch hold, cancels its quit, or, past the quit's point of no return,
+  the engine answers false. The launching process reads that reply, so no launch is acknowledged that nobody owns;
+  Chromium's posted callback only delivers the links (`ArdiaAppLaunchDelivered`, then the `relaunch` event).
+  - Inside that message `ArdiaAppLaunchArriving` makes no WinRT or COM call and nothing that pumps messages or can
+    block: it reads the quit's phase, sets plain fields (the undelivered count, the hold's start, a note to announce
+    a cancel), bumps the quit generation, so the pending 3 s timer and any late answer become no-ops through the
+    generation check, and returns its answer. A message sent from another process can't make outgoing COM calls
+    (`RPC_E_CANTCALLOUT_ININPUTSYNCCALL`), and anything that pumps there could run other code in the middle of a
+    quit. Everything else runs after the message returns, from a task the engine posts before it replies
+    (`ArdiaAppAfterLaunchArriving`): the log lines, telling the engine the quit was cancelled, `quitCancelled` to JS,
+    the hold's timer and the windows asked for during the quit. That task runs before Chromium's own posted
+    callback, so JS hears `quitCancelled` before the `relaunch` event. The engine's own lines from inside the message
+    are posted the same way.
+  - Between the last window closing and the quit (400 ms): a taken launch holds the quit until its window opens. The
+    hold starts at the first such launch and lasts at most 5 s from it (later launches don't extend it), and no quit
+    begins while a taken launch hasn't been delivered. If a hold or a cancelled quit leaves no window when the 5 s run
+    out, the quit begins again, so a windowless Ardia never lives on.
+  - While the quit waits for the app's answer to `willQuit` (3 s at most; phase `asking`): a launch cancels the quit
+    inside the hand-off message, so the answer or the timeout can no longer finish it. Answers carry no id; the app
+    counts the `willQuit`s it has sent and not had answered, and an answer finishes the quit only when that count
+    reaches zero. That is safe whatever order the answers come in: JS answers every `willQuit` exactly once
+    (`answerQuitAfterSaves` answers when the saves finish or at its 3 s deadline, whichever comes first) and always
+    with yes, so the count reaches zero only once the current quit's own answer has arrived, and an answer to a
+    cancelled quit only lowers it. A new React instance resets the count, since the old one's answers can't come, and
+    the native 3 s timer finishes a quit whose answer never comes. The launch log says `quit … began (user|update)` and `the app answered yes after
+    N ms`, `no answer in 3000 ms` or `cancelled by a relaunch after N ms`; `app_launched` reports the last one as a
+    range.
   - From `Finish()` (phase `final`, the point of no return): the engine marks the profile exiting, so a new launch
-    waits in the launch guard for this process to end. A launch already past the guard is turned away by
-    `chromium-win-hand-off-refused-after-quit.patch` (`ProcessSingletonNotificationCallback` answers false), which
-    Chromium turns into `PROFILE_IN_USE` after one retry. `AfterChromeMain` then finds the profile's owner (published
-    by the guard as `Local\ArdiaBrowser.<key>.owner`: its pid and start time), waits for that process and the
-    `lockfile`, and starts itself once with its own command line, folder and environment plus
-    `ARDIA_RESTARTED_AFTER_REFUSAL=1`; a restarted launch turned away again shows the start-failure message. Nothing is
-    written to the log after the wait, so `process ending` stays the closing copy's last line, and the guard writes its
-    own wait after it rotates the log.
+    waits in the launch guard for this process to end, and one already past the guard is answered false, which
+    Chromium turns into `PROFILE_IN_USE` after one retry. `AfterChromeMain` then reads the profile's owner (published
+    once a launch has really started, as `Local\ArdiaBrowser.<key>.owner`: its pid and start time), and starts itself
+    once with its own command line, folder and environment plus `ARDIA_RESTARTED_AFTER_REFUSAL=1`: after that process
+    and the `lockfile` are gone if it is closing, at once if it is already gone or a healthy successor holds the
+    profile. Only a launch turned away again after its restart, or whose 45 s wait ran out with the old process still
+    there, shows the start-failure message.
+  - De-elevation: in 157 an unnecessarily elevated start goes through `MaybeAutoDeElevate`, which starts the copy
+    with `base::win::RunDeElevated`, that is `CreateProcessWithTokenW` with Explorer's token and no environment
+    block. The copy gets the user's default environment, so `ARDIA_*` variables and the restart marker don't reach
+    it; the guard passes the marker on as `--ardia-restarted-after-refusal` (and the wait as
+    `--ardia-waited-for-previous-ms`), so the one-restart bound holds across it.
   - The engine's quit (`QuitApp`) closes every tab without running `beforeunload` (`chrome::ExitIgnoreUnloadHandlers`;
-    the app has already asked about downloads), and a quit Chromium hasn't finished after 10 s ends after the
-    document flush.
-  - Known gap: a launch Chromium accepts in the same message-loop turn as the point of no return reaches the engine
-    after it and is lost, with a log line. A session end is Chromium's own `SessionEnding()`, which never goes
-    through the app's quit and pumps no messages until it ends the process: a launch then gets no answer
-    (`SendMessageTimeout`, 20 s), and once the window is gone Chromium retries and the launch starts as the only Ardia
-    (or Chromium's hung-browser path applies if the copy looks hung). Nothing restarts and nothing is cancelled.
-  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, stages each stretch with test-only `ARDIA_TEST` keys
-    (`lastWindowWaitMs`, `windowOpenHoldMs`, `quitWaitMs`, `quitReason`, `quitAnswerHoldMs`, `quitUnloadHoldMs`,
-    `quitFlushHoldMs`, `handOffHoldMs`, and `quitByMessage`, which lets the registered message `ArdiaTestQuit` start a
-    quit with windows open) and requires the link opened exactly once in exactly one Ardia, still there 20 s later.
+    the app has already asked about downloads). A hung shutdown is not force-ended: a timer can't be a real deadline
+    (a hung unload never arms it, a blocked UI thread never runs it) and ending the process early would skip
+    Chromium's own writes (preferences, cookies). It shows instead in the quit log line, the quit-wait telemetry
+    and, at the next launch, the guard's wait and its error after 45 s.
+  - Launch log lines (`Logs\launch.log`, shared by every process on the profile). No existing line changes format:
+    - the app's lines: `<category> <ms> <text>`, where `<ms>` counts from that process's start, for example
+      `launch 1371 process ending`;
+    - the app's first line ends with its pid: `launch <ms> process started inside the engine pid=<pid>` (or
+      `launch <ms> process started pid=<pid>` when the app runs on its own). The engine's guard and test-gate lines
+      of the same process can come before it, unchanged;
+    - the engine's lines in the browser: `engine 0 <text>`, unchanged;
+    - every line of a process that never becomes the browser (a launch that hands over, waits, is turned away,
+      starts itself again or fails): `refused <ms> pid=<pid> <text>`, for example
+      `refused 6120 pid=4410 launch guard: the closing Ardia (3876) turned this launch away; it starts again by itself
+      once that one has ended`. Such a process never writes `process ending`, so `process ending` stays unique to a
+      real quit and can be counted anywhere in the file; a refused line can come after it.
+  - Update installs are the one stated exception (#2569 follows it up). While Ardia quits for an update (the
+    updater's `quit("update")`), every launch is taken and dropped, in every phase in which this Ardia can still
+    answer, past `Finish()` too: `g_ardia_win_drops_hand_off` runs first in `ProcessSingletonNotificationCallback`,
+    before Chromium's own shutdown refusal, and answers true without posting anything. A launch that meets the quit
+    anywhere else ends at once with 0: the quit sets `Local\ArdiaBrowser.<key>.updating`, and the launch guard and
+    `AfterChromeMain` check it before they would wait. No launch ever waits, because a waiting launch is an
+    `Ardia.exe` with `chrome.dll` loaded, which holds the files the installer replaces. The launch's link isn't
+    opened; the installer's own start (`/relaunch=1`) reopens Ardia.
+  - Still outside "never lost", besides update installs: a launch that reaches a starting Ardia before the app's events do (the engine has no
+    one to give it to); one Chromium drops itself (automation, headless or `--uninstall` launches); and a session
+    end, which is Chromium's own `SessionEnding()`: it never goes through the app's quit and pumps no messages until
+    it ends the process, so a launch gets no answer (`SendMessageTimeout`, 20 s) and, once the window is gone,
+    Chromium retries and starts it as the only Ardia (or its hung-browser path applies).
+  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, has 13 cases. It stages each stretch with test-only
+    `ARDIA_TEST` keys (`lastWindowWaitMs`, `windowOpenHoldMs`, `quitWaitMs`, `quitReason`, `quitAnswerHoldMs`,
+    `quitUnloadHoldMs`, `quitFlushHoldMs`, `handOffHoldMs`, `handOffDeliveryHoldMs`, and `quitByMessage`, which lets
+    the registered message `ArdiaTestQuit` start a quit with windows open). Links are served by the check's own
+    server, which counts their loads, so "opened once" means loaded once; a launch that should start a fresh Ardia
+    must still be there 20 s later. The cases take about 7 minutes and the whole relaunch step about 13; its timeout
+    is 22 minutes.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and
   file addresses on it. The app treats them as links from another app (`onOpenURLs`: a Little Ardia window or a tab,

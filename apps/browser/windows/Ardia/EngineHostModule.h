@@ -75,7 +75,6 @@ inline void OnReply(void *context, const char *json) noexcept {
 inline void OnEvent(void *context, const char *topic, const char *json) noexcept {
   auto *route = static_cast<EventRoute *>(context);
   if (!route || route != EventRoute::Installed()) return;
-  if (topic && std::string_view{topic} == "relaunch") WindowManager::Shared().LaunchArrived();
   winrt::Microsoft::ReactNative::JSValueObject payload;
   payload["topic"] = std::string{topic ? topic : ""};
   payload["json"] = std::string{json ? json : ""};

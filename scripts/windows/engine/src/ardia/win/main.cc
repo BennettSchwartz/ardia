@@ -6,6 +6,7 @@
 #include <stdio.h>
 
 #include <algorithm>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -69,6 +70,9 @@ struct App {
   HMODULE module = nullptr;
   ArdiaAppPreTranslateFunction pre_translate = nullptr;
   ArdiaAppStopFunction stop = nullptr;
+  ArdiaAppLaunchArrivingFunction launch_arriving = nullptr;
+  ArdiaAppLaunchDeliveredFunction launch_delivered = nullptr;
+  ArdiaAppAfterLaunchArrivingFunction after_launch_arriving = nullptr;
   bool started = false;
 };
 
@@ -94,7 +98,6 @@ std::unique_ptr<ScopedKeepAlive>& KeepAlive() {
 }
 
 constexpr int kHandOffHoldMostMs = 20000;
-constexpr int kQuitStallSeconds = 10;
 constexpr char kUserQuit[] = "user";
 constexpr char kUpdateQuit[] = "update";
 
@@ -104,6 +107,7 @@ struct QuitState {
   bool engine_quit_started = false;
   std::string reason = kUserQuit;
   int cancelled_by_launch = 0;
+  std::deque<int> answers;
 };
 
 QuitState& TheQuit() {
@@ -449,7 +453,7 @@ void WriteLaunchLog(const std::string& line) {
   if (!file) {
     return;
   }
-  const std::string text = "engine 0 " + line + "\n";
+  const std::string text = LaunchLogLine(line);
   fwrite(text.data(), 1, text.size(), file);
   fclose(file);
 }
@@ -720,6 +724,13 @@ bool StartApp() {
       ::GetProcAddress(app.module, "ArdiaAppPreTranslateMessage"));
   app.stop = reinterpret_cast<ArdiaAppStopFunction>(
       ::GetProcAddress(app.module, "ArdiaAppStop"));
+  app.launch_arriving = reinterpret_cast<ArdiaAppLaunchArrivingFunction>(
+      ::GetProcAddress(app.module, "ArdiaAppLaunchArriving"));
+  app.launch_delivered = reinterpret_cast<ArdiaAppLaunchDeliveredFunction>(
+      ::GetProcAddress(app.module, "ArdiaAppLaunchDelivered"));
+  app.after_launch_arriving =
+      reinterpret_cast<ArdiaAppAfterLaunchArrivingFunction>(
+          ::GetProcAddress(app.module, "ArdiaAppAfterLaunchArriving"));
   if (!start) {
     FailStart(L"Ardia's app library doesn't match its engine.");
     return false;
@@ -747,14 +758,6 @@ void StopApp() {
   app.started = false;
 }
 
-void EndStalledQuit() {
-  WriteLaunchLog("quit: Chromium hadn't finished quitting " +
-                 std::to_string(kQuitStallSeconds) +
-                 " s after it was asked; ending after the document flush");
-  StopApp();
-  base::Process::TerminateCurrentProcessImmediately(0);
-}
-
 class MainParts : public ChromeBrowserMainExtraParts {
  public:
   MainParts() = default;
@@ -772,8 +775,10 @@ class MainParts : public ChromeBrowserMainExtraParts {
   }
 
   void PostBrowserStart() override {
+    NoteBecameBrowser();
     NoteTestGate();
     NoteLaunchGuard();
+    PublishOwnerIfOwned();
     ClaimGuardUntilOwned(kClaimAttempts);
     Host::Get()->Start();
     WatchEngineEvents();
@@ -832,39 +837,118 @@ void EmitRelaunch(const std::vector<std::string>& links) {
   Emit("relaunch", std::move(payload));
 }
 
+int TestMillisecondsFromEnvironment(std::string_view key, int most) {
+  if (!TheGate().refusal.empty()) {
+    return 0;
+  }
+  int value = 0;
+  if (!base::StringToInt(TestEntryFromEnvironment(key), &value) || value <= 0) {
+    return 0;
+  }
+  return std::min(value, most);
+}
+
+void DeliverLaunch(const std::vector<std::string>& links) {
+  if (TheQuit().past_no_return) {
+    WriteLaunchLog(
+        "relaunch: a launch this Ardia took reached it after its quit's point "
+        "of no return, which taking it was meant to rule out; it is lost");
+    return;
+  }
+  App& app = TheApp();
+  if (app.started && app.launch_delivered) {
+    app.launch_delivered();
+  }
+  EmitRelaunch(links);
+}
+
 bool Relaunched(const base::CommandLine& command_line,
                 const base::FilePath& cur_dir) {
   QuitState& quit = TheQuit();
-  if (quit.past_no_return) {
-    WriteLaunchLog(
-        "relaunch: a launch Chromium accepted before the quit's point of no "
-        "return arrived after it, and is lost");
+  int answer = ARDIA_APP_LAUNCH_KEPT;
+  if (!quit.answers.empty()) {
+    answer = quit.answers.front();
+    quit.answers.pop_front();
+  }
+  if (answer == ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE) {
     return true;
   }
-  if (quit.asking && quit.reason == kUpdateQuit) {
-    WriteLaunchLog(
-        "relaunch: a launch during an update's quit is ignored; the "
-        "installer opens Ardia again");
+  std::vector<std::string> links = LaunchLinks(command_line, cur_dir);
+  const int held_ms =
+      TestMillisecondsFromEnvironment("handOffDeliveryHoldMs", kHandOffHoldMostMs);
+  if (held_ms) {
+    WriteLaunchLog("test: a launch this Ardia took reaches the app " +
+                   std::to_string(held_ms) + " ms late");
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE, base::BindOnce(&DeliverLaunch, std::move(links)),
+        base::Milliseconds(held_ms));
     return true;
   }
-  if (quit.asking) {
-    quit.asking = false;
-    quit.cancelled_by_launch++;
-    WriteLaunchLog("relaunch: a launch cancels the quit; this Ardia keeps "
-                   "running and opens it");
-  }
-  EmitRelaunch(LaunchLinks(command_line, cur_dir));
+  DeliverLaunch(links);
   return true;
 }
 
-bool RefusesHandOff() {
-  if (!TheQuit().past_no_return && !browser_shutdown::HasShutdownStarted()) {
+void WriteLaunchLogLater(const std::string& line) {
+  if (base::SequencedTaskRunner::HasCurrentDefault() &&
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(&WriteLaunchLog, line))) {
+    return;
+  }
+  WriteLaunchLog(line);
+}
+
+void AfterLaunchTaken(int answer) {
+  if (answer == ARDIA_APP_LAUNCH_KEPT_BY_CANCELLING_QUIT) {
+    WriteLaunchLog("relaunch: a launch cancels the quit; this Ardia keeps "
+                   "running and opens it");
+  } else if (answer == ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE) {
+    WriteLaunchLog(
+        "relaunch: a launch during an update's quit is taken and left for "
+        "the installer, which opens Ardia again");
+  }
+  App& app = TheApp();
+  if (app.started && app.after_launch_arriving) {
+    app.after_launch_arriving();
+  }
+}
+
+bool DropsHandOff() {
+  const QuitState& quit = TheQuit();
+  if (quit.reason != kUpdateQuit || !(quit.asking || quit.past_no_return)) {
     return false;
   }
-  WriteLaunchLog(
-      "relaunch: turned a launch away: this Ardia is past its quit's point "
-      "of no return, so that launch starts Ardia again once this one has "
-      "ended");
+  WriteLaunchLogLater(
+      "relaunch: a launch during an update's quit is taken and left for the "
+      "installer, which opens Ardia again");
+  return true;
+}
+
+bool TakesHandOff() {
+  QuitState& quit = TheQuit();
+  if (quit.past_no_return || browser_shutdown::HasShutdownStarted()) {
+    WriteLaunchLogLater(
+        "relaunch: turned a launch away: this Ardia is past its quit's point "
+        "of no return, so that launch starts Ardia again once this one has "
+        "ended");
+    return false;
+  }
+  App& app = TheApp();
+  const int answer = app.started && app.launch_arriving
+                         ? app.launch_arriving()
+                         : ARDIA_APP_LAUNCH_KEPT;
+  if (answer == ARDIA_APP_LAUNCH_TURNED_AWAY) {
+    WriteLaunchLogLater(
+        "relaunch: turned a launch away: the app is past its quit's point of "
+        "no return");
+    return false;
+  }
+  if (answer == ARDIA_APP_LAUNCH_KEPT_BY_CANCELLING_QUIT) {
+    quit.asking = false;
+    quit.cancelled_by_launch++;
+  }
+  quit.answers.push_back(answer);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&AfterLaunchTaken, answer));
   return true;
 }
 
@@ -880,74 +964,81 @@ int FailTurnedAwayLaunch(int exit_code,
 }
 
 int AnswerTurnedAwayLaunch(int exit_code) {
-  const std::wstring wait_advice =
-      L"Wait a moment, then open Ardia again. Restarting Windows ends a copy "
-      L"that is stuck.";
+  NoteTurnedAway();
+  if (UpdateUnderWay()) {
+    WriteLaunchLog(
+        "launch guard: Ardia is closing for an update; this launch ends here "
+        "and the installer opens Ardia again");
+    return 0;
+  }
   if (GuardFacts().restarted_after_refusal) {
     return FailTurnedAwayLaunch(
         exit_code,
-        L"Ardia was opened again after the copy that was closing turned it "
-        L"away, and it was turned away a second time.",
-        wait_advice);
-  }
-  QuittingOwner owner;
-  if (!FindQuittingOwner(&owner)) {
-    return FailTurnedAwayLaunch(
-        exit_code,
-        L"Another program or another computer is using Ardia's profile "
-        L"folder, so Ardia couldn't open it.",
+        L"Ardia started itself again after it was turned away, and was "
+        L"turned away a second time: another copy of Ardia, another program "
+        L"or another computer is using its profile folder.",
         L"Close the program using it, or restart Windows, then open Ardia "
         L"again.");
   }
-  if (!owner.exiting) {
+  QuittingOwner owner;
+  const bool owner_found = FindQuittingOwner(&owner);
+  const bool successor_running = owner_found && !owner.exiting;
+  if (owner_found && owner.exiting) {
+    WriteLaunchLog("launch guard: the closing Ardia (" +
+                   std::to_string(owner.process_id) +
+                   ") turned this launch away; it starts again by itself once "
+                   "that one has ended");
+    const int already_waited = std::max(GuardFacts().predecessor_wait_ms, 0);
+    int waited = 0;
+    const bool ended = WaitForOwnerToEnd(
+        owner, kPredecessorWaitSeconds * 1000 - already_waited, &waited);
     CloseOwner(&owner);
-    return FailTurnedAwayLaunch(
-        exit_code, L"The Ardia that is running didn't accept this launch.",
-        L"Open Ardia again from its own window, or restart Windows.");
+    if (!ended) {
+      return FailTurnedAwayLaunch(
+          exit_code,
+          L"The copy of Ardia that was closing hadn't finished after " +
+              std::to_wstring((already_waited + waited) / 1000) +
+              L" seconds, so this one couldn't open your profile.",
+          L"Wait a moment, then open Ardia again. Restarting Windows ends a "
+          L"copy that is stuck.");
+    }
+  } else {
+    const DWORD successor = owner.process_id;
+    CloseOwner(&owner);
+    WriteLaunchLog(
+        owner_found
+            ? "launch guard: this launch was turned away, and the Ardia now on "
+              "the profile (" +
+                  std::to_string(successor) +
+                  ") isn't closing; it starts again once to reach it"
+            : "launch guard: this launch was turned away, and the Ardia that "
+              "held the profile is gone; it starts again once");
   }
-  WriteLaunchLog("launch guard: the closing Ardia (" +
-                 std::to_string(owner.process_id) +
-                 ") turned this launch away; it starts again by itself once "
-                 "that one has ended");
-  const int already_waited = std::max(GuardFacts().predecessor_wait_ms, 0);
-  int waited = 0;
-  const bool ended = WaitForOwnerToEnd(
-      owner, kPredecessorWaitSeconds * 1000 - already_waited, &waited);
-  CloseOwner(&owner);
-  if (!ended) {
-    return FailTurnedAwayLaunch(
-        exit_code,
-        L"The copy of Ardia that was closing hadn't finished after " +
-            std::to_wstring((already_waited + waited) / 1000) +
-            L" seconds, so this one couldn't open your profile.",
-        wait_advice);
+  if (!successor_running) {
+    WaitForLockFileFree(kLockFileFreeWaitMs);
   }
-  WaitForLockFileFree(kLockFileFreeWaitMs);
   LetGoOfGuard();
   DWORD process_id = 0;
   DWORD error = 0;
   if (StartAgain(&process_id, &error)) {
+    WriteLaunchLog("launch guard: started again as Ardia " +
+                   std::to_string(process_id));
     return 0;
   }
   return FailTurnedAwayLaunch(
       exit_code,
-      L"Ardia couldn't start itself again after the copy that was closing "
-      L"ended (Windows error " +
+      L"Ardia couldn't start itself again after it was turned away (Windows "
+      L"error " +
           std::to_wstring(error) + L").",
       L"Open Ardia again.");
 }
 
 void HoldHandOffForTest() {
-  if (!TheGate().refusal.empty()) {
+  const int hold_ms =
+      TestMillisecondsFromEnvironment("handOffHoldMs", kHandOffHoldMostMs);
+  if (!hold_ms) {
     return;
   }
-  int hold_ms = 0;
-  if (!base::StringToInt(TestEntryFromEnvironment("handOffHoldMs"),
-                         &hold_ms) ||
-      hold_ms <= 0) {
-    return;
-  }
-  hold_ms = hold_ms > kHandOffHoldMostMs ? kHandOffHoldMostMs : hold_ms;
   WriteLaunchLog("test: this launch waits " + std::to_string(hold_ms) +
                  " ms before it looks for a running Ardia");
   ::Sleep(static_cast<DWORD>(hold_ms));
@@ -967,8 +1058,10 @@ void BeforeChromeMain() {
     return;
   }
   RememberOwnStart();
-  if (!Environment(kRestartedAfterRefusalVariable).empty()) {
+  if (!Environment(kRestartedAfterRefusalVariable).empty() ||
+      command_line->HasSwitch(kRestartedAfterRefusalSwitch)) {
     ::SetEnvironmentVariableW(kRestartedAfterRefusalVariable, nullptr);
+    command_line->RemoveSwitch(kRestartedAfterRefusalSwitch);
     NoteRestartedAfterRefusal();
   }
   command_line->RemoveSwitch(switches::kProcessType);
@@ -984,6 +1077,12 @@ void BeforeChromeMain() {
   GuardBrowserLaunch(
       data_dir.empty() ? ChromiumUserDataDir() : data_dir + L"\\Chromium",
       command_line);
+  if (GuardFacts().update_under_way) {
+    WriteLaunchLog(
+        "launch guard: Ardia is closing for an update; this launch ends here "
+        "and the installer opens Ardia again");
+    base::Process::TerminateCurrentProcessImmediately(0);
+  }
   AddLaunchSwitches(command_line);
   HoldHandOffForTest();
   ardia_win::AskBeforeDiscards();
@@ -991,7 +1090,8 @@ void BeforeChromeMain() {
   g_ardia_win_frame_view = &CreateHostedFrameView;
   g_ardia_win_add_main_parts = &AddMainParts;
   g_ardia_win_relaunched = &Relaunched;
-  g_ardia_win_refuses_hand_off = &RefusesHandOff;
+  g_ardia_win_takes_hand_off = &TakesHandOff;
+  g_ardia_win_drops_hand_off = &DropsHandOff;
   InstallExternalAppAsks();
   g_ardia_keeps_window_without_tabs = &KeepsWindowWithoutTabs;
 }
@@ -1021,6 +1121,9 @@ void AppQuitting(std::string_view phase,
   if (phase == "asking") {
     quit.asking = true;
     quit.reason = reason == kUpdateQuit ? kUpdateQuit : kUserQuit;
+    if (quit.reason == kUpdateQuit) {
+      MarkUpdating();
+    }
   } else if (phase == "cancelled") {
     quit.asking = false;
   } else if (phase == "final") {
@@ -1039,9 +1142,6 @@ void QuitApp() {
   MarkStartSettled();
   KeepAlive().reset();
   ChromeDevToolsManagerDelegate::AllowBrowserToClose();
-  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&EndStalledQuit),
-      base::Seconds(kQuitStallSeconds));
   chrome::ExitIgnoreUnloadHandlers();
 }
 

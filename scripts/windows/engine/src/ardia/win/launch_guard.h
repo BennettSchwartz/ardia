@@ -20,6 +20,8 @@ inline constexpr int kClaimAttempts = 240;
 inline constexpr int kLockFileFreeWaitMs = 5000;
 inline constexpr wchar_t kRestartedAfterRefusalVariable[] =
     L"ARDIA_RESTARTED_AFTER_REFUSAL";
+inline constexpr char kRestartedAfterRefusalSwitch[] =
+    "ardia-restarted-after-refusal";
 
 struct LaunchGuardFacts {
   int predecessor_wait_ms = -1;
@@ -27,6 +29,7 @@ struct LaunchGuardFacts {
   std::wstring recovered_to;
   bool profile_held_by_another = false;
   bool restarted_after_refusal = false;
+  bool update_under_way = false;
 };
 
 struct QuittingOwner {
@@ -52,9 +55,21 @@ void ClaimGuard();
 
 bool OwnsGuard();
 
+void PublishOwnerIfOwned();
+
 void LetGoOfGuard();
 
 void NoteRestartedAfterRefusal();
+
+void MarkUpdating();
+
+bool UpdateUnderWay();
+
+void NoteBecameBrowser();
+
+void NoteTurnedAway();
+
+std::string LaunchLogLine(const std::string& text);
 
 const LaunchGuardFacts& GuardFacts();
 

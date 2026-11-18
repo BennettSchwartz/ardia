@@ -2,6 +2,71 @@ $script:QuitPort = 9461
 $script:QuitData = $null
 $script:StillThereSeconds = 20
 
+if (-not ('QuitPages' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+public static class QuitPages {
+  static TcpListener listener;
+  public static int Port;
+  static readonly ConcurrentDictionary<string, int> loads = new ConcurrentDictionary<string, int>();
+  static readonly ConcurrentDictionary<string, string> scripts = new ConcurrentDictionary<string, string>();
+  public static void Start() {
+    listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+    var runner = new Thread(() => {
+      while (true) {
+        TcpClient client;
+        try { client = listener.AcceptTcpClient(); } catch { return; }
+        ThreadPool.QueueUserWorkItem(_ => Serve(client));
+      }
+    });
+    runner.IsBackground = true;
+    runner.Start();
+  }
+  public static void Stop() { try { listener.Stop(); } catch { } }
+  public static void SetScript(string name, string script) { scripts[name] = script; }
+  public static int LoadsOf(string name) { int n; return loads.TryGetValue(name, out n) ? n : 0; }
+  static void Serve(TcpClient client) {
+    using (client) {
+      try {
+        client.ReceiveTimeout = 5000;
+        var stream = client.GetStream();
+        var buffer = new byte[8192];
+        var request = new StringBuilder();
+        while (!request.ToString().Contains("\r\n\r\n")) {
+          int got = stream.Read(buffer, 0, buffer.Length);
+          if (got <= 0) break;
+          request.Append(Encoding.ASCII.GetString(buffer, 0, got));
+        }
+        string[] line = request.ToString().Split(' ');
+        string path = line.Length > 1 ? line[1] : "/";
+        string status = "404 Not Found";
+        string body = "";
+        if (path.StartsWith("/quit-") && path.EndsWith(".html")) {
+          string name = path.Substring(6, path.Length - 11);
+          if (line[0] == "GET") loads.AddOrUpdate(name, 1, (key, n) => n + 1);
+          string script;
+          scripts.TryGetValue(name, out script);
+          status = "200 OK";
+          body = "<!doctype html><meta charset=utf-8><title>quit " + name + "</title><p>opened during a quit: " + name + "</p><script>" + (script ?? "") + "</script>";
+        }
+        byte[] bytes = Encoding.UTF8.GetBytes(body);
+        byte[] head = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + "\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: " + bytes.Length + "\r\nConnection: close\r\n\r\n");
+        stream.Write(head, 0, head.Length);
+        stream.Write(bytes, 0, bytes.Length);
+      } catch { }
+    }
+  }
+}
+'@
+}
+
 function Quit-LogFiles { return @((Join-Path $script:QuitData "Logs\launch.previous.log"), (Join-Path $script:QuitData "Logs\launch.log")) }
 
 function Quit-Log {
@@ -44,16 +109,16 @@ function Assert-NoQuitLine([string]$pattern, [string]$what, [string]$why) {
   if (Count-QuitLines $pattern) { Fail-Quit $what $why }
 }
 
-function Assert-EndedWithProcessEnding([string]$what, [string]$file) {
-  $last = @(Get-Content -LiteralPath $file -ErrorAction SilentlyContinue | Where-Object { $_.Trim() }) | Select-Object -Last 1
-  if ("$last" -notmatch 'process ending') { Fail-Quit $what "the closing Ardia's log ($(Split-Path -Leaf $file)) ends with '$last', not 'process ending'" }
+function Count-QuitsEnded { return Count-QuitLines '^launch \d+ process ending$' }
+
+function Assert-QuitsEnded([string]$what, [int]$count) {
+  $ended = Count-QuitsEnded
+  if ($ended -ne $count) { Fail-Quit $what "the launch log has $ended 'process ending' lines, not $count (each real quit writes one, and nothing else does)" }
 }
 
 function Quit-Link([string]$name, [string]$pageScript = "") {
-  $page = Join-Path $script:QuitData "pages\quit-$name.html"
-  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $page) | Out-Null
-  Set-Content -LiteralPath $page -Value "<!doctype html><meta charset=utf-8><title>quit $name</title><p>opened during a quit: $name</p><script>$pageScript</script>" -Encoding utf8NoBOM
-  return ([Uri]$page).AbsoluteUri
+  if ($pageScript) { [QuitPages]::SetScript($name, $pageScript) }
+  return "http://127.0.0.1:$([QuitPages]::Port)/quit-$name.html"
 }
 
 function Start-WithTest([string]$test, [string[]]$arguments = @()) {
@@ -72,15 +137,17 @@ function Page-Targets {
   try { return @(Invoke-RestMethod -Uri "http://127.0.0.1:$($script:QuitPort)/json/list" -TimeoutSec 2 | Where-Object { $_.type -eq "page" }) } catch { return @() }
 }
 
-function Link-Targets([string]$name) { return @(Page-Targets | Where-Object { $_.url -like "*quit-$name.html" }) }
-
 function Wait-QuitLinkOnce([string]$what, [string]$name, [int]$seconds = 45) {
   $deadline = (Get-Date).AddSeconds($seconds)
-  while ((Get-Date) -lt $deadline -and -not @(Link-Targets $name).Count) { Start-Sleep -Milliseconds 250 }
-  if (-not @(Link-Targets $name).Count) { Fail-Quit $what "the link the launch carried (quit-$name.html) never opened; pages open: $((Page-Targets | ForEach-Object { $_.url }) -join ', ')" }
+  while ((Get-Date) -lt $deadline -and -not [QuitPages]::LoadsOf($name)) { Start-Sleep -Milliseconds 100 }
+  if (-not [QuitPages]::LoadsOf($name)) { Fail-Quit $what "the link the launch carried (quit-$name.html) was never loaded" }
   Start-Sleep -Seconds 2
-  $open = @(Link-Targets $name).Count
-  if ($open -ne 1) { Fail-Quit $what "the link the launch carried (quit-$name.html) is open $open times, not once" }
+  Assert-LoadedOnce $what $name
+}
+
+function Assert-LoadedOnce([string]$what, [string]$name) {
+  $loads = [QuitPages]::LoadsOf($name)
+  if ($loads -ne 1) { Fail-Quit $what "the link the launch carried (quit-$name.html) was loaded $loads times, not once" }
 }
 
 function Open-QuitInstance([string]$what, [string]$test) {
@@ -88,8 +155,9 @@ function Open-QuitInstance([string]$what, [string]$test) {
   Clear-QuitLog
   Start-WithTest $test | Out-Null
   $shown = Wait-Window $what 120
-  Wait-QuitLine 'launch guard: waited' $what
-  Start-Sleep -Seconds 3
+  Wait-QuitLine "^launch \d+ process started inside the engine pid=$($shown.Pid)$" $what
+  Wait-QuitLine 'events reach the UI' $what
+  Start-Sleep -Milliseconds 1500
   return $shown
 }
 
@@ -97,19 +165,18 @@ function Describe-Browsers { return (@(Browsers) | ForEach-Object { "$($_.Proces
 
 function Assert-SameArdiaKeepsIt([string]$what, $old, $launched, [string]$name) {
   $deadline = (Get-Date).AddSeconds(60)
-  while ((Get-Date) -lt $deadline -and -not ($launched.HasExited -and [RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count -gt 0)) { Start-Sleep -Milliseconds 250 }
+  while ((Get-Date) -lt $deadline -and -not ($launched.HasExited -and [RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count -gt 0)) { Start-Sleep -Milliseconds 100 }
   if (-not (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)) { Fail-Quit $what "the Ardia that was closing ($($old.Pid)) ended instead of taking the launch (browsers: $(Describe-Browsers))" }
   if (-not $launched.HasExited) { Fail-Quit $what "the launch ($($launched.Id)) is still running instead of handing over to Ardia $($old.Pid)" }
   if ($launched.ExitCode -ne 0) { Fail-Quit $what "the launch ($($launched.Id)) exited with $($launched.ExitCode), not 0" }
   if (-not [RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count) { Fail-Quit $what "Ardia $($old.Pid) took the launch but shows no window" }
   $deadline = (Get-Date).AddSeconds(10)
-  while ((Get-Date) -lt $deadline -and @(Browsers | Where-Object { [int]$_.ProcessId -ne $old.Pid }).Count) { Start-Sleep -Milliseconds 250 }
+  while ((Get-Date) -lt $deadline -and @(Browsers | Where-Object { [int]$_.ProcessId -ne $old.Pid }).Count) { Start-Sleep -Milliseconds 100 }
   if (@(Browsers | Where-Object { [int]$_.ProcessId -ne $old.Pid }).Count) { Fail-Quit $what "another browser runs beside Ardia $($old.Pid): $(Describe-Browsers)" }
   Wait-QuitLinkOnce $what $name
   Start-Sleep -Seconds 5
   if (-not (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue) -or -not [RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count) { Fail-Quit $what "Ardia $($old.Pid) showed the launch's window, then lost it within 5 s (browsers: $(Describe-Browsers))" }
-  $open = @(Link-Targets $name).Count
-  if ($open -ne 1) { Fail-Quit $what "5 s later the link is open $open times, not once" }
+  Assert-LoadedOnce $what $name
   Keep-QuitLog $what
   return [pscustomobject]@{ Pid = $old.Pid; Window = [RelaunchCheck.Native]::AppWindows([uint32]$old.Pid)[0] }
 }
@@ -119,11 +186,11 @@ function Assert-OneFreshArdia([string]$what, [int]$old, [string]$name, [int[]]$n
   $fresh = 0
   while ((Get-Date) -lt $deadline) {
     $windowed = @(Browsers | Where-Object { [RelaunchCheck.Native]::AppWindows([uint32]$_.ProcessId).Count -gt 0 })
-    if ($windowed.Count -eq 1 -and -not (Get-Process -Id $old -ErrorAction SilentlyContinue)) { $fresh = [int]$windowed[0].ProcessId; break }
-    Start-Sleep -Milliseconds 250
+    if ($windowed.Count -eq 1 -and (-not $old -or -not (Get-Process -Id $old -ErrorAction SilentlyContinue))) { $fresh = [int]$windowed[0].ProcessId; break }
+    Start-Sleep -Milliseconds 100
   }
   if (-not $fresh) {
-    $alive = if (Get-Process -Id $old -ErrorAction SilentlyContinue) { "still running" } else { "gone" }
+    $alive = if ($old -and (Get-Process -Id $old -ErrorAction SilentlyContinue)) { "still running" } else { "gone" }
     Fail-Quit $what "no single fresh Ardia with a window within 75 s (the closing Ardia $old is $alive; browsers: $(Describe-Browsers))"
   }
   if ($notThese -contains $fresh) { Fail-Quit $what "the window is in Ardia $fresh, a process this case expected to end" }
@@ -132,16 +199,16 @@ function Assert-OneFreshArdia([string]$what, [int]$old, [string]$name, [int[]]$n
   Start-Sleep -Seconds $script:StillThereSeconds
   if (-not (Get-Process -Id $fresh -ErrorAction SilentlyContinue) -or -not [RelaunchCheck.Native]::AppWindows([uint32]$fresh).Count) { Fail-Quit $what "the fresh Ardia ($fresh) was gone or windowless $($script:StillThereSeconds) s later (browsers: $(Describe-Browsers))" }
   if (@(Browsers).Count -ne 1) { Fail-Quit $what "$($script:StillThereSeconds) s later there are $(@(Browsers).Count) browsers: $(Describe-Browsers)" }
-  $open = @(Link-Targets $name).Count
-  if ($open -ne 1) { Fail-Quit $what "$($script:StillThereSeconds) s later the link is open $open times, not once" }
+  Assert-LoadedOnce $what $name
   Keep-QuitLog $what
   return [pscustomobject]@{ Pid = $fresh; Window = [RelaunchCheck.Native]::AppWindows([uint32]$fresh)[0] }
 }
 
 function Close-QuitInstance([string]$what, $shown) {
+  $ended = Count-QuitsEnded
   Close-Window $shown
   Wait-Exit $shown.Pid $what | Out-Null
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.log")
+  Assert-QuitsEnded $what ($ended + 1)
 }
 
 function Test-LaunchBeforeTheQuitBegins {
@@ -154,7 +221,7 @@ function Test-LaunchBeforeTheQuitBegins {
   $launched = Start-WithTest "" @($link)
   $shown = Assert-SameArdiaKeepsIt $what $old $launched "before"
   Assert-NoQuitLine 'began \((user|update)\)' $what "a quit began although a launch came before it"
-  Note "$what`: the same Ardia ($($shown.Pid)) showed a window with the link, once"
+  Note "$what`: the same Ardia ($($shown.Pid)) showed a window with the link, loaded once"
   Close-QuitInstance $what $shown
 }
 
@@ -169,7 +236,7 @@ function Test-LaunchAtTheQuitSeam {
   Wait-QuitLine 'not begun: a launch arrived after the last window closed' $what
   $shown = Assert-SameArdiaKeepsIt $what $old $launched "seam"
   Assert-NoQuitLine 'began \((user|update)\)' $what "the quit began while the launch's window was on its way"
-  Note "$what`: the quit waited for the launch's window, and Ardia $($shown.Pid) kept it with the link, once"
+  Note "$what`: the quit waited for the launch's window, and Ardia $($shown.Pid) kept it with the link, loaded once"
   Close-QuitInstance $what $shown
 }
 
@@ -185,27 +252,57 @@ function Test-LaunchDuringTheQuitWait {
   Assert-QuitLine 'cancelled by a relaunch after \d+ ms' $what "the log doesn't say the launch cancelled the quit"
   Assert-QuitLine 'relaunch: a launch cancels the quit' $what "the engine doesn't say the launch cancelled the quit"
   Assert-NoQuitLine '^launch \d+ quitting$' $what "the app unloaded although the launch cancelled the quit"
-  Note "$what`: the quit was cancelled and Ardia $($shown.Pid) kept running with the link, once"
+  Note "$what`: the quit was cancelled and Ardia $($shown.Pid) kept running with the link, loaded once"
   Close-QuitInstance $what $shown
-  Note "$what`: a later quit still ends Ardia, with 'process ending' last"
+  Note "$what`: a later quit still ends Ardia, with its 'process ending'"
+}
+
+function Test-LaunchTakenInTheTurnOfTheAnswer {
+  $what = "a launch taken just before the app's answer, reaching the app after it"
+  $old = Open-QuitInstance $what "quitAnswerHoldMs=2000,handOffDeliveryHoldMs=3000"
+  $link = Quit-Link "answer"
+  Close-Window $old
+  Wait-QuitLine 'began \(user\)' $what
+  Start-Sleep -Milliseconds 500
+  $launched = Start-WithTest "" @($link)
+  Wait-QuitLine 'test: a launch this Ardia took reaches the app 3000 ms late' $what
+  $shown = Assert-SameArdiaKeepsIt $what $old $launched "answer"
+  Assert-QuitLine 'an answer came after its quit was cancelled or had finished; ignored' $what "the app's answer arrived between the launch and its delivery but isn't in the log as set aside"
+  Assert-NoQuitLine '^launch \d+ quitting$' $what "the answer that came between the launch and its delivery ended the quit"
+  Assert-NoQuitLine 'it is lost' $what "the launch reached the app after the point of no return"
+  Note "$what`: the launch cancelled the quit when it was taken, so the answer that came before its delivery was set aside and Ardia $($shown.Pid) opened the link once"
+  Close-QuitInstance $what $shown
+}
+
+function Assert-EndedAtOnce([string]$what, $launched, [int]$seconds, [string]$which) {
+  if (-not $launched.WaitForExit($seconds * 1000)) { Fail-Quit $what "$which ($($launched.Id)) was still running $seconds s later: it waited instead of ending" }
+  if ($launched.ExitCode -ne 0) { Fail-Quit $what "$which ($($launched.Id)) exited with $($launched.ExitCode), not 0" }
 }
 
 function Test-LaunchDuringAnUpdateQuit {
-  $what = "a launch during an update's quit"
+  $what = "launches during an update's quit"
   $old = Open-QuitInstance $what "quitWaitMs=3000,quitReason=update"
-  $link = Quit-Link "update"
+  $handed = Start-WithTest "handOffHoldMs=2500" @((Quit-Link "update-handed"))
+  Wait-QuitLine "^refused \d+ pid=$($handed.Id) test: this launch waits 2500 ms" $what
   Close-Window $old
   Wait-QuitLine 'began \(update\)' $what
   Start-Sleep -Milliseconds 700
-  $launched = Start-WithTest "" @($link)
-  if (-not $launched.WaitForExit(30000)) { Fail-Quit $what "the launch ($($launched.Id)) was still running 30 s later" }
+  $guarded = Start-WithTest "" @((Quit-Link "update-guarded"))
+  Assert-EndedAtOnce $what $guarded 5 "the launch that met the update's quit at the guard"
+  Assert-QuitLine "^refused \d+ pid=$($guarded.Id) launch guard: Ardia is closing for an update; this launch ends here" $what "the launch that met the update's quit didn't say why it ended"
+  Assert-EndedAtOnce $what $handed 8 "the launch handed over during the update's quit"
+  Assert-QuitLine "relaunch: a launch during an update's quit is taken and left for the installer" $what "the engine doesn't say it took and dropped the launch handed over during the update's quit"
+  $waiting = @(Browsers | Where-Object { [int]$_.ProcessId -ne $old.Pid })
+  if ($waiting.Count) { Fail-Quit $what "an Ardia is waiting beside the one quitting for an update: $(Describe-Browsers)" }
   Wait-Exit $old.Pid $what 30 | Out-Null
-  Assert-QuitLine "relaunch: a launch during an update's quit is ignored" $what "the engine doesn't say it ignored the launch during an update's quit"
   Assert-NoQuitLine 'cancelled by a relaunch' $what "a launch cancelled an update's quit"
-  Start-Sleep -Seconds 5
+  Assert-NoQuitLine 'turned a launch away' $what "a launch during an update's quit was turned away into a waiting launch"
+  $deadline = (Get-Date).AddSeconds(3)
+  while ((Get-Date) -lt $deadline -and -not @(Browsers).Count) { Start-Sleep -Milliseconds 100 }
   if (@(Browsers).Count) { Fail-Quit $what "an Ardia is running after an update's quit, before any installer: $(Describe-Browsers)" }
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.log")
-  Note "$what`: the quit went on, the launch was left for the installer to reopen Ardia, and nothing was left running"
+  foreach ($name in "update-handed", "update-guarded") { if ([QuitPages]::LoadsOf($name)) { Fail-Quit $what "the link of a launch during an update's quit (quit-$name.html) was opened" } }
+  Assert-QuitsEnded $what 1
+  Note "$what`: both launches ended at once with 0 (one at the guard, one taken and dropped), none waited, and the quit went on for the installer to reopen Ardia"
 }
 
 function Test-LateAnswerAfterACancelledQuit {
@@ -227,8 +324,26 @@ function Test-LateAnswerAfterACancelledQuit {
   $outcomes = @(@(Quit-Log) | Where-Object { $_ -match '(the app answered (yes|no) after \d+ ms|no answer in \d+ ms|cancelled by a relaunch after \d+ ms)' })
   if ($outcomes.Count -ne 2) { Fail-Quit $what "expected two quits in the log (the cancelled one and the real one), found $($outcomes.Count): $($outcomes -join ' | ')" }
   if ($outcomes[1] -notmatch 'no answer in \d+ ms') { Fail-Quit $what "the second quit ended on '$($outcomes[1])', not on its own missing answer: the first quit's late answer ended it" }
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.log")
+  Assert-QuitsEnded $what 1
   Note "$what`: the late answer was set aside, the app stayed up, and the next quit ended Ardia on its own terms"
+}
+
+function Test-CancelWhoseWindowNeverOpens {
+  $what = "a quit cancelled by a launch whose window never opens"
+  $old = Open-QuitInstance $what "quitWaitMs=3000,windowOpenHoldMs=9000"
+  $link = Quit-Link "nowindow"
+  Close-Window $old
+  Wait-QuitLine 'began \(user\)' $what
+  Start-Sleep -Milliseconds 700
+  Start-WithTest "" @($link) | Out-Null
+  Wait-QuitLine 'cancelled by a relaunch after \d+ ms' $what
+  Wait-QuitLine 'no window opened within 5000 ms of the launch that kept this Ardia; quitting' $what 15
+  Wait-Exit $old.Pid $what 30 | Out-Null
+  Assert-QuitsEnded $what 1
+  $deadline = (Get-Date).AddSeconds(3)
+  while ((Get-Date) -lt $deadline -and -not @(Browsers).Count) { Start-Sleep -Milliseconds 100 }
+  if (@(Browsers).Count) { Fail-Quit $what "an Ardia is still running: $(Describe-Browsers)" }
+  Note "$what`: 5 s after the launch, with no window, the quit began again and Ardia ended"
 }
 
 function Test-LaunchAfterThePointOfNoReturn {
@@ -241,8 +356,8 @@ function Test-LaunchAfterThePointOfNoReturn {
   Start-WithTest "" @($link) | Out-Null
   $shown = Assert-OneFreshArdia $what $old.Pid "after"
   Assert-QuitLine 'launch guard: waited \d+ ms for the previous Ardia on this profile to finish exiting' $what "the launch didn't wait for the closing Ardia"
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.previous.log")
-  Note "$what`: the launch waited for the closing Ardia, then one fresh Ardia ($($shown.Pid)) with the link, once, still there $($script:StillThereSeconds) s later"
+  Assert-QuitsEnded $what 1
+  Note "$what`: the launch waited for the closing Ardia, then one fresh Ardia ($($shown.Pid)) with the link, loaded once, still there $($script:StillThereSeconds) s later"
   Close-QuitInstance $what $shown
 }
 
@@ -258,9 +373,30 @@ function Test-LaunchTurnedAwayAfterThePointOfNoReturn {
   if (-not $launched.HasExited) { Fail-Quit $what "the turned-away launch ($($launched.Id)) is still running" }
   if ($launched.ExitCode -ne 0) { Fail-Quit $what "the turned-away launch exited with $($launched.ExitCode), not 0, after starting Ardia again" }
   Assert-QuitLine 'started again after the closing Ardia turned the last launch away' $what "the fresh Ardia doesn't say it was started again after being turned away"
+  Assert-QuitLine "^refused \d+ pid=$($launched.Id) launch guard: the closing Ardia \(\d+\) turned this launch away" $what "the turned-away launch's lines aren't under its own 'refused' category with its pid"
+  Assert-NoQuitLine '^refused .*process ending' $what "a launch that never became the browser wrote 'process ending'"
   Assert-NoQuitLine 'cancelled by a relaunch' $what "the launch reached the app before the point of no return"
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.previous.log")
-  Note "$what`: the closing Ardia turned it away, the launch waited for it to end and started itself again ($($shown.Pid)), with the link once, still there $($script:StillThereSeconds) s later"
+  Assert-QuitsEnded $what 1
+  Note "$what`: the closing Ardia turned it away, the launch waited for it to end and started itself again ($($shown.Pid)), with the link loaded once, still there $($script:StillThereSeconds) s later"
+  Close-QuitInstance $what $shown
+}
+
+function Test-TurnedAwayWhosePredecessorIsGone {
+  $what = "a launch turned away when the Ardia that held the profile is already gone"
+  Clear-QuitLog
+  $link = Quit-Link "gone"
+  $lock = [IO.File]::Open((Join-Path $script:QuitData "Chromium\lockfile"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read)
+  try {
+    $launched = Start-WithTest "" @($link)
+    Wait-QuitLine 'the Ardia that held the profile is gone; it starts again once' $what 45
+  } finally {
+    $lock.Dispose()
+  }
+  $shown = Assert-OneFreshArdia $what 0 "gone" @($launched.Id)
+  if ($launched.ExitCode -ne 0) { Fail-Quit $what "the turned-away launch exited with $($launched.ExitCode), not 0, after starting Ardia again" }
+  Assert-NoQuitLine 'app start failed' $what "a launch whose predecessor was gone ended in a start failure"
+  Assert-QuitLine "^refused \d+ pid=$($launched.Id) launch guard: started again as Ardia $($shown.Pid)$" $what "the turned-away launch didn't say, under its own 'refused' category, which Ardia it started"
+  Note "$what`: it started itself again once and opened the link, loaded once, in Ardia $($shown.Pid)"
   Close-QuitInstance $what $shown
 }
 
@@ -304,7 +440,8 @@ function Test-QuitWithABeforeUnloadPage {
   $launched = Start-WithTest "" @($link)
   if (-not $launched.WaitForExit(30000)) { Fail-Quit $what "the launch carrying the page was still running 30 s later" }
   Wait-QuitLinkOnce $what "unload"
-  $page = @(Link-Targets "unload")[0]
+  $page = @(Page-Targets | Where-Object { $_.url -like "*quit-unload.html" })[0]
+  if (-not $page) { Fail-Quit $what "the page with the beforeunload handler isn't listed over DevTools" }
   $press = @{ type = "mousePressed"; x = 40; y = 40; button = "left"; clickCount = 1 }
   $release = @{ type = "mouseReleased"; x = 40; y = 40; button = "left"; clickCount = 1 }
   $answers = Invoke-PageCommands $page.webSocketDebuggerUrl @(
@@ -316,11 +453,12 @@ function Test-QuitWithABeforeUnloadPage {
   $message = [RelaunchCheck.Native]::RegisterWindowMessageW("ArdiaTestQuit")
   [RelaunchCheck.Native]::PostMessageW($old.Window, $message, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   Wait-QuitLine 'test: asked to quit by a message' $what 10
+  Wait-QuitLine '^launch \d+ quitting$' $what 10
   $watch = [Diagnostics.Stopwatch]::StartNew()
-  while ($watch.Elapsed.TotalSeconds -lt 20 -and (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 100 }
-  if (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue) { Fail-Quit $what "Ardia $($old.Pid) was still running 20 s after its quit began, with $([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count) windows: the page's beforeunload held the engine's quit" }
-  Assert-EndedWithProcessEnding $what (Join-Path $script:QuitData "Logs\launch.log")
-  Note "$what`: Ardia ended $([int]$watch.Elapsed.TotalMilliseconds) ms after its quit began, without asking the page, with 'process ending' last"
+  while ($watch.Elapsed.TotalSeconds -lt 5 -and (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)) { Start-Sleep -Milliseconds 50 }
+  if (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue) { Fail-Quit $what "Ardia $($old.Pid) was still running 5 s after the app unloaded, with $([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid).Count) windows: the page's beforeunload held the engine's quit" }
+  Assert-QuitsEnded $what 1
+  Note "$what`: Ardia ended $([int]$watch.Elapsed.TotalMilliseconds) ms after the app unloaded, without asking the page"
 }
 
 function Test-TurnedAwayLaunchKeepsItsUserDataDir {
@@ -329,7 +467,8 @@ function Test-TurnedAwayLaunchKeepsItsUserDataDir {
   $custom = Join-Path $script:QuitData "custom-profile"
   New-Item -ItemType Directory -Force -Path $custom | Out-Null
   $key = [RelaunchCheck.Native]::ProfileKey($custom)
-  $closing = Start-Process -FilePath "pwsh" -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 14") -WindowStyle Hidden -PassThru
+  $link = Quit-Link "custom"
+  $closing = Start-Process -FilePath "pwsh" -ArgumentList @("-NoProfile", "-Command", "Start-Sleep -Seconds 10") -WindowStyle Hidden -PassThru
   $null = $closing.Handle
   $owner = [IO.MemoryMappedFiles.MemoryMappedFile]::CreateNew("Local\ArdiaBrowser.$key.owner", 16)
   $view = $owner.CreateViewAccessor(0, 16)
@@ -342,10 +481,12 @@ function Test-TurnedAwayLaunchKeepsItsUserDataDir {
   $exiting = $null
   $released = $false
   $restarts = Count-LogLines 'started again after the closing Ardia turned the last launch away'
+  Set-Content -LiteralPath (Join-Path $data "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
+  Set-Content -LiteralPath (Join-Path $data "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
   Remove-Item -Path Env:ARDIA_DATA_DIR -ErrorAction SilentlyContinue
   Remove-Item -Path Env:ARDIA_REMOTE_DEBUGGING_PORT -ErrorAction SilentlyContinue
   try {
-    $launched = Start-WithTest "" @("--user-data-dir=$custom")
+    $launched = Start-WithTest "" @("--user-data-dir=$custom", $link)
     Start-Sleep -Seconds 1
     $exiting = New-Object System.Threading.EventWaitHandle($true, [System.Threading.EventResetMode]::ManualReset, "Local\ArdiaBrowser.$key.exiting")
     if (-not $closing.WaitForExit(30000)) { throw "$what`: the stand-in for the closing Ardia didn't end" }
@@ -370,13 +511,18 @@ function Test-TurnedAwayLaunchKeepsItsUserDataDir {
     if (-not $fresh) { Start-Sleep -Milliseconds 250 }
   }
   if (-not $fresh) { Keep-Log $what; throw "$what`: no Ardia with a window on $custom within 90 s (browsers: $(Describe-Browsers))" }
+  $freshId = [int]$fresh.ProcessId
   Wait-LogLine 'started again after the closing Ardia turned the last launch away' $what $restarts
   $held = $false
   try { ([IO.File]::Open((Join-Path $custom "lockfile"), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)).Dispose() } catch { $held = $true }
-  if (-not $held) { Keep-Log $what; throw "$what`: the fresh Ardia ($($fresh.ProcessId)) doesn't hold $custom's lockfile" }
-  Note "$what`: it waited for the closing Ardia, then started again ($($fresh.ProcessId)) on its own --user-data-dir"
-  Close-Window ([pscustomobject]@{ Pid = [int]$fresh.ProcessId; Window = [RelaunchCheck.Native]::AppWindows([uint32]$fresh.ProcessId)[0] })
-  Wait-Exit ([int]$fresh.ProcessId) $what | Out-Null
+  if (-not $held) { Keep-Log $what; throw "$what`: the fresh Ardia ($freshId) doesn't hold $custom's lockfile" }
+  Wait-QuitLinkOnce $what "custom"
+  Start-Sleep -Seconds $script:StillThereSeconds
+  if (-not (Get-Process -Id $freshId -ErrorAction SilentlyContinue) -or -not [RelaunchCheck.Native]::AppWindows([uint32]$freshId).Count) { Keep-Log $what; throw "$what`: the fresh Ardia ($freshId) was gone or windowless $($script:StillThereSeconds) s later" }
+  Assert-LoadedOnce $what "custom"
+  Note "$what`: it waited for the closing Ardia, then started again ($freshId) on its own --user-data-dir, with the link loaded once, still there $($script:StillThereSeconds) s later"
+  Close-Window ([pscustomobject]@{ Pid = $freshId; Window = [RelaunchCheck.Native]::AppWindows([uint32]$freshId)[0] })
+  Wait-Exit $freshId $what | Out-Null
 }
 
 function Test-LaunchRefusedForGood {
@@ -385,19 +531,26 @@ function Test-LaunchRefusedForGood {
   $lock = [IO.File]::Open((Join-Path $script:QuitData "Chromium\lockfile"), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::Read)
   try {
     $launched = Start-WithTest "" @((Quit-Link "held"))
-    if (-not $launched.WaitForExit(60000)) { throw "$what`: Ardia was still running 60 s after a start that could not open its profile" }
+    Wait-QuitLine 'launch guard: started again as Ardia \d+' $what 45
+    $said = @(@(Quit-Log) | Where-Object { $_ -match 'started again as Ardia (\d+)' }) | Select-Object -Last 1
+    $again = if ("$said" -match 'started again as Ardia (\d+)') { [int]$Matches[1] } else { 0 }
+    $restarted = if ($again) { Get-Process -Id $again -ErrorAction SilentlyContinue } else { $null }
+    if ($restarted) { $null = $restarted.Handle }
+    Wait-QuitLine 'app start failed: (.+)$' $what 45
+    if ($restarted -and -not $restarted.WaitForExit(30000)) { throw "$what`: the restarted Ardia ($again) was still running 30 s after its start failed" }
   } finally {
     $lock.Dispose()
   }
   $failed = @(@(Quit-Log) | Where-Object { $_ -match 'app start failed: (.+)$' })
   Keep-QuitLog $what
-  if (-not $failed.Count) { throw "$what`: Ardia exited with $($launched.ExitCode) and the launch log doesn't say why (a silent exit)" }
-  if ($launched.ExitCode -eq 0) { throw "$what`: Ardia exited with 0 although it couldn't start" }
+  if (-not $launched.WaitForExit(10000)) { throw "$what`: the first launch ($($launched.Id)) was still running after it started Ardia again" }
+  if ($launched.ExitCode -ne 0) { throw "$what`: the first launch exited with $($launched.ExitCode); it should have started itself again once and exited 0" }
+  if ($restarted -and $restarted.ExitCode -eq 0) { throw "$what`: the restarted Ardia ($again) exited with 0 although it couldn't start" }
   if (@(Browsers).Count) { throw "$what`: an Ardia is running although the start failed" }
   $shown = Open-QuitInstance "a launch after a refused start" ""
   $facts = Get-Content -LiteralPath (Join-Path $script:QuitData "launch-guard.json") -Raw | ConvertFrom-Json
   if ($facts.refusedStartsBefore -ne 1) { throw "$what`: the next start counted $($facts.refusedStartsBefore) refused starts, not 1" }
-  Note "$what`: no silent exit ($($launched.ExitCode)), the reason in the log ($($failed[0] -replace '^.*app start failed: ', '')), and the next start counted it"
+  Note "$what`: it started itself again once, that start failed with the reason in the log ($($failed[0] -replace '^.*app start failed: ', '')), and the next start counted it"
   Close-QuitInstance $what $shown
 }
 
@@ -412,19 +565,26 @@ function Test-LaunchesDuringQuit {
   $env:ARDIA_DATA_DIR = $script:QuitData
   Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue
   $env:ARDIA_REMOTE_DEBUGGING_PORT = "$($script:QuitPort)"
+  [QuitPages]::Start()
+  $watch = [Diagnostics.Stopwatch]::StartNew()
   try {
     Test-LaunchBeforeTheQuitBegins
     Test-LaunchAtTheQuitSeam
     Test-LaunchDuringTheQuitWait
+    Test-LaunchTakenInTheTurnOfTheAnswer
     Test-LaunchDuringAnUpdateQuit
     Test-LateAnswerAfterACancelledQuit
+    Test-CancelWhoseWindowNeverOpens
     Test-LaunchAfterThePointOfNoReturn
     Test-LaunchTurnedAwayAfterThePointOfNoReturn
+    Test-TurnedAwayWhosePredecessorIsGone
     Test-QuitWithABeforeUnloadPage
     Test-TurnedAwayLaunchKeepsItsUserDataDir
     Test-LaunchRefusedForGood
+    Note "launches during a quit: 13 cases in $([int]$watch.Elapsed.TotalSeconds) s"
   } finally {
     Keep-QuitLog "final"
+    [QuitPages]::Stop()
     Get-Process -Name Ardia -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 2
     foreach ($name in $saved.Keys) {

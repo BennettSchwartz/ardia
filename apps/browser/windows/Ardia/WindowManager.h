@@ -233,7 +233,8 @@ struct WindowManager {
       return;
     }
     if (!heldForTest && HoldOpenForTest(request)) return;
-    m_launchAwaitingWindow = 0;
+    m_hadWindow = true;
+    if (!m_launchesUndelivered) m_launchHoldSince = 0;
     if (ManagedWindow *existing = Find(request.id)) {
       bool wasClosing = !existing->exits.empty() || (existing->fade && (existing->fade->phase == WindowFade::Phase::Leaving || existing->fade->phase == WindowFade::Phase::Lingering));
       StopClosing(*existing);
@@ -570,20 +571,25 @@ struct WindowManager {
   }
 
   void Quit(std::string_view reason) noexcept {
+    const std::string_view asked = reason == kUpdateQuit ? kUpdateQuit : kUserQuit;
     if (m_quitting) {
-      if (reason == kUpdateQuit && m_quitReason != kUpdateQuit && !m_finished) {
+      if (asked == kUpdateQuit && m_quitReason != kUpdateQuit && !m_finished) {
         m_quitReason = kUpdateQuit;
         TellEngineQuitting("asking");
         LaunchLog::Write(L"quit", L"the quit under way is now an update's quit; a launch no longer cancels it");
       }
       return;
     }
+    if (m_launchesUndelivered > 0 && LaunchHoldsQuit()) {
+      LaunchLog::Write(L"quit", L"waits: a launch this Ardia took hasn't reached the app yet");
+      After(std::chrono::milliseconds(kUndeliveredRecheckMs), [this, asked]() noexcept { Quit(asked); });
+      return;
+    }
     m_quitting = true;
-    m_quitReason = reason == kUpdateQuit ? kUpdateQuit : kUserQuit;
+    m_quitReason = asked;
     m_quitAskedAt = GetTickCount64();
     m_quitWaitMs = 0;
     m_quitAnswer = m_context ? kAnswerPending : kNoAppToAsk;
-    m_launchAwaitingWindow = 0;
     TellEngineQuitting("asking");
     std::optional<int> held = AppLaunch::TestMilliseconds("quitWaitMs", kQuitTestHoldMostMs);
     LaunchLog::Write(L"quit", std::wstring(L"began (").append(Paths::Wide(m_quitReason)).append(m_context ? L"), asking the app to save" : L"), with no app to ask"));
@@ -608,18 +614,36 @@ struct WindowManager {
     });
   }
 
-  void LaunchArrived() noexcept {
-    if (m_finished) return;
-    if (!m_quitting) {
-      if (NoWindowStays()) m_launchAwaitingWindow = GetTickCount64();
-      return;
+  int LaunchArriving() noexcept {
+    if (m_quitReason == kUpdateQuit && (m_quitting || m_finished)) {
+      m_updateLaunchesToNote++;
+      return ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE;
     }
-    if (m_quitReason == kUpdateQuit) {
-      LaunchLog::Write(L"quit", L"a launch during an update's quit doesn't cancel it");
-      return;
+    if (m_finished) return ARDIA_APP_LAUNCH_TURNED_AWAY;
+    m_launchesUndelivered++;
+    if (!m_launchHoldSince) m_launchHoldSince = GetTickCount64();
+    if (!m_quitting) return ARDIA_APP_LAUNCH_KEPT;
+    m_quitting = false;
+    m_quitHeldUntil = 0;
+    m_quitGeneration++;
+    m_quitWaitMs = static_cast<int>((std::min)(GetTickCount64() - m_quitAskedAt, static_cast<ULONGLONG>(3600000)));
+    m_cancelledByLaunch = true;
+    return ARDIA_APP_LAUNCH_KEPT_BY_CANCELLING_QUIT;
+  }
+
+  void AfterLaunchArriving() noexcept {
+    for (; m_updateLaunchesToNote > 0; m_updateLaunchesToNote--) LaunchLog::Write(L"quit", L"a launch during an update's quit is left to the installer's own start");
+    if (m_cancelledByLaunch) {
+      m_cancelledByLaunch = false;
+      LaunchLog::Write(L"quit", std::wstring(L"cancelled by a relaunch after ").append(std::to_wstring(m_quitWaitMs)).append(L" ms (").append(Paths::Wide(m_quitReason)).append(L")"));
+      AnnounceCancelledQuit();
     }
-    NoteQuitWait(L"cancelled by a relaunch");
-    CancelQuit();
+    ArmLaunchHold();
+  }
+
+  void LaunchDelivered() noexcept {
+    if (m_launchesUndelivered > 0) m_launchesUndelivered--;
+    if (!m_launchesUndelivered && !NoWindowStays()) m_launchHoldSince = 0;
   }
 
   void QuitByTestMessage() noexcept {
@@ -657,6 +681,7 @@ struct WindowManager {
   static constexpr int kQuitAnswerWaitMs = 3000;
   static constexpr int kLastWindowWaitMs = 400;
   static constexpr ULONGLONG kLaunchWindowWaitMs = 5000;
+  static constexpr int kUndeliveredRecheckMs = 50;
   static constexpr int kQuitTestHoldMostMs = 15000;
   static constexpr std::string_view kUserQuit = "user";
   static constexpr std::string_view kUpdateQuit = "update";
@@ -1938,17 +1963,41 @@ struct WindowManager {
     return true;
   }
 
+  bool LaunchHoldsQuit() const noexcept {
+    if (!m_launchHoldSince || GetTickCount64() - m_launchHoldSince >= kLaunchWindowWaitMs) return false;
+    return m_launchesUndelivered > 0 || NoWindowStays();
+  }
+
+  void HoldQuitForLaunch() noexcept {
+    if (!m_launchHoldSince) m_launchHoldSince = GetTickCount64();
+    ArmLaunchHold();
+  }
+
+  void ArmLaunchHold() noexcept {
+    const ULONGLONG since = m_launchHoldSince;
+    if (!since || m_launchHoldArmedFor == since) return;
+    m_launchHoldArmedFor = since;
+    const ULONGLONG waited = GetTickCount64() - since;
+    const ULONGLONG left = waited < kLaunchWindowWaitMs ? kLaunchWindowWaitMs - waited : 0;
+    After(std::chrono::milliseconds(static_cast<long long>(left)), [this, since]() noexcept { LaunchHoldEnded(since); });
+  }
+
+  void LaunchHoldEnded(ULONGLONG since) noexcept {
+    if (m_launchHoldSince != since) return;
+    m_launchHoldSince = 0;
+    m_launchesUndelivered = 0;
+    if (m_quitting || m_finished || !m_hadWindow || !NoWindowStays()) return;
+    LaunchLog::Write(L"quit", std::wstring(L"no window opened within ").append(std::to_wstring(kLaunchWindowWaitMs)).append(L" ms of the launch that kept this Ardia; quitting"));
+    Quit(kUserQuit);
+  }
+
   void QuitWhenWindowless() noexcept {
     if (!m_windows.empty() || m_quitting) return;
-    if (m_launchAwaitingWindow) {
-      ULONGLONG waited = GetTickCount64() - m_launchAwaitingWindow;
-      if (waited < kLaunchWindowWaitMs) {
-        LaunchLog::Write(L"quit", L"not begun: a launch arrived after the last window closed, and its window is on its way");
-        After(std::chrono::milliseconds(static_cast<long long>(kLaunchWindowWaitMs - waited)), [this]() noexcept { QuitWhenWindowless(); });
-        return;
-      }
-      LaunchLog::Write(L"quit", std::wstring(L"a launch's window didn't open in ").append(std::to_wstring(kLaunchWindowWaitMs)).append(L" ms; quitting"));
-      m_launchAwaitingWindow = 0;
+    if (LaunchHoldsQuit()) {
+      ULONGLONG waited = GetTickCount64() - m_launchHoldSince;
+      LaunchLog::Write(L"quit", L"not begun: a launch arrived after the last window closed, and its window is on its way");
+      After(std::chrono::milliseconds(static_cast<long long>(kLaunchWindowWaitMs - waited)), [this]() noexcept { QuitWhenWindowless(); });
+      return;
     }
     Quit(WindowlessQuitReason());
   }
@@ -1962,11 +2011,22 @@ struct WindowManager {
     m_quitting = false;
     m_quitHeldUntil = 0;
     m_quitGeneration++;
+    AnnounceCancelledQuit();
+  }
+
+  void AnnounceCancelledQuit() noexcept {
     TellEngineQuitting("cancelled");
     EmitApp("quitCancelled");
+    if (NoWindowStays()) HoldQuitForLaunch();
     std::vector<OpenWindowRequest> remembered = std::move(m_opensDuringQuit);
     m_opensDuringQuit.clear();
-    for (auto const &request : remembered) Open(request, true);
+    if (remembered.empty()) return;
+    try {
+      Host::Current()->queue.DispatcherQueue().TryEnqueue([this, remembered = std::move(remembered)]() noexcept {
+        for (auto const &request : remembered) Open(request, true);
+      });
+    } catch (...) {
+    }
   }
 
   bool HoldOpenForTest(OpenWindowRequest const &request) noexcept {
@@ -2063,14 +2123,19 @@ struct WindowManager {
   std::string m_dragId;
   int m_quitGeneration{0};
   int m_answersOwed{0};
+  int m_launchesUndelivered{0};
   int m_quitWaitMs{0};
   ULONGLONG m_quitAskedAt{0};
   ULONGLONG m_quitHeldUntil{0};
-  ULONGLONG m_launchAwaitingWindow{0};
+  ULONGLONG m_launchHoldSince{0};
+  ULONGLONG m_launchHoldArmedFor{0};
+  int m_updateLaunchesToNote{0};
+  bool m_cancelledByLaunch{false};
   std::string_view m_quitReason{kUserQuit};
   std::string_view m_quitAnswer{kNoAppToAsk};
   std::vector<OpenWindowRequest> m_opensDuringQuit;
   bool m_finished{false};
+  bool m_hadWindow{false};
 };
 
 }

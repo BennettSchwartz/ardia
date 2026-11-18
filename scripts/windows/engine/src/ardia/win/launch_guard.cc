@@ -67,12 +67,15 @@ struct GuardState {
   HANDLE alive = nullptr;
   bool owns_alive = false;
   HANDLE exiting = nullptr;
+  HANDLE updating = nullptr;
   HANDLE owner = nullptr;
   std::wstring key;
   std::wstring exiting_name;
   std::wstring chromium_user_data_dir;
   std::vector<std::string> waiting_lines;
   bool settled = false;
+  bool became_browser = false;
+  bool turned_away = false;
   LaunchGuardFacts facts;
 };
 
@@ -204,7 +207,7 @@ void AppendLog(const std::string& line) {
   if (!file) {
     return;
   }
-  const std::string text = "engine 0 " + line + "\n";
+  const std::string text = LaunchLogLine(line);
   fwrite(text.data(), 1, text.size(), file);
   fclose(file);
 }
@@ -232,6 +235,10 @@ uint64_t ProcessCreated(HANDLE process) {
   }
   return (static_cast<uint64_t>(created.dwHighDateTime) << 32) |
          created.dwLowDateTime;
+}
+
+std::wstring UpdatingName(const std::wstring& key) {
+  return L"Local\\ArdiaBrowser." + key + L".updating";
 }
 
 std::wstring OwnerName(const std::wstring& key) {
@@ -461,6 +468,11 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
                         base::CommandLine* command_line) {
   GuardState& state = State();
   state.chromium_user_data_dir = Trimmed(chromium_user_data_dir);
+  state.key = ProfileKey(chromium_user_data_dir);
+  if (UpdateUnderWay()) {
+    state.facts.update_under_way = true;
+    return;
+  }
   const bool primary =
       WaitForExitingPredecessor(ProfileKey(chromium_user_data_dir),
                                 chromium_user_data_dir);
@@ -486,6 +498,9 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
           kWaitedForPreviousSwitch,
           base::NumberToString(state.facts.predecessor_wait_ms));
     }
+    if (state.facts.restarted_after_refusal) {
+      command_line->AppendSwitch(kRestartedAfterRefusalSwitch);
+    }
     WriteWaitingLines();
     return;
   }
@@ -498,7 +513,6 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
     AppendLog(line);
     return;
   }
-  PublishOwner();
   if (ProfileHeldByAnotherBrowser(chromium_user_data_dir)) {
     WriteWaitingLines();
     state.facts.profile_held_by_another = true;
@@ -565,6 +579,12 @@ bool OwnsGuard() {
   return State().owns_alive;
 }
 
+void PublishOwnerIfOwned() {
+  if (State().owns_alive) {
+    PublishOwner();
+  }
+}
+
 void LetGoOfGuard() {
   GuardState& state = State();
   if (!state.owns_alive) {
@@ -572,6 +592,59 @@ void LetGoOfGuard() {
   }
   ::ReleaseMutex(state.alive);
   state.owns_alive = false;
+}
+
+void MarkUpdating() {
+  GuardState& state = State();
+  if (state.updating || state.key.empty()) {
+    return;
+  }
+  state.updating =
+      ::CreateEventW(nullptr, TRUE, TRUE, UpdatingName(state.key).c_str());
+  if (state.updating) {
+    ::SetEvent(state.updating);
+  }
+}
+
+bool UpdateUnderWay() {
+  const GuardState& state = State();
+  if (state.key.empty()) {
+    return false;
+  }
+  HANDLE updating =
+      ::OpenEventW(SYNCHRONIZE, FALSE, UpdatingName(state.key).c_str());
+  if (!updating) {
+    return false;
+  }
+  const bool set = ::WaitForSingleObject(updating, 0) == WAIT_OBJECT_0;
+  ::CloseHandle(updating);
+  return set;
+}
+
+void NoteBecameBrowser() {
+  State().became_browser = true;
+}
+
+void NoteTurnedAway() {
+  State().turned_away = true;
+}
+
+std::string LaunchLogLine(const std::string& text) {
+  const GuardState& state = State();
+  if ((state.owns_alive || state.became_browser) && !state.turned_away) {
+    return "engine 0 " + text + "\n";
+  }
+  FILETIME now = {};
+  ::GetSystemTimeAsFileTime(&now);
+  const uint64_t now_ticks =
+      (static_cast<uint64_t>(now.dwHighDateTime) << 32) | now.dwLowDateTime;
+  const uint64_t created_ticks = ProcessCreated(::GetCurrentProcess());
+  const uint64_t since_start =
+      created_ticks && now_ticks > created_ticks
+          ? (now_ticks - created_ticks) / 10000
+          : 0;
+  return "refused " + std::to_string(since_start) + " pid=" +
+         std::to_string(::GetCurrentProcessId()) + " " + text + "\n";
 }
 
 void NoteRestartedAfterRefusal() {
