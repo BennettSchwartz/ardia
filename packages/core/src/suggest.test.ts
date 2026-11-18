@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
 import { BUILT_IN_ENGINES, engineById, parseRemoteSuggestions, parseSuggestions } from "./engines.ts";
-import { buildSuggestions, suggestionKey, type Suggestion } from "./suggest.ts";
+import { buildSuggestions, listsRoutesApart, suggestionKey, type Suggestion } from "./suggest.ts";
 import { createSuggestFetcher, type FetchLike } from "./suggestFetcher.ts";
 
 const now = Date.UTC(2026, 8, 24);
@@ -417,6 +417,15 @@ test("a #! route is a page of its own too, while an anchor is not: #grid and #to
   const saved = (typed: string) => rows(buildSuggestions(typed, { tabs: [], history: hist }, { now }).items).filter((r) => r.includes("#"));
   assert.deepEqual(saved("a.com"), ["https://a.com/#!/x", "https://a.com/#!/y"]);
   assert.deepEqual(saved("b.com"), ["https://b.com/#grid"], "an anchor never made the page a different one");
+});
+
+test("listsRoutesApart tells a list that shows several routes of one page from one that shows a single route", () => {
+  const source = { tabs: roamPins, history: roamHistory, bookmarks: roamBookmarks };
+  assert.equal(listsRoutesApart(buildSuggestions("roamresearch.com", source, { now }).items), true, "every route of the site is its own row");
+  assert.equal(listsRoutesApart(buildSuggestions("roamresearch.com", { tabs: roamPins.slice(0, 1), history: [], bookmarks: [] }, { now }).items), false, "one route is one row");
+  assert.equal(listsRoutesApart(buildSuggestions("roamresearch.com/#/app/graph2222", source, { now }).items), false, "a typed route lists only its own page");
+  const anchors = [{ url: "https://b.com/#grid", title: "Grid", favicon: null, visits: 3, lastVisit: now - 1000 }, { url: "https://b.com/#top", title: "Top", favicon: null, visits: 2, lastVisit: now - 2000 }];
+  assert.equal(listsRoutesApart(buildSuggestions("b.com", { tabs: [], history: anchors }, { now }).items), false, "an anchor is not a route");
 });
 
 test("frecency: frequent + recent beats old, and multi-word queries match words", () => {

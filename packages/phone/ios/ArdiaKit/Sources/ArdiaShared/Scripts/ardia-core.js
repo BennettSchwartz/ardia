@@ -2735,6 +2735,7 @@ __define("packages/core/src/suggest.ts", function (exports, __require) {
   __export(exports, "buildSuggestions", () => buildSuggestions);
   __export(exports, "displayUrl", () => __require("packages/core/src/pageText.ts")["displayUrl"]);
   __export(exports, "prepareSuggestions", () => __require("packages/core/src/candidatePool.ts")["prepareSuggestions"]);
+  __export(exports, "listsRoutesApart", () => __require("packages/core/src/suggestionRows.ts")["listsRoutesApart"]);
   __export(exports, "suggestionKey", () => __require("packages/core/src/suggestionRows.ts")["suggestionKey"]);
 const { findBang } = __require("packages/core/src/bangs.ts");
 const { calculate } = __require("packages/core/src/calculator.ts");
@@ -3168,12 +3169,13 @@ function tabsOver(pool      , tabs                   , currentTabId         )   
 __define("packages/core/src/suggestionRows.ts", function (exports, __require) {
   __export(exports, "pageSuggestion", () => pageSuggestion);
   __export(exports, "suggestionKey", () => suggestionKey);
+  __export(exports, "listsRoutesApart", () => listsRoutesApart);
   __export(exports, "Output", () => Output);
   __export(exports, "createRow", () => createRow);
   __export(exports, "actionRow", () => actionRow);
   __export(exports, "dedupeSuggestions", () => dedupeSuggestions);
                                                     
-const { pageKey, withRootSlash } = __require("packages/core/src/pageText.ts");
+const { documentKey, pageKey, routeOf, withRootSlash } = __require("packages/core/src/pageText.ts");
                                                                  
 
                                                                                                        
@@ -3205,6 +3207,20 @@ function suggestionKey(s            )         {
     case "provider":
       return `provider:${s.providerId}:${pageKey(s.url)}`;
   }
+}
+
+function listsRoutesApart(items                       )          {
+  const routes = new Map                ();
+  for (const s of items) {
+    if (s.kind !== "page") continue;
+    const route = routeOf(s.url);
+    if (!route) continue;
+    const document = documentKey(s.url);
+    const seen = routes.get(document);
+    if (seen === undefined) routes.set(document, route);
+    else if (seen !== route) return true;
+  }
+  return false;
 }
 
 class Output {

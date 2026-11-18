@@ -16,7 +16,7 @@ import { actionRow, createRow, dedupeSuggestions, Output, pageSuggestion, sugges
 export type { CommandAction, Suggestion, SuggestionResult, SuggestionSource, SuggestionVia, SuggestOptions } from "./suggestion.ts";
 export { displayUrl } from "./pageText.ts";
 export { prepareSuggestions } from "./candidatePool.ts";
-export { suggestionKey } from "./suggestionRows.ts";
+export { listsRoutesApart, suggestionKey } from "./suggestionRows.ts";
 
 const DAY = 86_400_000;
 
