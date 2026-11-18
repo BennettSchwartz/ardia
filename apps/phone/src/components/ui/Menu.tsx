@@ -9,7 +9,7 @@ import { Symbol } from "./Symbol";
 import type { SymbolName } from "./symbolPaths";
 import { useTheme } from "./theme";
 import { useDesign } from "./design";
-import { MaterialMenuPanel, type MaterialMenuEntry } from "./MaterialSurfaces";
+import { MaterialMenuPanel, useMaterialBack, type MaterialMenuEntry } from "./MaterialSurfaces";
 import { font, ink, menuShadow, radius, space, tabsLayout } from "./tokens";
 
 export type MenuAction = { label: string; icon?: SymbolName; systemImage?: string; destructive?: boolean; checked?: boolean; disabled?: boolean; onPress: () => void };
@@ -33,14 +33,7 @@ function MaterialMenu({ items, place, onDismiss }: Props) {
   const shown = page ? submenuPage(page) : items;
   const panel = useRef<ViewInstance>(null);
   useCoverFocus(panel);
-  useEffect(() => {
-    const back = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (page) setPage(null);
-      else onDismiss();
-      return true;
-    });
-    return () => back.remove();
-  }, [onDismiss, page]);
+  useMaterialBack(true, { onCommit: () => (page ? setPage(null) : onDismiss()) });
   const entries: MaterialMenuEntry[] = shown.map((item) => {
     if (item === "divider" || "heading" in item) return item;
     if (isSubmenu(item)) return { label: item.label, icon: item.icon, disabled: item.disabled, submenu: true, onPress: () => setPage(item) };

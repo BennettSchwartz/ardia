@@ -3,6 +3,7 @@ import { BackHandler, KeyboardAvoidingView, Pressable, StyleSheet, Text, useWind
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { interpolateColor, runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { predictiveBack, TRAY_BACK_TRAVEL } from "@ardia/phone-native";
 import { withAlpha } from "../../lib/color";
 import { clampedProgress, trayDragDismisses, trayDragOffset } from "../../lib/trayMotion";
 import { useReduceMotion } from "./contrast";
@@ -17,6 +18,28 @@ import type { SymbolName } from "./symbolPaths";
 
 const HIDE_FALLBACK_MS = 900;
 const SHEET_TOP_GAP = materialSize.topAppBar;
+
+type MaterialBackHandlers = { onProgress?: (progress: number) => void; onCancel?: () => void; onCommit: () => void };
+
+export function useMaterialBack(active: boolean, handlers: MaterialBackHandlers, fallback = true) {
+  const latest = useRef(handlers);
+  latest.current = handlers;
+  useEffect(() => {
+    if (!active) return;
+    if (predictiveBack.isNative()) {
+      const claim = predictiveBack.claim({ onProgress: (progress) => latest.current.onProgress?.(progress), onCancel: () => latest.current.onCancel?.(), onCommit: () => latest.current.onCommit() });
+      return () => claim.remove();
+    }
+    if (!fallback) return;
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      latest.current.onCommit();
+      return true;
+    });
+    return () => back.remove();
+  }, [active, fallback]);
+}
+
+export const materialSheetBackOffset = (progress: number) => Math.min(Math.max(progress, 0), 1) * TRAY_BACK_TRAVEL;
 
 export function useMaterialRipple(borderless = false) {
   const { scheme } = useMaterialTheme();
@@ -84,6 +107,19 @@ export function MaterialSheet({ open, onDismiss, onHidden, children }: SheetProp
   const sheetHeight = useSharedValue(height);
   const panel = useRef<ViewInstance>(null);
   useCoverFocus(panel);
+  useMaterialBack(
+    open,
+    {
+      onProgress: (progress) => {
+        drag.value = materialSheetBackOffset(progress);
+      },
+      onCancel: () => {
+        drag.value = materialMove(0, "standard", materialDuration.short4);
+      },
+      onCommit: onDismiss,
+    },
+    false,
+  );
   useEffect(() => {
     if (open) {
       drag.value = 0;
@@ -145,14 +181,10 @@ export function MaterialDialog({ title, message, buttons, onDismiss, children }:
   const ripple = useMaterialRipple();
   const shown = useSharedValue(0);
   const reduceMotion = useReduceMotion();
+  useMaterialBack(true, { onCommit: onDismiss });
   useEffect(() => {
     shown.value = materialMove(1, materialMotion.dialogEnter.easing, reduceMotion ? reducedMotionMs(materialDuration.short3) : materialMotion.dialogEnter.durationMs);
-    const back = BackHandler.addEventListener("hardwareBackPress", () => {
-      onDismiss();
-      return true;
-    });
-    return () => back.remove();
-  }, [onDismiss]);
+  }, []);
   const scrim = useAnimatedStyle(() => ({ opacity: shown.value }));
   const panel = useAnimatedStyle(() => ({ opacity: shown.value, transform: [{ scale: 0.9 + 0.1 * shown.value }] }));
   return (
