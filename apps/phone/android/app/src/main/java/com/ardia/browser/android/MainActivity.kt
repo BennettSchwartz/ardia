@@ -11,7 +11,6 @@ import com.ardia.phone.LookBudget
 import com.ardia.phone.PhoneSystemLinks
 import com.ardia.phone.ReactBack
 import com.ardia.phone.RestorableState
-import com.ardia.phone.StrayKeyboard
 import com.ardia.phone.SystemBars
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -31,7 +30,6 @@ class MainActivity : ReactActivity() {
         FirstScreenDrawn.watch(this)
         InsetsLab.watch(this)
         InsetHold.install(this)
-        StrayKeyboard.install(this)
         SystemBars.apply(window)
         PhoneSystemLinks.activityStarted(intent, restored = savedInstanceState != null)
     }
