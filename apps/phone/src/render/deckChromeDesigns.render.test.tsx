@@ -274,6 +274,22 @@ test("a tap on the switch shows only the Incognito tabs on Incognito glass, the 
   unmount(root);
 });
 
+test("the switch fades the shown side's cards out before the other side's cards take their place, and a second tap during the fade keeps the side", () => {
+  withPrivateTabs(2);
+  const root = deck();
+  act(() => incognitoSwitch(root)!.props.onPress());
+  expect(incognitoSwitch(root)!.props.accessibilityState).toMatchObject({ checked: true });
+  expect(hosts(root, "deckCard")).toHaveLength(9);
+  act(() => jest.advanceTimersByTime(600));
+  expect(hosts(root, "deckCard")).toHaveLength(2);
+  act(() => incognitoSwitch(root)!.props.onPress());
+  act(() => incognitoSwitch(root)!.props.onPress());
+  act(() => jest.advanceTimersByTime(600));
+  expect(useTabs.getState().incognito).toBe(true);
+  expect(hosts(root, "deckCard")).toHaveLength(2);
+  unmount(root);
+});
+
 test("with no Incognito tabs the switch shows an empty Incognito deck that says so, without the Archive link or the Archive capsule, and switching back shows every normal tab", () => {
   act(() => useArchiveCard.setState({ showing: true }));
   const root = deck();
