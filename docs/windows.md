@@ -459,6 +459,27 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   `TextInputState.focusInput`/`blurInput` and tells `ArdiaFocus.setTextInputFocused`; a page is a Chromium window on the
   same thread, so the hook reads the focused window's class (`Chrome_*`). The launch log says `ctrl+z reopens the last
   closed tab`, `ctrl+z left to the focused text field`, `ctrl+z left to the focused dialog or page` or `ctrl+z left to the focused page`.
+- A child mounted after its parent's first mount draws under the parent's background (#2197), in React Native
+  Windows 0.81.38 and upstream `main`. `ComponentView::updateProps` puts a view's background sprite at index 0 of its
+  visual, and `ViewComponentView::MountChildComponentView` inserts children at their index plus the border and outline
+  visuals but not the background. React Native mounts children inside a view only when it forms a stacking context
+  (`zIndex` with a position, `opacity` below 1, a transform, `pointerEvents="none"` and so on), so only a view with a
+  background and a stacking context is hit: a later child lands under the background, or under its previous sibling.
+  - **Remedy:** `BackedView` (`packages/expo-windows/src/views/BackedView.tsx`) draws the background on a permanent
+    first child at the padding box (an absolute child's offsets already start inside the border), with each corner's
+    radius less the borders that meet there and the lowest `zIndex`, so later children land above it. Its background
+    has to come through `style`: one set with `setNativeProps` or an animated `backgroundColor` reaches the outer view
+    and brings the fault back. Corners assume left-to-right. It's registered as `ArdiaBackedView`; nothing uses it yet.
+    A shared view would adopt it through the shell, like `ClipView`: a `packages/shell/src/backedView.ts` exporting
+    React Native's `View`, a `backedView.windows.ts` exporting `requireNativeViewManager("ArdiaBackedView")`, and an
+    export from `index.tsx`.
+  - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
+    child mounted into a `BackedView` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
+    round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
+    setup screen, #2280, and report unverified). It logs how many rounds a raw view still hides the child (5 of 5 on
+    0.81.38); when that reads 0 after an upgrade, `BackedView` can go. The same lab shows fades on mount draw and land.
+  - **Known, not fixed:** the top toolbar's address field (tabs on top) has a hover pill and mouse handlers, so the
+    reload glow and the not-secure lock mounted while it's hovered draw under the 6 to 10% pill.
 - Animations run in JavaScript on Windows (`packages/expo-windows/src/animation`). React Native for Windows' native
   animation driver adds what it animates to the view's own style instead of replacing it, turns a scale around the
   top-left corner, never reports where an animation ended, and drops scroll and gesture events, so anything but a
