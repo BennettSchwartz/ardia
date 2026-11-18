@@ -139,6 +139,7 @@ final class MenuTarget: NSObject, NSMenuItemValidation {
 
   @objc func pasteAndMatchStyle(_ sender: Any?) {
     let web = Selector(("pasteAndMatchStyle:"))
+    FocusHandoff.shared.countPasteAndMatchStyleKey(NSApp.currentEvent)
     if FocusHandoff.shared.defers(web) {
       PasteRefusal.reportMenuPaste(web, .deferred)
       return
