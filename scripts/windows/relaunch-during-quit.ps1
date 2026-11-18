@@ -626,7 +626,6 @@ function Test-TurnedAwayLaunchKeepsItsUserDataDir {
   $released = $false
   $restarts = Count-LogLines 'started again after the closing Ardia turned the last launch away'
   Set-Content -LiteralPath (Join-Path $data "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
-  Set-Content -LiteralPath (Join-Path $data "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
   Remove-Item -Path Env:ARDIA_DATA_DIR -ErrorAction SilentlyContinue
   Remove-Item -Path Env:ARDIA_REMOTE_DEBUGGING_PORT -ErrorAction SilentlyContinue
   try {
@@ -702,7 +701,6 @@ function Test-LaunchRefusedForGood {
 function New-QuitData {
   New-Item -ItemType Directory -Force -Path $script:QuitData | Out-Null
   Set-Content -LiteralPath (Join-Path $script:QuitData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
-  Set-Content -LiteralPath (Join-Path $script:QuitData "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
 }
 
 function Stop-QuitLeftovers {
@@ -767,7 +765,7 @@ function Test-LaunchesDuringQuit {
         Save-QuitDumps $case
       }
     }
-    Note "launches during a quit: $($cases.Count) cases in $([int]$watch.Elapsed.TotalSeconds) s, $($script:QuitFailures.Count) failed"
+    Note "launches during a quit (Little Ardia on, the default): $($cases.Count) cases in $([int]$watch.Elapsed.TotalSeconds) s, $($script:QuitFailures.Count) failed"
   } finally {
     Keep-QuitLog "final"
     [QuitPages]::Stop()
