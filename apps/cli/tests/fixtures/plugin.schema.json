@@ -147,9 +147,10 @@
         "background": {
           "enum": [
             "card",
-            "window"
+            "newTab",
+            "glass"
           ],
-          "description": "What the page sits on: the tab card (default), or the window's own tinted glass"
+          "description": "What the page sits on: the tab card (default), the surface New Tab sits on, or the card filled with Ardia's panel glass"
         }
       },
       "additionalProperties": false,
@@ -353,6 +354,16 @@
               "type": "string",
               "pattern": "^[^#\\s]{0,512}$",
               "description": "The page path Enter opens, with ?q=<text> added; {id} becomes a new UUID each time"
+            },
+            "keep": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "openTab",
+                  "dictate"
+                ]
+              },
+              "description": "The bar's footer items this mode keeps (default: dictate)"
             }
           },
           "additionalProperties": false,

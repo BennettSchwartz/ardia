@@ -39,6 +39,7 @@ import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { usePreviewSelection } from "./usePreviewSelection";
 import { useNewTabMode } from "./useNewTabMode";
 import { ModeSwitch } from "./ModeSwitch";
+import { CrossFade } from "./CrossFade";
 
 export { PANEL_TEXT_LEFT } from "./tokens";
 
@@ -284,7 +285,9 @@ export function Omnibox({
     !mode && current && (typed || scope) && current.kind !== "search" && !(scope?.kind === "provider" && current.kind === "provider") ? (
       <SuggestionIcon suggestion={current} color={theme.textPrimary} />
     ) : (
-      <Symbol name={mode?.icon ?? (incognito ? INCOGNITO_ICON : "magnifyingglass")} size={BAR.leadingIcon} weight="medium" color={hero ? theme.textSecondary : theme.textPrimary} style={{ width: BAR.iconSlot, height: BAR.iconSlot }} />
+      <CrossFade swapKey={mode?.plugin ?? ""}>
+        <Symbol name={mode?.icon ?? (incognito ? INCOGNITO_ICON : "magnifyingglass")} size={BAR.leadingIcon} weight="medium" color={hero ? theme.textSecondary : theme.textPrimary} style={{ width: BAR.iconSlot, height: BAR.iconSlot }} />
+      </CrossFade>
     );
 
   const focused = useRef(false);
@@ -382,8 +385,8 @@ export function Omnibox({
         <BottomRow
           hero={hero}
           modeSwitch={newTabMode.modes.length ? <ModeSwitch modes={newTabMode.modes} chosen={mode?.plugin ?? null} onChange={newTabMode.switchTo} /> : null}
-          addChip={mode ? null : <AddChip onPress={barActions.openTabOrFile} />}
-          onDictate={dictationAvailable() ? barActions.dictate : undefined}
+          addChip={!mode || mode.keep.includes("openTab") ? <AddChip onPress={barActions.openTabOrFile} /> : null}
+          onDictate={dictationAvailable() && (!mode || mode.keep.includes("dictate")) ? barActions.dictate : undefined}
           label={mode ? mode.title : destinationLabel(current)}
           enabled={!hero || !!typed.trim() || previewing}
           onGo={barActions.choose}

@@ -41,7 +41,7 @@ test("the consent sheet names the New Tab mode and button", async () => {
 test("the New Tab box starts in the mode its choice row picks, and Tab cycles Search and the modes", async () => {
   await turnedOn();
   const modes = pluginNewTabModes(P());
-  assert.deepEqual(modes, [{ plugin: "example", title: "Hello", placeholder: "Say hello to the example…", icon: "sparkles", startsOn: false }]);
+  assert.deepEqual(modes, [{ plugin: "example", title: "Hello", placeholder: "Say hello to the example…", icon: "sparkles", startsOn: false, keep: ["dictate"] }]);
   assert.equal(startingMode(modes), null, "mood is calm, so New Tab starts in Search");
   lifecycle.setPluginValue("example", "mood", "busy");
   const busy = pluginNewTabModes(P());

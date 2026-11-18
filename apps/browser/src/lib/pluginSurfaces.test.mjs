@@ -32,7 +32,7 @@ test("newTab adds a mode, a button or both, and needs a page", () => {
   const { manifest, problems } = read(FIXTURE);
   assert.deepEqual(problems, []);
   assert.deepEqual(manifest.newTab, {
-    mode: { title: "Hello", placeholder: "Say hello to the example…", defaultRow: "mood", defaultValue: "busy", path: "chats/{id}" },
+    mode: { title: "Hello", placeholder: "Say hello to the example…", defaultRow: "mood", defaultValue: "busy", path: "chats/{id}", keep: ["dictate"] },
     button: { title: "Example History", icon: "clock.arrow.circlepath", path: "history" },
   });
   assert.ok(contributionsOf(manifest).includes("newTab"));
@@ -40,6 +40,13 @@ test("newTab adds a mode, a button or both, and needs a page", () => {
   const { page: _page, commands, ...pageless } = FIXTURE;
   assert.ok(read({ ...pageless, commands: commands.filter((c) => !c.open) }).problems.includes("plugin.json: newTab needs a page"));
   assert.deepEqual(read({ ...FIXTURE, newTab: {} }).problems, ["plugin.json: newTab needs a mode, a button or both"]);
+});
+
+test("a mode keeps only the footer items it names, the mic by default", () => {
+  const withKeep = (keep) => read({ ...FIXTURE, newTab: { ...FIXTURE.newTab, mode: { ...FIXTURE.newTab.mode, keep } } });
+  assert.deepEqual(withKeep(["openTab", "dictate", "openTab"]).manifest.newTab.mode.keep, ["openTab", "dictate"]);
+  assert.deepEqual(withKeep([]).manifest.newTab.mode.keep, []);
+  assert.deepEqual(withKeep(["share"]).problems, ["plugin.json: newTab.mode.keep lists the bar's footer items the mode keeps: openTab, dictate"]);
 });
 
 test("a mode's default names a choice row and one of its values; paths stay inside the page", () => {

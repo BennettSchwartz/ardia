@@ -151,9 +151,6 @@ export const MODE_SWITCH = {
   segmentHeight: 26,
   segmentRadius: capsule(26),
   segmentPad: space.ml,
-  keyHeight: 18,
-  keyMinWidth: 28,
-  keyPad: space.xs,
-  keyRadius: 5,
-  keyBefore: space.xs,
+  keyScale: 0.75,
+  hintGap: space.s,
 } as const;

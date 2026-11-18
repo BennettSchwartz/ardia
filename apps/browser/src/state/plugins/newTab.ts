@@ -1,5 +1,5 @@
 import { fixupUrl } from "@ardia/core";
-import { modePagePath, modeStartsOn, pagePathOf } from "../../lib/pluginSurfaces";
+import { modePagePath, modeStartsOn, pagePathOf, type NewTabFooterItem } from "../../lib/pluginSurfaces";
 import { randomUuid } from "../../platform/secureRandom";
 import { notePlugin } from "../telemetry/pluginCounts";
 import { openPluginPage } from "./pages";
@@ -9,7 +9,7 @@ import { activeTabId, viewTabIds } from "../browser/model";
 import { activeManifest, activeNames, currentPlugins, usePlugins, type PluginsStore } from "./store";
 import { valuesOf } from "./values";
 
-export type NewTabModeOption = { plugin: string; title: string; placeholder: string; icon: string; startsOn: boolean };
+export type NewTabModeOption = { plugin: string; title: string; placeholder: string; icon: string; startsOn: boolean; keep: readonly NewTabFooterItem[] };
 export type NewTabButtonOption = { plugin: string; title: string; icon: string };
 
 type Plugins = Pick<PluginsStore, "listings" | "records" | "order">;
@@ -18,7 +18,7 @@ export function pluginNewTabModes(s: Plugins): NewTabModeOption[] {
   return activeNames(s).flatMap((plugin) => {
     const m = activeManifest(s, plugin)!;
     const mode = m.newTab?.mode;
-    return mode ? [{ plugin, title: mode.title, placeholder: mode.placeholder, icon: m.page?.icon ?? "puzzlepiece", startsOn: modeStartsOn(mode, valuesOf(s, plugin)) }] : [];
+    return mode ? [{ plugin, title: mode.title, placeholder: mode.placeholder, icon: m.page?.icon ?? "puzzlepiece", startsOn: modeStartsOn(mode, valuesOf(s, plugin)), keep: mode.keep }] : [];
   });
 }
 

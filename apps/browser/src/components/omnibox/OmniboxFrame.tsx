@@ -1,7 +1,7 @@
 import type { SearchScope } from "@ardia/core";
 import { memo, type ReactNode, type RefObject } from "react";
-import { View } from "react-native";
-import { Button, capsule, ContextMenuArea, ink, useHover, useTheme } from "../ui";
+import { Animated, View } from "react-native";
+import { Button, capsule, ContextMenuArea, curve, duration, ink, useHover, usePresence, useTheme } from "../ui";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { GoButton } from "./GoButton";
 import { ScopeChip } from "./ScopeChip";
@@ -78,6 +78,14 @@ export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, 
   );
 }
 
+const SLOT_MOTION = { show: { duration: duration.base, easing: curve.enter }, hide: { duration: duration.fast, easing: curve.exit } } as const;
+
+function FadingSlot({ children }: { children: ReactNode }) {
+  const { shown, appear } = usePresence(children ?? null, SLOT_MOTION);
+  if (!shown) return null;
+  return <Animated.View style={{ opacity: appear, transform: [{ scale: appear.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) }] }}>{shown}</Animated.View>;
+}
+
 export function BottomRow({ hero, modeSwitch, addChip, onDictate, label, enabled, onGo }: { hero: boolean; modeSwitch?: ReactNode; addChip: ReactNode; onDictate?: () => void; label: string; enabled: boolean; onGo(): void }) {
   return (
     <View
@@ -91,9 +99,9 @@ export function BottomRow({ hero, modeSwitch, addChip, onDictate, label, enabled
       }}
     >
       {modeSwitch}
-      {addChip}
+      <FadingSlot>{addChip}</FadingSlot>
       <View style={{ flex: 1 }} />
-      {onDictate && <DictateButton onPress={onDictate} />}
+      <FadingSlot>{onDictate ? <DictateButton onPress={onDictate} /> : null}</FadingSlot>
       <GoButton label={label} enabled={enabled} onPress={onGo} />
     </View>
   );

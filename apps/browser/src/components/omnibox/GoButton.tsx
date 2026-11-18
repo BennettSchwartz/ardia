@@ -5,6 +5,7 @@ import { Symbol, Text, useHover, useTheme } from "../ui";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { buttonMotion, usePressScaleMotion } from "../ui/motion";
 import { BAR_TYPE, GO_BUTTON } from "./tokens";
+import { CrossFade } from "./CrossFade";
 
 export function destinationLabel(s: Suggestion | undefined): string {
   if (s?.kind === "search") return s.engine;
@@ -38,9 +39,11 @@ export const GoButton = memo(function GoButton({ label, enabled, onPress }: { la
           }, scaleStyle]}
         >
           {glass ? <GlassFill radius={GO_BUTTON.radius} state={!enabled ? "rest" : hovered ? "pressed" : "lit"} /> : null}
-          <Text lines={1} weight="semibold" tone={tone} style={BAR_TYPE.goLabel}>
-            {label}
-          </Text>
+          <CrossFade swapKey={label}>
+            <Text lines={1} weight="semibold" tone={tone} style={BAR_TYPE.goLabel}>
+              {label}
+            </Text>
+          </CrossFade>
           <Symbol
             name="return"
             size={GO_BUTTON.glyph}

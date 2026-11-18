@@ -11,7 +11,10 @@ const NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const UNSAFE_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/;
 
 export type ToolbarSpec = { title: string; icon: string; command: string; shortcut: string | null };
-export type NewTabMode = { title: string; placeholder: string; defaultRow: string | null; defaultValue: string | null; path: string };
+export const NEW_TAB_FOOTER_ITEMS = ["openTab", "dictate"] as const;
+export type NewTabFooterItem = (typeof NEW_TAB_FOOTER_ITEMS)[number];
+export const DEFAULT_MODE_KEEPS: readonly NewTabFooterItem[] = ["dictate"];
+export type NewTabMode = { title: string; placeholder: string; defaultRow: string | null; defaultValue: string | null; path: string; keep: readonly NewTabFooterItem[] };
 export type NewTabButton = { title: string; icon: string; path: string };
 export type NewTabSpec = { mode: NewTabMode | null; button: NewTabButton | null };
 
@@ -62,14 +65,15 @@ export function toolbarOf(problems: string[], value: unknown): ToolbarSpec | nul
 
 function modeOf(problems: string[], value: unknown): NewTabMode | null {
   if (!isFields(value)) return problems.push('newTab.mode must be an object like {"title", "placeholder", "path"}'), null;
-  keys(problems, "newTab.mode", value, ["title", "placeholder", "defaultRow", "defaultValue", "path"]);
+  keys(problems, "newTab.mode", value, ["title", "placeholder", "defaultRow", "defaultValue", "path", "keep"]);
   const title = text(problems, "newTab.mode.title", value.title, SURFACE_LIMITS.modeTitle);
   const placeholder = text(problems, "newTab.mode.placeholder", value.placeholder, SURFACE_LIMITS.placeholder);
   const path = pathTemplate(problems, "newTab.mode.path", value.path, false);
   if ((value.defaultRow === undefined) !== (value.defaultValue === undefined)) problems.push("newTab.mode: defaultRow and defaultValue go together");
   const defaultRow = value.defaultRow === undefined ? null : typeof value.defaultRow === "string" && KEY.test(value.defaultRow) ? value.defaultRow : (problems.push("newTab.mode.defaultRow must be a row's key"), null);
   const defaultValue = value.defaultValue === undefined ? null : typeof value.defaultValue === "string" && KEY.test(value.defaultValue) ? value.defaultValue : (problems.push("newTab.mode.defaultValue must be one of that row's values"), null);
-  return title && placeholder && path !== null ? { title, placeholder, defaultRow, defaultValue, path } : null;
+  const keep = value.keep === undefined ? DEFAULT_MODE_KEEPS : Array.isArray(value.keep) && value.keep.length <= 8 && value.keep.every((k) => (NEW_TAB_FOOTER_ITEMS as readonly unknown[]).includes(k)) ? [...new Set(value.keep as NewTabFooterItem[])] : (problems.push(`newTab.mode.keep lists the bar's footer items the mode keeps: ${NEW_TAB_FOOTER_ITEMS.join(", ")}`), null);
+  return title && placeholder && path !== null && keep ? { title, placeholder, defaultRow, defaultValue, path, keep } : null;
 }
 
 function buttonOf(problems: string[], value: unknown): NewTabButton | null {
@@ -139,6 +143,7 @@ export const SURFACE_SCHEMAS: Record<"toolbar" | "newTab", JsonSchema> = {
           defaultRow: { type: "string", pattern: KEY.source, description: "A choice row whose value picks the mode New Tab starts in" },
           defaultValue: { type: "string", pattern: KEY.source, description: "The row's value that starts New Tab in this mode" },
           path: pathSchema("The page path Enter opens, with ?q=<text> added; {id} becomes a new UUID each time"),
+          keep: { type: "array", items: { enum: [...NEW_TAB_FOOTER_ITEMS] }, description: "The bar's footer items this mode keeps (default: dictate)" },
         },
         ["title", "placeholder", "path"],
       ),
