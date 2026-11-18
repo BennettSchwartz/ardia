@@ -174,7 +174,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         val here = IntArray(2).also(::getLocationInWindow)
         val origin = IntArray(2).also(content::getLocationInWindow)
         val bounds = MaterialMenuRules.anchor(here[0] - origin[0], here[1] - origin[1], width, height, resources.displayMetrics.density, pressX, pressY)
-        val colors = MaterialScheme.colorScheme(context, NativeMenuRules.isDark(context, dark), scheme)
+        val colors = MaterialScheme.colorScheme(appContext.currentActivity ?: context, NativeMenuRules.isDark(context, dark), scheme)
         val rows = NativeMenuRules.rows(items)
         val open = mutableStateOf(true)
         val view = ComposeView(context).apply {

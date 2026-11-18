@@ -207,27 +207,56 @@ internal object MaterialFallback {
     )
 }
 
+internal class SchemeChanges(private val current: () -> Map<String, Map<String, String>>?, private val send: (String) -> Unit) {
+    private var last: Map<String, Map<String, String>>? = null
+    private var night: Int? = null
+
+    fun read(): Map<String, Map<String, String>>? = current().also { last = it }
+
+    fun check(reason: String) {
+        val now = current()
+        if (now == last) return
+        last = now
+        send(reason)
+    }
+
+    fun configuration(nightNow: Int) {
+        val before = night
+        night = nightNow
+        if (before != null && before != nightNow) {
+            last = current()
+            send("night")
+            return
+        }
+        check("wallpaper")
+    }
+}
+
 class MaterialModule : Module() {
     private val main = Handler(Looper.getMainLooper())
     private var wallpaperListener: WallpaperManager.OnColorsChangedListener? = null
     private var configurationListener: ComponentCallbacks? = null
+    private val changes = SchemeChanges({ freshContext()?.let(MaterialScheme::of) }) { reason -> runCatching { sendEvent(CHANGE, mapOf("reason" to reason)) } }
 
     private fun context(): Context? = appContext.reactContext?.applicationContext
 
+    private fun freshContext(): Context? = appContext.currentActivity ?: context()
+
     private fun startWatching() {
         val context = context() ?: return
+        changes.read()
         if (MaterialScheme.dynamic && wallpaperListener == null) {
-            val listener = WallpaperManager.OnColorsChangedListener { _: WallpaperColors?, _: Int -> sendEvent(CHANGE, mapOf("reason" to "wallpaper")) }
+            val listener = WallpaperManager.OnColorsChangedListener { _: WallpaperColors?, _: Int ->
+                changes.check("wallpaper")
+                main.postDelayed({ changes.check("wallpaper") }, PALETTE_SETTLE_MS)
+            }
             runCatching { WallpaperManager.getInstance(context).addOnColorsChangedListener(listener, main) }.onSuccess { wallpaperListener = listener }
         }
         if (configurationListener == null) {
-            var night = MaterialScheme.nightOf(context.resources.configuration)
+            changes.configuration(MaterialScheme.nightOf(context.resources.configuration))
             val listener = object : ComponentCallbacks {
                 override fun onConfigurationChanged(configuration: Configuration) {
-                    val next = MaterialScheme.nightOf(configuration)
-                    if (next == night) return
-                    night = next
-                    sendEvent(CHANGE, mapOf("reason" to "night"))
+                    main.post { changes.configuration(MaterialScheme.nightOf(configuration)) }
                 }
 
                 @Deprecated("Deprecated in Java")
@@ -240,6 +269,7 @@ class MaterialModule : Module() {
 
     private fun stopWatching() {
         val context = context() ?: return
+        main.removeCallbacksAndMessages(null)
         wallpaperListener?.let { listener -> runCatching { WallpaperManager.getInstance(context).removeOnColorsChangedListener(listener) } }
         wallpaperListener = null
         configurationListener?.let(context::unregisterComponentCallbacks)
@@ -253,7 +283,7 @@ class MaterialModule : Module() {
 
         Events(CHANGE)
 
-        Function("schemes") { context()?.let(MaterialScheme::of) }
+        Function("schemes") { changes.read() }
 
         OnStartObserving { main.post { startWatching() } }
 
@@ -264,5 +294,6 @@ class MaterialModule : Module() {
 
     private companion object {
         const val CHANGE = "onSchemeChange"
+        const val PALETTE_SETTLE_MS = 800L
     }
 }
