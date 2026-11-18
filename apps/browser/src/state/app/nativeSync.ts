@@ -32,6 +32,7 @@ import { startExtensionsBridge } from "../extensions/bridge";
 import { useExtensions } from "../extensions/actions";
 import { useReader } from "../reader/reader";
 import { answerQuitAfterSaves, isQuitting, setQuitting } from "./quit";
+import { isTestInstance } from "../../platform/launchConfig";
 import { liveReachesMenu, menuInputsChanged, trackedMenuState, type MenuReads } from "../commands/menuState";
 import { onLiveChange } from "../tabs/tabLive";
 import { usePages } from "../tabs/pageState";
@@ -91,6 +92,7 @@ export function startNativeSync() {
     if (e.type === "littleArdiaGlobalShortcut") noteLittleArdiaAppHandoff("globalShortcut");
     if (e.type === "quitWarningSuppressed") s.updateSettings({ warnBeforeQuitting: false });
     if (e.type === "willQuit") {
+      if (isTestInstance()) console.info("[ardia windows] test: willQuit arrived");
       const flushing = Date.now();
       setQuitting(true);
       finishAnimatedCloses();

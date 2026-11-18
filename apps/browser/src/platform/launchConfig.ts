@@ -23,6 +23,10 @@ export const introStartDelayMs = (): number => {
 
 export const syncTurnOnRequested = (): boolean => testValue("syncTurnOn") === "1";
 
+export const syncProbeStep = (): string | null => testValue("syncProbe");
+
+export const stageProfileSyncFolder = (): string | null => testValue("stageProfile");
+
 export const devTestValue = (key: string): string | null => (typeof __DEV__ !== "undefined" && __DEV__ ? testValue(key) : null);
 
 export const reloadLaunchConfigForTests = () => void (config = null);
