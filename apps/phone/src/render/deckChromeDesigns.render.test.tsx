@@ -246,6 +246,7 @@ test("the bar's left button is an Incognito switch: Ardia's eyes glyph on 48-poi
   expect(toggle.props.accessibilityHint).toBe("Shows your Incognito tabs.");
   expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyes")).toHaveLength(1);
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true)).toHaveLength(0);
+  expect(host(root, "deckBarIncognitoOn")).toBeUndefined();
   unmount(root);
   const android = deck(designFor("android"));
   expect(incognitoSwitch(android)).toBeUndefined();
@@ -264,6 +265,7 @@ test("a tap on the switch shows only the Incognito tabs on Incognito glass, the 
   expect(incognitoSwitch(root)!.props.accessibilityState).toMatchObject({ checked: true });
   expect(incognitoSwitch(root)!.props.accessibilityHint).toBe("Shows your tabs.");
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true).length).toBeGreaterThan(0);
+  expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 38, height: 38, borderRadius: 19 });
   expect(pressable(root, "New Incognito Tab")).toBeDefined();
   expect(counted.mock.calls.filter(([name]) => name === "deck_incognito_switches")).toHaveLength(1);
   act(() => incognitoSwitch(root)!.props.onPress());
@@ -271,6 +273,22 @@ test("a tap on the switch shows only the Incognito tabs on Incognito glass, the 
   expect(useTabs.getState().incognito).toBe(false);
   expect(hosts(root, "deckCard")).toHaveLength(9);
   expect(counted.mock.calls.filter(([name]) => name === "deck_incognito_switches")).toHaveLength(1);
+  unmount(root);
+});
+
+test("the switch fades the shown side's cards out before the other side's cards take their place, and a second tap during the fade keeps the side", () => {
+  withPrivateTabs(2);
+  const root = deck();
+  act(() => incognitoSwitch(root)!.props.onPress());
+  expect(incognitoSwitch(root)!.props.accessibilityState).toMatchObject({ checked: true });
+  expect(hosts(root, "deckCard")).toHaveLength(9);
+  act(() => jest.advanceTimersByTime(600));
+  expect(hosts(root, "deckCard")).toHaveLength(2);
+  act(() => incognitoSwitch(root)!.props.onPress());
+  act(() => incognitoSwitch(root)!.props.onPress());
+  act(() => jest.advanceTimersByTime(600));
+  expect(useTabs.getState().incognito).toBe(true);
+  expect(hosts(root, "deckCard")).toHaveLength(2);
   unmount(root);
 });
 
