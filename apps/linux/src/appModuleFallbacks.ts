@@ -89,6 +89,9 @@ const MODULE_FALLBACKS: Record<string, Record<string, Fallback>> = {
     revealLog: now(undefined),
     revealFolder: now(undefined),
     devSnapshotPage: answer(false),
+    releasePage: now(undefined),
+    releasePluginPages: now(undefined),
+    goPage: answer(false),
   },
   ArdiaAutomation: { start: answer({ state: "off", generation: 0, path: "", reason: "the control socket is unavailable on Linux" }), stop: answer(undefined) },
   ArdiaSystemSignals: {
