@@ -130,6 +130,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Keep new-tab links inside a Little Ardia window, zoom with Ctrl and the mouse wheel, offer to save and fill passwords | Does nothing (the engine has no call for them yet); hidden | #1783, #1425 |
 | Warn before quitting | Works (#1796's build 1f4d97db1, run 43631924720): with it on, closing the last window (close button, Alt+F4, Ctrl+Shift+W, a lone Little Ardia's Ctrl+W; Ctrl+W on a window's last tab follows the same rule) asks first with the Mac's words; Cancel keeps the app running, Quit exits, Don't ask again turns it off; a hidden instance never asks | #1782, #1803 |
 | Quitting with a download running | Asks first, like the Mac. Seen in the tour (run 44238038941): Alt+F4 asks, Cancel keeps the window, Quit ends the app; Ctrl+W on the only tab asks "Close 1 tab?", then the downloads question, and Cancel keeps the window and the tab; no download, no question. The update's install sentence is unit-tested only | #2488 |
+| A download's flight to the Downloads button | Works, from beside the page: the Mac's icon starts in the middle of the page, under the page's window here, so on Windows it starts in the sidebar at the page's edge (or, with no sidebar, above the page's middle in the top band) and flies the rest of the Mac's path over the app. It starts once its icon has drawn (at most 300 ms after the download comes), since a view animating from the moment it mounts loses its first frames here. The tour's `download-flight` part captures both starts | #2603 |
 | Widevine | Not offered (says so) | |
 | Copy naming the Mac | Works: the walk found three more (a ⌘T, "History › Recently Closed", "File › Close All Tabs"), fixed in #1668's PR | #1522, #1668 |
 
@@ -642,6 +643,13 @@ is plain Chromium.
   a hole there, with the surface's corners. A surface inside a `ClipView` (the sidebar's and the tab strip's profile
   pages, which sit side by side and clip to one) reports only the part its clips show, so the next profile's rows,
   parked beside the sidebar, cut nothing in the page (#1673). A translucent surface shows the card behind it in the hole, not the page.
+  A download's flight to the Downloads button cuts no hole: a hole that moves with the icon would show the card
+  through a rectangle sliding across the page. It starts beside the page instead (`magnetPath`, from
+  `platform/downloadFlight.windows.ts`): in the sidebar at the page's edge, or in the top band when there is no
+  sidebar, and flies over the app. Its clock starts when its icon has drawn (the image's `onLoad`, at most 300 ms
+  after the download comes): started at once, as on the Mac, its first 150 ms or so never reached the screen in CI,
+  the mount lag the fade lab measures. `ARDIA_TEST downloadFlightFromPage=1` brings back the Mac's start in the page's
+  middle, which the tour's `download-flight` part captures beside the fixed one (#2603).
   A `Surface` that only draws a gradient (`GradientFill`, the address field's load glow) reports no rectangle: it always
   sits inside a toolbar, sidebar or Little Ardia plate that does, and `windowsGradientFill.test.mjs` pins its callers.
   Gradients draw through `ArdiaMaterialGradient` (`GradientView.h`): `fillColors` at `fillStops` top to bottom, masked
