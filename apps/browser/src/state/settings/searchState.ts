@@ -81,7 +81,7 @@ export function previewSetting({ id, pane, section }: Target) {
 function showWithoutHistory(pane: SettingsPane) {
   const nav = useSettingsNav.getState();
   const profileId = settingsProfileFor(pane, nav);
-  if (nav.pane !== pane || nav.profileId !== profileId || nav.detail) useSettingsNav.setState({ pane, profileId, detail: null, forward: [] });
+  if (nav.pane !== pane || nav.profileId !== profileId || nav.detail) useSettingsNav.setState({ pane, profileId, detail: null, scroll: 0, forward: [] });
 }
 
 export const flashSetting = (id: string) => useSettingsSearch.setState({ reveal: null, flash: { id, at: Date.now() } });
