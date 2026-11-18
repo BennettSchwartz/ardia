@@ -5,7 +5,9 @@ import { answerRequest, dismissPress, pressAction } from "../../state/page/actio
 import { usePageRequest, usePress } from "../../state/page/hooks";
 import { confirmAnswer, pressHeading, pressMenuGroups, PRESS_TITLES, requestPlan, type PressAction, type Request } from "../../state/page/pagePrompts";
 import { presentSystemRequest } from "./systemRequest";
-import { ActionSheet, Dialog, dialogLayout, font, Menu, radius, space, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { ActionSheet, Dialog, dialogLayout, font, Menu, menuLook, pointPlacer, radius, space, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { currentTabs } from "../../state/tabs/store";
+import { findTab } from "../../state/tabs/tabsState";
 
 export function PageRequestHost({ tabId }: { tabId: string }) {
   const request = usePageRequest(tabId);
@@ -81,13 +83,11 @@ export function PressMenu({ width, height }: { width: number; height: number }) 
     items.push("divider");
     for (const action of group) items.push({ label: PRESS_TITLES[action], icon: PRESS_ICONS[action], onPress: () => pressAction(press, action) });
   }
-  const left = Math.min(Math.max(press.x, space.s), width - PRESS_MENU_WIDTH - space.s);
-  const top = Math.min(Math.max(press.y + insets.top, insets.top + space.s), height - PRESS_MENU_HEIGHT);
-  return <Menu items={items} place={{ left, top, width: PRESS_MENU_WIDTH }} onDismiss={dismissPress} />;
+  const placer = pointPlacer({ x: press.x, y: press.y + insets.top }, { width, height }, insets, menuLook.width);
+  return <Menu items={items} placer={placer} dimmed privately={pressedPrivately(press.tabId)} onDismiss={dismissPress} />;
 }
 
-const PRESS_MENU_WIDTH = 280;
-const PRESS_MENU_HEIGHT = 380;
+const pressedPrivately = (tabId: string) => findTab(currentTabs(), tabId)?.isPrivate === true;
 
 const styles = StyleSheet.create({
   field: { minHeight: dialogLayout.fieldHeight, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.row, paddingHorizontal: space.m },

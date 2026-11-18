@@ -4,7 +4,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { appVersion, clearBrowsingData, openFromSettings, websiteDataClearsByTime } from "../../state/settings/actions";
 import { popSettings, pushSettings } from "../../state/settings/nav";
 import { CLEAR_RANGES, clearChoice, clearFooter, clearIsEmpty, clearMessage, clearTitle, type ClearRange } from "../../state/settings/settingsRules";
-import { AppIcon, appIconLayout, ConfirmDialog, font, settingsLayout, space, Symbol, useTheme, type Confirmation, type SymbolName } from "../ui";
+import { AppIcon, appIconLayout, ConfirmSheet, font, settingsLayout, space, Symbol, useTheme, type Confirmation, type SymbolName } from "../ui";
 import { copy } from "../../lib/platformCopy";
 import { libraryCredits } from "../../state/settings/libraryCredits";
 import { ButtonRow, Divider, Group, NavRow, PickerRow, SettingsPage, ToggleRow, ValueRow } from "./SettingsKit";
@@ -46,7 +46,7 @@ export function ClearDataPage() {
           onPress={() => setConfirmation({ title: clearTitle(choice, range, byTime), message: clearMessage(choice), action: "Clear Data", run: () => void clear() })}
         />
       </Group>
-      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
+      {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </SettingsPage>
   );
 }

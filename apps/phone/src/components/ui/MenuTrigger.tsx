@@ -1,14 +1,16 @@
 import { actionSheet, ContextMenuView, nativeMenusAvailable, settingsUI, type MenuItem as NativeMenuItem } from "@ardia/phone-native";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
+import { findNodeHandle, Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
 import type { Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
-import { returnAccessibilityFocus } from "./coverFocus";
+import { focusForScreenReader } from "./coverFocus";
+import { menuMotion } from "./motion";
+import { useOverlayLayers } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
 
-export type MenuHandlers = { onPress?: () => void; onLongPress?: (event?: GestureResponderEvent) => void };
+export type MenuHandlers = { onPress?: (event?: GestureResponderEvent) => void; onLongPress?: (event?: GestureResponderEvent) => void };
 
 type Props = {
   items: MenuItem[];
@@ -18,6 +20,7 @@ type Props = {
   onClose?: () => void;
   haptic?: () => void;
   disabled?: boolean;
+  privately?: boolean;
   place?: ViewStyle;
   dark?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -96,8 +99,10 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
   return touch && typeof touch.pageX === "number" && typeof touch.pageY === "number" ? { x: touch.pageX, y: touch.pageY } : null;
 };
 
-function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, style, testID, children }: Props) {
+function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
+  const opener = useRef<unknown>(null);
+  const layers = useOverlayLayers();
   const frost = useMenuFrost();
   const [opened, setOpened] = useState<{ at: Point | null } | null>(null);
   useEffect(() => {
@@ -109,6 +114,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
     (event?: GestureResponderEvent) => {
       if (disabled) return;
       haptic?.();
+      opener.current = event?.currentTarget ?? null;
       setOpened({ at: trigger === "longPress" ? pressPoint(event) : null });
       onOpen?.();
     },
@@ -117,13 +123,13 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   const dismiss = useCallback(() => {
     setOpened(null);
     onClose?.();
-    returnAccessibilityFocus(anchor);
+    setTimeout(() => focusForScreenReader(() => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0], () => layers() === 0), menuMotion.heldClose + menuMotion.contentFade);
   }, [onClose]);
   const held = trigger === "longPress";
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
       {children(held ? { onLongPress: open } : { onPress: open })}
-      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} frost={frost} onDismiss={dismiss} /> : null}
+      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
     </View>
   );
 }

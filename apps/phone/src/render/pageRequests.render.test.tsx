@@ -100,3 +100,20 @@ onAndroid("on Android a file input that offers the camera asks in the drawn acti
   expect(answered).toHaveBeenLastCalledWith("p1", expect.objectContaining({ id: "r1" }), { type: "dismiss" });
   unmount(root);
 });
+
+test("a page link's long press opens the drawn menu at the finger, dimmed, inside the safe screen, with its origin at the finger", () => {
+  const { PressMenu } = require("../components/browsing/PageRequests") as typeof import("../components/browsing/PageRequests");
+  const { Menu } = require("../components/ui") as typeof import("../components/ui");
+  const { usePageUi } = require("../state/page/store") as typeof import("../state/page/store");
+  act(() => usePageUi.setState({ press: { tabId: "p1", target: { kind: "link", url: "https://example.com/a", text: "A" } as never, x: 360, y: 790 } }));
+  const root = renderSurface(<PressMenu width={393} height={873} />);
+  const menu = root.root.findAll((node) => node.type === Menu)[0]!;
+  expect(menu.props.dimmed).toBe(true);
+  const placed = menu.props.placer(300);
+  expect(placed.origin).toBe("right bottom");
+  expect(placed.place.left + 250).toBeLessThanOrEqual(393 - 8);
+  expect(placed.place.top + placed.maxHeight).toBeLessThanOrEqual(873 - 24 - 8);
+  expect(placed.place.top).toBeGreaterThanOrEqual(40 + 8);
+  act(() => usePageUi.setState({ press: null }));
+  unmount(root);
+});

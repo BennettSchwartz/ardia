@@ -17,11 +17,14 @@ export function useCoverFocus(target: RefObject<ViewInstance | null>) {
   }, [target]);
 }
 
-export function returnAccessibilityFocus(target: RefObject<ViewInstance | null>) {
+type Focusable = Parameters<typeof findNodeHandle>[0];
+
+export function focusForScreenReader(target: () => Focusable | null | undefined, still: () => boolean = () => true) {
   void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
     if (!on) return;
     requestAnimationFrame(() => {
-      const handle = target.current ? findNodeHandle(target.current) : null;
+      const view = target();
+      const handle = view && still() ? findNodeHandle(view) : null;
       if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
     });
   });

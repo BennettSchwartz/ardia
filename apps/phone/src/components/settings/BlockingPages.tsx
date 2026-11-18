@@ -31,7 +31,7 @@ import {
   filterListAddress,
   FILTER_LIST_ADDRESS,
 } from "../../state/settings/settingsRules";
-import { ConfirmDialog, duration, font, ink, screenReaderActions, Sheet, usePresence, settingsLayout, settingsTint, space, Symbol, Toggle, useTheme, type Confirmation, useWarningInk } from "../ui";
+import { ConfirmSheet, duration, font, ink, screenReaderActions, Sheet, usePresence, settingsLayout, settingsTint, space, Symbol, Toggle, useTheme, type Confirmation, useWarningInk } from "../ui";
 import { copy } from "../../lib/platformCopy";
 
 const FILTER_SYNTAX_URL = "https://github.com/gorhill/uBlock/wiki/Static-filter-syntax";
@@ -99,7 +99,7 @@ export function FilterListsPage() {
           }
         />
       </Group>
-      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
+      {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </SettingsPage>
   );
 }
@@ -182,7 +182,7 @@ export function FilterListDetailPage({ id }: { id: string }) {
           />
         </Group>
       ) : null}
-      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
+      {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </SettingsPage>
   );
 }

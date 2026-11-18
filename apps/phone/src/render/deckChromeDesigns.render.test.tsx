@@ -17,6 +17,7 @@ import * as telemetry from "../state/telemetry/telemetry";
 import * as tabHooks from "../state/tabs/hooks";
 import { useTabs } from "../state/tabs/store";
 import { renderSurface, someTabs, textOf, unmount, withTabs } from "../../test/render/harness";
+import { menuMotion } from "../components/ui/motion";
 
 const SAFE_TOP = 40;
 const SAFE_BOTTOM = 24;
@@ -78,7 +79,10 @@ const host = (root: Root, testID: string) => hosts(root, testID)[0];
 const style = (root: Root, testID: string) => StyleSheet.flatten(host(root, testID)!.props.style);
 const pressable = (root: Root, label: string) => root.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!;
 const menuLabels = (root: Root) => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").map((node) => node.props.accessibilityLabel);
-const pickMenu = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
+const pickMenu = (root: Root, label: string) => {
+  act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
+  act(() => jest.advanceTimersByTime(menuMotion.heldClose));
+};
 const cardCentres = (root: Root) =>
   hosts(root, "deckCard").map((card) => {
     const translateY = (getAnimatedStyle(card).transform as { translateY?: number }[]).find((step) => step.translateY !== undefined)!.translateY!;

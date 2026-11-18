@@ -255,6 +255,7 @@ export const actionSheetLook = {
   buttonBottom: 17.6,
   buttonHeight: 43.5,
   buttonsBetween: 8,
+  screenMargin: 16,
   title: { fontSize: 17, lineHeight: 22, fontWeight: "600" },
   message: { fontSize: 15, lineHeight: 20 },
   button: { fontSize: 17, lineHeight: 22 },

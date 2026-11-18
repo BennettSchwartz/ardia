@@ -109,6 +109,7 @@ drawnTest("on Android the Reader's Text Appearance opens the drawn menu with the
   const sepia = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === "Sepia" && typeof node.type === "string")[0]!;
   expect(sepia.props.accessibilityState).toMatchObject({ checked: true });
   act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === "Dark" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  act(() => jest.advanceTimersByTime(250));
   expect(theme).toHaveBeenCalledWith("dark");
   expect(drawnLabels(root)).toEqual([]);
   unmount(root);

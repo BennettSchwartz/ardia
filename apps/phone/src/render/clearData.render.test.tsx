@@ -53,3 +53,14 @@ test("clearing from today passes today's start to the website-data clear, so iPh
   expect(cleared).toHaveBeenCalledWith(["cache"], null);
   cleared.mockRestore();
 });
+
+test("Clear Data asks in the drawn confirmation card, as iPhone's SwiftUI confirmation does, not the centred dialog", async () => {
+  const { ConfirmDialog, ConfirmSheet } = require("../components/ui") as typeof import("../components/ui");
+  const byTime = jest.spyOn(pages, "clearsWebsiteDataSince").mockImplementation(() => true);
+  const root = renderSurface(<ClearDataPage />);
+  await pressButton(root, "Clear Data");
+  expect(root.root.findAll((node) => node.type === ConfirmSheet)).toHaveLength(1);
+  expect(root.root.findAll((node) => node.type === ConfirmDialog)).toHaveLength(0);
+  byTime.mockRestore();
+  unmount(root);
+});

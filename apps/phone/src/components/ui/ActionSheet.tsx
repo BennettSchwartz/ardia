@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, View, type ViewInstance } from "react-native";
+import { BackHandler, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { FadeOut } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
 import { useCoverFocus } from "./coverFocus";
@@ -27,6 +28,10 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost
   const theme = useTheme();
   const paint = theme.dark ? actionSheetInk.dark : actionSheetInk.light;
   const reduceMotion = useReduceMotion();
+  const window = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const width = confirmCardWidth(window.fontScale, window.width - insets.left - insets.right);
+  const maxHeight = window.height - insets.top - insets.bottom - 2 * actionSheetLook.screenMargin;
   const card = useRef<ViewInstance>(null);
   useCoverFocus(card);
   useEffect(() => {
@@ -43,8 +48,9 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost
     <Animated.View style={StyleSheet.absoluteFill} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.sheetOut)}>
       <Pressable accessibilityRole="button" accessibilityLabel={cancel} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onCancel} />
       <View style={styles.centre} pointerEvents="box-none">
-        <View ref={card} testID="drawnActionSheet" accessibilityViewIsModal style={[styles.card, { borderColor: paint.rim, boxShadow: actionSheetLook.shadow }]}>
-          <MenuMaterial source={frost} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={styles.material}>
+        <View ref={card} testID="drawnActionSheet" accessibilityViewIsModal style={[styles.card, { width, maxHeight, borderColor: paint.rim, boxShadow: actionSheetLook.shadow }]}>
+          <MenuMaterial source={frost} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={[styles.material, { maxHeight: maxHeight - 2 * actionSheetLook.rim }]}>
+            <ScrollView style={styles.scroll} contentContainerStyle={styles.content} bounces={false} overScrollMode="never">
             {title ? (
               <Text accessibilityRole="header" style={[actionSheetLook.title, { color: paint.title }]}>
                 {title}
@@ -64,18 +70,21 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost
                   onPress={action.onPress}
                   style={({ pressed }) => [styles.button, { backgroundColor: paint.button }, pressed ? styles.pressed : null]}
                 >
-                  <Text numberOfLines={1} style={[actionSheetLook.button, styles.centred, { color: action.destructive ? paint.destructive : paint.title }]}>
+                  <Text style={[actionSheetLook.button, styles.centred, { color: action.destructive ? paint.destructive : paint.title }]}>
                     {action.title}
                   </Text>
                 </Pressable>
               ))}
             </View>
+            </ScrollView>
           </MenuMaterial>
         </View>
       </View>
     </Animated.View>
   );
 }
+
+export const confirmCardWidth = (fontScale: number, room: number) => Math.min(actionSheetLook.width * Math.max(1, fontScale), room - 2 * actionSheetLook.screenMargin);
 
 export function ConfirmSheet({ confirmation, onClose }: { confirmation: Confirmation; onClose: () => void }) {
   return (
@@ -99,12 +108,14 @@ export function ConfirmSheet({ confirmation, onClose }: { confirmation: Confirma
 
 const styles = StyleSheet.create({
   centre: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
-  card: { width: actionSheetLook.width, borderRadius: actionSheetLook.radius, borderWidth: actionSheetLook.rim },
-  material: { overflow: "hidden", paddingTop: actionSheetLook.top, paddingHorizontal: actionSheetLook.side, paddingBottom: actionSheetLook.buttonBottom },
+  card: { borderRadius: actionSheetLook.radius, borderWidth: actionSheetLook.rim },
+  material: { overflow: "hidden" },
+  scroll: { flexGrow: 0 },
+  content: { paddingTop: actionSheetLook.top, paddingHorizontal: actionSheetLook.side, paddingBottom: actionSheetLook.buttonBottom },
   message: { marginTop: actionSheetLook.messageGap },
   buttons: { marginHorizontal: actionSheetLook.buttonSide - actionSheetLook.side, gap: actionSheetLook.buttonsBetween },
   afterText: { marginTop: actionSheetLook.buttonGap },
-  button: { height: actionSheetLook.buttonHeight, borderRadius: actionSheetLook.buttonHeight / 2, justifyContent: "center", paddingHorizontal: actionSheetLook.buttonSide },
+  button: { minHeight: actionSheetLook.buttonHeight, borderRadius: actionSheetLook.buttonHeight / 2, justifyContent: "center", paddingHorizontal: actionSheetLook.buttonSide, paddingVertical: (actionSheetLook.buttonHeight - actionSheetLook.button.lineHeight) / 2 },
   pressed: { opacity: 0.7 },
   centred: { textAlign: "center" },
 });

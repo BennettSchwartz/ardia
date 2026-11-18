@@ -357,7 +357,7 @@ export function CardMenu({ tab, close, testID, haptic, style, children }: CardMe
   const profiles = useSyncView().profiles;
   const spaces = moveTargets(tabSpaces, profiles, tab);
   return (
-    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces }, close)} trigger="longPress" haptic={haptic} onOpen={hideArchiveCard} style={style}>
+    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces }, close)} trigger="longPress" haptic={haptic} privately={tab.isPrivate} onOpen={hideArchiveCard} style={style}>
       {children}
     </MenuTrigger>
   );
