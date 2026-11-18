@@ -8,6 +8,8 @@ import { middleClickTab } from "../../state/sidebar/clearTabs";
 import { dismissHover } from "../../state/sidebar/hover";
 import { openTabMenu } from "../../state/sidebar/menus";
 import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from "../../state/sidebar/heldTabPress";
+import { tabPressTag } from "../../state/tabs/tabReveal";
+import { useSplitOf } from "../../state/windows/card";
 import { ContextMenuArea } from "../ui";
 import { buttonMotion, usePressScaleMotion } from "../ui/motion";
 
@@ -21,6 +23,7 @@ export function TabPressArea({
   tooltip,
   squish,
   hitSlop,
+  selected = false,
   children,
 }: {
   windowId: string;
@@ -30,9 +33,11 @@ export function TabPressArea({
   tooltip?: string;
   squish?: keyof typeof SQUISH;
   hitSlop?: Insets;
+  selected?: boolean;
   children: ReactNode | ((state: { pressed: boolean }) => ReactNode);
 }) {
   const press = useRef<TabPress | null>(null);
+  const inSplit = !!useSplitOf(tab.id);
   const plainTooltip = useSettings((s) => !s.showTabHoverMenu);
   const pressMotion = usePressScaleMotion(!!squish, squish ? SQUISH[squish] : undefined);
   const scale = pressMotion.scale;
@@ -56,6 +61,8 @@ export function TabPressArea({
           pressOutTabPress(press.current, e);
         }}
         style={pressStyle}
+        nativeID={tabPressTag(tab.id, selected, inSplit)}
+        collapsable={false}
         hitSlop={hitSlop}
         tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
       >
