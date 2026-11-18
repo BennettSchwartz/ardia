@@ -4,6 +4,7 @@
 
 #include <share.h>
 #include <stdio.h>
+#include <cstdlib>
 
 #include <memory>
 #include <string>
@@ -273,22 +274,48 @@ void AddLaunchSwitches(base::CommandLine* command_line) {
   }
 }
 
-void WriteLaunchLog(const std::string& line) {
+HANDLE& LaunchLogHandle() {
+  static HANDLE handle = INVALID_HANDLE_VALUE;
+  return handle;
+}
+
+void CloseLaunchLog() {
+  HANDLE& handle = LaunchLogHandle();
+  if (handle != INVALID_HANDLE_VALUE) {
+    CloseHandle(handle);
+    handle = INVALID_HANDLE_VALUE;
+  }
+}
+
+HANDLE OpenLaunchLog() {
   std::wstring path =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueNative("log-file");
   if (path.empty()) {
     path = LaunchLogPath();
   }
   if (path.empty()) {
-    return;
+    return INVALID_HANDLE_VALUE;
   }
-  FILE* file = _wfsopen(path.c_str(), L"ab", _SH_DENYNO);
-  if (!file) {
+  HANDLE handle = CreateFileW(
+      path.c_str(), FILE_APPEND_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle != INVALID_HANDLE_VALUE) {
+    LaunchLogHandle() = handle;
+    std::atexit(&CloseLaunchLog);
+  }
+  return handle;
+}
+
+void WriteLaunchLog(const std::string& line) {
+  static const HANDLE handle = OpenLaunchLog();
+  if (handle == INVALID_HANDLE_VALUE) {
     return;
   }
   const std::string text = "engine 0 " + line + "\n";
-  fwrite(text.data(), 1, text.size(), file);
-  fclose(file);
+  DWORD wrote = 0;
+  WriteFile(handle, text.data(), static_cast<DWORD>(text.size()), &wrote,
+            nullptr);
 }
 
 void SaveLaunchGuardFacts(const LaunchGuardFacts& facts) {
@@ -619,6 +646,7 @@ void BeforeChromeMain() {
   AddLaunchSwitches(command_line);
   ardia_win::AskBeforeDiscards();
   g_ardia_win_hosts_normal_windows = true;
+  content::g_ardia_win_keep_media_session_players = true;
   g_ardia_win_frame_view = &CreateHostedFrameView;
   g_ardia_win_add_main_parts = &AddMainParts;
   g_ardia_win_relaunched = &Relaunched;
