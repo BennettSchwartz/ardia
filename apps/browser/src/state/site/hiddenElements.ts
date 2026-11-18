@@ -18,6 +18,7 @@ import {
   noteHiddenElementsRestored,
   noteHiddenElementWriteFailure,
 } from "../telemetry/hiddenElementCounts";
+import { consentToken } from "../telemetry/client";
 
 const HIDING_RULE = /^[a-z0-9.-]+##[^+^\s][^\n{}]*$/;
 const MAX_FILTER = 1024;
@@ -119,6 +120,7 @@ export async function startHidingElement(tabId: string, point: [number, number] 
     return;
   }
   if (point) noteElementPickerFromContextMenu();
+  const consent = consentToken();
   if (readerState(tabId).active) await closeReader(tabId);
   picking.add(tabId);
   let result: PickResult = null;
@@ -133,8 +135,8 @@ export async function startHidingElement(tabId: string, point: [number, number] 
   const after = pageOf(tabId);
   const samePage = after?.host === page.host && after.profile === page.profile;
   const filter = samePage && result?.selector ? hidingFilter(page.host, result.selector) : null;
-  if (!filter) return void noteElementPickerCancelled();
-  noteElementHidden(page.inPrivateWindow);
+  if (!filter) return void noteElementPickerCancelled(consent);
+  noteElementHidden(page.inPrivateWindow, consent);
   if (page.inPrivateWindow) {
     useHiddenElements.setState((s) => {
       const kept = s.session[page.profile] ?? [];
@@ -145,7 +147,7 @@ export async function startHidingElement(tabId: string, point: [number, number] 
   try {
     await hideElements(page.profile, [filter]);
   } catch {
-    noteHiddenElementWriteFailure();
+    noteHiddenElementWriteFailure(consent);
   }
   changed();
 }
@@ -178,11 +180,12 @@ export async function restoreHiddenElements(profile: string, elements: HiddenEle
   if (session.size)
     useHiddenElements.setState((s) => ({ session: { ...s.session, [profile]: (s.session[profile] ?? []).filter((f) => !session.has(f)) } }));
   unhideInOpenTabs(profile, elements);
+  const consent = consentToken();
   try {
     if (kept.length) await restoreElements(profile, kept);
-    noteHiddenElementsRestored(elements.length);
+    noteHiddenElementsRestored(elements.length, consent);
   } catch {
-    noteHiddenElementWriteFailure();
+    noteHiddenElementWriteFailure(consent);
   }
   changed();
   if (kept.length) reloadCoveredTabs(profile, elements.filter((e) => !e.session));

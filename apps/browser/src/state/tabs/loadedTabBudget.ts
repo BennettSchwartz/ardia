@@ -10,6 +10,7 @@ import { withSharedFamily } from "../pins/pinShare";
 import type { Settings } from "../settings/settings";
 import { withPinnedPanes } from "../splits/splits";
 import { noteBudgetSweep, noteTabSleptOverBudget, noteTabSleptOverBudgetReopened } from "../telemetry/tabSleepCounts";
+import { consentToken } from "../telemetry/client";
 import { hasPage } from "./pageSession";
 import { usePages } from "./pageState";
 import { shownTabIds } from "./shownTabs";
@@ -103,6 +104,7 @@ export async function sleepTabsOverBudget(budget: LoadedTabBudget | null, now = 
   const asking = [...candidates.filter((id) => !keptAt.has(id)), ...candidates.filter((id) => keptAt.has(id))].slice(0, SLEEPS_PER_SWEEP);
   noteBudgetSweep(skippedLoading.length, candidates.slice(0, SLEEPS_PER_SWEEP).filter((id) => !asking.includes(id)).length);
   const slept: string[] = [];
+  const consent = consentToken();
   sweeping = true;
   try {
     for (const id of asking) {
@@ -112,7 +114,7 @@ export async function sleepTabsOverBudget(budget: LoadedTabBudget | null, now = 
         slept.push(id);
         sleptAt.set(id, now);
         keptAt.delete(id);
-        noteTabSleptOverBudget();
+        noteTabSleptOverBudget(consent);
       } else if (keptBy?.includes(RECENTLY_VISIBLE)) seenAt.set(id, now);
       else {
         askAgainAt.set(id, now + ASK_AGAIN_MS);
