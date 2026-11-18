@@ -1478,7 +1478,17 @@ public static class ArdiaFirstFrames {
     public int R, G, B;
     public int Width, Height;
     public byte[] Pixels;
+    public byte[] Grid;
     public string Kind = "";
+  }
+
+  public static double Share(byte[] grid, byte[] reference, int tolerance) {
+    if (grid == null || reference == null || grid.Length != reference.Length || grid.Length == 0) return 0;
+    int same = 0, points = grid.Length / 3;
+    for (int at = 0; at < grid.Length; at += 3) {
+      if (Math.Abs(grid[at] - reference[at]) <= tolerance && Math.Abs(grid[at + 1] - reference[at + 1]) <= tolerance && Math.Abs(grid[at + 2] - reference[at + 2]) <= tolerance) same++;
+    }
+    return same / (double)points;
   }
 
   public class Launch {
@@ -1562,6 +1572,7 @@ public static class ArdiaFirstFrames {
     frame.Alpha = Math.Max(frame.Alpha, AlphaOf(window));
     if (pixels == null) { frame.Kind = KindOf(frame, 1); return frame; }
     int same = 0, compared = 0;
+    byte[] grid = new byte[40 * 24 * 3];
     frame.Width = width;
     frame.Height = height;
     int white = 0, count = 0;
@@ -1572,6 +1583,9 @@ public static class ArdiaFirstFrames {
         int x = (int)((column + 0.5) * width / 40), y = (int)((row + 0.5) * height / 24);
         int at = (y * width + x) * 4;
         int b = pixels[at], g = pixels[at + 1], r = pixels[at + 2];
+        grid[count * 3] = (byte)r;
+        grid[count * 3 + 1] = (byte)g;
+        grid[count * 3 + 2] = (byte)b;
         count++;
         if (r >= 240 && g >= 240 && b >= 240) white++;
         minR = Math.Min(minR, r); minG = Math.Min(minG, g); minB = Math.Min(minB, b);
@@ -1588,6 +1602,7 @@ public static class ArdiaFirstFrames {
     frame.White = white / (double)count;
     frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
     frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
+    frame.Grid = grid;
     if (keep) frame.Pixels = pixels;
     frame.Kind = KindOf(frame, compared > 0 ? same / (double)compared : 1);
     return frame;
@@ -1730,6 +1745,21 @@ public static class ArdiaFirstFramesFront {
       }
       Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
       $problems = @()
+      $tone = if ($Dark) { "dark" } else { "light" }
+      $firstUi = @($frames | Where-Object { $_.Kind -eq "content" -and $_.Grid } | Select-Object -First 1)
+      if ($Onboarded -and $firstUi.Count) { $script:BrowserGrids[$tone] = $firstUi[0].Grid }
+      if (-not $Onboarded) {
+        $reference = $script:BrowserGrids[$tone]
+        if (-not $reference) { $problems += "first frames ($Label): no settled browser frame from the second launch in $tone to compare the first launch with" }
+        else {
+          $browser = @()
+          for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) {
+            if ($frames[$i].Kind -in @("plain", "content") -and [ArdiaFirstFrames]::Share($frames[$i].Grid, $reference, 6) -ge 0.9) { $browser += $frames[$i] }
+          }
+          Write-Host "First frames ($Label): $($browser.Count) captures show the browser instead of the intro$(if ($browser.Count) { ", from $($browser[0].Ms) to $($browser[-1].Ms) ms" })."
+          if ($browser.Count) { $problems += "first frames ($Label): the browser showed instead of the intro in $($browser.Count) captures, from $($browser[0].Ms) to $($browser[-1].Ms) ms" }
+        }
+      }
       $leaks = @($frames | Where-Object { $_.Kind -eq "leak" })
       if ($leaks.Count) { $problems += "first frames ($Label): something showed in $($leaks.Count) captures while the window was still transparent, from $($leaks[0].Ms) ms" }
       if ($contentIndex -lt 0) { $problems += "first frames ($Label): the window never showed its UI in 9 s" }
@@ -1754,10 +1784,11 @@ public static class ArdiaFirstFramesFront {
   $themesKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
   $savedTheme = (Get-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
   try {
-    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
-    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
+    $script:BrowserGrids = @{}
     Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false -Click | ForEach-Object { $failures += $_ }
     Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true -Click | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
   } finally {
     if ($null -ne $savedTheme) { Set-ItemProperty -Path $themesKey -Name AppsUseLightTheme -Value $savedTheme -Type DWord }
     else { Remove-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
