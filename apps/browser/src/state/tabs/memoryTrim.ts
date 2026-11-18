@@ -1,3 +1,4 @@
+import { keysOf } from "../browser/changes";
 import { hermesHeapBytes } from "../../lib/hermesHeap";
 import { inputIdleSeconds, trimEngineMemory } from "../../platform/performance";
 import { useBrowser } from "../browser/store";
@@ -77,7 +78,7 @@ export function startMemoryTrim() {
 
   useBrowser.subscribe((s, prev) => {
     if (s.tabs === prev.tabs) return;
-    const count = Object.keys(s.tabs).length;
+    const count = keysOf(s.tabs).length;
     if (count === tabCount) return;
     tabCount = count;
     cancel();
