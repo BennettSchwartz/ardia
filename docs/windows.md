@@ -271,7 +271,10 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     never for this question (#2488; `quit_warnings_with_downloads` and its
     `_cancelled` count them). It is asked in the UI before the window closes: once the app has decided to quit, the
     engine closes without a second question. The update's "ready to install" question adds a sentence when a
-    download is running, since installing closes Ardia. A quit that never passes through the UI (Windows ending the
+    download is running, since installing closes Ardia. The launch log says what happened at a close that quits:
+    `[quit] asked: 1 download in progress, warning on; answered quit` (or `cancel`) when a question was shown, and on a
+    hidden test instance, which never asks, `[quit] not asked on a hidden instance: 1 download in progress, warning on`,
+    once per window (#2635), so a check can read the decision from the log instead of looking for a dialog. A quit that never passes through the UI (Windows ending the
     session) isn't asked.
   - Windows fade as on the Mac (`WindowFade.h`), fade only with no grow. A window opened with `animated`, and every
     window that is not a browser window (Little Ardia, Settings, Import: the Mac's system animates those open),

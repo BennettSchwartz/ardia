@@ -44,6 +44,7 @@ export function quitWarningMayAsk() {
 }
 
 const asking = new Set<string>();
+const notedWhenHidden = new Set<string>();
 
 async function closeStillQuits(windowId: string) {
   const openWindowIds = await windowIds().catch(() => [] as string[]);
@@ -51,8 +52,26 @@ async function closeStillQuits(windowId: string) {
   return closeQuits({ quitsWithLastWindow: true, background: false, staysOpen });
 }
 
+const quitFacts = (downloads: number, warns: boolean) => `${downloads} ${downloads === 1 ? "download" : "downloads"} in progress, warning ${warns ? "on" : "off"}`;
+
+export function noteQuitNotAskedWhenHidden(windowId: string) {
+  if (!PLATFORM_FEATURES.quitsWithLastWindow || !backgroundInstance || notedWhenHidden.has(windowId)) return;
+  const s = useBrowser.getState();
+  const downloads = downloadsInProgress(s.downloads);
+  const warns = s.settings.warnBeforeQuitting;
+  if (!warns && downloads === 0) return;
+  notedWhenHidden.add(windowId);
+  void closeStillQuits(windowId).then((quits) => {
+    if (quits) console.info(`[quit] not asked on a hidden instance: ${quitFacts(downloads, warns)}`);
+    else notedWhenHidden.delete(windowId);
+  });
+}
+
 export async function askBeforeQuitting(windowId: string, ask: typeof confirm = confirm, { warning = true, consent }: { warning?: boolean; consent?: ConsentToken | null } = {}): Promise<QuitWarning> {
-  if (!quitWarningMayAsk()) return "notAsked";
+  if (!quitWarningMayAsk()) {
+    noteQuitNotAskedWhenHidden(windowId);
+    return "notAsked";
+  }
   if (asking.has(windowId)) return "cancelled";
   asking.add(windowId);
   try {
@@ -60,22 +79,27 @@ export async function askBeforeQuitting(windowId: string, ask: typeof confirm = 
     const quits = await closeStillQuits(windowId);
     if (wasBrowserWindow && !useBrowser.getState().windows[windowId]) return "notAsked";
     if (!quits) return "notAsked";
+    const warns = useBrowser.getState().settings.warnBeforeQuitting;
+    const answered = (answer: Exclude<QuitWarning, "notAsked">) => {
+      console.info(`[quit] asked: ${quitFacts(downloadsInProgress(useBrowser.getState().downloads), warns)}; answered ${answer === "confirmed" ? "quit" : "cancel"}`);
+      return answer;
+    };
     let answer: QuitWarning = "notAsked";
-    if (warning && useBrowser.getState().settings.warnBeforeQuitting) {
+    if (warning && warns) {
       const { confirmed, suppressed } = await ask({ ...QUIT_WARNING, windowId });
       if (suppressed) useBrowser.getState().updateSettings({ warnBeforeQuitting: false });
-      if (!confirmed) return "cancelled";
+      if (!confirmed) return answered("cancelled");
       answer = "confirmed";
-      if (!(await closeStillQuits(windowId))) return answer;
+      if (!(await closeStillQuits(windowId))) return answered(answer);
     }
     const running = downloadsInProgress(useBrowser.getState().downloads);
     if (running > 0) {
       const { confirmed } = await ask({ ...downloadsQuitWarning(running), windowId });
       noteQuitAskedWithDownloads(!confirmed, consent);
-      if (!confirmed) return "cancelled";
+      if (!confirmed) return answered("cancelled");
       answer = "confirmed";
     }
-    return answer;
+    return answer === "confirmed" ? answered(answer) : answer;
   } finally {
     asking.delete(windowId);
   }
