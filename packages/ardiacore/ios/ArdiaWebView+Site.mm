@@ -1,4 +1,5 @@
 #import "ArdiaWebViewInternal.h"
+#import "ArdiaChromeWindowInternal.h"
 #import "ArdiaRuntime.h"
 #import "ArdiaServices.h"
 
@@ -74,7 +75,10 @@ constexpr NSSize kExtensionPopupMaximum = {800, 600};
 }
 
 - (void)tab:(ArdiaCoreTab *)tab didChangeMediaAccess:(NSDictionary<NSString *, NSNumber *> *)access {
-  _reports.capturing = [access[@"camera"] boolValue] || [access[@"microphone"] boolValue] || [access[@"screen"] boolValue];
+  BOOL screen = [access[@"screen"] boolValue];
+  _reports.capturing = [access[@"camera"] boolValue] || [access[@"microphone"] boolValue] || screen;
+  if (screen && _reports.captureSource) ardia_window::HoldWindowsForCapture(self, _reports.captureSource);
+  else if (!screen && ardia_window::ReleaseWindowsForCapture(self)) _reports.captureSource = nil;
   [self emit:@"mediaAccess" payload:access ?: @{}];
   [self autoPictureInPictureInputsChanged];
 }

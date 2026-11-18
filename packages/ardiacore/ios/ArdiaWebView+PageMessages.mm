@@ -1,4 +1,5 @@
 #import "ArdiaWebViewInternal.h"
+#import "ArdiaChromeWindowInternal.h"
 #import "ArdiaRuntime.h"
 #import "ArdiaEarlyWindow.h"
 #import "ArdiaFieldTiming.h"
@@ -308,6 +309,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
                                 frame:[request[@"frame"] length] ? request[@"frame"] : nil
                                origin:request[@"origin"]
                                 audio:audio];
+  _reports.captureSource = sourceId.length && _tab && ([sourceId hasPrefix:@"window:"] || [sourceId hasPrefix:@"screen:"]) ? sourceId : nil;
   [self callFrame:request[@"frame"] kind:@"displayMedia"
              json:JSONText(@{@"id" : request[@"id"], @"sourceId" : sourceId.length ? sourceId : NSNull.null, @"audio" : @(audio != nil)})];
 }

@@ -89,6 +89,7 @@ struct ArdiaPageReports {
   NSMutableDictionary<NSString *, NSDictionary *> *displayRequests;
   double pinchScale{};
   BOOL capturing{};
+  NSString *captureSource;
   BOOL crashed{};
   NSMutableSet<NSString *> *exclusiveFrames;
   BOOL seenByUser{YES};
