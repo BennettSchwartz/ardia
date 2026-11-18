@@ -312,6 +312,7 @@ function Test-LateAnswerAfterACancelledQuit {
   $link = Quit-Link "late"
   Close-Window $old
   Wait-QuitLine 'began \(user\)' $what
+  $secondCloseAt = (Get-Date).AddMilliseconds(1600)
   Start-WithTest "" @($link) | Out-Null
   Wait-QuitLine 'cancelled by a relaunch after \d+ ms' $what
   $deadline = (Get-Date).AddSeconds(30)
@@ -320,8 +321,11 @@ function Test-LateAnswerAfterACancelledQuit {
   if (-not $windows.Count) { Fail-Quit $what "Ardia $($old.Pid) showed no window after the launch cancelled its quit (browsers: $(Describe-Browsers))" }
   $deadline = (Get-Date).AddSeconds(10)
   while ((Get-Date) -lt $deadline -and -not [QuitPages]::LoadsOf("late")) { Start-Sleep -Milliseconds 50 }
+  while ((Get-Date) -lt $secondCloseAt) { Start-Sleep -Milliseconds 50 }
   Close-Window ([pscustomobject]@{ Pid = $old.Pid; Window = $windows[0] })
   Wait-Exit $old.Pid $what 45 | Out-Null
+  $began = @(@(Quit-Log) | ForEach-Object { if ($_ -match '^quit (\d+) began \(user\)') { [int]$Matches[1] } })
+  if ($began.Count -ge 2 -and ($began[1] - $began[0]) -le 1100) { Fail-Quit $what "the check's own timing: the second quit began $($began[1] - $began[0]) ms after the first, so the first quit's answer (held 4000 ms) could not land inside the second quit's 3000 ms wait" }
   Assert-QuitLine 'an answer (to an earlier, cancelled quit came during this one|came after its quit was cancelled or had finished); ignored' $what "the answer to the cancelled quit wasn't set aside"
   Assert-LoadedOnce $what "late"
   $outcomes = @(@(Quit-Log) | Where-Object { $_ -match '(the app answered (yes|no) after \d+ ms|no answer in \d+ ms|cancelled by a relaunch after \d+ ms)' })
