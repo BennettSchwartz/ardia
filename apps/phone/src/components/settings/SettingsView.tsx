@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react";
 import { Platform, StyleSheet } from "react-native";
-import Animated, { SlideInLeft, SlideInRight, SlideOutRight } from "react-native-reanimated";
+import Animated, { Easing, FadeInLeft, FadeInRight, FadeOutRight, SlideInLeft, SlideInRight, SlideOutRight } from "react-native-reanimated";
 import { refreshSettings } from "../../state/settings/actions";
 import { useSettingsNav, type SettingsRoute } from "../../state/settings/hooks";
-import { tabsMotion } from "../ui";
+import { tabsMotion, useDesign } from "../ui";
+import { materialEasing, materialMotion } from "../ui/materialTokens";
 import { FilterListDetailPage, FilterListsPage, MyFiltersPage, TrustedSitesPage } from "./BlockingPages";
 import { AboutPage, ClearDataPage, LicensesPage } from "./DataPages";
 import { AppearancePage } from "./AppearancePage";
@@ -22,6 +23,14 @@ import { ExpoSettingsStack } from "./ExpoSettingsStack";
 const push = SlideInRight.springify().stiffness(tabsMotion.sheetIn.stiffness).damping(tabsMotion.sheetIn.damping);
 const reveal = SlideInLeft.springify().stiffness(tabsMotion.sheetIn.stiffness).damping(tabsMotion.sheetIn.damping);
 const leave = SlideOutRight.springify().stiffness(tabsMotion.sheetOut.stiffness).damping(tabsMotion.sheetOut.damping);
+const axisIn = Easing.bezier(...materialEasing[materialMotion.sharedAxisIn.easing]);
+const axisOut = Easing.bezier(...materialEasing[materialMotion.sharedAxisOut.easing]);
+const MATERIAL_MOTION = {
+  push: FadeInRight.duration(materialMotion.sharedAxisIn.durationMs).easing(axisIn),
+  reveal: FadeInLeft.duration(materialMotion.sharedAxisIn.durationMs).easing(axisIn),
+  leave: FadeOutRight.duration(materialMotion.sharedAxisOut.durationMs).easing(axisOut),
+};
+const CLASSIC_MOTION = { push, reveal, leave };
 
 export function SettingsPageFor({ route }: { route: SettingsRoute }) {
   switch (route.page) {
@@ -87,6 +96,7 @@ function HandBuiltSettings() {
   useEffect(() => {
     if (open) void refreshSettings();
   }, [open]);
+  const motion = useDesign() === "material" ? MATERIAL_MOTION : CLASSIC_MOTION;
   const shown = useRef<{ depth: number; route: SettingsRoute } | null>(null);
   if (open && stack.length) shown.current = { depth: stack.length, route: stack[stack.length - 1]! };
   const last = shown.current;
@@ -94,8 +104,8 @@ function HandBuiltSettings() {
   return (
     <Animated.View
       key={`${last.depth}:${last.route.page}`}
-      entering={last.depth === 1 || !open ? undefined : popping ? reveal : push}
-      exiting={popping && open ? leave : undefined}
+      entering={last.depth === 1 || !open ? undefined : popping ? motion.reveal : motion.push}
+      exiting={popping && open ? motion.leave : undefined}
       style={StyleSheet.absoluteFill}
     >
       <SettingsPageFor route={last.route} />

@@ -36,6 +36,7 @@ import { SiteSettingsGroups } from "../settings/SitePages";
 import { useIsPinned, useSendTargets } from "../../state/sync/hooks";
 import { useTab } from "../../state/tabs/hooks";
 import { capsule, ConfirmDialog, FloatingMenu, font, menuLayout, PressScale, Sheet, space, Symbol, tabsMotion, Toggle, useDesign, useTheme, type SymbolName } from "../ui";
+import { MaterialPageMenu } from "./MaterialPageMenu";
 import { PageMenuWords, usePageMenuInk } from "./PageMenuWords";
 import { syncOffered } from "../../state/sync/offer";
 
@@ -46,7 +47,8 @@ export function PageMenu({ tabId, open, onHidden }: { tabId: string; open: boole
   const confirmed = useTranslationConfirmed();
   const translate = () => (translationAsks(isPrivate, confirmed) ? setConfirmsTranslation(true) : translatePage());
   const page = useMenuPage();
-  const redesigned = useDesign() === "redesigned";
+  const design = useDesign();
+  const redesigned = design === "redesigned";
   const ink = usePageMenuInk();
   const hidden = () => {
     onHidden();
@@ -60,7 +62,9 @@ export function PageMenu({ tabId, open, onHidden }: { tabId: string; open: boole
           onClose={() => setConfirmsTranslation(false)}
         />
       ) : null}
-      {redesigned ? (
+      {design === "material" ? (
+        <MaterialPageMenu tabId={tabId} model={model} onTranslate={translate} />
+      ) : redesigned ? (
         <PageMenuWords tabId={tabId} model={model} onTranslate={translate} />
       ) : (
         <LayoutAnimationConfig skipEntering>

@@ -6,6 +6,11 @@ import { openSettings, popSettings, pushSettings } from "../state/settings/nav";
 import { useSync } from "../state/sync/store";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const NORMAL = { width: 393, height: 873, scale: 3, fontScale: 1 };
 
 function setFontScale(fontScale: number) {

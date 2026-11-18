@@ -2,6 +2,11 @@ import { act, type ReactTestInstance } from "react-test-renderer";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 import { idOf, itemOf, mockNative, resetNativeMenus, titles, type NativeItem } from "./nativeMenusMock";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
 const { ArchiveView } = require("../components/tabs/ArchiveView") as typeof import("../components/tabs/ArchiveView");

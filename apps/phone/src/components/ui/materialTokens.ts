@@ -95,4 +95,6 @@ export const materialMotion = {
   dialogEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium4 },
   dialogExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short4 },
   ripple: { easing: "standard", durationMs: materialDuration.medium1 },
+  sharedAxisIn: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium2 },
+  sharedAxisOut: { easing: "emphasizedAccelerate", durationMs: materialDuration.short3 },
 } as const satisfies Record<string, { easing: MaterialEasing; durationMs: number }>;

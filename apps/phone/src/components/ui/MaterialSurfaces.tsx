@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BackHandler, KeyboardAvoidingView, Pressable, StyleSheet, Text, useWindowDimensions, View, type ViewInstance, type ViewStyle } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import Animated, { interpolateColor, runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { withAlpha } from "../../lib/color";
 import { clampedProgress, trayDragDismisses, trayDragOffset } from "../../lib/trayMotion";
@@ -29,6 +29,41 @@ export function DragHandle({ onPress }: { onPress?: () => void }) {
     <Pressable testID="materialDragHandle" accessibilityRole="button" accessibilityLabel="Dismiss" onPress={onPress} disabled={!onPress} style={styles.handleHit}>
       <View style={[styles.handle, { backgroundColor: withAlpha(scheme.onSurfaceVariant, 0.4) }]} />
     </Pressable>
+  );
+}
+
+export const MATERIAL_SWITCH = { width: 52, height: 32, border: 2, handleOff: 16, handleOn: 24 } as const;
+
+export const materialSwitchHandle = (on: number) => {
+  "worklet";
+  const inner = MATERIAL_SWITCH.height - MATERIAL_SWITCH.border * 2;
+  const size = MATERIAL_SWITCH.handleOff + (MATERIAL_SWITCH.handleOn - MATERIAL_SWITCH.handleOff) * on;
+  const offLeft = (inner - MATERIAL_SWITCH.handleOff) / 2;
+  const onLeft = MATERIAL_SWITCH.width - MATERIAL_SWITCH.border * 2 - MATERIAL_SWITCH.handleOn - (inner - MATERIAL_SWITCH.handleOn) / 2;
+  return { size, left: offLeft + (onLeft - offLeft) * on, top: (inner - size) / 2 };
+};
+
+export function MaterialSwitchTrack({ value, disabled }: { value: boolean; disabled?: boolean }) {
+  const { scheme } = useMaterialTheme();
+  const reduceMotion = useReduceMotion();
+  const on = useSharedValue(value ? 1 : 0);
+  useEffect(() => {
+    on.value = materialMove(value ? 1 : 0, "standard", reduceMotion ? reducedMotionMs(materialDuration.short4) : materialDuration.short4);
+  }, [value]);
+  const trackOff = scheme.surfaceContainerHighest;
+  const trackOn = scheme.primary;
+  const borderOff = scheme.outline;
+  const handleOff = scheme.outline;
+  const handleOn = scheme.onPrimary;
+  const track = useAnimatedStyle(() => ({ backgroundColor: interpolateColor(on.value, [0, 1], [trackOff, trackOn]), borderColor: interpolateColor(on.value, [0, 1], [borderOff, trackOn]) }), [trackOff, trackOn, borderOff]);
+  const handle = useAnimatedStyle(() => {
+    const place = materialSwitchHandle(on.value);
+    return { width: place.size, height: place.size, borderRadius: place.size / 2, left: place.left, top: place.top, backgroundColor: interpolateColor(on.value, [0, 1], [handleOff, handleOn]) };
+  }, [handleOff, handleOn]);
+  return (
+    <Animated.View testID="materialSwitch" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden style={[styles.switchTrack, track, disabled ? styles.switchDisabled : null]}>
+      <Animated.View style={[styles.switchHandle, handle]} />
+    </Animated.View>
   );
 }
 
@@ -109,8 +144,9 @@ export function MaterialDialog({ title, message, buttons, onDismiss, children }:
   const { scheme } = useMaterialTheme();
   const ripple = useMaterialRipple();
   const shown = useSharedValue(0);
+  const reduceMotion = useReduceMotion();
   useEffect(() => {
-    shown.value = materialMove(1, materialMotion.dialogEnter.easing, materialMotion.dialogEnter.durationMs);
+    shown.value = materialMove(1, materialMotion.dialogEnter.easing, reduceMotion ? reducedMotionMs(materialDuration.short3) : materialMotion.dialogEnter.durationMs);
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       onDismiss();
       return true;
@@ -199,6 +235,9 @@ export function useMaterialMenuPage<T>() {
 }
 
 const styles = StyleSheet.create({
+  switchTrack: { width: MATERIAL_SWITCH.width, height: MATERIAL_SWITCH.height, borderRadius: MATERIAL_SWITCH.height / 2, borderWidth: MATERIAL_SWITCH.border },
+  switchHandle: { position: "absolute" },
+  switchDisabled: { opacity: MATERIAL_STATE.disabledContent },
   handleHit: { alignSelf: "center", width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center" },
   handle: { width: materialSize.dragHandle.width, height: materialSize.dragHandle.height, borderRadius: materialShape.full },
   sheet: {
