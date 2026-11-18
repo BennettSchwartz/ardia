@@ -340,6 +340,8 @@ const { closeTab } = await import("./src/state/browser/actions.ts");
 const { closeLittleArdia } = await import("./src/state/littleArdia/actions.ts");
 const { quitWarningMayAsk } = await import("./src/state/windows/quitWarning.ts");
 const { takeQuitWarningCounts } = await import("./src/state/telemetry/quitWarningCounts.ts");
+const { setConsentPeriod } = await import("./src/state/telemetry/consentPeriod.ts");
+setConsentPeriod(true, "quit-downloads-test");
 const { shellNativeModules, windows } = await import("./src/test-native/shell.ts");
 const S = () => useBrowser.getState();
 const settle = async () => { for (let turn = 0; turn < 12; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); };
@@ -438,6 +440,11 @@ w = lone();
 let opened;
 whileAsking = () => { opened = lone(); };
 seen.windowOpenedDuringTheWarning = { ...(await closing(w, byButton, [true])), openedStays: !!S().windows[opened] };
+
+setConsentPeriod(false, null);
+fresh({}, [download("one")]);
+w = lone();
+seen.withoutSharing = { ...(await closing(w, byButton, [false])), counts: takeQuitWarningCounts() };
 console.log(JSON.stringify(seen));
 `;
 
@@ -472,4 +479,5 @@ test("on Windows, a close that quits with a download running asks first, whateve
   assert.deepEqual(seen.tabsConfirmStandsInForTheWarning, { asked: [tabs, one], open: false }, "the last-tab confirm stands in for the warning, never for the downloads question");
   assert.deepEqual(seen.tabsConfirmWithNothingRunning, { asked: [tabs], open: false }, "and with nothing running it is the only question, as before");
   assert.deepEqual(seen.windowOpenedDuringTheWarning, { asked: [warning], open: false, openedStays: true }, "a window opened while the warning was up keeps Ardia running, so the downloads question isn't asked");
+  assert.deepEqual(seen.withoutSharing, { asked: [one], open: true, counts: { quit_warnings_after_tabs_confirm: 0, quit_warnings_after_tabs_confirm_cancelled: 0, quit_warnings_with_downloads: 0, quit_warnings_with_downloads_cancelled: 0 } }, "with sharing off the question still asks and nothing is counted");
 });

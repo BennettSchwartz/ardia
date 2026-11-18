@@ -6,6 +6,7 @@ import { useBrowser } from "../browser/store";
 import { isUtilityWindowId } from "../settings/settingsWindows";
 import { isWindowClosing } from "./closingWindows";
 import { downloadsInProgress } from "../downloads/status";
+import type { ConsentToken } from "../telemetry/choice";
 import { noteQuitAskedWithDownloads } from "../telemetry/quitWarningCounts";
 
 export const QUIT_WARNING = {
@@ -50,7 +51,7 @@ async function closeStillQuits(windowId: string) {
   return closeQuits({ quitsWithLastWindow: true, background: false, staysOpen });
 }
 
-export async function askBeforeQuitting(windowId: string, ask: typeof confirm = confirm, { warning = true }: { warning?: boolean } = {}): Promise<QuitWarning> {
+export async function askBeforeQuitting(windowId: string, ask: typeof confirm = confirm, { warning = true, consent }: { warning?: boolean; consent?: ConsentToken | null } = {}): Promise<QuitWarning> {
   if (!quitWarningMayAsk()) return "notAsked";
   if (asking.has(windowId)) return "cancelled";
   asking.add(windowId);
@@ -70,7 +71,7 @@ export async function askBeforeQuitting(windowId: string, ask: typeof confirm = 
     const running = downloadsInProgress(useBrowser.getState().downloads);
     if (running > 0) {
       const { confirmed } = await ask({ ...downloadsQuitWarning(running), windowId });
-      noteQuitAskedWithDownloads(!confirmed);
+      noteQuitAskedWithDownloads(!confirmed, consent);
       if (!confirmed) return "cancelled";
       answer = "confirmed";
     }

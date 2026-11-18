@@ -10,9 +10,8 @@ export function noteQuitAskedAfterTabsConfirm(wasCancelled: boolean, consent?: C
   countFor(consent, () => void (asked++, wasCancelled && cancelled++), { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: +wasCancelled });
 }
 
-export function noteQuitAskedWithDownloads(wasCancelled: boolean) {
-  askedWithDownloads++;
-  if (wasCancelled) cancelledWithDownloads++;
+export function noteQuitAskedWithDownloads(wasCancelled: boolean, consent?: ConsentToken | null) {
+  countFor(consent, () => void (askedWithDownloads++, wasCancelled && cancelledWithDownloads++), { quit_warnings_with_downloads: 1, quit_warnings_with_downloads_cancelled: +wasCancelled });
 }
 
 export function takeQuitWarningCounts() {
