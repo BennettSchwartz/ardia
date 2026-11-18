@@ -14,6 +14,7 @@ import { materialDuration, materialMotion, materialMove, materialShape, material
 import { reducedMotionMs } from "../ui/motion";
 
 const FIELD_EDGE = 16;
+const START_FIELD_MAX = 560;
 
 export const materialStartMs = (reduceMotion: boolean, searching: boolean) =>
   reduceMotion ? reducedMotionMs(materialDuration.short3) : searching ? materialMotion.fadeThroughOut.durationMs : materialMotion.fadeThroughIn.durationMs;
@@ -62,18 +63,18 @@ export function MaterialStart() {
         {canReopen && !incognito ? <StartIconButton icon="arrowUturnBackward" label="Reopen Closed Tab" ink={inkVariant} onPress={reopenLastClosed} /> : null}
         <StartIconButton icon="gearshape" label="Settings" ink={inkVariant} onPress={() => openSettings()} />
       </Animated.View>
-      <Animated.View style={[styles.logo, fade]} pointerEvents="none" importantForAccessibility={searching ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={searching}>
-        <ArdiaLogo width={browseLayout.logoWidth} />
-        {incognito ? <Text style={[materialType.titleMedium, { color: ink }]}>You’re browsing Incognito</Text> : null}
-      </Animated.View>
       <Animated.View
-        testID="materialStartBottom"
+        testID="materialStartCenter"
         pointerEvents={searching ? "none" : "box-none"}
         collapsable={false}
         importantForAccessibility={searching ? "no-hide-descendants" : "auto"}
         accessibilityElementsHidden={searching}
-        style={[styles.bottom, { bottom: insets.bottom + FIELD_EDGE, left: insets.left + FIELD_EDGE, right: insets.right + FIELD_EDGE }, fade]}
+        style={[styles.center, { paddingLeft: insets.left + FIELD_EDGE, paddingRight: insets.right + FIELD_EDGE }, fade]}
       >
+        <View pointerEvents="none" style={styles.logo}>
+          <ArdiaLogo width={browseLayout.logoWidth} />
+          {incognito ? <Text style={[materialType.titleMedium, { color: ink }]}>You’re browsing Incognito</Text> : null}
+        </View>
         <Pressable
           testID="materialStartSearch"
           accessibilityRole="button"
@@ -106,7 +107,7 @@ const styles = StyleSheet.create({
   fill: { flex: 1 },
   topBar: { position: "absolute", top: 0, left: 0, right: 0, flexDirection: "row", alignItems: "center", minHeight: materialSize.topAppBar, gap: 4 },
   iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
-  logo: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 16 },
-  bottom: { position: "absolute" },
-  field: { height: materialSize.searchBar, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 16 },
+  center: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 32 },
+  logo: { alignItems: "center", gap: 16 },
+  field: { width: "100%", maxWidth: START_FIELD_MAX, height: materialSize.searchBar, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 16 },
 });

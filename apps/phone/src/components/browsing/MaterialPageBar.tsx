@@ -34,6 +34,11 @@ export function MaterialPageBar({ tab, order, showsPlus, onTabs, onTabsMenu, onS
   const count = order.length;
   return (
     <View testID="materialPageBar" style={styles.row}>
+      {showsPlus ? (
+        <Pressable testID="materialBarPlus" accessibilityRole="button" accessibilityLabel="New Search" android_ripple={icon} onPress={onPlus} style={styles.iconButton}>
+          <Symbol name="plus" size={materialSize.icon} color={scheme.onSurfaceVariant} />
+        </Pressable>
+      ) : null}
       <Pressable
         testID="materialAddressField"
         accessibilityRole="button"
@@ -57,11 +62,6 @@ export function MaterialPageBar({ tab, order, showsPlus, onTabs, onTabsMenu, onS
           {address.host}
         </Text>
       </Pressable>
-      {showsPlus ? (
-        <Pressable testID="materialBarPlus" accessibilityRole="button" accessibilityLabel="New Search" android_ripple={icon} onPress={onPlus} style={styles.iconButton}>
-          <Symbol name="plus" size={materialSize.icon} color={scheme.onSurfaceVariant} />
-        </Pressable>
-      ) : null}
       <TabsMenuTrigger order={order} onTabsMenu={onTabsMenu} style={styles.iconSlot}>
         {({ onLongPress, screenReaderActions: menuActions }) => (
           <Pressable

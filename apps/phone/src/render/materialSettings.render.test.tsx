@@ -121,3 +121,15 @@ onAndroid("the original design's Settings are untouched by the Material one", ()
   expect(node(root, "materialSwitch")).toBeUndefined();
   unmount(root);
 });
+
+onAndroid("Settings closes from a close icon at the start of its top app bar, with no iPhone Done", () => {
+  const closing = jest.spyOn(require("../state/settings/nav"), "closeSettings");
+  const root = settings();
+  expect(root.root.findAll((found) => found.props.children === "Done")).toHaveLength(0);
+  expect(flat(node(root, "materialSettingsClose"))).toMatchObject({ width: 48, height: 48 });
+  act(() => {
+    pressable(root, "materialSettingsClose").props.onPress();
+  });
+  expect(closing).toHaveBeenCalled();
+  unmount(root);
+});

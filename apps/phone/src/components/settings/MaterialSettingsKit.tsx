@@ -12,11 +12,11 @@ import { MATERIAL_SEGMENT_GAP, materialSegmentCorners, materialShape, materialSi
 const AVATAR = 40;
 const RADIO = 20;
 
-type PageProps = { title: string; onBack?: () => void; leading?: ReactNode; trailing?: ReactNode; children: ReactNode; scroll?: boolean; onRefresh?: () => Promise<unknown>; heroTitle?: boolean; overlay?: ReactNode; dismissesKeyboard?: boolean };
+type PageProps = { title: string; onBack?: () => void; onClose?: () => void; leading?: ReactNode; trailing?: ReactNode; children: ReactNode; scroll?: boolean; onRefresh?: () => Promise<unknown>; heroTitle?: boolean; overlay?: ReactNode; dismissesKeyboard?: boolean };
 
 export const materialAppBarFill = (scheme: { surfaceContainer: string; surfaceContainerHigh: string }, scrolled: boolean) => (scrolled ? scheme.surfaceContainerHigh : scheme.surfaceContainer);
 
-export function MaterialSettingsPage({ title, onBack, leading, trailing, children, scroll = true, onRefresh, overlay, dismissesKeyboard = false }: PageProps) {
+export function MaterialSettingsPage({ title, onBack, onClose, leading, trailing, children, scroll = true, onRefresh, overlay, dismissesKeyboard = false }: PageProps) {
   const { scheme } = useMaterialTheme();
   const insets = useSafeAreaInsets();
   const icon = useMaterialRipple(true);
@@ -41,9 +41,13 @@ export function MaterialSettingsPage({ title, onBack, leading, trailing, childre
                 <Symbol name="arrowRight" size={materialSize.icon} color={scheme.onSurface} />
               </View>
             </Pressable>
+          ) : onClose ? (
+            <Pressable testID="materialSettingsClose" accessibilityRole="button" accessibilityLabel="Close" android_ripple={icon} onPress={onClose} style={styles.iconButton}>
+              <Symbol name="xmark" size={materialSize.icon} color={scheme.onSurface} />
+            </Pressable>
           ) : null}
           {leading}
-          <Text testID="settingsTitle" accessibilityRole="header" numberOfLines={1} style={[materialType.titleLarge, styles.title, { color: scheme.onSurface, paddingLeft: onBack || leading ? 0 : 12 }]}>
+          <Text testID="settingsTitle" accessibilityRole="header" numberOfLines={1} style={[materialType.titleLarge, styles.title, { color: scheme.onSurface, paddingLeft: onBack || onClose || leading ? 0 : 12 }]}>
             {title}
           </Text>
           {trailing}
@@ -81,8 +85,8 @@ export function MaterialBarButton({ title, onPress, emphasized, enabled = true }
   const ripple = useMaterialRipple();
   const ink = enabled ? scheme.primary : withAlpha(scheme.onSurface, MATERIAL_STATE.disabledContent);
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ disabled: !enabled }} disabled={!enabled} android_ripple={ripple} onPress={onPress} style={[styles.textButton, emphasized ? { backgroundColor: enabled ? scheme.primary : withAlpha(scheme.onSurface, MATERIAL_STATE.disabledContainer) } : null]}>
-      <Text style={[materialType.labelLarge, { color: emphasized && enabled ? scheme.onPrimary : ink }]}>{title}</Text>
+    <Pressable accessibilityRole="button" accessibilityState={{ disabled: !enabled }} disabled={!enabled} android_ripple={ripple} onPress={onPress} style={styles.textButton}>
+      <Text style={[materialType.labelLarge, emphasized ? styles.emphasized : null, { color: ink }]}>{title}</Text>
     </Pressable>
   );
 }
@@ -248,6 +252,7 @@ const styles = StyleSheet.create({
   iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
   flipped: { transform: [{ scaleX: -1 }] },
   title: { flex: 1 },
+  emphasized: { fontWeight: "700" },
   textButton: { minHeight: materialSize.touchTarget - 8, minWidth: materialSize.touchTarget, paddingHorizontal: 12, marginHorizontal: 4, borderRadius: materialShape.full, overflow: "hidden", alignItems: "center", justifyContent: "center" },
   list: { flex: 1 },
   content: { paddingTop: 8, paddingBottom: 32 },

@@ -9,7 +9,7 @@ import { duration, LookBackdrop, settingsMotion, useSheetFrame, font, ink, setti
 
 export const SettingsHostedContext = createContext(false);
 
-type PageProps = { title: string; onBack?: () => void; leading?: ReactNode; trailing?: ReactNode; children: ReactNode; scroll?: boolean; onRefresh?: () => Promise<unknown>; heroTitle?: boolean; overlay?: ReactNode; dismissesKeyboard?: boolean };
+type PageProps = { title: string; onBack?: () => void; onClose?: () => void; leading?: ReactNode; trailing?: ReactNode; children: ReactNode; scroll?: boolean; onRefresh?: () => Promise<unknown>; heroTitle?: boolean; overlay?: ReactNode; dismissesKeyboard?: boolean };
 
 function ClassicSettingsPage({ title, onBack, leading, trailing, children, scroll = true, onRefresh, heroTitle = false, overlay, dismissesKeyboard = false }: PageProps) {
   const theme = useTheme();

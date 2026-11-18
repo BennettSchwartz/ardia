@@ -42,9 +42,11 @@ export function SettingsRoot() {
   const synced = useSyncView().search;
   const engineName = syncEnabled && synced ? syncedEngineName(synced, engines) : (engines.find((engine) => engine.id === engineId)?.name ?? "");
   const stacks = useWindowDimensions().fontScale >= settingsLayout.accessibilityFontScale;
-  const redesigned = useDesign() === "redesigned";
+  const design = useDesign();
+  const redesigned = design === "redesigned";
+  const material = design === "material";
   return (
-    <SettingsPage title="Settings" trailing={<BarButton title="Done" emphasized onPress={closeSettings} />}>
+    <SettingsPage title="Settings" onClose={material ? closeSettings : undefined} trailing={material ? undefined : <BarButton title="Done" emphasized onPress={closeSettings} />}>
       {syncOffered() ? (
         <Group>
           <SyncCard stacks={stacks} />

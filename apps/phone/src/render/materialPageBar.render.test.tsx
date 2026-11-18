@@ -61,6 +61,8 @@ onAndroid("the material page bar is a Material bottom app bar: 80 dp on surfaceC
     expect(pressable(root, id).props.android_ripple).toMatchObject({ borderless: true });
   }
   expect(pressable(root, "materialAddressField").props.android_ripple).toMatchObject({ borderless: false });
+  const order = root.root.findAll((found) => typeof found.type === "string" && ["materialBarPlus", "materialAddressField", "materialBarTabs", "materialBarMore"].includes(found.props.testID)).map((found) => found.props.testID);
+  expect(order).toEqual(["materialBarPlus", "materialAddressField", "materialBarTabs", "materialBarMore"]);
   unmount(root);
 });
 

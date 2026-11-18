@@ -41,7 +41,7 @@ const start = () =>
     </DesignProvider>,
   );
 
-onAndroid("the material start screen is the scheme's surfaces, a top app bar of 48 dp icon buttons, the logo, and a 56 dp Material search bar at the bottom", () => {
+onAndroid("the material start screen is the scheme's surfaces, a top app bar of 48 dp icon buttons, and the logo with a 56 dp Material search bar centred under it", () => {
   const root = start();
   expect(node(root, "materialStart")).toBeDefined();
   expect(root.root.findAll((found) => found.type === Backdrop)[0]!.props.colors).toEqual([LIGHT.surface, LIGHT.surfaceContainerLow]);
@@ -99,7 +99,7 @@ onAndroid("in Incognito the start screen is the scheme's inverse surface and say
 onAndroid("while search is open the start screen's controls leave touch and TalkBack, and they fade through on Material's timings", () => {
   const root = start();
   act(() => presentSearch("start", ""));
-  for (const id of ["materialStartTopBar", "materialStartBottom"]) {
+  for (const id of ["materialStartTopBar", "materialStartCenter"]) {
     expect(node(root, id)!.props).toMatchObject({ pointerEvents: "none", importantForAccessibility: "no-hide-descendants", accessibilityElementsHidden: true });
   }
   expect(materialStartMs(true, true)).toBe(0);
