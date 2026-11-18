@@ -2502,6 +2502,7 @@ $pages = @{
   "/links" = "<!doctype html><meta charset=utf-8><title>tour links</title><style>body{margin:0;background:#fff}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/peeked'>peek this</a>"
   "/peeked" = "<!doctype html><meta charset=utf-8><title>tour peeked</title><style>html,body{margin:0;height:100%;background:#2a7}</style>"
   "/taba" = "<!doctype html><meta charset=utf-8><title>tour tab a</title><style>html,body{margin:0;height:100%;background:#3366cc}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/typed'>peek this</a><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='a got '+keys}});</script>"
+  "/flightdownload" = "<!doctype html><meta charset=utf-8><title>tour flight page</title><style>html,body{margin:0;height:100%;background:#3366cc}</style><script>setTimeout(()=>{location.href='/download'},3000)</script>"
   "/startdownload" = "<!doctype html><meta charset=utf-8><title>tour download page</title><style>html,body{margin:0;height:100%;background:#fff}</style><script>setTimeout(()=>{location.href='/download'},300)</script>"
   "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
   "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
@@ -2763,6 +2764,244 @@ function Note-QuitWithoutAsking($Session, $Stop) {
   $end = Wait-AppEnded $Session 2000
   if ($end.Clean) { $Session.Summary = "Quit without asking on the tour's close, which the stop counts against it (exit code $($Session.Process.ExitCode))." }
   $Stop.Facts.Add("the app quit without asking; its launch log's last line: '$($end.LastLine)'")
+}
+
+if (-not ([System.Management.Automation.PSTypeName]"ArdiaFlightCapture").Type) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class ArdiaFlightCapture {
+  [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] struct Point { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] struct Header { public uint Size; public int Width, Height; public ushort Planes, BitCount; public uint Compression, SizeImage; public int XPels, YPels; public uint Used, Important; }
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window, ref Point point);
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
+  [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref Header header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dc, int x, int y, int width, int height, IntPtr source, int sx, int sy, uint op);
+  [DllImport("gdi32.dll")] static extern bool GdiFlush();
+
+  public class Frame { public DateTime Utc; public byte[] Pixels; }
+  public class Capture { public DateTime KeyUtc; public DateTime SeenUtc; public bool Seen; public int Width, Height, OriginX, OriginY, Captures; public List<Frame> Frames = new List<Frame>(); }
+
+  public static Capture Run(IntPtr window, byte key, string logPath, long logOffset, string marker, int ring, int afterMs, int maxMs) {
+    Rect client;
+    GetClientRect(window, out client);
+    Point origin = new Point();
+    ClientToScreen(window, ref origin);
+    Capture capture = new Capture();
+    capture.Width = client.Right - client.Left;
+    capture.Height = client.Bottom - client.Top;
+    capture.OriginX = origin.X;
+    capture.OriginY = origin.Y;
+    int width = capture.Width, height = capture.Height;
+    IntPtr screen = GetDC(IntPtr.Zero);
+    IntPtr memory = CreateCompatibleDC(screen);
+    Header header = new Header();
+    header.Size = (uint)Marshal.SizeOf(typeof(Header));
+    header.Width = width;
+    header.Height = -height;
+    header.Planes = 1;
+    header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    IntPtr previous = SelectObject(memory, section);
+    List<Frame> recent = new List<Frame>();
+    FileStream log = null;
+    StringBuilder pending = new StringBuilder();
+    byte[] chunk = new byte[65536];
+    try {
+      log = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+      log.Seek(logOffset, SeekOrigin.Begin);
+      keybd_event(key, 0, 0, UIntPtr.Zero);
+      capture.KeyUtc = DateTime.UtcNow;
+      keybd_event(key, 0, 2, UIntPtr.Zero);
+      Stopwatch clock = Stopwatch.StartNew();
+      long seenAt = -1;
+      while (clock.ElapsedMilliseconds < maxMs && (seenAt < 0 || clock.ElapsedMilliseconds - seenAt < afterMs)) {
+        if (!BitBlt(memory, 0, 0, width, height, screen, origin.X, origin.Y, 0x40CC0020)) { Thread.Sleep(1); continue; }
+        GdiFlush();
+        Frame frame = new Frame();
+        frame.Utc = DateTime.UtcNow;
+        frame.Pixels = new byte[width * height * 4];
+        Marshal.Copy(bits, frame.Pixels, 0, frame.Pixels.Length);
+        capture.Captures++;
+        if (seenAt >= 0) { capture.Frames.Add(frame); continue; }
+        recent.Add(frame);
+        if (recent.Count > ring) recent.RemoveAt(0);
+        int read;
+        while ((read = log.Read(chunk, 0, chunk.Length)) > 0) pending.Append(Encoding.UTF8.GetString(chunk, 0, read));
+        if (pending.ToString().Contains(marker)) {
+          seenAt = clock.ElapsedMilliseconds;
+          capture.Seen = true;
+          capture.SeenUtc = DateTime.UtcNow;
+          capture.Frames.AddRange(recent);
+          recent.Clear();
+        }
+      }
+      if (!capture.Seen) capture.Frames.AddRange(recent);
+    } finally {
+      if (log != null) log.Dispose();
+      SelectObject(memory, previous);
+      DeleteObject(section);
+      DeleteDC(memory);
+      ReleaseDC(IntPtr.Zero, screen);
+    }
+    return capture;
+  }
+
+  public static int Changed(byte[] now, byte[] before, int width, int height, int left, int top, int right, int bottom) {
+    int changed = 0;
+    for (int y = Math.Max(0, top); y < Math.Min(height, bottom); y += 2) {
+      for (int x = Math.Max(0, left); x < Math.Min(width, right); x += 2) {
+        int at = (y * width + x) * 4;
+        if (Math.Abs(now[at] - before[at]) + Math.Abs(now[at + 1] - before[at + 1]) + Math.Abs(now[at + 2] - before[at + 2]) > 48) changed++;
+      }
+    }
+    return changed;
+  }
+}
+"@
+}
+
+function Save-FlightFrame($Capture, $Frame, [string]$Path) {
+  Add-Type -AssemblyName System.Drawing
+  $bitmap = [System.Drawing.Bitmap]::new($Capture.Width, $Capture.Height, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+  try {
+    $locked = $bitmap.LockBits([System.Drawing.Rectangle]::new(0, 0, $Capture.Width, $Capture.Height), [System.Drawing.Imaging.ImageLockMode]::WriteOnly, $bitmap.PixelFormat)
+    [System.Runtime.InteropServices.Marshal]::Copy($Frame.Pixels, 0, $locked.Scan0, $Frame.Pixels.Length)
+    $bitmap.UnlockBits($locked)
+    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $bitmap.Dispose()
+  }
+}
+
+function Read-FlightLine([string]$Line) {
+  if ($Line -notmatch "download flight start from (-?\d+),(-?\d+) to (-?\d+),(-?\d+) arc (\d+(?:\.\d+)?) icon (\d+) in (\d+)x(\d+) over (\d+) ms (from the page \w+) after (\d+) ms for its icon at (\d+)") { return $null }
+  return [pscustomobject]@{
+    StartX = [double]$Matches[1]; StartY = [double]$Matches[2]; TargetX = [double]$Matches[3]; TargetY = [double]$Matches[4]
+    Arc = [double]$Matches[5]; Icon = [double]$Matches[6]; Width = [double]$Matches[7]; Height = [double]$Matches[8]; Ms = [double]$Matches[9]
+    From = $Matches[10]; WaitedMs = [int]$Matches[11]; AtUtc = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$Matches[12]).UtcDateTime
+  }
+}
+
+function Get-FlightEase([double]$Time) {
+  $t = [Math]::Min(1.0, [Math]::Max(0.0, [double]$Time))
+  if ($t -lt 0.5) { return 2 * $t * $t }
+  return 1 - 2 * (1 - $t) * (1 - $t)
+}
+
+function Get-FlightLevel([double]$Value, [double[]]$Inputs, [double[]]$Outputs) {
+  if ($Value -le $Inputs[0]) { return $Outputs[0] }
+  for ($i = 1; $i -lt $Inputs.Count; $i++) {
+    if ($Value -le $Inputs[$i]) { return $Outputs[$i - 1] + ($Outputs[$i] - $Outputs[$i - 1]) * ($Value - $Inputs[$i - 1]) / ($Inputs[$i] - $Inputs[$i - 1]) }
+  }
+  return $Outputs[-1]
+}
+
+function Get-FlightBox($Flight, [double]$Time, [double]$Scale) {
+  $p = Get-FlightEase $Time
+  $x = $Flight.StartX + ($Flight.TargetX - $Flight.StartX) * $p
+  $y = $Flight.StartY + ($Flight.TargetY - $Flight.StartY) * $p - [Math]::Sin([Math]::PI * $p) * $Flight.Arc
+  $half = $Flight.Icon * (Get-FlightLevel $p @(0, 0.15, 1) @(0.6, 1.1, 0.3)) / 2
+  return [pscustomobject]@{ X = $x * $Scale; Y = $y * $Scale; Left = ($x - $half) * $Scale; Top = ($y - $half) * $Scale; Right = ($x + $half) * $Scale; Bottom = ($y + $half) * $Scale; Opacity = Get-FlightLevel $p @(0, 0.1, 0.8, 1) @(0, 1, 1, 0) }
+}
+
+function Measure-DownloadFlight($Capture, $Flight, $Page) {
+  $scale = $Capture.Width / [Math]::Max(1.0, [double]$Flight.Width)
+  $frames = @($Capture.Frames)
+  $baseline = @($frames | Where-Object { $_.Utc -lt $Flight.AtUtc }) | Select-Object -Last 1
+  $rows = @()
+  foreach ($frame in $frames) {
+    $time = ($frame.Utc - $Flight.AtUtc).TotalMilliseconds / $Flight.Ms
+    if ($time -lt 0 -or $time -gt 1) { continue }
+    $boxes = @(foreach ($offset in @(-0.2, -0.1, 0, 0.05)) { Get-FlightBox $Flight ([Math]::Min(1.0, [Math]::Max(0.0, [double]($time + $offset)))) $scale })
+    $now = Get-FlightBox $Flight $time $scale
+    $left = [int](($boxes | Measure-Object Left -Minimum).Minimum - 4)
+    $top = [int](($boxes | Measure-Object Top -Minimum).Minimum - 4)
+    $right = [int](($boxes | Measure-Object Right -Maximum).Maximum + 4)
+    $bottom = [int](($boxes | Measure-Object Bottom -Maximum).Maximum + 4)
+    $changed = if ($baseline) { [ArdiaFlightCapture]::Changed($frame.Pixels, $baseline.Pixels, $Capture.Width, $Capture.Height, $left, $top, $right, $bottom) } else { 0 }
+    $side = ($now.Right - $now.Left)
+    $needed = [Math]::Max(6, [int](0.15 * $side * $side / 4))
+    $overPage = $Page -and $now.X -ge $Page.Left -and $now.X -lt $Page.Left + $Page.Width -and $now.Y -ge $Page.Top -and $now.Y -lt $Page.Top + $Page.Height
+    $rows += [pscustomobject]@{ Frame = $frame; Ms = [int]($frame.Utc - $Flight.AtUtc).TotalMilliseconds; Time = $time; X = [int]$now.X; Y = [int]$now.Y; OverPage = [bool]$overPage; Changed = $changed; Drawn = $changed -ge $needed }
+  }
+  return [pscustomobject]@{ Baseline = $baseline; Rows = $rows; Scale = $scale }
+}
+
+function Invoke-DownloadFlightStop($Session, [string]$Slug, [string]$Title, [bool]$FromPageEdge) {
+  Invoke-Stop $Session $Slug $Title {
+    param($stop)
+    $where = if ($FromPageEdge) { "the sidebar beside the page" } else { "the middle of the page, as on the Mac (ARDIA_TEST downloadFlightFromPage=1)" }
+    $stop.Did = "One browser window, sidebar on the left, Downloads in its footer (the default). Opened 127.0.0.1:$($script:TourPagesPort)/flightdownload in the starting tab: a blue page that starts the held download 3 s after it loads, so the page's window covers the card when the flight starts at $where. Captured the window as fast as it reads until 900 ms after the app logged the flight, and judged each capture during the flight at the icon's place on its logged path (the move curve, the scale and opacity keyframes), allowing it to trail by up to a fifth of the flight, against the capture just before the flight."
+    if ($FromPageEdge) {
+      $stop.Expected = "the app logs a flight 'from the page edge', started once its icon showed; in every capture from 40% to 58% of the flight (past its fade-in and the first frame's lag on Windows, and before it nears the downloads popover) the icon is drawn at its place, allowing it to trail by up to a fifth of the flight, and that place is never over the page's window."
+    } else {
+      $stop.Expected = "report only: from the page's middle the icon is under the page's window, so captures from 40% to 58% of the flight show nothing at its place (#2603)."
+    }
+    if (-not (Test-Usable $Session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+    Focus-Window $Session $Session.Main $stop | Out-Null
+    Send-Address "127.0.0.1:$($script:TourPagesPort)/flightdownload"
+    $mark = Get-LogCount $Session
+    $offset = (Get-Item -LiteralPath $Session.Log).Length
+    $capture = [ArdiaFlightCapture]::Run($Session.Main, [byte]0x0D, $Session.Log, $offset, "download flight start", 40, 900, 12000)
+    $page = Get-PageWindow $Session "tour flight page"
+    $pageBox = if ($page) { [pscustomobject]@{ Left = $page.Left - $capture.OriginX; Top = $page.Top - $capture.OriginY; Width = $page.Width; Height = $page.Height } } else { $null }
+    $line = @(Get-LinesSince $Session $mark "download flight start") | Select-Object -First 1
+    $flight = Read-FlightLine $line
+    $stop.Facts.Add("captures: $($capture.Captures), kept $($capture.Frames.Count); the flight logged: $($capture.Seen); the page's window: $(if ($pageBox) { "$($pageBox.Left),$($pageBox.Top) $($pageBox.Width)x$($pageBox.Height) in the client area" } else { 'not found' })")
+    if (-not $flight) { $stop.Seen = "no"; $stop.Facts.Add("no flight line in the log: '$line'"); $capture.Frames.Clear(); return }
+    $stop.Facts.Add("flight $($flight.From) from $($flight.StartX),$($flight.StartY) to $($flight.TargetX),$($flight.TargetY), arc $($flight.Arc), over $($flight.Ms) ms, started $($flight.WaitedMs) ms after the download came, once its icon showed, in a $($flight.Width)x$($flight.Height) layout drawn at $($capture.Width)x$($capture.Height)")
+    $measured = Measure-DownloadFlight $capture $flight $pageBox
+    $rows = @($measured.Rows)
+    $stop.Facts.Add("captures during the flight (ms after it started: the icon's place, over the page or the app, changed samples, drawn): $(($rows | ForEach-Object { "+$($_.Ms) $($_.X),$($_.Y) $(if ($_.OverPage) { 'page' } else { 'app' }) $($_.Changed) $(if ($_.Drawn) { 'drawn' } else { '-' })" }) -join '; ')")
+    $judged = @($rows | Where-Object { $_.Time -ge 0.4 -and $_.Time -le 0.58 })
+    $drawn = @($judged | Where-Object { $_.Drawn }).Count
+    $overPage = @($judged | Where-Object { $_.OverPage }).Count
+    $stop.Facts.Add("from 40% to 58% of the flight: $($judged.Count) captures, the icon drawn in $drawn, its place over the page in $overPage")
+    $folder = Split-Path -Parent $stop.Shot
+    $prefix = [IO.Path]::GetFileNameWithoutExtension($stop.Shot)
+    if ($measured.Baseline) { Save-FlightFrame $capture $measured.Baseline (Join-Path $folder "$prefix-before.png") }
+    $picked = @($rows | Where-Object { $_.Time -le 1 })
+    $every = [Math]::Max(1, [Math]::Ceiling($picked.Count / 12))
+    for ($i = 0; $i -lt $picked.Count; $i += $every) {
+      Save-FlightFrame $capture $picked[$i].Frame (Join-Path $folder ("{0}-{1:000}ms.png" -f $prefix, [Math]::Max(0, $picked[$i].Ms)))
+    }
+    $capture.Frames.Clear()
+    if ($FromPageEdge) {
+      Set-Seen $stop ($flight.From -eq "from the page edge" -and $judged.Count -ge 2 -and $overPage -eq 0 -and $drawn -eq $judged.Count)
+    } else {
+      $stop.Seen = "yes"
+    }
+  } | Out-Null
+}
+
+function Invoke-DownloadFlightTour {
+  if (-not (Start-TourPages)) {
+    $script:Lines.Add("- The download-flight part found no loopback page server on port $($script:TourPagesPort).")
+    return
+  }
+  $env:ARDIA_TEST = "downloadFlightFromPage=1"
+  try { $centre = Start-Ardia "flight-from-page" -Onboarded -Settings @{ appearance = "light" } } finally { $env:ARDIA_TEST = "" }
+  Invoke-DownloadFlightStop $centre "flight-from-page" "A download's flight from the middle of the page, as on the Mac (report only, #2603)" $false
+  Stop-Ardia $centre
+  $edge = Start-Ardia "flight-from-edge" -Onboarded -Settings @{ appearance = "light" }
+  Invoke-DownloadFlightStop $edge "flight-from-edge" "A download started from a page flies to the Downloads button over the app, where the page can't cover it (#2603)" $true
+  Stop-Ardia $edge
 }
 
 function Invoke-QuitDownloadsTour {
@@ -3171,6 +3410,7 @@ if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
   $tours += @{ Name = "peek-dark"; Run = { Invoke-PeekTour "peek-dark" @{ appearance = "dark" } "dark" } }
   $tours += @{ Name = "peek-tabs"; Run = { Invoke-PeekTabsTour } }
   $tours += @{ Name = "quit-downloads"; Run = { Invoke-QuitDownloadsTour } }
+  $tours += @{ Name = "download-flight"; Run = { Invoke-DownloadFlightTour } }
   $tours += @{ Name = "peek-layouts"; Run = {
       Invoke-PeekTour "peek-sidebar-address" @{ appearance = "light"; addressBar = "sidebar" } "light, address bar in the sidebar"
       Invoke-PeekTour "peek-borderless" @{ appearance = "light"; borderlessMode = $true } "light, Borderless"
