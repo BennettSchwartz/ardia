@@ -374,7 +374,6 @@ export function Omnibox({
       scope={scope}
       field={field}
       list={listAway || mode ? null : suggestionList}
-      modeSwitch={newTabMode.modes.length ? <ModeSwitch modes={newTabMode.modes} chosen={mode?.plugin ?? null} onChange={newTabMode.switchTo} /> : null}
       rowsHover={rowsHover}
       pulse={pulse}
       hero={hero}
@@ -382,6 +381,7 @@ export function Omnibox({
       bottom={
         <BottomRow
           hero={hero}
+          modeSwitch={newTabMode.modes.length ? <ModeSwitch modes={newTabMode.modes} chosen={mode?.plugin ?? null} onChange={newTabMode.switchTo} /> : null}
           addChip={mode ? null : <AddChip onPress={barActions.openTabOrFile} />}
           onDictate={dictationAvailable() ? barActions.dictate : undefined}
           label={mode ? mode.title : destinationLabel(current)}

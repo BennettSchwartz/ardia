@@ -50,11 +50,10 @@ export function DropdownFrame({ rootRef, onContextMenu, leadingIcon, scope, fiel
   );
 }
 
-export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, list, rowsHover, pulse, hero, rowHeight, bottom, modeSwitch }: FrameProps & { hero: boolean; rowHeight: number; bottom: ReactNode; modeSwitch?: ReactNode }) {
+export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, list, rowsHover, pulse, hero, rowHeight, bottom }: FrameProps & { hero: boolean; rowHeight: number; bottom: ReactNode }) {
   return (
     <View ref={rootRef}>
       {pulse}
-      {modeSwitch}
       <ContextMenuArea captureDescendants onContextMenu={onContextMenu}>
         <View
           style={{
@@ -79,7 +78,7 @@ export function PanelFrame({ rootRef, onContextMenu, leadingIcon, scope, field, 
   );
 }
 
-export function BottomRow({ hero, addChip, onDictate, label, enabled, onGo }: { hero: boolean; addChip: ReactNode; onDictate?: () => void; label: string; enabled: boolean; onGo(): void }) {
+export function BottomRow({ hero, modeSwitch, addChip, onDictate, label, enabled, onGo }: { hero: boolean; modeSwitch?: ReactNode; addChip: ReactNode; onDictate?: () => void; label: string; enabled: boolean; onGo(): void }) {
   return (
     <View
       style={{
@@ -91,6 +90,7 @@ export function BottomRow({ hero, addChip, onDictate, label, enabled, onGo }: { 
         marginBottom: hero ? BAR.bottom.heroBelow : 0,
       }}
     >
+      {modeSwitch}
       {addChip}
       <View style={{ flex: 1 }} />
       {onDictate && <DictateButton onPress={onDictate} />}

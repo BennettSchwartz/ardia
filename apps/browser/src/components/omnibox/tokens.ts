@@ -141,4 +141,19 @@ export const SITE_BRAND_COLORS: Readonly<Record<string, string>> = {
   "apps.apple.com": "#0D96F6",
 };
 
-export const MODE_SWITCH = { top: space.m, gap: space.s, keyScale: 0.75 } as const;
+export const MODE_SWITCH = {
+  height: ADD_CHIP.height,
+  radius: capsule(ADD_CHIP.height),
+  border: ADD_CHIP.border,
+  inset: 3,
+  gap: 2,
+  after: space.s,
+  segmentHeight: 26,
+  segmentRadius: capsule(26),
+  segmentPad: space.ml,
+  keyHeight: 18,
+  keyMinWidth: 28,
+  keyPad: space.xs,
+  keyRadius: 5,
+  keyBefore: space.xs,
+} as const;
