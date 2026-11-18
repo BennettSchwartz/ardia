@@ -124,6 +124,11 @@ struct WindowsModule {
     OnUI(promise, [rootTag]() noexcept { WindowManager::Shared().PressDragArea(static_cast<int64_t>(rootTag)); });
   }
 
+  REACT_METHOD(setSwipeArea)
+  void setSwipeArea(std::string id, std::string key, bool on, Promise promise) noexcept {
+    OnUI(promise, [id, key, on]() noexcept { WindowManager::Shared().SetSwipeArea(id, key, on); });
+  }
+
   REACT_METHOD(setCaptionRegions)
   void setCaptionRegions(std::string id, JSValue regions, Promise promise) noexcept {
     std::vector<std::array<double, 4>> wanted;

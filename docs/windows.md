@@ -532,8 +532,16 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   (`Pager.swift`) has a TypeScript version in `packages/expo-windows/src/pager`: the `ArdiaSwipe` view and module with
   the same events (`onPagerPosition` every frame, `onPagerState` on select and settle), sequence numbers and spring
   (critically damped, a quarter-second period), stepped on the app's 60 Hz frames. With Windows' animations off it
-  lands at once. Swipe gestures (two-finger scroll, the rubber band, haptics) have no input on Windows yet, so only
-  clicks, shortcuts and outside switches page.
+  lands at once. A sideways wheel over the sidebar (a tilt wheel, or a sideways two-finger pan on a touchpad that sends
+  wheel input) pages to the next or previous profile, as the Mac's wheel paging does (#2406). `WindowManager`'s
+  handler on each window island's `InputPointerSource.PointerWheelChanged` (the input path React Native for Windows
+  itself takes; a CI probe showed `WH_MOUSE` and `WH_GETMESSAGE` thread hooks see no wheel over the island) sends a
+  `swipeWheel` window event with the point, in layout units, for a window with a paging `SwipeArea`. Each such area
+  measures itself then, so a moved, resized or hidden sidebar is never judged by an old rectangle, and pages through
+  the Mac's `wheel` swipe event (a 120 delta is 10 points) for `profilePager.ts` when the point is inside it. Only the
+  sidebar's area pages this way (`wheelPages`, set by `ProfileSwipeArea` for the sidebar): the top tab strip's area
+  sits over its own horizontal scrolling, which keeps the sideways wheel. Shift with the wheel doesn't page, since the vertical list scrolls with it too. A vertical wheel
+  is left to the tab list. The finger-following swipe with its rubber band and haptics still has no input on Windows.
 - Shadows of the views drawn in TypeScript (`Surface`, popover bubbles) are rounded rings drawn behind the fill
   (`src/views/shadowLayers.ts`), fading like a Gaussian blur of the edge: React Native for Windows casts a view's shadow
   from its rectangle whatever its corner radius, which left grey square corners behind the new tab's command bar.
