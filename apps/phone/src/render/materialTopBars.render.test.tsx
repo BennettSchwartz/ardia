@@ -1,5 +1,7 @@
-import { Platform, StyleSheet, Text } from "react-native";
+import { Keyboard, Platform, StyleSheet, Text } from "react-native";
 import { act } from "react-test-renderer";
+import { materialPressTop, PRESS_FINGER_CLEAR } from "../components/browsing/PageRequests";
+import { MyFiltersPage } from "../components/settings/BlockingPages";
 import { SpacesView } from "../components/sync/SpacesView";
 import { ArchiveView } from "../components/tabs/ArchiveView";
 import { DesignProvider } from "../components/ui";
@@ -56,4 +58,18 @@ onAndroid("the Spaces sheet opens on the same Material top app bar, close at the
   expect(node(root, "materialTopBar")).toBeDefined();
   expect(root.root.findAll((found) => found.props.accessibilityLabel === "Archive" && typeof found.props.onPress === "function").length).toBeGreaterThan(0);
   unmount(root);
+});
+
+test("a page press menu opens below the finger, or above it when there's no room below, never on the link it came from", () => {
+  expect(materialPressTop(300, 200, 40, 800)).toBe(300 + PRESS_FINGER_CLEAR);
+  expect(materialPressTop(700, 200, 40, 800)).toBe(700 - PRESS_FINGER_CLEAR - 200);
+  expect(materialPressTop(150, 700, 40, 800)).toBe(100);
+});
+
+onAndroid("leaving My Filters puts the keyboard away, so it doesn't stay up over Settings and the page", () => {
+  const dismissed = jest.spyOn(Keyboard, "dismiss");
+  const root = material(<MyFiltersPage />);
+  expect(dismissed).not.toHaveBeenCalled();
+  unmount(root);
+  expect(dismissed).toHaveBeenCalled();
 });

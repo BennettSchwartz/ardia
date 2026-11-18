@@ -303,6 +303,7 @@ export function MyFiltersPage() {
   const keyboard = useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true });
   const lift = useAnimatedStyle(() => ({ height: Math.max(keyboard.height.value - insets.bottom, 0) }));
   const large = useWindowDimensions().fontScale >= settingsLayout.accessibilityFontScale;
+  useEffect(() => (Platform.OS === "android" ? () => Keyboard.dismiss() : undefined), []);
   const apply = async () => {
     if (!changed || applyingNow.current) return;
     applyingNow.current = true;

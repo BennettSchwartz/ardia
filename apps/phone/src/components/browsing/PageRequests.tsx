@@ -5,7 +5,8 @@ import { answerRequest, dismissPress, pressAction } from "../../state/page/actio
 import { usePageRequest, usePress } from "../../state/page/hooks";
 import { confirmAnswer, pressHeading, pressMenuGroups, PRESS_TITLES, requestPlan, type PressAction, type Request, type RequestChoice } from "../../state/page/pagePrompts";
 import { presentSystemRequest } from "./systemRequest";
-import { dialogLayout, Dialog, font, Menu, radius, space, Symbol, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { dialogLayout, Dialog, font, Menu, radius, space, Symbol, useDesign, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { menuHeight } from "../../lib/menuPlace";
 
 export function PageRequestHost({ tabId }: { tabId: string }) {
   const request = usePageRequest(tabId);
@@ -89,9 +90,20 @@ const PRESS_ICONS: Record<PressAction, SymbolName> = {
   saveImage: "arrowDownCircle",
 };
 
+export const PRESS_FINGER_CLEAR = 32;
+
+export function materialPressTop(pressY: number, menu: number, top: number, bottom: number): number {
+  const below = pressY + PRESS_FINGER_CLEAR;
+  if (below + menu <= bottom) return below;
+  const above = pressY - PRESS_FINGER_CLEAR - menu;
+  if (above >= top) return above;
+  return Math.max(top, bottom - menu);
+}
+
 export function PressMenu({ width, height }: { width: number; height: number }) {
   const press = usePress();
   const insets = useSafeAreaInsets();
+  const material = useDesign() === "material";
   if (!press) return null;
   const items: MenuItem[] = [{ heading: pressHeading(press.target) }];
   for (const group of pressMenuGroups(press.target)) {
@@ -99,7 +111,9 @@ export function PressMenu({ width, height }: { width: number; height: number }) 
     for (const action of group) items.push({ label: PRESS_TITLES[action], icon: PRESS_ICONS[action], onPress: () => pressAction(press, action) });
   }
   const left = Math.min(Math.max(press.x, space.s), width - PRESS_MENU_WIDTH - space.s);
-  const top = Math.min(Math.max(press.y + insets.top, insets.top + space.s), height - PRESS_MENU_HEIGHT);
+  const top = material
+    ? materialPressTop(press.y + insets.top, menuHeight(items), insets.top + space.s, height - insets.bottom - space.s)
+    : Math.min(Math.max(press.y + insets.top, insets.top + space.s), height - PRESS_MENU_HEIGHT);
   return <Menu items={items} place={{ left, top, width: PRESS_MENU_WIDTH }} onDismiss={dismissPress} />;
 }
 
