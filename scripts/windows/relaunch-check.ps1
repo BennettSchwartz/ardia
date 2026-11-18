@@ -47,12 +47,19 @@ $log = Join-Path $data "Logs\launch.log"
 $reports = Join-Path $data "User Data\Crashpad\reports"
 $started = Get-Date
 $summary = New-Object System.Collections.Generic.List[string]
+$script:SeenPids = New-Object System.Collections.Generic.HashSet[int]
+$script:QuitDumps = @()
+$werDumps = Join-Path $Out "dumps"
+$werKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
+New-Item -ItemType Directory -Force -Path $werDumps | Out-Null
 
 function Note([string]$line) {
   Write-Host "relaunch-check: $line"
   $script:summary.Add($line)
 }
+
+function Remember-Pid([int]$processId) { if ($processId) { [void]$script:SeenPids.Add($processId) } }
 
 function Running { return @(Get-CimInstance Win32_Process -Filter "Name='Ardia.exe'") }
 
@@ -80,7 +87,10 @@ function Wait-Window([string]$what, [int]$seconds = 120) {
   while ((Get-Date) -lt $deadline) {
     foreach ($browser in @(Browsers)) {
       $windows = [RelaunchCheck.Native]::AppWindows([uint32]$browser.ProcessId)
-      if ($windows.Count -gt 0) { return [pscustomobject]@{ Pid = [int]$browser.ProcessId; Window = $windows[0] } }
+      if ($windows.Count -gt 0) {
+        Remember-Pid ([int]$browser.ProcessId)
+        return [pscustomobject]@{ Pid = [int]$browser.ProcessId; Window = $windows[0] }
+      }
     }
     Start-Sleep -Milliseconds 250
   }
@@ -128,7 +138,35 @@ function Assert-OneBrowser([string]$what) {
   }
 }
 
-function Start-Ardia { return Start-Process -FilePath $exe -PassThru }
+function Start-Ardia {
+  $launched = Start-Process -FilePath $exe -PassThru
+  Remember-Pid $launched.Id
+  return $launched
+}
+
+function Read-CrashDumps {
+  $found = @(Get-ChildItem -LiteralPath $werDumps -Filter "*.dmp" -ErrorAction SilentlyContinue)
+  Note "full crash dumps written: $($found.Count)"
+  if (-not $found.Count) { return }
+  $machine = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+  $debugger = @("${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\$machine\cdb.exe", "$env:ProgramFiles\Windows Kits\10\Debuggers\$machine\cdb.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if (-not $debugger) { Write-Host "relaunch-check: no cdb.exe on this runner; the dumps are in the artifact."; return }
+  $symbols = Join-Path $Out "symbols"
+  foreach ($dump in ($found | Select-Object -First 2)) {
+    Write-Host "relaunch-check: $($dump.Name), as cdb reads it:"
+    & $debugger -z $dump.FullName -y "srv*$symbols*https://msdl.microsoft.com/download/symbols" -c ".ecxr; kn 40; lm m Ardia*; lm m Microsoft*; q" 2>&1 | Select-Object -Last 80 | ForEach-Object { Write-Host "  $_" }
+  }
+}
+
+function Get-CrashEventFacts($record) {
+  $text = "$($record.Message)"
+  $processId = if ($text -match 'Faulting process id: (0x[0-9a-fA-F]+)') { [Convert]::ToInt32($Matches[1].Substring(2), 16) } else { 0 }
+  $startTime = if ($text -match 'Faulting application start time: (0x[0-9a-fA-F]+)') { try { [DateTime]::FromFileTime([Convert]::ToInt64($Matches[1].Substring(2), 16)).ToString('HH:mm:ss.fff') } catch { $Matches[1] } } else { "unknown" }
+  $path = if ($text -match 'Faulting application path: ([^\r\n]+)') { $Matches[1].Trim() } else { "unknown" }
+  $module = if ($text -match 'Faulting module name: ([^,\r\n]+)') { $Matches[1].Trim() } else { "unknown" }
+  $offset = if ($text -match 'Fault offset: (0x[0-9a-fA-F]+)') { $Matches[1] } else { "unknown" }
+  return [pscustomobject]@{ Pid = $processId; Line = "process $processId (seen by this check: $($script:SeenPids.Contains($processId))), started $startTime, $path, $module+$offset" }
+}
 
 if (-not (Test-Path -LiteralPath $Setup -PathType Leaf)) { throw "'$Setup' does not exist" }
 if ((Test-Path -LiteralPath $entry) -or (Test-Path -LiteralPath $folder)) { throw "Ardia is already installed for this user: this check installs and removes it" }
@@ -139,11 +177,24 @@ $env:ARDIA_BACKGROUND = "1"
 $install = Start-Process -FilePath (Resolve-Path -LiteralPath $Setup).Path -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART" -Wait -PassThru
 if ($install.ExitCode -ne 0) { throw "the installer exited with $($install.ExitCode)" }
 
+$werOn = $false
+try {
+  New-Item -Path $werKey -Force -ErrorAction Stop | Out-Null
+  New-ItemProperty -Path $werKey -Name DumpFolder -PropertyType ExpandString -Value $werDumps -Force -ErrorAction Stop | Out-Null
+  New-ItemProperty -Path $werKey -Name DumpType -PropertyType DWord -Value 2 -Force -ErrorAction Stop | Out-Null
+  New-ItemProperty -Path $werKey -Name DumpCount -PropertyType DWord -Value 10 -Force -ErrorAction Stop | Out-Null
+  $werOn = $true
+} catch {
+  Write-Host "relaunch-check: full crash dumps could not be turned on: $($_.Exception.Message)"
+}
+Note "full crash dumps on: $werOn"
+
 try {
   Start-Ardia | Out-Null
   $shown = Wait-Window "first launch" 180
   Assert-OneBrowser "first launch"
   Note "first launch: a window in $([int]((Get-Date) - $started).TotalSeconds) s"
+  Keep-Log "first-launch"
 
   foreach ($round in 1, 2) {
     Close-Window $shown
@@ -157,16 +208,19 @@ try {
     Start-Sleep -Seconds 2
     Assert-OneBrowser "relaunch $round right after closing"
     Note "relaunch $round right after closing: a window in browser $($shown.Pid)"
+    Keep-Log "relaunch-$round"
   }
 
   Close-Window $shown
   $exitMs = Wait-Exit $shown.Pid "closing"
   if ($exitMs -gt 15000) { throw "closing: the browser took $exitMs ms to exit after its window closed; it must end once Chromium's shutdown returns (#1706 lingered about 30 s)" }
   Note "closing: the browser exited $exitMs ms after its window closed"
+  Keep-Log "closing"
   Start-Ardia | Out-Null
   $shown = Wait-Window "relaunch after a full exit"
   Assert-OneBrowser "relaunch after a full exit"
   Note "relaunch after a full exit: a window in browser $($shown.Pid)"
+  Keep-Log "relaunch-after-exit"
 
   $held = $null
   foreach ($attempt in 1, 2, 3) {
@@ -203,6 +257,7 @@ try {
   $guard = Read-LaunchGuard @(Launch-Log)
   if ($null -eq $guard.WaitedMs -or $guard.WaitedMs -lt 1000) { throw "lingering exit: the launch log doesn't show the new launch waiting for the previous one (waited '$($guard.WaitedMs)' ms)" }
   Note "relaunch during a lingering exit: waited $($guard.WaitedMs) ms for the previous Ardia, then one browser and a window"
+  Keep-Log "lingering-exit"
 
   Close-Window $shown
   Wait-Exit $shown.Pid "before the stuck profile" | Out-Null
@@ -215,6 +270,7 @@ try {
   $setAside = Get-ChildItem -LiteralPath (Join-Path $data "Recovery") -Recurse -File -Filter "session.json" -ErrorAction SilentlyContinue | Select-Object -First 1
   if (-not $setAside) { throw "stuck profile: no session.json under $data\Recovery" }
   Note "stuck profile: after two unfinished starts the session went to $($setAside.Directory.Name) and Ardia opened a window"
+  Keep-Log "stuck-profile"
   Close-Window $shown
   Wait-Exit $shown.Pid "after the stuck profile" | Out-Null
   $settled = (Get-Content -LiteralPath (Join-Path $data "launch-starts.txt") -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -237,25 +293,32 @@ try {
   if ($guard.Fatal.Count) { throw "start failure: the engine crashed instead of quitting: $($guard.Fatal[0])" }
   if ($code -ne 0) { throw "start failure: Ardia exited with $code, not 0" }
   Note "start failure: a clean exit (0) with the reason in the log: $($guard.StartFailure)"
+  Keep-Log "start-failure"
 
   Start-Ardia | Out-Null
   $shown = Wait-Window "launch after a start failure"
   Close-Window $shown
   Wait-Exit $shown.Pid "launch after a start failure" | Out-Null
   Note "launch after a start failure: a window again"
+  Keep-Log "after-start-failure"
 
   Test-LaunchesDuringQuit
 
   $events = @(Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started } -ErrorAction SilentlyContinue |
       Where-Object { $_.ProviderName -eq "Application Error" -and $_.Message -match "Ardia\.exe" })
-  if ($events.Count) { throw "Windows logged $($events.Count) Ardia crash(es): $(($events[0].Message -split "`n")[0..3] -join ' | ')" }
+  $facts = @($events | ForEach-Object { Get-CrashEventFacts $_ })
+  foreach ($fact in $facts) { Write-Host "relaunch-check: Application Error: $($fact.Line)" }
+  if ($events.Count) { throw "Windows logged $($events.Count) Ardia crash(es): $(($facts | ForEach-Object { $_.Line }) -join ' | ')" }
   $dumps = @(Get-ChildItem -LiteralPath $reports -Filter *.dmp -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started })
   if ($dumps.Count) { throw "Crashpad wrote $($dumps.Count) crash dump(s): $($dumps.Name -join ', ')" }
+  if ($script:QuitDumps.Count) { throw "Crashpad wrote $($script:QuitDumps.Count) crash dump(s) in the quit cases' profiles: $($script:QuitDumps -join ', ')" }
   $fatal = (Read-LaunchGuard @(Launch-Log)).Fatal
   if ($fatal.Count) { throw "the launch log has a fatal line: $($fatal[0])" }
   Note "no crash events, crash dumps or fatal log lines"
 } finally {
   Keep-Log "final"
+  if ($werOn) { Remove-Item -Path $werKey -Force -ErrorAction SilentlyContinue }
+  Read-CrashDumps
   Get-Process -Name Ardia -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2
   $uninstaller = Join-Path $folder "unins000.exe"

@@ -103,3 +103,4 @@ chromium-win-devtools-other-clients.patch
 chromium-win-autoplay-policy.patch
 chromium-win-hosted-theme-change.patch
 chromium-win-hand-off-asks-the-app.patch
+chromium-win-hung-predecessor-not-killed.patch

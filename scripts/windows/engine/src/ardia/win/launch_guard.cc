@@ -484,11 +484,15 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
     state.facts.predecessor_wait_ms = inherited;
   }
   command_line->RemoveSwitch(kWaitedForPreviousSwitch);
+  const bool de_elevates = HandsOverToDeElevatedCopy(*command_line);
+  if (de_elevates && state.facts.restarted_after_refusal) {
+    command_line->AppendSwitch(kRestartedAfterRefusalSwitch);
+  }
   if (!primary) {
     WriteWaitingLines();
     return;
   }
-  if (HandsOverToDeElevatedCopy(*command_line)) {
+  if (de_elevates) {
     if (state.owns_alive) {
       ::ReleaseMutex(state.alive);
       state.owns_alive = false;
@@ -497,9 +501,6 @@ void GuardBrowserLaunch(const std::wstring& chromium_user_data_dir,
       command_line->AppendSwitchASCII(
           kWaitedForPreviousSwitch,
           base::NumberToString(state.facts.predecessor_wait_ms));
-    }
-    if (state.facts.restarted_after_refusal) {
-      command_line->AppendSwitch(kRestartedAfterRefusalSwitch);
     }
     WriteWaitingLines();
     return;

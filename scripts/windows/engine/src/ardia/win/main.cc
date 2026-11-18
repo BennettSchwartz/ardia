@@ -6,7 +6,6 @@
 #include <stdio.h>
 
 #include <algorithm>
-#include <deque>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,6 +48,7 @@
 #include "chrome/browser/lifetime/application_lifetime_desktop.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/win/chrome_process_finder.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
@@ -107,7 +107,6 @@ struct QuitState {
   bool engine_quit_started = false;
   std::string reason = kUserQuit;
   int cancelled_by_launch = 0;
-  std::deque<int> answers;
 };
 
 QuitState& TheQuit() {
@@ -837,6 +836,15 @@ void EmitRelaunch(const std::vector<std::string>& links) {
   Emit("relaunch", std::move(payload));
 }
 
+void WriteLaunchLogLater(const std::string& line) {
+  if (base::SequencedTaskRunner::HasCurrentDefault() &&
+      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+          FROM_HERE, base::BindOnce(&WriteLaunchLog, line))) {
+    return;
+  }
+  WriteLaunchLog(line);
+}
+
 int TestMillisecondsFromEnvironment(std::string_view key, int most) {
   if (!TheGate().refusal.empty()) {
     return 0;
@@ -848,53 +856,40 @@ int TestMillisecondsFromEnvironment(std::string_view key, int most) {
   return std::min(value, most);
 }
 
-void DeliverLaunch(const std::vector<std::string>& links) {
-  if (TheQuit().past_no_return) {
-    WriteLaunchLog(
-        "relaunch: a launch this Ardia took reached it after its quit's point "
-        "of no return, which taking it was meant to rule out; it is lost");
-    return;
-  }
+void DeliverLaunch(const base::CommandLine& command_line,
+                   const base::FilePath& cur_dir) {
   App& app = TheApp();
   if (app.started && app.launch_delivered) {
     app.launch_delivered();
   }
-  EmitRelaunch(links);
+  EmitRelaunch(LaunchLinks(command_line, cur_dir));
+}
+
+void PostLaunchDelivery(const base::CommandLine& command_line,
+                        const base::FilePath& cur_dir) {
+  const int held_ms =
+      TestMillisecondsFromEnvironment("handOffDeliveryHoldMs", kHandOffHoldMostMs);
+  if (held_ms) {
+    WriteLaunchLogLater("test: a launch this Ardia took reaches the app " +
+                        std::to_string(held_ms) + " ms late");
+  }
+  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+      FROM_HERE, base::BindOnce(&DeliverLaunch, command_line, cur_dir),
+      base::Milliseconds(held_ms));
 }
 
 bool Relaunched(const base::CommandLine& command_line,
                 const base::FilePath& cur_dir) {
-  QuitState& quit = TheQuit();
-  int answer = ARDIA_APP_LAUNCH_KEPT;
-  if (!quit.answers.empty()) {
-    answer = quit.answers.front();
-    quit.answers.pop_front();
-  }
-  if (answer == ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE) {
-    return true;
-  }
-  std::vector<std::string> links = LaunchLinks(command_line, cur_dir);
-  const int held_ms =
-      TestMillisecondsFromEnvironment("handOffDeliveryHoldMs", kHandOffHoldMostMs);
-  if (held_ms) {
-    WriteLaunchLog("test: a launch this Ardia took reaches the app " +
-                   std::to_string(held_ms) + " ms late");
-    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-        FROM_HERE, base::BindOnce(&DeliverLaunch, std::move(links)),
-        base::Milliseconds(held_ms));
-    return true;
-  }
-  DeliverLaunch(links);
+  EmitRelaunch(LaunchLinks(command_line, cur_dir));
   return true;
 }
 
-void WriteLaunchLogLater(const std::string& line) {
-  if (base::SequencedTaskRunner::HasCurrentDefault() &&
-      base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-          FROM_HERE, base::BindOnce(&WriteLaunchLog, line))) {
-    return;
-  }
-  WriteLaunchLog(line);
+bool IsLaunch(const base::CommandLine& command_line) {
+  const base::CommandLine& own = *base::CommandLine::ForCurrentProcess();
+  return !command_line.HasSwitch(switches::kUninstall) &&
+         !command_line.HasSwitch(switches::kEnableAutomation) &&
+         !own.HasSwitch(switches::kEnableAutomation) &&
+         !command_line.HasSwitch("headless");
 }
 
 void AfterLaunchTaken(int answer) {
@@ -912,25 +907,24 @@ void AfterLaunchTaken(int answer) {
   }
 }
 
-bool DropsHandOff() {
-  const QuitState& quit = TheQuit();
-  if (quit.reason != kUpdateQuit || !(quit.asking || quit.past_no_return)) {
-    return false;
+ArdiaHandOff AnswersHandOff(const base::CommandLine& command_line,
+                            const base::FilePath& cur_dir) {
+  if (!IsLaunch(command_line)) {
+    return ArdiaHandOff::kNotOurs;
   }
-  WriteLaunchLogLater(
-      "relaunch: a launch during an update's quit is taken and left for the "
-      "installer, which opens Ardia again");
-  return true;
-}
-
-bool TakesHandOff() {
   QuitState& quit = TheQuit();
+  if (quit.reason == kUpdateQuit && (quit.asking || quit.past_no_return)) {
+    WriteLaunchLogLater(
+        "relaunch: a launch during an update's quit is taken and left for "
+        "the installer, which opens Ardia again");
+    return ArdiaHandOff::kTaken;
+  }
   if (quit.past_no_return || browser_shutdown::HasShutdownStarted()) {
     WriteLaunchLogLater(
         "relaunch: turned a launch away: this Ardia is past its quit's point "
         "of no return, so that launch starts Ardia again once this one has "
         "ended");
-    return false;
+    return ArdiaHandOff::kTurnedAway;
   }
   App& app = TheApp();
   const int answer = app.started && app.launch_arriving
@@ -940,16 +934,18 @@ bool TakesHandOff() {
     WriteLaunchLogLater(
         "relaunch: turned a launch away: the app is past its quit's point of "
         "no return");
-    return false;
+    return ArdiaHandOff::kTurnedAway;
   }
   if (answer == ARDIA_APP_LAUNCH_KEPT_BY_CANCELLING_QUIT) {
     quit.asking = false;
     quit.cancelled_by_launch++;
   }
-  quit.answers.push_back(answer);
   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE, base::BindOnce(&AfterLaunchTaken, answer));
-  return true;
+  if (answer != ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE) {
+    PostLaunchDelivery(command_line, cur_dir);
+  }
+  return ArdiaHandOff::kTaken;
 }
 
 int FailTurnedAwayLaunch(int exit_code,
@@ -1033,6 +1029,18 @@ int AnswerTurnedAwayLaunch(int exit_code) {
       L"Open Ardia again.");
 }
 
+void ShortenHandOffTimeoutForTest() {
+  const int timeout_ms =
+      TestMillisecondsFromEnvironment("handOffTimeoutMs", kHandOffHoldMostMs);
+  if (!timeout_ms) {
+    return;
+  }
+  SetNotificationTimeoutForTesting(base::Milliseconds(timeout_ms));
+  WriteLaunchLog("test: this launch waits at most " +
+                 std::to_string(timeout_ms) +
+                 " ms for a running Ardia to answer");
+}
+
 void HoldHandOffForTest() {
   const int hold_ms =
       TestMillisecondsFromEnvironment("handOffHoldMs", kHandOffHoldMostMs);
@@ -1085,13 +1093,13 @@ void BeforeChromeMain() {
   }
   AddLaunchSwitches(command_line);
   HoldHandOffForTest();
+  ShortenHandOffTimeoutForTest();
   ardia_win::AskBeforeDiscards();
   g_ardia_win_hosts_normal_windows = true;
   g_ardia_win_frame_view = &CreateHostedFrameView;
   g_ardia_win_add_main_parts = &AddMainParts;
   g_ardia_win_relaunched = &Relaunched;
-  g_ardia_win_takes_hand_off = &TakesHandOff;
-  g_ardia_win_drops_hand_off = &DropsHandOff;
+  g_ardia_win_answers_hand_off = &AnswersHandOff;
   InstallExternalAppAsks();
   g_ardia_keeps_window_without_tabs = &KeepsWindowWithoutTabs;
 }

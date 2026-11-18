@@ -54,6 +54,7 @@ source_set("win") {
     "//chrome/browser/devtools",
     "//chrome/browser/printing",
     "//chrome/browser/ui:recently_audible_helper",
+    "//chrome/browser/win:chrome_process_finder",
     "//chrome/browser/profiles:profile",
     "//chrome/common",
     "//chrome/install_static:install_static_util",

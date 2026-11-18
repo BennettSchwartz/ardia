@@ -71,7 +71,7 @@ inline std::vector<std::string_view> const &TestKeys() noexcept {
       "pipSelfTest", "pipHover", "selfCheckOnly", "meadowWebGL", "meadowReadyMs", "introStartDelayMs", "fakeFullScreenMs", "shadersKeyWindow", "peekStrict", "importSecret", "importDiaBundleId", "importDiaWindows",
       "cliInstallScript", "legacySource", "legacyCrashAfter", "bangsUrl", "onboarding", "whatsNew", "telemetry",
       "liveMock", "calendarFixture", "appMenu", "appDialog", "loginsTimeout", "externalAppLaunch", "nativeDragRefused", "httpPages", "selfCheckStage",
-      "keyHold", "keyHoldReadyMs", "quitWaitMs", "quitUnloadHoldMs", "quitFlushHoldMs", "handOffHoldMs", "handOffDeliveryHoldMs", "lastWindowWaitMs",
+      "keyHold", "keyHoldReadyMs", "quitWaitMs", "quitUnloadHoldMs", "quitFlushHoldMs", "handOffHoldMs", "handOffDeliveryHoldMs", "handOffTimeoutMs", "lastWindowWaitMs",
       "windowOpenHoldMs", "quitReason", "quitByMessage", "quitAnswerHoldMs",
   };
   return keys;
