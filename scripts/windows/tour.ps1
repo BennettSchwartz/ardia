@@ -2596,6 +2596,28 @@ function Open-TourPage($Session, $Stop, [string]$Path, [string]$TitlePattern) {
   return $loaded
 }
 
+function Open-TourPageHere($Session, $Stop, [string]$Path, [string]$TitlePattern) {
+  Focus-Window $Session $Session.Main $Stop | Out-Null
+  Send-Address "127.0.0.1:$($script:TourPagesPort)$Path"
+  Send-Key 0x0D 0
+  Send-Key 0x0D 2
+  $how = "typed into the starting tab's focused bar"
+  $loaded = Wait-Until $Session { $null -ne (Get-PageWindow $Session $TitlePattern) } 10000
+  if (-not $loaded) {
+    Focus-Window $Session $Session.Main $Stop | Out-Null
+    Send-Chord @(0x11) 0x4C
+    Start-Sleep -Milliseconds 700
+    Send-Address "127.0.0.1:$($script:TourPagesPort)$Path"
+    Send-Key 0x0D 0
+    Send-Key 0x0D 2
+    $how = "typed into the starting tab's bar, then after Ctrl+L"
+    $loaded = Wait-Until $Session { $null -ne (Get-PageWindow $Session $TitlePattern) } 20000
+  }
+  Start-Sleep -Milliseconds 2000
+  $Stop.Facts.Add("opened $Path in the starting tab ($how; its page window shows: $loaded)")
+  return $loaded
+}
+
 function Switch-Tab($Session, $Stop, [string]$TitlePattern, [string]$Leaving, [string]$Row) {
   Send-Chord @(0x11) 0x09
   $shown = { $null -ne (Get-PageWindow $Session $TitlePattern) -and $null -eq (Get-PageWindow $Session $Leaving) }
@@ -2753,10 +2775,11 @@ function Invoke-QuitDownloadsTour {
     $stop.Expected = "a first dialog asking 'Close 1 tab?', then a second asking '$expectedMessage'; after Cancel the window, its tab and the process are still there."
     if (-not (Test-Usable $lastTab)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
     $since = (Get-Date).AddSeconds(-2)
-    $opened = Open-TourPage $lastTab $stop "/startdownload" "tour download page"
+    $opened = Open-TourPageHere $lastTab $stop "/startdownload" "tour download page"
     $download = Wait-DownloadStarted $lastTab $since 15000
     $stop.Facts.Add("the page shows: $opened; $(Format-DownloadStart $download 15000); the window's title: '$([ArdiaTour]::TitleOf($lastTab.Main))'")
     if (-not $download.Started) { $stop.Seen = "no download started"; $stop.Facts.Add("didn't press Ctrl+W: with no download there is nothing for the question to be about"); return }
+    if ([ArdiaTour]::TitleOf($lastTab.Main) -match '& \d+ Tabs?$') { $stop.Seen = "not the only tab"; $stop.Facts.Add("didn't press Ctrl+W: the window holds other tabs, so closing this one doesn't close the window and nothing should ask"); return }
     Focus-Window $lastTab $lastTab.Main $stop | Out-Null
     Send-Chord @(0x11) 0x57
     $first = Wait-QuitDialog $lastTab 8000
