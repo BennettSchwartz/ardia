@@ -1360,6 +1360,624 @@ if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesU
   }
 }
 
+if ($Part -ne "gate" -and $withEngineForEdge -and -not $NoInput -and $httpPagesUp) {
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaFirstFrames").Type) {
+    Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public static class ArdiaFirstFrames {
+  public delegate bool EnumProc(IntPtr window, IntPtr data);
+  [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct BitmapInfoHeader { public uint Size; public int Width, Height; public ushort Planes, BitCount; public uint Compression, SizeImage; public int XPels, YPels; public uint Used, Important; }
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window, ref Point point);
+  [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+  [DllImport("user32.dll")] static extern bool GetLayeredWindowAttributes(IntPtr window, out uint key, out byte alpha, out uint flags);
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr target, int x, int y, int width, int height, IntPtr source, int fromX, int fromY, uint operation);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BitmapInfoHeader header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint x, uint y, uint data, UIntPtr extra);
+  public delegate IntPtr WindowProc(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct WindowClass { public uint Style; public WindowProc Proc; public int ClassExtra, WindowExtra; public IntPtr Instance, Icon, Cursor, Background; public string Menu, Name; }
+  [StructLayout(LayoutKind.Sequential)] public struct Message { public IntPtr Window; public uint Id; public IntPtr WParam, LParam; public uint Time; public int X, Y; }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern ushort RegisterClassW(ref WindowClass windowClass);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr CreateWindowExW(uint extended, string className, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+  [DllImport("user32.dll")] static extern IntPtr DefWindowProcW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool DestroyWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern int GetMessageW(out Message message, IntPtr window, uint from, uint to);
+  [DllImport("user32.dll")] static extern bool TranslateMessage(ref Message message);
+  [DllImport("user32.dll")] static extern IntPtr DispatchMessageW(ref Message message);
+  [DllImport("user32.dll")] static extern bool PostThreadMessageW(uint thread, uint message, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+  [DllImport("user32.dll")] static extern bool SystemParametersInfoW(uint action, uint param, ref Rect rect, uint ini);
+  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandleW(IntPtr name);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateSolidBrush(uint color);
+
+  public static int BackdropClicks;
+  static WindowProc backdropProc = BackdropMessage;
+  static bool backdropRegistered;
+  static uint backdropThread;
+  static Thread backdropLoop;
+
+  static IntPtr BackdropMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam) {
+    if (message == 0x0201 || message == 0x0204 || message == 0x0021) BackdropClicks++;
+    return DefWindowProcW(window, message, wParam, lParam);
+  }
+
+  public static bool ShowBackdrop() {
+    BackdropClicks = 0;
+    bool shown = false;
+    ManualResetEvent ready = new ManualResetEvent(false);
+    backdropLoop = new Thread(() => {
+      backdropThread = GetCurrentThreadId();
+      IntPtr instance = GetModuleHandleW(IntPtr.Zero);
+      if (!backdropRegistered) {
+        WindowClass windowClass = new WindowClass();
+        windowClass.Proc = backdropProc;
+        windowClass.Instance = instance;
+        windowClass.Background = CreateSolidBrush(0x00804020);
+        windowClass.Name = "ArdiaFirstFramesBackdrop";
+        backdropRegistered = RegisterClassW(ref windowClass) != 0;
+      }
+      Rect work = new Rect();
+      SystemParametersInfoW(0x30, 0, ref work, 0);
+      IntPtr backdrop = CreateWindowExW(0x80, "ArdiaFirstFramesBackdrop", "first frames backdrop", 0x80000000, work.Left, work.Top, work.Right - work.Left, work.Bottom - work.Top, IntPtr.Zero, IntPtr.Zero, instance, IntPtr.Zero);
+      if (backdrop != IntPtr.Zero) {
+        ShowWindow(backdrop, 4);
+        shown = IsWindowVisible(backdrop);
+      }
+      ready.Set();
+      Message message;
+      while (GetMessageW(out message, IntPtr.Zero, 0, 0) > 0) {
+        TranslateMessage(ref message);
+        DispatchMessageW(ref message);
+      }
+      DestroyWindow(backdrop);
+    });
+    backdropLoop.IsBackground = true;
+    backdropLoop.Start();
+    if (!ready.WaitOne(5000)) return false;
+    Thread.Sleep(400);
+    return shown;
+  }
+
+  public static void HideBackdrop() {
+    if (backdropLoop == null) return;
+    PostThreadMessageW(backdropThread, 0x0012, IntPtr.Zero, IntPtr.Zero);
+    backdropLoop.Join(5000);
+    backdropLoop = null;
+  }
+
+  static byte[] desktop;
+  static int desktopWidth, desktopHeight;
+
+  public class Frame {
+    public long Ms;
+    public int Alpha = 255;
+    public double White;
+    public bool Uniform;
+    public int R, G, B;
+    public int Width, Height;
+    public byte[] Pixels;
+    public byte[] Grid;
+    public string Kind = "";
+  }
+
+  public static double Share(byte[] grid, byte[] reference, int tolerance) {
+    if (grid == null || reference == null || grid.Length != reference.Length || grid.Length == 0) return 0;
+    int same = 0, points = grid.Length / 3;
+    for (int at = 0; at < grid.Length; at += 3) {
+      if (Math.Abs(grid[at] - reference[at]) <= tolerance && Math.Abs(grid[at + 1] - reference[at + 1]) <= tolerance && Math.Abs(grid[at + 2] - reference[at + 2]) <= tolerance) same++;
+    }
+    return same / (double)points;
+  }
+
+  public class Launch {
+    public Process Process;
+    public List<Frame> Frames = new List<Frame>();
+    public long VisibleMs = -1;
+    public long ForegroundMs = -1;
+    public long ClickedMs = -1;
+    public string ClickedOn = "";
+  }
+
+  static IntPtr Find(uint process) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((window, data) => {
+      uint owner;
+      GetWindowThreadProcessId(window, out owner);
+      if (owner != process || !IsWindowVisible(window)) return true;
+      StringBuilder name = new StringBuilder(64);
+      GetClassName(window, name, 64);
+      if (name.ToString() != "Microsoft.UI.Windowing.Window") return true;
+      found = window;
+      return false;
+    }, IntPtr.Zero);
+    return found;
+  }
+
+  static int AlphaOf(IntPtr window) {
+    long extended = GetWindowLongPtr(window, -20).ToInt64();
+    if ((extended & 0x80000) == 0) return 255;
+    uint key, flags;
+    byte alpha;
+    if (!GetLayeredWindowAttributes(window, out key, out alpha, out flags) || (flags & 2) == 0) return 255;
+    return alpha;
+  }
+
+  static byte[] Grab(int x, int y, int width, int height) {
+    IntPtr screen = GetDC(IntPtr.Zero);
+    IntPtr memory = CreateCompatibleDC(screen);
+    BitmapInfoHeader header = new BitmapInfoHeader();
+    header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
+    header.Width = width;
+    header.Height = -height;
+    header.Planes = 1;
+    header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    byte[] pixels = null;
+    if (section != IntPtr.Zero) {
+      IntPtr previous = SelectObject(memory, section);
+      if (BitBlt(memory, 0, 0, width, height, screen, x, y, 0x40CC0020)) {
+        pixels = new byte[width * height * 4];
+        Marshal.Copy(bits, pixels, 0, pixels.Length);
+      }
+      SelectObject(memory, previous);
+      DeleteObject(section);
+    }
+    DeleteDC(memory);
+    ReleaseDC(IntPtr.Zero, screen);
+    return pixels;
+  }
+
+  static string KindOf(Frame frame, double sameShare) {
+    if (frame.Width == 0) return frame.Alpha <= 8 ? "hidden" : "unread";
+    if (frame.Alpha <= 8) return sameShare < 0.97 ? "leak" : "hidden";
+    if (sameShare >= 0.9) return "behind";
+    if (frame.Uniform && frame.White > 0.9) return "white";
+    if (frame.Uniform) return "plain";
+    return "content";
+  }
+
+  static Frame Capture(IntPtr window, bool keep) {
+    Frame frame = new Frame();
+    frame.Alpha = AlphaOf(window);
+    Rect client;
+    GetClientRect(window, out client);
+    Point origin = new Point();
+    ClientToScreen(window, ref origin);
+    int width = client.Right - client.Left, height = client.Bottom - client.Top;
+    if (width < 8 || height < 8) { frame.Kind = KindOf(frame, 1); return frame; }
+    byte[] pixels = Grab(origin.X, origin.Y, width, height);
+    frame.Alpha = Math.Max(frame.Alpha, AlphaOf(window));
+    if (pixels == null) { frame.Kind = KindOf(frame, 1); return frame; }
+    int same = 0, compared = 0;
+    byte[] grid = new byte[40 * 24 * 3];
+    frame.Width = width;
+    frame.Height = height;
+    int white = 0, count = 0;
+    int minR = 255, minG = 255, minB = 255, maxR = 0, maxG = 0, maxB = 0;
+    long sumR = 0, sumG = 0, sumB = 0;
+    for (int row = 0; row < 24; row++) {
+      for (int column = 0; column < 40; column++) {
+        int x = (int)((column + 0.5) * width / 40), y = (int)((row + 0.5) * height / 24);
+        int at = (y * width + x) * 4;
+        int b = pixels[at], g = pixels[at + 1], r = pixels[at + 2];
+        grid[count * 3] = (byte)r;
+        grid[count * 3 + 1] = (byte)g;
+        grid[count * 3 + 2] = (byte)b;
+        count++;
+        if (r >= 240 && g >= 240 && b >= 240) white++;
+        minR = Math.Min(minR, r); minG = Math.Min(minG, g); minB = Math.Min(minB, b);
+        maxR = Math.Max(maxR, r); maxG = Math.Max(maxG, g); maxB = Math.Max(maxB, b);
+        sumR += r; sumG += g; sumB += b;
+        int screenX = origin.X + x, screenY = origin.Y + y;
+        if (desktop != null && screenX >= 0 && screenY >= 0 && screenX < desktopWidth && screenY < desktopHeight) {
+          int then = (screenY * desktopWidth + screenX) * 4;
+          compared++;
+          if (Math.Abs(desktop[then] - b) <= 12 && Math.Abs(desktop[then + 1] - g) <= 12 && Math.Abs(desktop[then + 2] - r) <= 12) same++;
+        }
+      }
+    }
+    frame.White = white / (double)count;
+    frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
+    frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
+    frame.Grid = grid;
+    if (keep) frame.Pixels = pixels;
+    frame.Kind = KindOf(frame, compared > 0 ? same / (double)compared : 1);
+    return frame;
+  }
+
+  public static Launch Run(string app, string arguments, int milliseconds, bool click) {
+    Launch launch = new Launch();
+    desktopWidth = GetSystemMetrics(0);
+    desktopHeight = GetSystemMetrics(1);
+    desktop = Grab(0, 0, desktopWidth, desktopHeight);
+    Stopwatch clock = Stopwatch.StartNew();
+    ProcessStartInfo start = new ProcessStartInfo(app, arguments);
+    start.UseShellExecute = false;
+    launch.Process = Process.Start(start);
+    IntPtr window = IntPtr.Zero;
+    string last = "";
+    int kept = 0;
+    while (clock.ElapsedMilliseconds < milliseconds && !launch.Process.HasExited) {
+      if (window == IntPtr.Zero) {
+        window = Find((uint)launch.Process.Id);
+        if (window == IntPtr.Zero) { Thread.Sleep(1); continue; }
+        launch.VisibleMs = clock.ElapsedMilliseconds;
+      }
+      long at = clock.ElapsedMilliseconds;
+      if (launch.ForegroundMs < 0 && GetForegroundWindow() == window) launch.ForegroundMs = at;
+      Frame frame = Capture(window, kept < 16);
+      frame.Ms = at;
+      if (click && launch.ClickedMs < 0) {
+        Rect client;
+        GetClientRect(window, out client);
+        Point middle = new Point();
+        middle.X = (client.Right - client.Left) / 2;
+        middle.Y = (client.Bottom - client.Top) / 2;
+        ClientToScreen(window, ref middle);
+        SetCursorPos(middle.X, middle.Y);
+        mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+        mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+        launch.ClickedMs = clock.ElapsedMilliseconds;
+        launch.ClickedOn = frame.Kind;
+      }
+      if (frame.Kind != last && kept < 16) { kept++; last = frame.Kind; }
+      else frame.Pixels = null;
+      launch.Frames.Add(frame);
+    }
+    return launch;
+  }
+}
+"@
+  }
+
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaFirstFramesFront").Type) {
+    Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class ArdiaFirstFramesFront {
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+}
+"@
+  }
+
+  function Get-FrameKind($Frame) {
+    return $Frame.Kind
+  }
+
+  function Save-Frame($Frame, [string]$Path) {
+    $bitmap = New-Object System.Drawing.Bitmap $Frame.Width, $Frame.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+    try {
+      $bits = $bitmap.LockBits((New-Object System.Drawing.Rectangle 0, 0, $Frame.Width, $Frame.Height), [System.Drawing.Imaging.ImageLockMode]::WriteOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppRgb)
+      [System.Runtime.InteropServices.Marshal]::Copy($Frame.Pixels, 0, $bits.Scan0, $Frame.Pixels.Length)
+      $bitmap.UnlockBits($bits)
+      $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+      $bitmap.Dispose()
+    }
+  }
+
+  function Measure-FirstFrames([string]$Label, [switch]$Onboarded, [bool]$Dark, [switch]$Click) {
+    $themes = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+    New-Item -Path $themes -Force | Out-Null
+    Set-ItemProperty -Path $themes -Name AppsUseLightTheme -Value ([int](-not $Dark)) -Type DWord
+    Start-Sleep -Milliseconds 800
+    $data = New-DataDirectory "first-frames-$Label-data"
+    if ($Onboarded) { Set-Content -Path (Join-Path $data "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM }
+    $log = Join-Path $Out "first-frames-$Label.log"
+    $env:ARDIA_DATA_DIR = $data
+    $env:ARDIA_CONFIG_DIR = $data
+    $launch = $null
+    try {
+      if (-not [ArdiaFirstFrames]::ShowBackdrop()) { return @("first frames ($Label): the check's own click-counting window did not open, so nothing was measured") }
+      $launch = [ArdiaFirstFrames]::Run((Resolve-Path -LiteralPath $App).Path, "--log-file=`"$log`"", 9000, [bool]$Click)
+      $env:ARDIA_CONFIG_DIR = ""
+      $frames = @($launch.Frames)
+      $savedCount = 0
+      foreach ($frame in $frames) {
+        if (-not $frame.Pixels) { continue }
+        $savedCount++
+        Save-Frame $frame (Join-Path $Out ("first-frames-$Label-{0:00}-{1}ms-{2}.png" -f $savedCount, $frame.Ms, $frame.Kind))
+      }
+      $shownIndex = -1
+      for ($i = 0; $i -lt $frames.Count; $i++) { if ((Get-FrameKind $frames[$i]) -in @("white", "plain", "content")) { $shownIndex = $i; break } }
+      $contentIndex = -1
+      for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) { if ((Get-FrameKind $frames[$i]) -eq "content") { $contentIndex = $i; break } }
+      $spacing = if ($frames.Count -gt 1) { [int](($frames[-1].Ms - $frames[0].Ms) / ($frames.Count - 1)) } else { 0 }
+      $firstWindow = if (Test-Path $log) { (Select-String -Path $log -Pattern "\[ardia windows\] first window" | Select-Object -First 1).Line } else { "" }
+      $windowLines = if (Test-Path $log) { @(Select-String -Path $log -Pattern "^window \d+ (opened|window \S+ (shown|shows|fades))| first window" | Select-Object -First 6 | ForEach-Object { $_.Line }) } else { @() }
+      if ($shownIndex -lt 0) {
+        Write-Host "First frames ($Label): the window never showed in 9 s ($($frames.Count) captures)."
+        return @("first frames ($Label): the window never showed")
+      }
+      $shown = $frames[$shownIndex]
+      $until = if ($contentIndex -ge 0) { $contentIndex } else { $frames.Count }
+      $white = @()
+      $plain = @()
+      for ($i = $shownIndex; $i -lt $until; $i++) {
+        $kind = Get-FrameKind $frames[$i]
+        if ($kind -eq "white") { $white += $frames[$i] }
+        if ($kind -eq "plain") { $plain += $frames[$i] }
+      }
+      $endMs = if ($contentIndex -ge 0) { $frames[$contentIndex].Ms } else { $frames[-1].Ms }
+      $whiteMs = if ($white.Count) { $endMs - $white[0].Ms } else { 0 }
+      $plainColours = ($plain | ForEach-Object { "rgb($($_.R),$($_.G),$($_.B))" } | Select-Object -Unique) -join ", "
+      $content = if ($contentIndex -ge 0) { $frames[$contentIndex] } else { $null }
+      $contentText = if ($content) { "at $($content.Ms) ms, mean rgb($($content.R),$($content.G),$($content.B)), $([int]($content.White * 100))% white" } else { "never within 9 s" }
+      Write-Host "First frames ($Label): $($frames.Count) captures about every $spacing ms; the window first shows at $($shown.Ms) ms as $(Get-FrameKind $shown) (mean rgb($($shown.R),$($shown.G),$($shown.B))); $($white.Count) plain white captures over $whiteMs ms before the first UI frame; $($plain.Count) captures of another plain colour ($plainColours); the first UI frame is $contentText."
+      $foreground = [ArdiaSnapKeys]::GetForegroundWindow()
+      $frontOwner = [uint32]0
+      [ArdiaFirstFramesFront]::GetWindowThreadProcessId($foreground, [ref]$frontOwner) | Out-Null
+      $ours = $frontOwner -eq $launch.Process.Id
+      Write-Host "First frames ($Label): the window is visible to Windows (taskbar, Alt+Tab) from $($launch.VisibleMs) ms and in front from $($launch.ForegroundMs) ms; at the end the foreground window is ours: $ours."
+      $backdropClicks = [ArdiaFirstFrames]::BackdropClicks
+      if ($launch.ClickedMs -ge 0) { Write-Host "First frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms, while it was $($launch.ClickedOn), reached the window underneath $backdropClicks times and left the foreground with the app: $ours." }
+      if ($firstWindow) { Write-Host "First frames ($Label) log: $firstWindow" }
+      foreach ($line in $windowLines) { Write-Host "First frames ($Label) log: $line" }
+      $sequence = @()
+      $last = ""
+      foreach ($frame in $frames) {
+        $kind = Get-FrameKind $frame
+        if ($kind -ne $last) { $sequence += "$($frame.Ms) ms $kind"; $last = $kind }
+      }
+      Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
+      $problems = @()
+      $tone = if ($Dark) { "dark" } else { "light" }
+      $firstUi = @($frames | Where-Object { $_.Kind -eq "content" -and $_.Grid } | Select-Object -First 1)
+      if ($Onboarded -and $firstUi.Count) { $script:BrowserGrids[$tone] = $firstUi[0].Grid }
+      if (-not $Onboarded) {
+        $reference = $script:BrowserGrids[$tone]
+        if (-not $reference) { $problems += "first frames ($Label): no settled browser frame from the second launch in $tone to compare the first launch with" }
+        else {
+          $browser = @()
+          for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) {
+            if ($frames[$i].Kind -in @("plain", "content") -and [ArdiaFirstFrames]::Share($frames[$i].Grid, $reference, 6) -ge 0.9) { $browser += $frames[$i] }
+          }
+          Write-Host "First frames ($Label): $($browser.Count) captures show the browser instead of the intro$(if ($browser.Count) { ", from $($browser[0].Ms) to $($browser[-1].Ms) ms" })."
+          if ($browser.Count) { $problems += "first frames ($Label): the browser showed instead of the intro in $($browser.Count) captures, from $($browser[0].Ms) to $($browser[-1].Ms) ms" }
+        }
+      }
+      $leaks = @($frames | Where-Object { $_.Kind -eq "leak" })
+      if ($leaks.Count) { $problems += "first frames ($Label): something showed in $($leaks.Count) captures while the window was still transparent, from $($leaks[0].Ms) ms" }
+      if ($contentIndex -lt 0) { $problems += "first frames ($Label): the window never showed its UI in 9 s" }
+      if ($backdropClicks -gt 0) { $problems += "first frames ($Label): the window underneath got $backdropClicks clicks or activations meant for the app's window" }
+      if ($white.Count -gt 0) { $problems += "first frames ($Label): the window showed plain white in $($white.Count) captures over $whiteMs ms before the UI's first frame" }
+      if ($launch.ForegroundMs -lt 0 -or ($launch.ForegroundMs - $launch.VisibleMs) -gt 100) { $problems += "first frames ($Label): the window was visible from $($launch.VisibleMs) ms but in front only from $($launch.ForegroundMs) ms" }
+      if ($launch.ClickedMs -ge 0 -and -not $ours) { $problems += "first frames ($Label): a click at the window's centre at $($launch.ClickedMs) ms ($($launch.ClickedOn)) went to the window behind; the foreground window is $(Get-SnapDescription $foreground)" }
+      return $problems
+    } finally {
+      $env:ARDIA_CONFIG_DIR = ""
+      try {
+        if ($launch -and -not $launch.Process.HasExited) {
+          Stop-Process -Id $launch.Process.Id -Force
+          $launch.Process.WaitForExit(10000) | Out-Null
+        }
+      } finally {
+        [ArdiaFirstFrames]::HideBackdrop()
+      }
+    }
+  }
+
+  $themesKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+  $savedTheme = (Get-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
+  try {
+    $script:BrowserGrids = @{}
+    Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false -Click | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true -Click | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
+  } finally {
+    if ($null -ne $savedTheme) { Set-ItemProperty -Path $themesKey -Name AppsUseLightTheme -Value $savedTheme -Type DWord }
+    else { Remove-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
+  }
+}
+
+if ($Part -ne "gate" -and $withEngineForEdge -and $httpPagesUp) {
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaContrast").Type) {
+    Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class ArdiaContrast {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct HighContrast { public uint Size; public uint Flags; public IntPtr Scheme; }
+  public delegate bool EnumProc(IntPtr window, IntPtr data);
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint size, ref HighContrast value, uint flags);
+  [DllImport("user32.dll")] public static extern uint GetSysColor(int index);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+
+  public static bool IsOn() {
+    HighContrast value = new HighContrast();
+    value.Size = (uint)Marshal.SizeOf(typeof(HighContrast));
+    return SystemParametersInfo(0x0042, value.Size, ref value, 0) && (value.Flags & 1) != 0;
+  }
+
+  public static string Set(bool on, string scheme) {
+    HighContrast value = new HighContrast();
+    value.Size = (uint)Marshal.SizeOf(typeof(HighContrast));
+    SystemParametersInfo(0x0042, value.Size, ref value, 0);
+    IntPtr name = on && !string.IsNullOrEmpty(scheme) ? Marshal.StringToHGlobalUni(scheme) : IntPtr.Zero;
+    try {
+      value.Flags = on ? (value.Flags | 1u) : (value.Flags & ~1u);
+      if (name != IntPtr.Zero) value.Scheme = name;
+      bool done = SystemParametersInfo(0x0043, value.Size, ref value, 0x03);
+      return done ? "set" : "refused, error " + Marshal.GetLastWin32Error();
+    } finally {
+      if (name != IntPtr.Zero) Marshal.FreeHGlobal(name);
+    }
+  }
+
+  public static int CountWindows(int process) {
+    int count = 0;
+    EnumWindows((window, data) => {
+      uint owner;
+      GetWindowThreadProcessId(window, out owner);
+      if (owner != (uint)process || !IsWindowVisible(window)) return true;
+      StringBuilder name = new StringBuilder(64);
+      GetClassName(window, name, 64);
+      if (name.ToString() == "Microsoft.UI.Windowing.Window") count++;
+      return true;
+    }, IntPtr.Zero);
+    return count;
+  }
+}
+"@
+  }
+
+  function Get-SystemColours {
+    $window = [ArdiaContrast]::GetSysColor(5)
+    $text = [ArdiaContrast]::GetSysColor(8)
+    return "window #{0:X6}, text #{1:X6}" -f $window, $text
+  }
+
+  function Set-Contrast([bool]$On) {
+    $answer = [ArdiaContrast]::Set($On, "High Contrast Black")
+    return "contrast $(if ($On) { 'on' } else { 'off' }) $answer (now $([ArdiaContrast]::IsOn()), $(Get-SystemColours))"
+  }
+
+  function Get-AppErrors([datetime]$Since) {
+    try {
+      return @(Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "Application Error"; StartTime = $Since } -ErrorAction Stop | Where-Object { $_.Message -match "Ardia" } | ForEach-Object { ($_.Message -replace "\s+", " ").Substring(0, [Math]::Min(500, ($_.Message -replace "\s+", " ").Length)) })
+    } catch {
+      return @()
+    }
+  }
+
+  function Save-ContrastShot([string]$Path) {
+    try {
+      Save-Screenshot $Path
+    } catch {
+    }
+  }
+
+  function Invoke-ContrastScenario([string]$Name, [switch]$Settings, [switch]$Dark, [int]$Pairs, [int]$PauseMs) {
+    $log = Join-Path $Out "contrast-$Name.log"
+    $launchActions = if ($Settings) { ',"launchActions":["openSettings"]' } else { "" }
+    $appearance = if ($Dark) { ',"appearance":"dark"' } else { "" }
+    Set-Content -Path (Join-Path $contrastData "config.json") -Value ('{"settings":{"openLinksInLittleArdia":false' + $launchActions + $appearance + '}}') -Encoding utf8NoBOM
+    $env:ARDIA_DATA_DIR = $contrastData
+    $env:ARDIA_CONFIG_DIR = $contrastData
+    $since = Get-Date
+    $app = Start-Process -FilePath $App -ArgumentList "--log-file=`"$log`"", "http://127.0.0.1:$httpPagesPort/a" -PassThru
+    $env:ARDIA_CONFIG_DIR = ""
+    $notes = @()
+    $problems = @()
+    try {
+      Start-Sleep -Seconds 12
+      $app.Refresh()
+      if ($app.HasExited) { return @("contrast ($Name): the app exited before the switch (exit code $($app.ExitCode))") }
+      if ($Settings) {
+        $open = [ArdiaContrast]::CountWindows($app.Id)
+        $notes += "windows open with the openSettings launch action: $open"
+        if ($open -lt 2) { $problems += "contrast ($Name): Settings did not open from the launch action" }
+      }
+      Save-ContrastShot (Join-Path $Out "contrast-$Name-0-before.png")
+      for ($pair = 1; $pair -le $Pairs; $pair++) {
+        $notes += Set-Contrast $true
+        Start-Sleep -Milliseconds $PauseMs
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-on.png") }
+        if ($app.HasExited) { $notes += "the app exited after contrast went on in pair $pair"; break }
+        $notes += Set-Contrast $false
+        Start-Sleep -Milliseconds $PauseMs
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-off.png") }
+        if ($app.HasExited) { $notes += "the app exited after contrast went off in pair $pair"; break }
+      }
+      Start-Sleep -Seconds 3
+      $app.Refresh()
+      if ($app.HasExited) {
+        $problems += "contrast ($Name): the app exited during the contrast switches (exit code 0x$('{0:X8}' -f $app.ExitCode))"
+      } else {
+        $notes += "the app is still up with $([ArdiaContrast]::CountWindows($app.Id)) windows"
+      }
+    } finally {
+      if ([ArdiaContrast]::IsOn()) { $notes += "cleanup: " + (Set-Contrast $false) }
+      if (-not $app.HasExited) {
+        Stop-Process -Id $app.Id -Force
+        $app.WaitForExit(10000) | Out-Null
+      }
+    }
+    foreach ($note in $notes) { Write-Host "Contrast ($Name): $note" }
+    if (Test-Path $log) { Select-String -Path $log -Pattern "^(fatal|error) |highContrast|appearance" | Select-Object -First 60 | ForEach-Object { Write-Host "Contrast ($Name) log: $($_.Line)" } }
+    $errors = Get-AppErrors $since
+    foreach ($e in $errors) { Write-Host "Contrast ($Name) Application Error: $e" }
+    if ($errors.Count) { $problems += "contrast ($Name): Windows logged $($errors.Count) Application Error events for Ardia" }
+    return $problems
+  }
+
+  $contrastData = New-DataDirectory "contrast-data"
+  Set-Content -Path (Join-Path $contrastData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
+  Set-Content -Path (Join-Path $contrastData "automation-approvals.json") -Value '{"approved":{"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06":{"key":"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06","kind":"launchAction","name":"launchActions: openSettings","summary":"Runs openSettings each time Ardia starts","at":1700000000000}},"dismissed":[],"version":1}' -Encoding utf8NoBOM
+  $dumps = Join-Path $Out "contrast-dumps"
+  New-Item -ItemType Directory -Force -Path $dumps | Out-Null
+  $dumpKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
+  $dumpsOn = $false
+  try {
+    New-Item -Path $dumpKey -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpFolder -PropertyType ExpandString -Value $dumps -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpType -PropertyType DWord -Value 2 -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpCount -PropertyType DWord -Value 10 -Force -ErrorAction Stop | Out-Null
+    $dumpsOn = $true
+  } catch {
+    Write-Host "Contrast: full crash dumps could not be turned on: $($_.Exception.Message)"
+  }
+  Write-Host "Contrast: on $env:PROCESSOR_ARCHITECTURE $((Get-CimInstance Win32_OperatingSystem).Caption) build $([Environment]::OSVersion.Version.Build); before the checks, $(Get-SystemColours), contrast on: $([ArdiaContrast]::IsOn()); full dumps on: $dumpsOn."
+  $contrastProblems = @()
+  try {
+    $contrastProblems += @(Invoke-ContrastScenario "browser" -Pairs 2 -PauseMs 4000)
+    $contrastProblems += @(Invoke-ContrastScenario "settings" -Settings -Pairs 2 -PauseMs 4000)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-fast" -Settings -Pairs 5 -PauseMs 300)
+    $contrastProblems += @(Invoke-ContrastScenario "browser-fast" -Pairs 5 -PauseMs 300)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-many" -Settings -Pairs 15 -PauseMs 200)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-dark" -Settings -Dark -Pairs 2 -PauseMs 4000)
+  } finally {
+    if ([ArdiaContrast]::IsOn()) { Write-Host "Contrast: final cleanup, $(Set-Contrast $false)" }
+    if ($dumpsOn) { Remove-Item -Path $dumpKey -Force -ErrorAction SilentlyContinue }
+  }
+  $found = @(Get-ChildItem -LiteralPath $dumps -Filter "*.dmp" -ErrorAction SilentlyContinue)
+  Write-Host "Contrast: $($found.Count) crash dumps written."
+  if ($found.Count) {
+    $machine = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+    $debugger = @("${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\$machine\cdb.exe", "$env:ProgramFiles\Windows Kits\10\Debuggers\$machine\cdb.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $debugger) { Write-Host "Contrast: no cdb.exe on this runner; the dumps are in the artifact." }
+    else {
+      $symbols = Join-Path $Out "contrast-symbols"
+      foreach ($dump in ($found | Select-Object -First 2)) {
+        Write-Host "Contrast: $($dump.Name), as cdb reads it:"
+        & $debugger -z $dump.FullName -y "srv*$symbols*https://msdl.microsoft.com/download/symbols" -c ".ecxr; kn 40; lm m Ardia*; q" 2>&1 | Select-Object -Last 70 | ForEach-Object { Write-Host "  $_" }
+      }
+    }
+  }
+  $contrastProblems | ForEach-Object { $failures += $_ }
+}
+
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
 $importFixtures = Join-Path $env:ARDIA_DATA_DIR "import-fixtures"
 $fixtureProfiles = Join-Path $PSScriptRoot "..\..\packages\import\fixtures\home\Library\Application Support"
