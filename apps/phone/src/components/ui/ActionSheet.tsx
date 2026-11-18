@@ -1,15 +1,14 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { BackHandler, Pressable, StyleSheet, Text, View, type ViewInstance } from "react-native";
-import Animated, { FadeIn, FadeOut, SlideInDown } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Animated, { FadeOut } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
 import { useCoverFocus } from "./coverFocus";
 import type { Confirmation } from "./Dialog";
 import { countDrawnMenuOpened, MenuMaterial, useMenuFrost } from "./Menu";
 import { menuMotion } from "./motion";
 import { Portal } from "./Overlay";
+import { actionSheetInk, actionSheetLook, ink } from "./tokens";
 import { useTheme } from "./theme";
-import { actionSheetInk, actionSheetLook } from "./tokens";
 
 export type SheetAction = { title: string; destructive?: boolean; onPress: () => void };
 
@@ -19,18 +18,17 @@ export function ActionSheet(props: Props) {
   const frost = useMenuFrost();
   return (
     <Portal>
-      <SheetPanel {...props} frost={frost} />
+      <SheetCard {...props} frost={frost} />
     </Portal>
   );
 }
 
-function SheetPanel({ title, message, actions, cancel = "Cancel", onCancel, frost }: Props & { frost: string | null }) {
+function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost }: Props & { frost: string | null }) {
   const theme = useTheme();
   const paint = theme.dark ? actionSheetInk.dark : actionSheetInk.light;
-  const insets = useSafeAreaInsets();
   const reduceMotion = useReduceMotion();
-  const panel = useRef<ViewInstance>(null);
-  useCoverFocus(panel);
+  const card = useRef<ViewInstance>(null);
+  useCoverFocus(card);
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
@@ -41,53 +39,39 @@ function SheetPanel({ title, message, actions, cancel = "Cancel", onCancel, fros
     });
     return () => back.remove();
   }, [onCancel]);
-  const rise = reduceMotion ? undefined : SlideInDown.springify().mass(menuMotion.sheetIn.mass).stiffness(menuMotion.sheetIn.stiffness).damping(menuMotion.sheetIn.damping);
-  const header = Boolean(title || message);
   return (
     <Animated.View style={StyleSheet.absoluteFill} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.sheetOut)}>
-      <Animated.View entering={reduceMotion ? undefined : FadeIn.duration(menuMotion.dim)} style={StyleSheet.absoluteFill}>
-        <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: paint.scrim }]} onPress={onCancel} />
-      </Animated.View>
-      <View style={[styles.column, { paddingBottom: insets.bottom + actionSheetLook.bottomGap, paddingLeft: insets.left + actionSheetLook.sideInset, paddingRight: insets.right + actionSheetLook.sideInset }]} pointerEvents="box-none">
-        <Animated.View ref={panel} testID="drawnActionSheet" accessibilityViewIsModal entering={rise} style={styles.stack}>
-          <MenuMaterial source={frost} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={styles.group}>
-            {header ? (
-              <View accessible style={styles.header}>
-                {title ? (
-                  <Text accessibilityRole="header" style={[actionSheetLook.title, styles.centred, { color: paint.header }]}>
-                    {title}
-                  </Text>
-                ) : null}
-                {message ? <Text style={[actionSheetLook.message, styles.centred, { color: paint.header }]}>{message}</Text> : null}
-              </View>
+      <Pressable accessibilityRole="button" accessibilityLabel={cancel} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onCancel} />
+      <View style={styles.centre} pointerEvents="box-none">
+        <View ref={card} testID="drawnActionSheet" accessibilityViewIsModal style={[styles.card, { borderColor: paint.rim, boxShadow: actionSheetLook.shadow }]}>
+          <MenuMaterial source={frost} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={styles.material}>
+            {title ? (
+              <Text accessibilityRole="header" style={[actionSheetLook.title, { color: paint.title }]}>
+                {title}
+              </Text>
             ) : null}
-            {actions.map((action, index) => (
-              <Fragment key={`${index}:${action.title}`}>
-                {header || index > 0 ? <View style={[styles.separator, { backgroundColor: paint.separator }]} /> : null}
+            {message ? (
+              <Text textBreakStrategy="balanced" style={[actionSheetLook.message, styles.message, { color: paint.message }]}>
+                {message}
+              </Text>
+            ) : null}
+            <View style={[styles.buttons, title || message ? styles.afterText : null]}>
+              {actions.map((action, index) => (
                 <Pressable
+                  key={`${index}:${action.title}`}
                   accessibilityRole="button"
                   accessibilityLabel={action.title}
                   onPress={action.onPress}
-                  style={({ pressed }) => [styles.action, pressed ? { backgroundColor: paint.highlight } : null]}
+                  style={({ pressed }) => [styles.button, { backgroundColor: paint.button }, pressed ? styles.pressed : null]}
                 >
-                  <Text numberOfLines={1} style={[actionSheetLook.action, styles.centred, { color: action.destructive ? theme.destructive : theme.formAccent }]}>
+                  <Text numberOfLines={1} style={[actionSheetLook.button, styles.centred, { color: action.destructive ? paint.destructive : paint.title }]}>
                     {action.title}
                   </Text>
                 </Pressable>
-              </Fragment>
-            ))}
+              ))}
+            </View>
           </MenuMaterial>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={cancel}
-            onPress={onCancel}
-            style={({ pressed }) => [styles.group, styles.action, { backgroundColor: paint.cancel }, pressed ? { backgroundColor: paint.highlight } : null]}
-          >
-            <Text numberOfLines={1} style={[actionSheetLook.action, styles.centred, { color: theme.formAccent, fontWeight: actionSheetLook.cancelWeight }]}>
-              {cancel}
-            </Text>
-          </Pressable>
-        </Animated.View>
+        </View>
       </View>
     </Animated.View>
   );
@@ -114,11 +98,13 @@ export function ConfirmSheet({ confirmation, onClose }: { confirmation: Confirma
 }
 
 const styles = StyleSheet.create({
-  column: { ...StyleSheet.absoluteFill, justifyContent: "flex-end", alignItems: "center" },
-  stack: { width: "100%", maxWidth: actionSheetLook.maxWidth, gap: actionSheetLook.gap },
-  group: { borderRadius: actionSheetLook.radius, overflow: "hidden" },
-  header: { paddingHorizontal: actionSheetLook.headerSide, paddingVertical: actionSheetLook.headerVertical, gap: actionSheetLook.headerGap },
+  centre: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
+  card: { width: actionSheetLook.width, borderRadius: actionSheetLook.radius, borderWidth: actionSheetLook.rim },
+  material: { overflow: "hidden", paddingTop: actionSheetLook.top, paddingHorizontal: actionSheetLook.side, paddingBottom: actionSheetLook.buttonBottom },
+  message: { marginTop: actionSheetLook.messageGap },
+  buttons: { marginHorizontal: actionSheetLook.buttonSide - actionSheetLook.side, gap: actionSheetLook.buttonsBetween },
+  afterText: { marginTop: actionSheetLook.buttonGap },
+  button: { height: actionSheetLook.buttonHeight, borderRadius: actionSheetLook.buttonHeight / 2, justifyContent: "center", paddingHorizontal: actionSheetLook.buttonSide },
+  pressed: { opacity: 0.7 },
   centred: { textAlign: "center" },
-  separator: { height: StyleSheet.hairlineWidth },
-  action: { minHeight: actionSheetLook.rowHeight, justifyContent: "center", paddingHorizontal: actionSheetLook.headerSide },
 });

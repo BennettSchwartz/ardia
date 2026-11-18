@@ -1,8 +1,8 @@
-import { createContext, Fragment, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { BackHandler, Pressable, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
+import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming, type EntryExitAnimationFunction } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAcross, menuAt, menuBeside, tallestMenuPage, type Point } from "../../lib/menuPlace";
+import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuOnTrigger, tallestMenuPage, type Point } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
 import { useCoverFocus } from "./coverFocus";
 import { LookFrost, SURFACES_FROST } from "./LookViews";
@@ -37,16 +37,32 @@ export const MenuFrostProvider = MenuFrostContext.Provider;
 
 export const useMenuFrost = () => useContext(MenuFrostContext);
 
-type Props = { items: MenuItem[]; place: ViewStyle; onDismiss: () => void; dimmed?: boolean; origin?: string; frost?: string | null };
+const shrinkAway =
+  (ms: number): EntryExitAnimationFunction =>
+  () => {
+    "worklet";
+    return {
+      initialValues: { opacity: 1, transform: [{ scale: 1 }] },
+      animations: { opacity: withTiming(0, { duration: menuMotion.contentFade }), transform: [{ scale: withTiming(menuMotion.fromScale, { duration: ms }) }] },
+    };
+  };
 
-export function Menu({ items, place, onDismiss, dimmed = false, origin = "top", frost }: Props) {
+const TAP_CLOSE = shrinkAway(menuMotion.close);
+const HELD_CLOSE = shrinkAway(menuMotion.heldClose);
+
+const PRESS = menuLook.pressInset;
+const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
+
+type Props = { items: MenuItem[]; place: ViewStyle; onDismiss: () => void; dimmed?: boolean; origin?: string; frost?: string | null; shown?: boolean };
+
+export function Menu({ items, place, onDismiss, dimmed = false, origin = "top", frost, shown = true }: Props) {
   const theme = useTheme();
   const paint = theme.dark ? menuInk.dark : menuInk.light;
   const reduceMotion = useReduceMotion();
   const frostAround = useMenuFrost();
   const source = frost === undefined ? frostAround : frost;
   const [page, setPage] = useState<MenuSubmenu | null>(null);
-  const shown = page ? page.children : items;
+  const rows = page ? page.children : items;
   const panel = useRef<ViewInstance>(null);
   useCoverFocus(panel);
   useEffect(() => {
@@ -62,101 +78,103 @@ export function Menu({ items, place, onDismiss, dimmed = false, origin = "top", 
   }, [onDismiss, page]);
   const opened = useSharedValue(reduceMotion ? 1 : 0);
   useEffect(() => {
-    opened.value = reduceMotion ? 1 : withSpring(1, menuMotion.open);
-  }, []);
-  const grow = useAnimatedStyle(() => ({
-    opacity: Math.min(1, opened.value / menuMotion.opaqueAt),
-    transform: [{ scale: menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value }],
-  }));
-  const checks = shown.some((item) => typeof item === "object" && !("heading" in item) && !isSubmenu(item) && item.checked === true);
+    if (shown && !reduceMotion) opened.value = withSpring(1, menuMotion.open);
+  }, [shown]);
+  const grow = useAnimatedStyle(() => ({ transform: [{ scale: menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value }] }));
+  const checks = rows.some((item) => typeof item === "object" && !("heading" in item) && !isSubmenu(item) && item.checked === true);
   const leading = menuLook.iconSide === "leading";
-  const rows = shown.map((item, index) => {
-    const before = shown[index - 1];
-    const separated = menuLook.rowSeparators && index > 0 && before !== "divider" && typeof before === "object" && !("heading" in before) && item !== "divider" && !("heading" in item);
-    const separator = separated ? <View style={[styles.separator, { backgroundColor: paint.separator }]} /> : null;
-    if (item === "divider") return <View key={`d${index}`} style={[styles.divider, { backgroundColor: paint.groupSeparator }]} />;
+  const shift = checks ? CHECK_SHIFT : 0;
+  const labelLeft = (icon: boolean) => (icon && leading ? menuLook.labelInsetIcon : menuLook.labelInset) + shift - PRESS;
+  const iconLeft = menuLook.iconCentre + shift - PRESS - menuLook.iconSlot / 2;
+  const pressed = (on: boolean, disabled?: boolean) => [styles.row, on ? { backgroundColor: paint.highlight } : null, disabled ? styles.disabled : null];
+  const label = (text: string, color: string, bold = false) => (
+    <Text numberOfLines={menuLook.labelLines} style={[menuLook.label, styles.label, bold ? styles.bold : null, { color }]}>
+      {text}
+    </Text>
+  );
+  const drawn = rows.map((item, index) => {
+    if (item === "divider")
+      return (
+        <View key={`d${index}`} style={styles.divider}>
+          <View style={[styles.dividerLine, { backgroundColor: paint.divider }]} />
+        </View>
+      );
     if ("heading" in item)
       return (
-        <Text key={`h${index}`} accessibilityRole="header" style={[font.footnote, styles.heading, { color: paint.heading }]}>
+        <Text key={`h${index}`} accessibilityRole="header" style={[font.footnote, styles.heading, { paddingLeft: menuLook.labelInset + shift, color: paint.heading }]}>
           {item.heading}
         </Text>
       );
+    const icon = leading && item.icon ? item.icon : null;
     if (isSubmenu(item))
       return (
-        <Fragment key={`${index}:${item.label}`}>
-          {separator}
-          <Pressable
-            accessibilityRole="menuitem"
-            accessibilityLabel={item.label}
-            accessibilityState={{ disabled: item.disabled, expanded: false }}
-            disabled={item.disabled}
-            onPress={() => setPage(item)}
-            style={({ pressed }) => [styles.row, pressed ? { backgroundColor: paint.highlight } : null, item.disabled ? styles.disabled : null]}
-          >
-            {checks ? <View style={styles.checkSlot} /> : null}
-            {leading && item.icon ? <MenuIcon name={item.icon} color={theme.label} /> : null}
-            <Text numberOfLines={menuLook.labelLines} style={[font.body, styles.label, { color: theme.label }]}>
-              {item.label}
-            </Text>
-            <MenuIcon name="chevronRight" color={theme.label} />
-          </Pressable>
-        </Fragment>
-      );
-    const color = item.destructive ? theme.destructive : theme.label;
-    return (
-      <Fragment key={`${index}:${item.label}`}>
-        {separator}
         <Pressable
+          key={`${index}:${item.label}`}
           accessibilityRole="menuitem"
           accessibilityLabel={item.label}
-          accessibilityState={{ checked: item.checked, disabled: item.disabled }}
+          accessibilityState={{ disabled: item.disabled, expanded: false }}
           disabled={item.disabled}
-          onPress={() => {
-            onDismiss();
-            item.onPress();
-          }}
-          style={({ pressed }) => [styles.row, pressed ? { backgroundColor: paint.highlight } : null, item.disabled ? styles.disabled : null]}
+          onPress={() => setPage(item)}
+          style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null), paddingRight: styles.chevronRoom.paddingRight }]}
         >
-          {checks ? <View style={styles.checkSlot}>{item.checked ? <Symbol name="checkmark" size={menuLook.checkSize} color={color} /> : null}</View> : null}
-          {leading && item.icon ? <MenuIcon name={item.icon} color={color} /> : null}
-          <Text numberOfLines={menuLook.labelLines} style={[font.body, styles.label, { color }]}>
-            {item.label}
-          </Text>
-          {!leading && item.icon ? <MenuIcon name={item.icon} color={color} /> : null}
+          {icon ? <MenuIcon name={icon} color={paint.label} left={iconLeft} /> : null}
+          {label(item.label, paint.label)}
+          <View style={styles.chevron}>
+            <Symbol name="chevronRight" size={menuLook.chevronSize} color={paint.label} />
+          </View>
         </Pressable>
-      </Fragment>
+      );
+    const color = item.destructive ? paint.destructive : paint.label;
+    return (
+      <Pressable
+        key={`${index}:${item.label}`}
+        accessibilityRole="menuitem"
+        accessibilityLabel={item.label}
+        accessibilityState={{ checked: item.checked, disabled: item.disabled }}
+        disabled={item.disabled}
+        onPress={() => {
+          onDismiss();
+          item.onPress();
+        }}
+        style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null) }]}
+      >
+        {item.checked ? (
+          <View style={styles.check}>
+            <Symbol name="checkmark" size={menuLook.checkSize} color={color} />
+          </View>
+        ) : null}
+        {icon ? <MenuIcon name={icon} color={color} left={iconLeft} /> : null}
+        {label(item.label, color)}
+        {!leading && item.icon ? <Symbol name={item.icon} size={menuLook.iconSize} color={color} /> : null}
+      </Pressable>
     );
   });
   return (
-    <Animated.View style={StyleSheet.absoluteFill} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.close)}>
-      <Animated.View entering={dimmed && !reduceMotion ? FadeIn.duration(menuMotion.dim) : undefined} style={StyleSheet.absoluteFill}>
-        <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: dimmed ? theme.menuScrim : ink.clear }]} onPress={onDismiss} />
-      </Animated.View>
+    <View style={StyleSheet.absoluteFill} pointerEvents={shown ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!shown} importantForAccessibility={shown ? "auto" : "no-hide-descendants"}>
+      {dimmed ? (
+        <Animated.View entering={reduceMotion ? undefined : FadeIn.duration(menuMotion.heldOpen)} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.heldClose)} style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }]} />
+      ) : null}
+      <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onDismiss} />
       <Animated.View
         ref={panel}
         testID="drawnMenu"
         accessibilityRole="menu"
         accessibilityViewIsModal
-        style={[styles.panel, { boxShadow: `0px 8px 32px ${paint.shadow}`, transformOrigin: origin }, place, grow]}
+        exiting={reduceMotion ? FadeOut.duration(menuMotion.contentFade) : dimmed ? HELD_CLOSE : TAP_CLOSE}
+        style={[styles.panel, { boxShadow: menuLook.shadow, borderColor: paint.rim, transformOrigin: origin }, place, shown ? null : styles.unseen, grow]}
       >
-        <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={styles.frost}>
+        <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={styles.material}>
+          <View pointerEvents="none" style={[styles.specular, { backgroundColor: paint.specular }]} />
           {page ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Back, ${page.label}`}
-              onPress={() => setPage(null)}
-              style={({ pressed }) => [styles.row, styles.back, pressed ? { backgroundColor: paint.highlight } : null, { borderBottomColor: paint.separator }]}
-            >
-              <MenuIcon name="chevronLeft" color={theme.label} />
-              <Text numberOfLines={1} style={[font.body, styles.label, styles.backLabel, { color: theme.label }]}>
-                {page.label}
-              </Text>
+            <Pressable accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={() => setPage(null)} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
+              <MenuIcon name="chevronLeft" color={paint.label} left={iconLeft} />
+              {label(page.label, paint.label, true)}
             </Pressable>
           ) : null}
-          {rows}
+          {drawn}
         </MenuMaterial>
       </Animated.View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -169,9 +187,9 @@ export function MenuMaterial({ source, fill, solid, radius, style, children }: {
   );
 }
 
-function MenuIcon({ name, color }: { name: SymbolName; color: string }) {
+function MenuIcon({ name, color, left }: { name: SymbolName; color: string; left: number }) {
   return (
-    <View style={styles.iconSlot}>
+    <View style={[styles.iconSlot, { left }]}>
       <Symbol name={name} size={menuLook.iconSize} color={color} />
     </View>
   );
@@ -185,55 +203,55 @@ export function menuAtPoint(at: Point, screen: { width: number; height: number }
 
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 
-type FloatingProps = Props & { anchor?: RefObject<ViewInstance | null>; at?: Point | null };
+type FloatingProps = Omit<Props, "shown" | "origin"> & { anchor?: RefObject<ViewInstance | null>; at?: Point | null };
 
 export function FloatingMenu({ items, place, onDismiss, anchor, at, dimmed, frost }: FloatingProps) {
   const hostFrame = useOverlayFrame();
   const insets = useSafeAreaInsets();
+  const screen = useWindowDimensions();
   const frostAround = useMenuFrost();
-  const [placed, setPlaced] = useState<{ place: ViewStyle; origin: string } | null>(null);
+  const width = widthOf(place);
+  const [placed, setPlaced] = useState<{ place: ViewStyle; origin: string } | null>(() => (at ? menuAtPoint(at, screen, insets, width, items) : null));
   useEffect(() => {
+    if (at) return;
     let live = true;
-    void Promise.all([hostFrame(), anchor && !at ? measureAnchor(anchor) : Promise.resolve(null)]).then(([host, row]) => {
+    void Promise.all([hostFrame(), anchor ? measureAnchor(anchor) : Promise.resolve(null)]).then(([host, row]) => {
       if (!live) return;
       const room = host.width > 0 ? insetRect(host, insets) : host;
       const height = tallestMenuPage(items);
-      const width = widthOf(place);
-      const { top: _top, bottom: _bottom, ...across } = place;
-      if (at) {
-        const spot = menuAt(at, host, room, width, height, MENU_MARGIN);
+      if (row && row.height > 0) {
+        const spot = menuOnTrigger(row, host, room, width, height, MENU_MARGIN);
         setPlaced({ place: { width, left: spot.left, top: spot.top }, origin: spot.origin });
-      } else if (row && row.height > 0) {
-        const beside = menuBeside(row, host, room, height, MENU_MARGIN);
-        const sideways = across.left !== undefined || across.right !== undefined ? {} : { width, left: menuAcross(row, host, room, width, MENU_MARGIN) };
-        setPlaced({ place: { ...across, ...sideways, top: beside.top }, origin: beside.below ? "top" : "bottom" });
       } else if (typeof place.top === "number") {
         const top = Math.max(room.y + MENU_MARGIN, Math.min(place.top, room.y + room.height - height - MENU_MARGIN)) - host.y;
-        setPlaced({ place: { ...place, top }, origin: "top" });
-      } else setPlaced({ place, origin: place.bottom !== undefined ? "bottom" : "top" });
+        setPlaced({ place: { ...place, width, top }, origin: "top" });
+      } else setPlaced({ place: { ...place, width }, origin: place.bottom !== undefined ? "bottom" : "top" });
     });
     return () => {
       live = false;
     };
   }, []);
-  return placed ? (
+  return (
     <Portal>
-      <Menu items={items} place={placed.place} origin={placed.origin} dimmed={dimmed} frost={frost === undefined ? frostAround : frost} onDismiss={onDismiss} />
+      <Menu items={items} place={placed?.place ?? { ...place, width }} origin={placed?.origin ?? "top"} shown={placed !== null} dimmed={dimmed} frost={frost === undefined ? frostAround : frost} onDismiss={onDismiss} />
     </Portal>
-  ) : null;
+  );
 }
 
 const styles = StyleSheet.create({
-  panel: { position: "absolute", minWidth: menuLook.width, borderRadius: menuLook.radius },
-  frost: { overflow: "hidden", paddingVertical: MENU_PADDING / 2 },
-  row: { flexDirection: "row", alignItems: "center", gap: menuLook.labelGap, paddingHorizontal: menuLook.sideInset, minHeight: MENU_ROW },
-  back: { borderBottomWidth: StyleSheet.hairlineWidth },
-  backLabel: { fontWeight: "600" },
+  panel: { position: "absolute", minWidth: menuLook.width, borderRadius: menuLook.radius, borderWidth: menuLook.rim },
+  unseen: { opacity: 0 },
+  material: { overflow: "hidden", paddingVertical: MENU_PADDING / 2 },
+  specular: { position: "absolute", top: 0, left: 0, right: 0, height: 1 },
+  row: { flexDirection: "row", alignItems: "center", marginHorizontal: PRESS, minHeight: MENU_ROW, paddingVertical: (MENU_ROW - menuLook.label.lineHeight) / 2, paddingRight: menuLook.labelInset - PRESS, borderRadius: MENU_ROW / 2 },
+  chevronRoom: { paddingRight: menuLook.trailingInset - PRESS + menuLook.chevronSize + 8 },
+  chevron: { position: "absolute", right: menuLook.trailingInset - PRESS, top: 0, bottom: 0, justifyContent: "center" },
   label: { flex: 1 },
-  heading: { paddingHorizontal: menuLook.sideInset, minHeight: MENU_HEADING, paddingTop: 6 },
-  separator: { height: StyleSheet.hairlineWidth },
-  divider: { height: MENU_DIVIDER },
-  checkSlot: { width: menuLook.checkSlot, alignItems: "center" },
-  iconSlot: { width: menuLook.iconSlot, alignItems: "center" },
+  bold: { fontWeight: "600" },
+  heading: { minHeight: MENU_HEADING, paddingTop: 8, paddingRight: menuLook.labelInset },
+  divider: { height: MENU_DIVIDER, justifyContent: "center" },
+  dividerLine: { height: menuLook.dividerLine, marginHorizontal: menuLook.dividerInset },
+  check: { position: "absolute", left: menuLook.checkLeft - PRESS, top: 0, bottom: 0, justifyContent: "center" },
+  iconSlot: { position: "absolute", width: menuLook.iconSlot, top: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
   disabled: { opacity: menuLook.disabledOpacity },
 });

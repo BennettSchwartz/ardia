@@ -4,10 +4,10 @@ export type Point = { x: number; y: number };
 
 export type MenuSpot = { left: number; top: number; origin: string };
 
-export const MENU_ROW = 46;
-export const MENU_HEADING = 28;
-export const MENU_DIVIDER = 9;
-export const MENU_PADDING = 8;
+export const MENU_ROW = 42;
+export const MENU_HEADING = 30;
+export const MENU_DIVIDER = 20.67;
+export const MENU_PADDING = 19;
 export const MENU_MARGIN = 8;
 
 type Entry = "divider" | { heading: string } | object;
@@ -27,17 +27,15 @@ export function tallestMenuPage(items: readonly Entry[]): number {
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
 
-export function menuBeside(anchor: Rect, host: Rect, room: Rect, height: number, margin: number): { top: number; below: boolean } {
+export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: number, height: number, margin: number): MenuSpot {
   const roomTop = room.y + margin;
   const roomBottom = room.y + room.height - margin;
-  const rowBottom = anchor.y + anchor.height;
-  if (rowBottom + height <= roomBottom) return { top: rowBottom - host.y, below: true };
-  if (anchor.y - height >= roomTop) return { top: anchor.y - height - host.y, below: false };
-  return { top: Math.max(roomTop, roomBottom - height) - host.y, below: true };
-}
-
-export function menuTop(anchor: Rect, host: Rect, height: number, margin: number): number {
-  return menuBeside(anchor, host, host, height, margin).top;
+  const trailing = anchor.x + anchor.width / 2 > room.x + room.width / 2;
+  const x = clamp(trailing ? anchor.x + anchor.width - width : anchor.x, room.x + margin, room.x + room.width - width - margin);
+  const anchorBottom = anchor.y + anchor.height;
+  const below = anchor.y + height <= roomBottom || anchorBottom - height < roomTop;
+  const y = below ? clamp(anchor.y, roomTop, roomBottom - height) : anchorBottom - height;
+  return { left: x - host.x, top: Math.max(roomTop, y) - host.y, origin: `${trailing ? "right" : "left"} ${below ? "top" : "bottom"}` };
 }
 
 export function menuAt(point: Point, host: Rect, room: Rect, width: number, height: number, margin: number): MenuSpot {
@@ -46,11 +44,6 @@ export function menuAt(point: Point, host: Rect, room: Rect, width: number, heig
   const x = clamp(fitsRight ? point.x : point.x - width, room.x + margin, room.x + room.width - width - margin);
   const y = clamp(fitsBelow ? point.y : point.y - height, room.y + margin, room.y + room.height - height - margin);
   return { left: x - host.x, top: y - host.y, origin: `${fitsRight ? "left" : "right"} ${fitsBelow ? "top" : "bottom"}` };
-}
-
-export function menuAcross(anchor: Rect, host: Rect, room: Rect, width: number, margin: number): number {
-  const left = anchor.x + anchor.width / 2 - width / 2;
-  return clamp(left, room.x + margin, room.x + room.width - width - margin) - host.x;
 }
 
 export function insetRect(rect: Rect, inset: { top: number; bottom: number; left: number; right: number }): Rect {

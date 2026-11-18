@@ -6,7 +6,7 @@ import { mockNative, resetNativeMenus } from "./nativeMenusMock";
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
 const { MenuTrigger, confirmInSheet, nativeMenu } = require("../components/ui/MenuTrigger") as typeof import("../components/ui/MenuTrigger");
-const { FloatingMenu } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
+const { FloatingMenu, Menu } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
 type MenuItem = import("../components/ui").MenuItem;
 
 type Root = ReturnType<typeof renderSurface>;
@@ -127,6 +127,10 @@ test("a long press opens the drawn menu at the finger, dimmed, and a tap opens i
   const floating = held.root.findAll((node) => node.type === FloatingMenu)[0]!;
   expect(floating.props.at).toEqual({ x: 120, y: 300 });
   expect(floating.props.dimmed).toBe(true);
+  const heldMenu = held.root.findAll((node) => node.type === Menu)[0]!;
+  expect(heldMenu.props.shown).toBe(true);
+  expect(heldMenu.props.place).toMatchObject({ left: 120, top: 300, width: 250 });
+  expect(heldMenu.props.origin).toBe("left top");
   unmount(held);
   const tapped = renderSurface(
     <MenuTrigger items={ITEMS} trigger="tap" place={{ right: 16, width: 250 }}>
@@ -142,6 +146,7 @@ test("a long press opens the drawn menu at the finger, dimmed, and a tap opens i
   expect(beside.props.at).toBeNull();
   expect(beside.props.anchor.current).not.toBeUndefined();
   expect(beside.props.dimmed).toBe(false);
+  expect(tapped.root.findAll((node) => node.type === Menu)[0]!.props.shown).toBe(false);
   unmount(tapped);
 });
 
@@ -194,7 +199,7 @@ test("each drawn menu and drawn action sheet counts drawn_menus_opened once as i
   onDrawnMenuOpened(() => undefined);
 });
 
-test("the drawn action sheet confirms with its action and cancels with Cancel, a tap outside or Back", () => {
+test("the drawn confirmation is a centred card with one action and no Cancel row: its action confirms, and a tap outside, which never reaches what is under it, or Back cancels", () => {
   const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
   const back = pressBack();
   const confirmation = { title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: jest.fn() };
@@ -204,13 +209,15 @@ test("the drawn action sheet confirms with its action and cancels with Cancel, a
   const text = sheet.root.findAll((node) => typeof node.type === "string" && typeof node.props.children === "string").map((node) => node.props.children).join("\n");
   expect(text).toContain("Close 3 Tabs?");
   expect(text).toContain("They’ll stay in your Archive.");
+  const outside = sheet.root.findAll((node) => node.props.accessibilityLabel === "Cancel" && typeof node.props.onPress === "function" && node.props.accessibilityRole === "button");
+  expect(outside).toHaveLength(1);
+  expect(sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Cancel")).toHaveLength(0);
   press(sheet, "Cancel");
-  press(sheet, "Dismiss");
   back();
-  expect(closed).toHaveBeenCalledTimes(3);
+  expect(closed).toHaveBeenCalledTimes(2);
   expect(confirmation.run).not.toHaveBeenCalled();
   press(sheet, "Close All Tabs");
-  expect(closed).toHaveBeenCalledTimes(4);
+  expect(closed).toHaveBeenCalledTimes(3);
   expect(confirmation.run).toHaveBeenCalledTimes(1);
   unmount(sheet);
 });

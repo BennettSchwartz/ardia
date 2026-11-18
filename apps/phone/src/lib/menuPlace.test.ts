@@ -1,20 +1,25 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MENU_DIVIDER, MENU_HEADING, MENU_PADDING, MENU_ROW, menuAt, menuBeside, menuHeight, menuTop, tallestMenuPage } from "./menuPlace.ts";
+import { MENU_DIVIDER, MENU_HEADING, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, tallestMenuPage } from "./menuPlace.ts";
 
 const host = { x: 0, y: 0, width: 392, height: 873 };
 
-test("a menu opens fully below the row that opened it, or fully above when there is no room", () => {
-  const row = { x: 16, y: 300, width: 360, height: 52 };
-  assert.equal(menuTop(row, host, 200, 8), 352);
-  const low = { x: 16, y: 760, width: 360, height: 52 };
-  assert.equal(menuTop(low, host, 200, 8), 560);
-  assert.equal(menuTop(row, { ...host, y: 24 }, 200, 8), 328);
+test("a tap menu's corner sits on its trigger's matching corner and covers it: top-right on the ··· near the right edge, top-left on a button near the left", () => {
+  const more = { x: 336, y: 66, width: 44, height: 44 };
+  assert.deepEqual(menuOnTrigger(more, host, host, 250, 272, 8), { left: 130, top: 66, origin: "right top" });
+  const left = { x: 16, y: 66, width: 120, height: 44 };
+  assert.deepEqual(menuOnTrigger(left, host, host, 250, 272, 8), { left: 16, top: 66, origin: "left top" });
 });
 
-test("a menu too tall for either side keeps clear of the edges", () => {
+test("with no room below, a tap menu opens upward with its bottom on the trigger's bottom", () => {
+  const picker = { x: 270, y: 700, width: 100, height: 26 };
+  assert.deepEqual(menuOnTrigger(picker, host, host, 250, 314, 8), { left: 120, top: 412, origin: "right bottom" });
+});
+
+test("a menu too tall for either way keeps clear of the edges, and the host's origin is taken off", () => {
   const row = { x: 16, y: 400, width: 360, height: 52 };
-  assert.equal(menuTop(row, host, 700, 8), 165);
+  assert.equal(menuOnTrigger(row, host, host, 250, 900, 8).top, 8);
+  assert.equal(menuOnTrigger({ x: 16, y: 300, width: 100, height: 40 }, { ...host, y: 24 }, { ...host, y: 24 }, 250, 200, 8).top, 276);
 });
 
 test("a menu's height counts its rows, headings and dividers", () => {
@@ -37,10 +42,10 @@ test("a menu wider or taller than the room left keeps clear of the bars and the 
   assert.equal(spot.top, 48);
 });
 
-test("a menu beside a row never runs under the system bars", () => {
-  const row = { x: 16, y: 700, width: 360, height: 52 };
-  assert.deepEqual(menuBeside(row, host, room, 200, 8), { top: 500, below: false });
-  assert.deepEqual(menuBeside({ ...row, y: 60 }, host, room, 200, 8), { top: 112, below: true });
+test("a tap menu never runs under the system bars", () => {
+  const button = { x: 346, y: 760, width: 44, height: 44 };
+  assert.deepEqual(menuOnTrigger(button, host, room, 250, 200, 8), { left: 134, top: 604, origin: "right bottom" });
+  assert.equal(menuOnTrigger({ ...button, y: 20 }, host, room, 250, 200, 8).top, 48);
 });
 
 test("the tallest page of a menu counts a submenu's back row and its children", () => {

@@ -5,8 +5,7 @@ import type { Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { returnAccessibilityFocus } from "./coverFocus";
 import type { Confirmation } from "./Dialog";
-import { FloatingMenu, isSubmenu, Menu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
-import { Portal } from "./Overlay";
+import { FloatingMenu, isSubmenu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
 
 export type MenuHandlers = { onPress?: () => void; onLongPress?: (event?: GestureResponderEvent) => void };
@@ -121,19 +120,10 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
     returnAccessibilityFocus(anchor);
   }, [onClose]);
   const held = trigger === "longPress";
-  const fixed = place && (place.top !== undefined || place.bottom !== undefined) && !opened?.at;
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
       {children(held ? { onLongPress: open } : { onPress: open })}
-      {opened && !disabled ? (
-        fixed ? (
-          <Portal>
-            <Menu items={items} place={place} origin={place.bottom !== undefined ? "bottom" : "top"} dimmed={held} frost={frost} onDismiss={dismiss} />
-          </Portal>
-        ) : (
-          <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} frost={frost} onDismiss={dismiss} />
-        )
-      ) : null}
+      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} frost={frost} onDismiss={dismiss} /> : null}
     </View>
   );
 }

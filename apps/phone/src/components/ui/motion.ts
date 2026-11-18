@@ -61,13 +61,13 @@ export const tabsMotion = {
 } as const;
 
 export const menuMotion = {
-  open: spring(0.32, 0.82),
-  fromScale: 0.4,
-  opaqueAt: 0.35,
-  close: 150,
-  dim: 200,
-  sheetIn: spring(0.4, 1),
-  sheetOut: 220,
+  open: spring(0.2, 0.76),
+  fromScale: 0.18,
+  contentFade: 90,
+  close: 200,
+  heldOpen: 280,
+  heldClose: 270,
+  sheetOut: 270,
 } as const;
 
 export const trayMotion = {
