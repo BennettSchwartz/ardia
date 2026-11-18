@@ -221,10 +221,10 @@ test("the quit's stretches are test-only keys, the update installer quits with i
   assert.equal((during.match(/\n    "Test-[A-Za-z]+",?(?=\n)/g) ?? []).length, steps.length, "every case in the list is checked");
   assert.match(during, /foreach \(\$case in \$cases\) \{/, "every case runs on its own");
   assert.match(during, /\$script:QuitFailures \+= /, "a failed case is recorded and the next one runs");
-  assert.match(during, /if \(\$Shown\) \{ Remove-Item -Path Env:ARDIA_BACKGROUND/, "a shown launch drops ARDIA_BACKGROUND, which answers every question unseen");
-  assert.match(during, /\$old = Open-QuitInstance \$what "appDialog" -Shown/, "the downloads question case runs a shown Ardia");
+  assert.match(during, /if \(\$Visible\) \{ Remove-Item -Path Env:ARDIA_BACKGROUND/, "a shown launch drops ARDIA_BACKGROUND, which answers every question unseen");
+  assert.match(during, /\$old = Open-QuitInstance \$what "appDialog" -Visible/, "the downloads question case runs a shown Ardia");
   assert.match(during, /Assert-NoQuitLine '\\\[quit\\\] not asked on a hidden instance'/, "the shown Ardia never logs itself as a hidden instance that didn't ask");
   assert.match(during, /if \(\$downloadAsks\.Count -ne \$answers\)/, "when the build logs the quit question, there is one line per question the case answered");
-  assert.equal((during.match(/ -Shown$/gm) ?? []).length, 3, "only the downloads question case's three launches run shown");
+  assert.equal((during.match(/ -Visible$/gm) ?? []).length, 3, "only the downloads question case's three launches run shown");
   assert.match(during, /\[QuitPages\]::LoadsOf\(\$name\)/, "a link counts as opened by its loads on the test server");
 });

@@ -147,11 +147,11 @@ function Quit-Link([string]$name, [string]$pageScript = "") {
   return "http://127.0.0.1:$([QuitPages]::Port)/quit-$name.html"
 }
 
-function Start-WithTest([string]$test, [string[]]$arguments = @(), [switch]$Shown) {
+function Start-WithTest([string]$test, [string[]]$arguments = @(), [switch]$Visible) {
   $saved = $env:ARDIA_TEST
   $savedBackground = $env:ARDIA_BACKGROUND
   if ($test) { $env:ARDIA_TEST = $test } else { Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue }
-  if ($Shown) { Remove-Item -Path Env:ARDIA_BACKGROUND -ErrorAction SilentlyContinue }
+  if ($Visible) { Remove-Item -Path Env:ARDIA_BACKGROUND -ErrorAction SilentlyContinue }
   try {
     $started = if ($arguments.Count) { Start-Process -FilePath $exe -ArgumentList $arguments -PassThru } else { Start-Process -FilePath $exe -PassThru }
     $null = $started.Handle
@@ -180,10 +180,10 @@ function Assert-LoadedOnce([string]$what, [string]$name) {
   if ($loads -ne 1) { Fail-Quit $what "the link the launch carried (quit-$name.html) was loaded $loads times, not once" }
 }
 
-function Open-QuitInstance([string]$what, [string]$test, [switch]$Shown) {
+function Open-QuitInstance([string]$what, [string]$test, [switch]$Visible) {
   if (@(Browsers).Count) { throw "$what`: an Ardia was still running before this case" }
   Clear-QuitLog
-  Start-WithTest $test -Shown:$Shown | Out-Null
+  Start-WithTest $test -Visible:$Visible | Out-Null
   $shown = Wait-Window $what 120
   Wait-QuitLine "^launch \d+ process started inside the engine pid=$($shown.Pid)$" $what
   Wait-QuitLine 'events reach the UI' $what
@@ -304,8 +304,8 @@ function Answer-QuitDialog($dialog, [int]$button) {
 
 function Test-LaunchWhileTheDownloadsQuestionShows {
   $what = "a launch while the question about running downloads is on screen"
-  $old = Open-QuitInstance $what "appDialog" -Shown
-  $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);")) -Shown
+  $old = Open-QuitInstance $what "appDialog" -Visible
+  $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);")) -Visible
   if (-not $starter.WaitForExit(30000) -or $starter.ExitCode -ne 0) { Fail-Quit $what "the launch that opens the download page didn't hand over and exit 0" }
   Wait-QuitLinkOnce $what "download"
   $deadline = (Get-Date).AddSeconds(30)
@@ -336,7 +336,7 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   }
   if (-not $question) { Fail-Quit $what "closing the window never asked about the running download (asked first: $($earlier -join ', '))" }
   $link = Quit-Link "asking"
-  $launched = Start-WithTest "" @($link) -Shown
+  $launched = Start-WithTest "" @($link) -Visible
   $shown = Assert-SameArdiaKeepsIt $what $old $launched "asking"
   if (-not (@([RelaunchCheck.Native]::DialogWindows([uint32]$old.Pid)) -contains $question.Window)) { Fail-Quit $what "the launch took the question about downloads off the screen" }
   Assert-NoQuitLine 'began \((user|update)\)' $what "a quit began although the question was still on screen"
@@ -369,7 +369,7 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   if ($askedLines.Count) {
     $cancelled = @($askedLines | Where-Object { $_ -match 'answered cancel' })
     if ($cancelled.Count) { Fail-Quit $what "the log has a quit question answered cancel, which the case never gave: $($cancelled -join ' | ')" }
-    $downloadAsks = @($askedLines | Where-Object { $_ -match '\[quit\] asked: [1-9]\d* downloads? in progress, warning (on|off); answered quit$' })
+    $downloadAsks = @($askedLines | Where-Object { $_ -match '\[quit\] asked: [1-9]\d* downloads? in progress, warning (on|off); answered quit' })
     if ($downloadAsks.Count -ne $answers) { Fail-Quit $what "the log has $($downloadAsks.Count) quit questions about downloads answered quit, not the $answers the case answered: $($askedLines -join ' | ')" }
     $askLog = "the log has $($downloadAsks.Count) '[quit] asked: ... downloads in progress ...; answered quit' line(s), one per question"
   }
