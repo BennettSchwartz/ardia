@@ -527,14 +527,14 @@ function Test-TurnedAwayWhosePredecessorIsGone {
 
 function Test-HungPredecessorIsNotKilled {
   $what = "a launch that meets an Ardia too busy to answer"
-  $old = Open-QuitInstance $what "quitWaitMs=1500,quitFlushHoldMs=20000"
+  $old = Open-QuitInstance $what "quitWaitMs=1500,quitFlushHoldMs=15000"
   $oldProcess = Get-Process -Id $old.Pid
   $null = $oldProcess.Handle
   $link = Quit-Link "hung"
   Close-Window $old
   Wait-QuitLine 'began \(user\)' $what
   $launched = Start-WithTest "handOffHoldMs=9000,handOffTimeoutMs=1500" @($link)
-  Wait-QuitLine 'test: the flush is held 20000 ms' $what
+  Wait-QuitLine 'test: the flush is held 15000 ms' $what
   $shown = Assert-OneFreshArdia $what $old.Pid "hung" @($launched.Id)
   if ($oldProcess.ExitCode -ne 0) { Fail-Quit $what "the busy Ardia ($($old.Pid)) ended with $($oldProcess.ExitCode): it was killed instead of waited for" }
   Assert-QuitsEnded $what 1
@@ -699,48 +699,79 @@ function Test-LaunchRefusedForGood {
   Close-QuitInstance $what $shown
 }
 
+function New-QuitData {
+  New-Item -ItemType Directory -Force -Path $script:QuitData | Out-Null
+  Set-Content -LiteralPath (Join-Path $script:QuitData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
+  Set-Content -LiteralPath (Join-Path $script:QuitData "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
+}
+
+function Stop-QuitLeftovers {
+  foreach ($process in @(Running)) { Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue }
+  $deadline = (Get-Date).AddSeconds(15)
+  while ((Get-Date) -lt $deadline -and @(Running).Count) { Start-Sleep -Milliseconds 200 }
+  if (@(Running).Count) { Note "launches during a quit: $(@(Running).Count) Ardia process(es) still running after the leftovers were ended" }
+}
+
+function Save-QuitDumps([string]$case) {
+  $found = @(Get-ChildItem -LiteralPath $script:QuitData -Recurse -Filter "*.dmp" -ErrorAction SilentlyContinue)
+  if (-not $found.Count) { return }
+  $dumpCopies = Join-Path $Out "during-quit\dumps"
+  New-Item -ItemType Directory -Force -Path $dumpCopies | Out-Null
+  foreach ($dump in $found) {
+    Copy-Item -LiteralPath $dump.FullName -Destination (Join-Path $dumpCopies "$case-$($dump.Directory.Name)-$($dump.Name)") -Force
+    $script:QuitDumps += "$case`: $($dump.FullName.Substring($script:QuitData.Length))"
+  }
+}
+
 function Test-LaunchesDuringQuit {
   $script:QuitData = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent ([IO.Path]::GetFullPath($Out))) ("relaunch-during-quit-" + [guid]::NewGuid().ToString("N").Substring(0, 8))))
   $marker = Join-Path $folder "Ardia.test-build"
   $saved = @{ ARDIA_DATA_DIR = $env:ARDIA_DATA_DIR; ARDIA_TEST = $env:ARDIA_TEST; ARDIA_REMOTE_DEBUGGING_PORT = $env:ARDIA_REMOTE_DEBUGGING_PORT }
-  New-Item -ItemType Directory -Force -Path $script:QuitData | Out-Null
-  Set-Content -LiteralPath (Join-Path $script:QuitData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
-  Set-Content -LiteralPath (Join-Path $script:QuitData "config.json") -Value '{"settings":{"openLinksInLittleArdia":false}}' -Encoding utf8NoBOM
   Set-Content -LiteralPath $marker -Value "relaunch-check" -Encoding ascii
   $env:ARDIA_DATA_DIR = $script:QuitData
   Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue
   $env:ARDIA_REMOTE_DEBUGGING_PORT = "$($script:QuitPort)"
+  $cases = @(
+    "Test-LaunchBeforeTheQuitBegins",
+    "Test-LaunchAtTheQuitSeam",
+    "Test-LaunchDuringTheQuitWait",
+    "Test-LaunchTakenInTheTurnOfTheAnswer",
+    "Test-LaunchDuringAnUpdateQuit",
+    "Test-LateAnswerAfterACancelledQuit",
+    "Test-CancelWhoseWindowNeverOpens",
+    "Test-LaunchAfterThePointOfNoReturn",
+    "Test-LaunchTurnedAwayAfterThePointOfNoReturn",
+    "Test-HungPredecessorIsNotKilled",
+    "Test-TurnedAwayWhosePredecessorIsGone",
+    "Test-QuitWithABeforeUnloadPage",
+    "Test-TurnedAwayLaunchKeepsItsUserDataDir",
+    "Test-LaunchRefusedForGood",
+    "Test-LaunchWhileTheDownloadsQuestionShows"
+  )
+  $script:QuitFailures = @()
   [QuitPages]::Start()
   $watch = [Diagnostics.Stopwatch]::StartNew()
   try {
-    Test-LaunchBeforeTheQuitBegins
-    Test-LaunchAtTheQuitSeam
-    Test-LaunchDuringTheQuitWait
-    Test-LaunchTakenInTheTurnOfTheAnswer
-    Test-LaunchDuringAnUpdateQuit
-    Test-LateAnswerAfterACancelledQuit
-    Test-CancelWhoseWindowNeverOpens
-    Test-LaunchAfterThePointOfNoReturn
-    Test-LaunchTurnedAwayAfterThePointOfNoReturn
-    Test-HungPredecessorIsNotKilled
-    Test-TurnedAwayWhosePredecessorIsGone
-    Test-QuitWithABeforeUnloadPage
-    Test-TurnedAwayLaunchKeepsItsUserDataDir
-    Test-LaunchRefusedForGood
-    Test-LaunchWhileTheDownloadsQuestionShows
-    Note "launches during a quit: 15 cases in $([int]$watch.Elapsed.TotalSeconds) s"
+    foreach ($case in $cases) {
+      Stop-QuitLeftovers
+      Remove-Item -LiteralPath $script:QuitData -Recurse -Force -ErrorAction SilentlyContinue
+      New-QuitData
+      try {
+        & $case
+      } catch {
+        $script:QuitFailures += "$case`: $($_.Exception.Message)"
+        Note "FAILED $case`: $($_.Exception.Message)"
+        Keep-QuitLog "$case-failed"
+      } finally {
+        Stop-QuitLeftovers
+        Save-QuitDumps $case
+      }
+    }
+    Note "launches during a quit: $($cases.Count) cases in $([int]$watch.Elapsed.TotalSeconds) s, $($script:QuitFailures.Count) failed"
   } finally {
     Keep-QuitLog "final"
     [QuitPages]::Stop()
-    Get-Process -Name Ardia -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-    $dumpCopies = Join-Path $Out "during-quit\dumps"
-    $found = @(Get-ChildItem -LiteralPath $script:QuitData -Recurse -Filter "*.dmp" -ErrorAction SilentlyContinue)
-    if ($found.Count) {
-      New-Item -ItemType Directory -Force -Path $dumpCopies | Out-Null
-      foreach ($dump in $found) { Copy-Item -LiteralPath $dump.FullName -Destination (Join-Path $dumpCopies "$($dump.Directory.Name)-$($dump.Name)") -Force }
-    }
-    $script:QuitDumps = @($found | ForEach-Object { $_.FullName.Substring($script:QuitData.Length) })
+    Stop-QuitLeftovers
     foreach ($name in $saved.Keys) {
       if ($null -eq $saved[$name]) { Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue } else { Set-Item -Path "Env:$name" -Value $saved[$name] }
     }

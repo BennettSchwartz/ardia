@@ -408,6 +408,7 @@ try {
   $fatal = (Read-LaunchGuard @(Launch-Log)).Fatal
   if ($fatal.Count) { throw "the launch log has a fatal line: $($fatal[0])" }
   Note "no crash events, crash dumps or fatal log lines"
+  if ($script:QuitFailures.Count) { throw "launches during a quit: $($script:QuitFailures.Count) case(s) failed: $($script:QuitFailures -join ' | ')" }
 } finally {
   Keep-Log "final"
   Restore-WerKey $werBefore

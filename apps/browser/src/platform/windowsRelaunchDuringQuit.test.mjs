@@ -217,7 +217,9 @@ test("the quit's stretches are test-only keys, the update installer quits with i
     "Test-LaunchRefusedForGood",
     "Test-LaunchWhileTheDownloadsQuestionShows",
   ];
-  for (const step of steps) assert.match(during, new RegExp(`\\n    ${step}\\n`), step);
-  assert.match(during, new RegExp(`${steps.length} cases in`));
+  for (const step of steps) assert.match(during, new RegExp(`\\n    "${step}",?\\n`), step);
+  assert.equal((during.match(/\n    "Test-[A-Za-z]+",?(?=\n)/g) ?? []).length, steps.length, "every case in the list is checked");
+  assert.match(during, /foreach \(\$case in \$cases\) \{/, "every case runs on its own");
+  assert.match(during, /\$script:QuitFailures \+= /, "a failed case is recorded and the next one runs");
   assert.match(during, /\[QuitPages\]::LoadsOf\(\$name\)/, "a link counts as opened by its loads on the test server");
 });
