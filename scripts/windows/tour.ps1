@@ -2928,7 +2928,7 @@ function Measure-DownloadFlight($Capture, $Flight, $Page) {
   foreach ($frame in $frames) {
     $time = ($frame.Utc - $Flight.AtUtc).TotalMilliseconds / $Flight.Ms
     if ($time -lt 0 -or $time -gt 1) { continue }
-    $boxes = @(foreach ($offset in @(-0.12, 0, 0.12)) { Get-FlightBox $Flight ([Math]::Min(1.0, [Math]::Max(0.0, [double]($time + $offset)))) $scale })
+    $boxes = @(foreach ($offset in @(-0.2, -0.1, 0, 0.05)) { Get-FlightBox $Flight ([Math]::Min(1.0, [Math]::Max(0.0, [double]($time + $offset)))) $scale })
     $now = Get-FlightBox $Flight $time $scale
     $left = [int](($boxes | Measure-Object Left -Minimum).Minimum - 4)
     $top = [int](($boxes | Measure-Object Top -Minimum).Minimum - 4)
@@ -2947,11 +2947,11 @@ function Invoke-DownloadFlightStop($Session, [string]$Slug, [string]$Title, [boo
   Invoke-Stop $Session $Slug $Title {
     param($stop)
     $where = if ($FromPageEdge) { "the sidebar beside the page" } else { "the middle of the page, as on the Mac (ARDIA_TEST downloadFlightFromPage=1)" }
-    $stop.Did = "One browser window, sidebar on the left, Downloads in its footer (the default). Opened 127.0.0.1:$($script:TourPagesPort)/flightdownload in the starting tab: a blue page that starts the held download 3 s after it loads, so the page's window covers the card when the flight starts at $where. Captured the window as fast as it reads until 900 ms after the app logged the flight, and judged each capture during the flight at the icon's place on its logged path (the move curve, the scale and opacity keyframes), against the capture just before the flight."
+    $stop.Did = "One browser window, sidebar on the left, Downloads in its footer (the default). Opened 127.0.0.1:$($script:TourPagesPort)/flightdownload in the starting tab: a blue page that starts the held download 3 s after it loads, so the page's window covers the card when the flight starts at $where. Captured the window as fast as it reads until 900 ms after the app logged the flight, and judged each capture during the flight at the icon's place on its logged path (the move curve, the scale and opacity keyframes), allowing it to trail by up to a fifth of the flight, against the capture just before the flight."
     if ($FromPageEdge) {
-      $stop.Expected = "the app logs a flight 'from the page edge', started once its icon showed; in at least three quarters of the captures from 12% to 50% of the flight the icon is drawn at its place, which is never over the page's window."
+      $stop.Expected = "the app logs a flight 'from the page edge', started once its icon showed; in at least three quarters of the captures from 30% to 55% of the flight (where the Mac's keyframes have it fully opaque, and before it nears the downloads popover) the icon is drawn at its place, allowing it to trail by up to a fifth of the flight, and that place is never over the page's window."
     } else {
-      $stop.Expected = "report only: from the page's middle the icon is under the page's window, so captures from 12% to 50% of the flight show nothing at its place (#2603)."
+      $stop.Expected = "report only: from the page's middle the icon is under the page's window, so captures from 30% to 55% of the flight show nothing at its place (#2603)."
     }
     if (-not (Test-Usable $Session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
     Focus-Window $Session $Session.Main $stop | Out-Null
@@ -2969,10 +2969,10 @@ function Invoke-DownloadFlightStop($Session, [string]$Slug, [string]$Title, [boo
     $measured = Measure-DownloadFlight $capture $flight $pageBox
     $rows = @($measured.Rows)
     $stop.Facts.Add("captures during the flight (ms after it started: the icon's place, over the page or the app, changed samples, drawn): $(($rows | ForEach-Object { "+$($_.Ms) $($_.X),$($_.Y) $(if ($_.OverPage) { 'page' } else { 'app' }) $($_.Changed) $(if ($_.Drawn) { 'drawn' } else { '-' })" }) -join '; ')")
-    $judged = @($rows | Where-Object { $_.Time -ge 0.12 -and $_.Time -le 0.5 })
+    $judged = @($rows | Where-Object { $_.Time -ge 0.3 -and $_.Time -le 0.55 })
     $drawn = @($judged | Where-Object { $_.Drawn }).Count
     $overPage = @($judged | Where-Object { $_.OverPage }).Count
-    $stop.Facts.Add("from 12% to 50% of the flight: $($judged.Count) captures, the icon drawn in $drawn, its place over the page in $overPage")
+    $stop.Facts.Add("from 30% to 55% of the flight: $($judged.Count) captures, the icon drawn in $drawn, its place over the page in $overPage")
     $folder = Split-Path -Parent $stop.Shot
     $prefix = [IO.Path]::GetFileNameWithoutExtension($stop.Shot)
     if ($measured.Baseline) { Save-FlightFrame $capture $measured.Baseline (Join-Path $folder "$prefix-before.png") }
