@@ -225,8 +225,15 @@ function Assert-OneFreshArdia([string]$what, [int]$old, [string]$name, [int[]]$n
 
 function Close-QuitInstance([string]$what, $shown) {
   $ended = Count-QuitsEnded
-  Close-Window $shown
-  Wait-Exit $shown.Pid $what | Out-Null
+  $windows = @([RelaunchCheck.Native]::AppWindows([uint32]$shown.Pid))
+  if (-not $windows.Count) { $windows = @($shown.Window) }
+  foreach ($window in $windows) { Close-Window ([pscustomobject]@{ Pid = $shown.Pid; Window = $window }) }
+  try {
+    Wait-Exit $shown.Pid $what | Out-Null
+  } catch {
+    Keep-QuitLog $what
+    Fail-Quit $what "Ardia ($($shown.Pid)) was still running 60 s after its $($windows.Count) app window(s) were closed, with $(@([RelaunchCheck.Native]::AppWindows([uint32]$shown.Pid)).Count) still open"
+  }
   Assert-QuitsEnded $what ($ended + 1)
   Keep-QuitLog $what
 }
