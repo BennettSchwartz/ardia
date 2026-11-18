@@ -52,7 +52,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | New tab, close, reopen closed tab (Ctrl+Shift+T) | Works | |
 | Ctrl+Z reopens closed tabs | Works once turned on in Settings › Shortcuts (off by default, as on the Mac) | |
 | New window | Works | |
-| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again) | #1453 |
+| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again). Its pages paint as fast as a normal window's: in run 44320319587 a page's own window showed 40 to 50 ms after Enter in both, the local page painted in 141 to 168 ms and DuckDuckGo in 375 to 411 ms on its first visit (100 to 118 ms again). The first walk's 6 to 9 s of white was a slow navigation, which looks the same in any window (a CI run's DuckDuckGo visit hung 19 s on a white page before ERR_CONNECTION_RESET); the tour's `private-pages` part keeps the local page under 5 s in both windows | #1453, #2653 |
 | Close-tabs confirm while other windows load | Works: the confirm (like the prompt and the file pickers) runs on its own thread, so other windows keep loading and taking input while it is open; it stays in front of its own window and comes forward with it (#1688's self-check holds a confirm while a page loads, on CI; not walked here) | #1672, #1688 |
 | Quit and relaunch with the session restored | Works (tabs, the split and the open windows came back) | |
 | Engine memory trimmed after tabs close, once input is idle | Works (logged after closes) | #1544 |
@@ -733,6 +733,53 @@ is plain Chromium.
   has opened, so a profile that crashes Ardia at every start opens again on its own. Chromium's profile (bookmarks,
   history, passwords, cookies) isn't touched. #2097's recording (the app gone about 4 s after its window appears, at
   every launch after onboarding) is that shape; the launch log now kept in `Logs` says what ended it.
+  Sync is paused on that recovered start (#2592): the start gets `launchConfig().recoveredStart`, and Sync then
+  unlocks nothing and reads, writes or deletes none of its files; it only records the pause in `sync.json` (keeping the
+  `seqs` it read, and any synced tab closed meanwhile), because a profile whose Sync load crashes the app (#2570) would
+  otherwise crash every recovered start too. While paused, every Sync action refuses and Settings offers only Resume
+  and Stop Syncing. The pause sticks across starts until Resume, which unlocks, loads Sync's saved state and runs one
+  cycle, and clears the pause only once that cycle has ended updated and the clear has been saved; until then every
+  other Sync action still refuses. A Resume that fails (a failed cycle, the sync data missing from the folder, a quit
+  that began during it, a clear that didn't save) leaves Sync as a fresh paused start: nothing loaded or running,
+  `sync.json` read again (a clear refused but staged anyway is overwritten with the paused document). The promise that
+  the state and journal stay byte for byte as they were is for a paused start; a failed Resume can still let a
+  checkpoint it had already handed to the native save land, which is a true state with its journal kept. A missing
+  chain during Resume never resets this device. No cycle runs before the saved state is loaded, at any start; a load that failed is tried again by Sync Now (once per press), never by the 15 s timer. Every write of `sync.json` goes through one ordered queue, and the quit waits for it to drain. Stop Syncing first saves the document as off and waits for that write, then forgets the key and clears the files, so a crash in between leaves Sync off. Stop pressed during a start's load waits for the load and runs the usual last cycle. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
+  for the recovery phrase, and entering it finishes the resume. Stop Syncing while paused turns Sync off here without
+  a last cycle and never deletes the sync folder's data. Only Windows sets the flag today; the switch is shared
+  (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`
+  carries `sync_paused_by_launch_guard`, `sync_resumes` and `sync_resumes_completed`: resumes well below pauses means
+  people don't find Resume, and completed well below resumes means the crash comes back when Sync loads.
+  On Windows `recoveredStart` is true only when the engine's `launch-guard.json` in the data folder parses, says
+  `"restoreStateSetAside": true`, and was written at or after this process started (`AppModule.h` `LaunchGuard`); a
+  missing, unreadable or stale file, or the app outside the engine, reads false. A test instance logs
+  `[sync] test: recoveredStart …, status …` and each Sync status after it, writes `[sync] unlock finished: unlocked`
+  (or `not unlocked`) when the native unlock returns, just before the load and its 2-minute timer begin, and
+  `ARDIA_TEST=syncTurnOn=1` turns Sync on in the `syncFolder` folder after the first window.
+- Sync keeps its own count of unsettled starts, because the launch guard misses a Sync crash that comes later than
+  15 s (#2570's profile died at 5.2, 19.4, 3.8, 18.9 and 4.6 s, so the guard's count went 1, 0, 1, 0, 1). It's shared
+  code, so it holds on the Mac too; Linux doesn't keep it, because its Sync starts again at every handover between
+  windows and nothing there runs the quit's save (Linux has no pause trigger for now). At a start with Sync on and no
+  pause, before the unlock and the load,
+  Sync reads `unsettledStarts` from `sync.json`: at 2 or more it pauses exactly as a recovered start does; otherwise
+  it adds 1 and waits for that write to land (a refused write is logged and the load goes on). The count goes back to
+  0, saved, on a clean quit (after the quit's checkpoint, so a death in that checkpoint stays counted; even a quit
+  seconds after the start) and once the app has stayed alive 2 minutes after the load of the saved state began (an
+  unlock waiting on a prompt, or a start waiting at the recovery phrase, stays counted); never at the end of a cycle,
+  since a death can come after one has finished. A Resume counts as a load the same way, arms the 2 minutes again
+  when it ends updated, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
+  count is kept. `recoveredStart` stays a second trigger. On the dashboard,
+  `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
+- `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
+  Sync on, checks an ordinary start reports `recoveredStart` false, writes `unsettledStarts` 1 before it unlocks,
+  keeps it through a finished cycle and leaves 0 after a clean quit; a full run (`FULL`, `-SettleCheck`) also keeps a
+  start alive until `sync.json`, sampled while the app runs and before its window is closed, shows the count back at 0,
+  between 110 and 200 s after its `[sync] unlock finished: unlocked` line (the load's start); a start whose key didn't
+  unlock is never asserted to reach 0. Then it records two unfinished
+  starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`,
+  `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
+  the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and
+  `sync_paused_after_unsettled_starts` never) in the local telemetry copy. The start after it must still be paused.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens

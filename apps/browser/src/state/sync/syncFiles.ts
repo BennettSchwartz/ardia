@@ -99,6 +99,9 @@ export function syncFiles(current: () => SyncDoc) {
   const state = { json: "", onDisk: false, loaded: false, savedAt: 0, wanted: false, clock: null as Clock | null };
   const writtenRest = new Map<string, string>();
   let queue: Promise<void> = Promise.resolve();
+  let generation = 0;
+  let docQueue: Promise<void> = Promise.resolve();
+  let docWrites = 0;
 
   function serial<T>(task: () => Promise<T>): Promise<T> {
     const run = queue.then(task);
@@ -249,16 +252,66 @@ export function syncFiles(current: () => SyncDoc) {
     if (!Object.keys(journal.batches).length) clearJournal();
   }
 
-  function saveDoc() {
-    const { scopes, ...meta } = current();
-    const seqs = Object.fromEntries(Object.entries(scopes).map(([k, s]) => [k, writtenSeq(s)]));
-    const json = versionedJson({ ...meta, seqs }, DOC_VERSION, "v");
-    if (json === docFile.json) return;
-    const lasting = versionedJson({ ...meta, lastSyncedAt: null, seqs }, DOC_VERSION, "v");
+  const writtenSeqs = () => (state.loaded ? Object.fromEntries(Object.entries(current().scopes).map(([k, s]) => [k, writtenSeq(s)])) : current().seqs);
+
+  function docJson(patch: Partial<SyncDoc>) {
+    const { scopes: _scopes, ...meta } = { ...current(), ...patch };
+    const seqs = writtenSeqs();
+    return { json: versionedJson({ ...meta, seqs }, DOC_VERSION, "v"), lasting: versionedJson({ ...meta, lastSyncedAt: null, seqs }, DOC_VERSION, "v") };
+  }
+
+  function issueDoc(always: boolean, patch: Partial<SyncDoc> = {}) {
+    const { json, lasting } = docJson(patch);
     const now = Date.now();
-    if (lasting === docFile.lasting && now - docFile.savedAt < DOC_IDLE_MS) return;
+    if (!always && (json === docFile.json || (lasting === docFile.lasting && now - docFile.savedAt < DOC_IDLE_MS))) return null;
     Object.assign(docFile, { json, lasting, savedAt: now });
-    writeDocument(DOC, json);
+    return json;
+  }
+
+  function inDocTurn(task: () => Promise<void>) {
+    docWrites++;
+    const run = docQueue.then(task).finally(() => void docWrites--);
+    docQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  const forgetIssued = (json: string) => void (docFile.json === json && Object.assign(docFile, { json: "", lasting: "" }));
+
+  const saveDocNow = (patch: Partial<SyncDoc> = {}) =>
+    inDocTurn(async () => {
+      const json = issueDoc(true, patch)!;
+      try {
+        await saveDocument(DOC, json);
+      } catch (error) {
+        forgetIssued(json);
+        throw error;
+      }
+    });
+
+  function unload() {
+    generation++;
+    Object.assign(journal, { batches: {}, parts: null, bytes: 0, legacy: false, lastId: 0 });
+    Object.assign(state, { json: "", onDisk: false, loaded: false, savedAt: 0, wanted: false, clock: null });
+    writtenRest.clear();
+  }
+
+  function writeDocNow() {
+    const json = issueDoc(false);
+    if (json === null) return;
+    let refused = true;
+    try {
+      refused = (writeDocument(DOC, json) as unknown) === false;
+    } finally {
+      if (refused) forgetIssued(json);
+    }
+  }
+
+  function saveDoc() {
+    if (docWrites) void inDocTurn(async () => writeDocNow()).catch((error: unknown) => warnFor(null, "[sync] couldn't save sync.json", error));
+    else writeDocNow();
   }
 
   function stateDue() {
@@ -270,6 +323,7 @@ export function syncFiles(current: () => SyncDoc) {
   async function saveState() {
     const consent = consentToken();
     const doc = current();
+    const at = generation;
     if (!doc.enabled) {
       if (state.onDisk || state.wanted) writeDocument(STATE, "");
       Object.assign(state, { json: "", onDisk: false, wanted: false });
@@ -286,12 +340,13 @@ export function syncFiles(current: () => SyncDoc) {
     if (json !== state.json) {
       try {
         const sealed = await SyncNative?.sealLocal(`{"covers":${covers},"clock":${JSON.stringify(seen.last)},"scopes":${json},"version":${CHECKPOINT_VERSION}}`);
-        if (!sealed) return;
+        if (!sealed || at !== generation) return;
         await saveDocument(STATE, sealed);
       } catch (error) {
         warnFor(consent, "[sync] couldn't save the sync state", error);
         return;
       }
+      if (at !== generation) return;
       Object.assign(state, { json, onDisk: true });
     }
     state.savedAt = Date.now();
@@ -304,6 +359,7 @@ export function syncFiles(current: () => SyncDoc) {
   }
 
   function startOver() {
+    state.loaded = true;
     saveDoc();
     void serial(async () => {
       clearJournal();
@@ -320,5 +376,5 @@ export function syncFiles(current: () => SyncDoc) {
     });
   }
 
-  return { read, loadState, persistJournal, watchScope, save, startOver, checkpoint };
+  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded, docsSettled: () => docQueue };
 }
