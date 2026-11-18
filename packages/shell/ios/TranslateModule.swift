@@ -45,9 +45,10 @@ public class TranslateModule: Module {
       try await DownloadPrompt.run(source: Locale.Language(identifier: source), target: Locale.Language(identifier: target))
     }
 
-    AsyncFunction("translateBlocks") { (source: String, target: String, blocks: [[String]], owner: String) async -> [[String]?] in
-      guard #available(macOS 26.0, *) else { return blocks.map { _ in nil } }
-      return await TranslationSessions.translateBlocks(source: source, target: target, owner: owner, blocks)
+    AsyncFunction("translateBlocks") { (source: String, target: String, blocks: [[String]], owner: String) async -> [String: Any] in
+      guard #available(macOS 26.0, *) else { return ["parts": blocks.map { _ in NSNull() as Any }, "errors": ["unavailable"]] }
+      let answer = await TranslationSessions.translateBlocks(source: source, target: target, owner: owner, blocks)
+      return ["parts": answer.parts.map { $0.map { $0 as Any } ?? NSNull() }, "errors": answer.errors]
     }
 
     AsyncFunction("open") { (owner: String) async in
