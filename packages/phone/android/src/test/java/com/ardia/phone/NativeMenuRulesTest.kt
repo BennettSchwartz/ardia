@@ -59,6 +59,13 @@ class NativeMenuRulesTest {
     }
 
     @Test
+    fun anOpenDialogFollowsTheSystemsNightModeOnlyWhenItWasOpenedInTheSystemsMode() {
+        assertTrue("JS asked for nothing", NativeMenuRules.followsNight(null, systemDark = false))
+        assertTrue("JS asked for light while the system was light", NativeMenuRules.followsNight(false, systemDark = false))
+        assertFalse("Incognito forced dark over a light system", NativeMenuRules.followsNight(true, systemDark = false))
+    }
+
+    @Test
     fun androidsOwnMenusAreTheDefaultAndOnlyTheLabArgumentBringsBackTheDrawnOnes() {
         assertTrue(NativeMenuRules.nativeMenus(emptyMap()))
         assertFalse(NativeMenuRules.nativeMenus(mapOf("ArdiaDrawnMenus" to true)))

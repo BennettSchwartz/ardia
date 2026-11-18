@@ -118,6 +118,8 @@ internal object NativeMenuRules {
 
     fun nativeMenus(arguments: Map<String, Any>): Boolean = arguments[DRAWN_ARGUMENT] != true
 
+    fun followsNight(askedDark: Boolean?, systemDark: Boolean): Boolean = askedDark == null || askedDark == systemDark
+
     fun isDark(context: Context, dark: Boolean?): Boolean =
         dark ?: ((context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
 }
@@ -270,7 +272,9 @@ class MenusModule : Module() {
                 promise.resolve(null)
                 return@AsyncFunction
             }
-            val dark = { NativeMenuRules.isDark(activity, options.appearance?.dark) }
+            val askedDark = options.appearance?.dark
+            val followsNight = NativeMenuRules.followsNight(askedDark, NativeMenuRules.isDark(activity, null))
+            val dark = { if (followsNight) NativeMenuRules.isDark(activity, null) else askedDark == true }
             val given = options.appearance?.scheme
             val followsWallpaper = MaterialScheme.followsWallpaper(given, MaterialScheme.colorScheme(activity, dark(), null))
             val colors = mutableStateOf(MaterialScheme.colorScheme(activity, dark(), given))
@@ -279,7 +283,7 @@ class MenusModule : Module() {
             val view = object : FrameLayout(activity) {
                 override fun onConfigurationChanged(newConfig: Configuration?) {
                     super.onConfigurationChanged(newConfig)
-                    if (followsWallpaper) post { colors.value = MaterialScheme.colorScheme(activity, dark(), null) }
+                    if (followsWallpaper && followsNight) post { colors.value = MaterialScheme.colorScheme(activity, dark(), null) }
                 }
             }
             view.addView(compose, FrameLayout.LayoutParams(0, 0))

@@ -124,10 +124,9 @@ internal object MaterialScheme {
         return if (given.isNullOrEmpty()) base else withRoles(base, given)
     }
 
-    fun followsWallpaper(given: Map<String, String>?, wallpaper: ColorScheme): Boolean {
+    fun followsWallpaper(given: Map<String, String>?, system: ColorScheme): Boolean {
         if (given.isNullOrEmpty()) return true
-        if (!dynamic) return false
-        return given["primary"].equals(hex(wallpaper.primary), ignoreCase = true)
+        return given["primary"].equals(hex(system.primary), ignoreCase = true)
     }
 
     fun nightOf(configuration: Configuration): Int = configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
