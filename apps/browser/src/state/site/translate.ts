@@ -3,7 +3,7 @@ import { translation } from "../../platform/text";
 import { create } from "zustand";
 import { webviews } from "../../platform/webviews";
 import { useBrowser } from "../browser/store";
-import { changedIds } from "../browser/changes";
+import { liveOf, onLiveChange } from "../tabs/tabLive";
 import { incognitoOriginal, isIncognitoProfile } from "../browser/model";
 import { hideKeyedToast, showToast } from "../app/toasts";
 import { translatorCall } from "./pageTranslator";
@@ -287,7 +287,7 @@ function watchTabDocument(tabId: string) {
     tabId,
     {
       holds: () => holds(tabId, token),
-      loading: () => !!useBrowser.getState().live[tabId]?.isLoading,
+      loading: () => liveOf(tabId).isLoading,
       sameDocument: () => webviews.get(tabId)?.evaluate<boolean>(translatorCall("holds", token)) ?? Promise.resolve(undefined),
       release: () => toIdle(tabId),
       wait: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -319,14 +319,13 @@ export function startTranslate() {
   if (!translation) return () => {};
   const model = translation;
   const stopCancelling = cancelEndedTranslations((token) => void model.cancel(token).catch(() => {}));
+  const stopLoadWatch = onLiveChange((id, live, prev) => {
+    if (live.isLoading === prev.isLoading || !useBrowser.getState().tabs[id]) return;
+    if (live.isLoading) return watchTabDocument(id);
+    stopDocumentWatch(id);
+    void detect(id).catch(() => {});
+  });
   const stopWatching = useBrowser.subscribe((s, prev) => {
-    for (const id of changedIds(s.live, prev.live)) {
-      if (s.live[id] && prev.live[id]?.isLoading && !s.live[id].isLoading) {
-        stopDocumentWatch(id);
-        void detect(id).catch(() => {});
-      }
-      if (s.live[id]?.isLoading && prev.live[id] && !prev.live[id].isLoading) watchTabDocument(id);
-    }
     if (s.tabs === prev.tabs) return;
     const gone = Object.keys(useTranslate.getState()).filter((id) => !s.tabs[id]);
     for (const id of gone) {
@@ -337,6 +336,7 @@ export function startTranslate() {
   });
   return () => {
     stopCancelling();
+    stopLoadWatch();
     stopWatching();
   };
 }

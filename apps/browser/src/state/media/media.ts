@@ -14,6 +14,7 @@ import { capture } from "../telemetry/client";
 import { noteMediaPositionReport, noteNowPlayingLoopRestart } from "../telemetry/mediaCardCounts";
 import { isSleeping } from "../tabs/sleepingTabs";
 import { notePictureInPictureClosed } from "../telemetry/pictureInPictureCloses";
+import { liveOf, watchLive } from "../tabs/tabLive";
 
 export type Session = NowPlaying & {
   playedAt: number;
@@ -161,9 +162,9 @@ function wakeToPlay(tabId: string) {
       const after = m.sessions[tabId];
       if (after && after !== before && after.playbackState !== "none") resume(after);
     }),
-    useBrowser.subscribe((s) => {
+    watchLive(tabId, () => {
       if (loaded || isSleeping(tabId)) return;
-      if (s.live[tabId]?.isLoading) sawLoading = true;
+      if (liveOf(tabId).isLoading) sawLoading = true;
       else if (sawLoading) loaded = setTimeout(() => resume(null), LOADED_WITHOUT_SESSION_MS);
     }),
   );

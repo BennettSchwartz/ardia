@@ -7,6 +7,7 @@ import { startLinuxTabPolicies, watchInputIdle } from "./hostPolicies.ts";
 import { useBrowser } from "../../browser/src/state/browser/store.ts";
 import { pageOf, patchPage } from "../../browser/src/state/tabs/pageState.ts";
 import { updateLive } from "../../browser/src/state/tabs/actions.ts";
+import { liveOf } from "../../browser/src/state/tabs/tabLive.ts";
 import { exitPictureInPicture, playerTabFor, setNowPlaying, setPictureInPictureState, useMedia } from "../../browser/src/state/media/media.ts";
 import { webviews } from "../../browser/src/platform/webviews.ts";
 import { noteDiscarded, noteReady, useLifecycle } from "../../browser/src/state/tabs/tabLifecycle.ts";
@@ -49,7 +50,7 @@ const mediaSnapshot = (playing, access, pip, extra = []) => [
 test("snapshot media state reaches the shared audio badge, player, capture and picture-in-picture state", () => {
   const h = setup();
   assert.ok(h.receiver.install({ lease, snapshot: { watermark: 1, events: mediaSnapshot(true, { camera: true, microphone: false, screen: false }, { kind: "video", active: true }) } }));
-  assert.equal(useBrowser.getState().live[h.tab]?.playingAudio, true);
+  assert.equal(liveOf(h.tab).playingAudio, true);
   assert.equal(useMedia.getState().sessions[h.tab]?.title, "Track");
   assert.deepEqual(useMedia.getState().sessions[h.tab]?.actions, ["play", "pause", "nexttrack"]);
   assert.deepEqual(pageOf(h.tab).mediaAccess, { camera: true, microphone: false, screen: false });
@@ -57,7 +58,7 @@ test("snapshot media state reaches the shared audio badge, player, capture and p
   h.send(message(2, "media", { playing: false, muted: true }));
   h.send(message(3, "nowPlaying", { state: null }));
   h.send(message(4, "pictureInPicture", { kind: "video", active: false }));
-  assert.equal(useBrowser.getState().live[h.tab]?.playingAudio, false);
+  assert.equal(liveOf(h.tab).playingAudio, false);
   assert.equal(useMedia.getState().sessions[h.tab], undefined);
   assert.equal(useMedia.getState().pipOpen[h.tab], undefined);
   assert.deepEqual(pageOf(h.tab).mediaAccess, { camera: true, microphone: false, screen: false });

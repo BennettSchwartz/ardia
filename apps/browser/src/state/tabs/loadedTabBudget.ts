@@ -14,6 +14,7 @@ import { hasPage } from "./pageSession";
 import { usePages } from "./pageState";
 import { shownTabIds } from "./shownTabs";
 import { isSleeping } from "./sleepingTabs";
+import { liveOf } from "./tabLive";
 
 export type LoadedTabBudget = { tabs: number; hiddenMs: number };
 
@@ -44,7 +45,7 @@ export function inUse(s: BrowserState, id: string): boolean {
   const media = useMedia.getState();
   const access = usePages.getState().pages[id]?.mediaAccess;
   return (
-    !!s.live[id]?.playingAudio ||
+    liveOf(id).playingAudio ||
     !!media.pipOpen[id] ||
     isPlaying(media.sessions[id]) ||
     !!(access && (access.camera || access.microphone || access.screen)) ||
@@ -79,7 +80,7 @@ export function tabsOverBudget(
         tabEngine(s, id) === "chromium" &&
         /^https?:\/\//i.test(s.tabs[id]!.url) &&
         !inUse(s, id) &&
-        !(s.live[id]?.isLoading && skippedLoading.push(id)),
+        !(liveOf(id).isLoading && skippedLoading.push(id)),
     )
     .reverse();
 }
