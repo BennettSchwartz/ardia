@@ -23,6 +23,8 @@ export const introStartDelayMs = (): number => {
 
 export const syncTurnOnRequested = (): boolean => testValue("syncTurnOn") === "1";
 
+export const downloadFlightFromPageCentre = (): boolean => testValue("downloadFlightFromPage") === "1";
+
 export const devTestValue = (key: string): string | null => (typeof __DEV__ !== "undefined" && __DEV__ ? testValue(key) : null);
 
 export const reloadLaunchConfigForTests = () => void (config = null);

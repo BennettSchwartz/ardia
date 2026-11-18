@@ -71,7 +71,7 @@ inline std::vector<std::string_view> const &TestKeys() noexcept {
       "cliInstallScript", "legacySource", "legacyCrashAfter", "bangsUrl", "onboarding", "whatsNew", "telemetry",
       "liveMock", "calendarFixture", "appMenu", "appDialog", "loginsTimeout", "externalAppLaunch", "nativeDragRefused", "httpPages", "selfCheckStage",
       "keyHold", "keyHoldReadyMs", "syncTurnOn",
-      "fadeLab", "rawBackgrounds",
+      "fadeLab", "rawBackgrounds", "downloadFlightFromPage",
   };
   return keys;
 }
