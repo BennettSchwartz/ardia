@@ -1069,12 +1069,14 @@ The owner's reference is Safari's swipe up on its bottom bar (#2607; the measure
 - **The handover.** The capture of the page starts when the pull starts. The waiting deck takes the fresh picture only
   after the landing has ended (re-rendering its cards mid-pull stalled the UI thread for over 100 ms), and once that
   picture has painted in the card the live page is hidden and the deck's own card shown in the same UI frame; the
-  surface changes to the deck one frame later. The wait is for the picture that is current when it ends: if a newer
-  capture lands while an older picture is awaited, the deck draws and awaits the newer one. If the picture has not
-  painted within 250 ms the live page keeps standing in the card for up to 1 s more (`DECK_PULL.paintLateCapMs`) and
-  the deck takes over the moment it paints. Only if it still hasn't is the page handed over anyway: that is counted
-  as `deck_pictures_late`, and the card then shows its background colour until the image loads. While a landed page
-  waits, a second request for the tabs for the same tab is ignored, and the wait gives up only its own capture. The live page and its picture agree to the point because the page
+  surface changes to the deck one frame later. The wait has one deadline, 1 s from the moment it
+  begins (`DECK_PULL.paintDeadlineMs`, #2664), and the live page stands in the card until then at the latest. It is
+  checked every 250 ms and when a paint is reported: the deck takes over the moment the picture that is then the
+  tab's own has painted, and if a newer capture has landed meanwhile the deck draws that one and awaits it for
+  whatever time is left, never a fresh second. Only when the deadline passes with the current picture unpainted is
+  the page handed over anyway: that is counted as `deck_pictures_late`, and the card then shows its background
+  colour until the image loads. While a landed page waits, a second request for the tabs for the same tab is
+  ignored, and the wait gives up only its own capture. The live page and its picture agree to the point because the page
   view pins its insets while it moves (`pinsSafeArea` on `ArdiaPageView`): a transformed view's safe area shrinks as
   it leaves the status bar, and the web view's content used to slide inside the page by up to 60 pt during the pull.
 - **No second motion.** When the "Archive inactive tabs" capsule is due, the waiting deck lays its cards out for it
@@ -1108,7 +1110,7 @@ The owner's reference is Safari's swipe up on its bottom bar (#2607; the measure
     fade. The live page stands in its card in one frame, a cut as before the swipe followed the finger
     (`cutDeckPullFromRest`), and the same handover follows. Through the entrance the card is never empty either
     way, because what stands in it is the page itself; the one exception is the handover's last resort above, a
-    picture that has not painted 1.25 s after the page landed.
+    picture that has not painted when its 1 s deadline passes.
   With Reduce Motion on, the waiting deck takes each new picture of the page in front as it lands
   (`showFadingDeckThePicture`), so the first case is the common one; with normal motion it doesn't re-render for
   that. A touch on the bar wakes the deck under the page and draws the page at 99% (`deckPull.primed`), which makes
@@ -1117,7 +1119,8 @@ The owner's reference is Safari's swipe up on its bottom bar (#2607; the measure
   it, and the deck's bar takes over after. Opening a card is a fade too (`growDeckPull(…, steady)`): the deck holds
   still, can't be dragged or scrolled by an accessibility action, and stays the surface, the page is made under it unseen, fades in over it once it is laid
   out and its cover has painted (five to seven frames after the tap on the simulator), and the deck lets go when
-  the fade has ended. Grid's tile open, and the old entrance when it runs (search, a menu or the reader open, or
+  the fade has ended. The fade's end commits the opened tab only if its opening is still the active one: if a link
+  or anything else has put another tab in front meanwhile, the open is cleared and that tab stays selected (#2664). Grid's tile open, and the old entrance when it runs (search, a menu or the reader open, or
   the deck not ready within 0.5 s), are still cuts under Reduce Motion.
 - **A request that outlives its page is dropped.** If the tab in front changes, or the surface does, while a tap
   is still waiting for the deck to report (at most 0.5 s), the request is cleared and nothing opens; with the same
@@ -1366,7 +1369,7 @@ Every count and timing the phone can send, for the owner to read as one set and 
 | `duo_layout_shown` | the Duo layouts on iPhone | Whether anyone runs Ardia on a Duo; zero after a release reaching Duo owners means the layout probe stopped reporting |
 | `landscape_shown` | landscape on both phones | How often people turn the phone; zero across testers after a release that rotates means the orientation lock came back |
 | `card_opens_waited` | the card open's hand-over | Whether the page mounted at the start of a card's growth is ready when the card lands; a share of card opens that grows after a release means the open is again held at full size before the page takes over |
-| `deck_pictures_late` | the deck-entrance hold, and the pull's handover (#2651) | Whether the leaving page's picture paints before the deck shrinks, or within 1.25 s of a pulled page landing in its card; a share of deck opens that grows after a release means a card may again open on a blank or placeholder face |
+| `deck_pictures_late` | the deck-entrance hold, and the pull's handover (#2651) | Whether the leaving page's picture paints before the deck shrinks, or by the 1 s deadline of the wait that follows a pulled page landing in its card (1.25 s for one picture, and up to about 2.5 s with a replacement, before #2664); a share of deck opens that grows after a release means a card may again open on a blank or placeholder face |
 | `list_sheets_late` | the Archive and History opens on iPhone | Whether those sheets still mount their rows before they move; near zero is the goal, and a share that grows after a release means the open is again doing its work on the tap's path |
 | `list_pages_added` | the Archive and History pages on iPhone | How often people scroll past the first 200 rows; near zero would argue for a larger first page or none, a large share for a smaller one |
 | `search_reveals_late` | the search panel's open on iPhone | Whether the panel's field and rows lay out before the stage reveals them; zero across testers is good, and a share of `searches` that grows after a release means the panel's content mounts late |

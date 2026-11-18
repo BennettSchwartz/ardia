@@ -431,28 +431,32 @@ function cardShowsPicture(id: string) {
 function whenPullPicturePainted(id: string, then: () => void) {
   const capture = pullCapture?.id === id ? pullCapture.done : null;
   const current = () => findTab(currentTabs(), id)?.snapshotFileName ?? null;
-  const paints = (picture: string | null, capMs: number, newer: number) => {
-    if (!picture) {
-      then();
-      return;
-    }
-    whenPicturePainted(pictureKey(`deck:${id}`, picture), capMs, (shown) => {
-      const now = current();
-      if (newer > 0 && now !== picture) {
-        refreshHiddenDeck();
-        paints(now, DECK_PULL.paintCapMs, newer - 1);
-      } else if (shown) then();
-      else if (capMs < DECK_PULL.paintLateCapMs) paints(picture, DECK_PULL.paintLateCapMs, newer);
-      else {
-        if (pullCounts(id)) countUsage("deck_pictures_late");
-        labTrace("PAGELAB deck pull handed over before its picture had painted");
-        then();
-      }
-    });
-  };
   const painted = () => {
     refreshHiddenDeck();
-    paints(current(), DECK_PULL.paintCapMs, 1);
+    const deadline = Date.now() + DECK_PULL.paintDeadlineMs;
+    const paints = (picture: string | null) => {
+      if (!picture) {
+        then();
+        return;
+      }
+      const slice = Math.max(Math.min(DECK_PULL.paintCapMs, deadline - Date.now()), 0);
+      whenPicturePainted(pictureKey(`deck:${id}`, picture), slice, (shown) => {
+        const now = current();
+        const late = Date.now() >= deadline;
+        if (shown && now === picture) then();
+        else if (!late) {
+          if (now !== picture) refreshHiddenDeck();
+          paints(now);
+        } else {
+          if (now === null || !picturePainted(pictureKey(`deck:${id}`, now))) {
+            if (pullCounts(id)) countUsage("deck_pictures_late");
+            labTrace("PAGELAB deck pull handed over before its picture had painted");
+          }
+          then();
+        }
+      });
+    };
+    paints(current());
   };
   if (!capture) {
     painted();
