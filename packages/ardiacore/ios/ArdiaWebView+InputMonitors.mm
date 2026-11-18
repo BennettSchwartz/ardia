@@ -129,6 +129,7 @@ NSWindow *AppWindowAt(NSPoint screen) {
   static id monitor;
   if (monitor) return;
   monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp handler:^NSEvent *(NSEvent *event) {
+    [ArdiaWebView revealForPress:event];
     [ArdiaWebView prewarmForMouseEvent:event];
     return event;
   }];

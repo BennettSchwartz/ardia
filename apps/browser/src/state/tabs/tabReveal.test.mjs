@@ -147,3 +147,36 @@ test("a new tab isn't shown over a page whose toolbar is scrolled away (its page
   assert.deepEqual(revealed(), ["drop over a"]);
   useToolbarAutoHide.setState({ scrolledDown: {} });
 });
+
+test("the native switch is on from the start on this platform, and off while a tab is shared", () => {
+  assert.equal(stub.nativeTabSwitches[0], true);
+  stub.nativeTabSwitches.length = 0;
+  useMedia.setState({ tabShares: { a: { kind: "screen" } } });
+  useMedia.setState({ tabShares: { a: { kind: "screen" }, b: { kind: "screen" } } });
+  useMedia.setState({ tabShares: {} });
+  assert.deepEqual(stub.nativeTabSwitches, [false, true], "it's told only when that changes");
+});
+
+test("a plain press that leaves its row's tab in the background takes back the page native code showed for it", async () => {
+  const held = await import("../sidebar/heldTabPress.ts");
+  let start = 5000;
+  const press = (tabId, mods = {}) => held.holdTabPress("w1", tabId, { nativeEvent: { identifier: "0", pageX: 10, pageY: 10, ...mods }, touchHistory: { touchBank: [{ startTimeStamp: ++start }] } });
+  setup();
+  press("b");
+  assert.deepEqual(revealed(), ["b"], "a press that switches is shown by the switch itself, nothing to take back");
+  press("b");
+  assert.deepEqual(revealed(), [], "nor a press on the tab already in front");
+  press("c", { metaKey: true });
+  assert.deepEqual(revealed(), [], "native code doesn't show a modified click, so nothing to take back");
+  S().setSelection("w1", ["b", "c"]);
+  press("c");
+  assert.deepEqual(revealed(), ["drop over c"], "a press on a selected tab doesn't switch on press");
+  S().setSelection("w1", []);
+  held.devTabPress.switchOnPress = false;
+  try {
+    press("a");
+    assert.deepEqual(revealed(), ["drop over a"], "with switching on press off, the press leaves it in the background");
+  } finally {
+    held.devTabPress.switchOnPress = true;
+  }
+});

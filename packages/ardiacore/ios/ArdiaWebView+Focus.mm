@@ -49,6 +49,11 @@ static BOOL InTabPage(NSView *view) {
 }
 
 - (void)storePageFocus {
+  if (_focus.storedAtReveal) {
+    _focus.storedAtReveal = NO;
+    _focus.keepsOutgoing = NO;
+    return;
+  }
   NSResponder *responder = self.window.firstResponder;
   const BOOL unfocused = !responder || responder == self.window;
   const BOOL snapshotted = _focus.keepsOutgoing;

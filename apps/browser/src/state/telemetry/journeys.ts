@@ -52,8 +52,12 @@ function lastInput(now = Date.now()): number | null {
 type Mark = [kind: string, at: number];
 const marks = new Map<string, Mark[]>();
 
+const NATIVE_REVEAL_COUNTS: Record<string, string> = { nativeReveal: "j3_native", nativeRevealDropped: "j3_native_dropped", nativeRevealFocus: "j3_native_focus" };
+
 function pullMarks(now: number) {
   for (const [key, kind, at] of fieldTiming.drain()) {
+    const counted = NATIVE_REVEAL_COUNTS[kind];
+    if (counted) count(counted);
     let list = marks.get(key);
     if (!list) marks.set(key, (list = []));
     list.push([kind, at]);
@@ -97,9 +101,9 @@ function tick() {
 }
 
 function settle(force: boolean) {
-  if (!pending.length) return;
   const now = Date.now();
   pullMarks(now);
+  if (!pending.length) return;
   pending = pending.filter((p) => !(settleOne(p, now) || (force && settleOne(p, Infinity))));
 }
 

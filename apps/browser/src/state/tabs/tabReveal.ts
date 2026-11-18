@@ -1,4 +1,4 @@
-import { dropTabReveals, revealOffered, revealTab } from "../../platform/tabs";
+import { dropTabReveals, revealOffered, revealTab, setNativeTabSwitch } from "../../platform/tabs";
 import { useMedia } from "../media/media";
 import { pageOf } from "./pageState";
 import { useToolbarAutoHide } from "../windows/toolbarAutoHide";
@@ -8,8 +8,14 @@ import { adoptOf, hasPage } from "./pageSession";
 import { splitOf } from "../splits/splits";
 import type { Tab } from "../browser/types";
 import { isWebPageUrl } from "../../lib/url";
+import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 
 const OFFERED = /^(tab|ardiacore):/;
+
+export const tabPressTag = (tabId: string, selected: boolean) =>
+  PLATFORM_FEATURES.nativeTabSwitch ? `${selected ? "tab-selected" : "tab-switch"}:${tabId}` : undefined;
+
+const nativeSwitchAllowed = () => PLATFORM_FEATURES.nativeTabSwitch && !Object.keys(useMedia.getState().tabShares).length;
 
 export type Switch = { tabId: string; offered?: string; over: string } | { tabId: null; over: string };
 
@@ -52,6 +58,14 @@ export function switchedTabs(s: BrowserState, prev: BrowserState): Switch[] {
 }
 
 export function startTabReveal() {
+  let nativeSwitch = nativeSwitchAllowed();
+  if (PLATFORM_FEATURES.nativeTabSwitch) setNativeTabSwitch(nativeSwitch);
+  useMedia.subscribe(() => {
+    const allowed = nativeSwitchAllowed();
+    if (allowed === nativeSwitch) return;
+    nativeSwitch = allowed;
+    setNativeTabSwitch(allowed);
+  });
   useBrowser.subscribe((s, prev) => {
     for (const change of switchedTabs(s, prev)) {
       if (change.tabId === null) dropTabReveals(change.over);

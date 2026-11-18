@@ -62,7 +62,12 @@ the start unless noted. All clocks are epoch ms on the same Mac: JS's `Date.now(
 Each `perf_journeys` step goes as `<step>_p50`, `_p75`, `_p95`, `_max` and `_n` (ms; at most 500 samples per step per
 summary). Counts: `j3_cold` (the page was hidden), `j3_warm` (it was still painting), `j3_load` (it had to load),
 `j3_other` (no page: New Tab), `j2_no_bar`, `j4_no_load` (not a page load: a ardia: page, a download),
-`j4_no_paint` (nothing painted within 30 s), `j4_replaced` (another navigation came first).
+`j4_no_paint` (nothing painted within 30 s), `j4_replaced` (another navigation came first), `j3_native` (a sidebar
+press showed the page from native code before JS switched), `j3_native_dropped` (of those, taken back because no
+switch followed, or a later press took the screen: a drag, a press on the shown tab's row or on another row, the 5 s backstop) and `j3_native_focus` (of those, the
+keyboard moved to the page with it). Watch `j3_native_dropped / j3_native` stay small and `j3_view`'s p95 fall.
+A window that has visited another Space keeps that Space's page warm, and a warm page keeps both this and JS's own
+reveal off (`revealableOver`), so there `j3_native` stays 0.
 Context: `tabs`, how many tabs were open when the summary went out (an exact count, from the first nightly after 0.2.46-nightly.6), so J2 and J3 can
 be split by tab count: they must not grow with it (#1330). Before it, join `perf_memory`'s tab count by copy.
 `perf_journeys` goes hourly and at quit, like `perf_omnibox`; `perf_launch` once its steps are in (≤ 30 s after the first

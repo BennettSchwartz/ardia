@@ -21,6 +21,7 @@ public class TabsModule: Module {
     }
     Function("revealTab") { (key: String) in ArdiaWebView.revealTab(key) }
     Function("dropTabReveals") { (key: String) in ArdiaWebView.dropTabReveals(key) }
+    Function("setNativeTabSwitch") { (enabled: Bool) in ArdiaWebView.setNativeTabSwitch(enabled) }
     Function("revealOffered") { (adoptId: String, key: String) in ArdiaWebView.revealOffered(adoptId, over: key) }
     AsyncFunction("discardOffered") { (adoptId: String) -> Bool in ArdiaWebView.discardOffered(adoptId) }.runOnQueue(.main)
 
