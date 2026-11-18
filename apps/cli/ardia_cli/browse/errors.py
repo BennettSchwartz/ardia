@@ -46,6 +46,18 @@ REFUSAL_HINTS = {
 }
 
 
+# Methods Ardia keeps off the ardia-command policy on purpose. Their refusal isn't a missing allowance, so it says so
+# and says what to do instead. Keyed by method, so every command that needs one (`download`, `wait --download`) words
+# it the same way. `Browser.setDownloadBehavior` lets the caller choose a folder to write to, and the engine's token
+# client answers false to `MayWriteLocalFiles` (chromium-devtools-control-token.patch) for the same reason.
+ON_PURPOSE = {
+    "Browser.setDownloadBehavior": (
+        "it would let the ardia command write a page's download to any folder on this computer",
+        "Ask the person to save the file from the page",
+    ),
+}
+
+
 def refusal_reason(text: str, method: str) -> str:
     said = text.split(POLICY_REFUSAL, 1)[0]
     if method not in said:
@@ -62,6 +74,9 @@ class Gated(BrowseError):
         if self.reason:
             hint = REFUSAL_HINTS.get(self.reason)
             message = f"{what}, which Ardia allows for the ardia command, but not {self.reason} ({self.refusal})" + (f": {hint}" if hint else "")
+        elif method in ON_PURPOSE:
+            why, instead = ON_PURPOSE[method]
+            message = f"{what}, which Ardia's ardia-command policy blocks on purpose: {why} ({self.refusal}). {instead}. Trying again won't change this"
         else:
             message = (
                 f"{what}, which Ardia's ardia-command policy refuses ({self.refusal}). "

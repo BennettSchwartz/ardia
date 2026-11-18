@@ -927,8 +927,9 @@ can't be saved (`flow_not_get`), and GraphQL over GET works only when its URL va
 
 The engine's ardia-command policy (`ac_cli_token_policy_methods.cc`) refuses these methods, so on the real connection
 these commands fail with exit 1, naming the method and the command (`code: "policy_refused"`, `data.method`, and
-`data.reason` empty). Each is implemented and works against a plain `--port` test server, so allowing the method is the
-only change needed.
+`data.reason` empty). Each command in this table is implemented and works against a plain `--port` test server, so
+allowing the method is the only change needed. `download` is not in the table: Ardia blocks it on purpose (see
+[Blocked on purpose](#blocked-on-purpose) below).
 
 | Command | Needs |
 | --- | --- |
@@ -938,13 +939,22 @@ only change needed.
 | `set offline`, `set headers` | `Network.emulateNetworkConditions`, `Network.setExtraHTTPHeaders` |
 | `set credentials`, `network route\|unroute` | `Fetch.enable` (and `Fetch.fulfillRequest`, `failRequest`, `continueRequest`) |
 | `upload` | `DOM.setFileInputFiles` |
-| `download <sel> <path>`, `wait --download [path]` | `Browser.setDownloadBehavior` (`wait --download` waits for the next download that starts after it; `download` clicks and saves) |
 | `highlight` | `Overlay.enable`, `Overlay.highlightNode` |
 | `clipboard copy\|paste` | `Input.dispatchKeyEvent` with the `copy`/`paste` editing commands |
 | `clipboard read\|write` | `Browser.grantPermissions` |
 | `trace start\|stop`, `profiler start\|stop` | `Tracing.start`, `Tracing.end` |
 | `record start\|stop\|restart` | `Page.startScreencast` (and ffmpeg on PATH for the WebM) |
 | `stream enable` | `Page.startScreencast` |
+
+#### Blocked on purpose
+
+`download <sel> <path>` and `wait --download [path]` fail the same way (exit 1, `code: "policy_refused"`, `data.method`
+`Browser.setDownloadBehavior`, `data.reason` empty), but they aren't waiting for the engine to catch up. Ardia leaves
+the method off the ardia-command policy on purpose: it would let the command choose where a download is written, which
+is any folder on the computer. The error says so, and says what to do instead: ask the person to save the file from the
+page. Trying again won't change the result. Letting the command write a download is a decision about its access to
+local files, so it needs a maintainer's decision and an engine change, not a CLI one. (`wait --download` also needs
+the method, so it is refused the same way.)
 
 On the token path Ardia also strips `Cookie`, `Set-Cookie` and `Authorization` from network events, so
 `network requests` and HAR files never contain them.
