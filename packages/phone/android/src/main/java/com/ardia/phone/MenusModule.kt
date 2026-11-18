@@ -131,6 +131,9 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     var scheme: Map<String, String>? = null
     private var host: ComposeView? = null
     private var expanded: MutableState<Boolean>? = null
+    private var downX = 0f
+    private var downY = 0f
+    private var downAt: Long? = null
 
     private val gestures = GestureDetector(
         context,
@@ -139,7 +142,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
 
             override fun onSingleTapUp(event: MotionEvent): Boolean {
                 if (trigger != "tap") return false
-                show(event, null, null)
+                show(event, event.x, event.y)
                 return true
             }
         },
@@ -153,13 +156,21 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) = Unit
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            downX = event.x
+            downY = event.y
+            downAt = event.eventTime
+        }
         if (items.isNotEmpty()) gestures.onTouchEvent(event)
         return super.dispatchTouchEvent(event)
     }
 
     fun showFromCode(pressX: Double?, pressY: Double?) {
         val density = resources.displayMetrics.density
-        if (pressX == null || pressY == null) return show(null, null, null)
+        if (pressX == null || pressY == null) {
+            val recent = MaterialMenuRules.recentTouch(downAt, android.os.SystemClock.uptimeMillis())
+            return if (recent) show(null, downX, downY) else show(null, null, null)
+        }
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         show(null, (pressX * density).toFloat(), (pressY * density).toFloat())
     }

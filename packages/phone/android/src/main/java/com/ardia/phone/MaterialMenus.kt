@@ -46,10 +46,17 @@ internal object MaterialMenuRules {
     data class Bounds(val left: Int, val top: Int, val width: Int, val height: Int)
 
     fun anchor(viewLeft: Int, viewTop: Int, viewWidth: Int, viewHeight: Int, density: Float, pressX: Float?, pressY: Float?): Bounds {
-        val button = viewWidth / density <= BUTTON_MAX_DP && viewHeight / density <= BUTTON_MAX_DP
+        val short = viewHeight / density <= BUTTON_MAX_DP
+        val button = short && viewWidth / density <= BUTTON_MAX_DP
         if (pressX == null || pressY == null || button) return Bounds(viewLeft, viewTop, viewWidth, viewHeight)
-        return Bounds(viewLeft + pressX.toInt(), viewTop + pressY.toInt(), 1, 1)
+        val x = viewLeft + pressX.toInt().coerceIn(0, (viewWidth - 1).coerceAtLeast(0))
+        if (short) return Bounds(x, viewTop, 1, viewHeight)
+        return Bounds(x, viewTop + pressY.toInt(), 1, 1)
     }
+
+    const val RECENT_TOUCH_MS = 1000L
+
+    fun recentTouch(downAt: Long?, now: Long): Boolean = downAt != null && now - downAt in 0..RECENT_TOUCH_MS
 
     fun sections(rows: List<NativeMenuRules.Row>): List<List<NativeMenuRules.Row>> {
         val sections = mutableListOf<MutableList<NativeMenuRules.Row>>()

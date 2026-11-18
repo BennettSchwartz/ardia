@@ -14,6 +14,20 @@ class MaterialMenuRulesTest {
     }
 
     @Test
+    fun aRowsMenuDropsBelowTheRowAtTheFingerSoItNeverCoversTheRow() {
+        assertEquals("the Archive row, 1000 by 198 px, long pressed at 300,120", Bounds(340, 900, 1, 198), MaterialMenuRules.anchor(40, 900, 1000, 198, 2.75f, 300f, 120f))
+        assertEquals("the Settings interval row tapped on its right-aligned value", Bounds(1010, 1500, 1, 154), MaterialMenuRules.anchor(40, 1500, 1000, 154, 2.75f, 970f, 70f))
+        assertEquals("a press past the row's edge stays on the row", Bounds(1039, 1500, 1, 154), MaterialMenuRules.anchor(40, 1500, 1000, 154, 2.75f, 1200f, 70f))
+    }
+
+    @Test
+    fun aTapShownFromJavaScriptUsesTheTouchThatJustWentDownAndNotAnOldOne() {
+        assertEquals(true, MaterialMenuRules.recentTouch(5_000L, 5_300L))
+        assertEquals(false, MaterialMenuRules.recentTouch(5_000L, 7_000L))
+        assertEquals(false, MaterialMenuRules.recentTouch(null, 7_000L))
+    }
+
+    @Test
     fun aLargeViewsLongPressOpensTheMenuAtTheFinger() {
         assertEquals(Bounds(140, 830, 1, 1), MaterialMenuRules.anchor(40, 600, 480, 720, 2.75f, 100f, 230f))
     }
