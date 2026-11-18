@@ -26,4 +26,5 @@ Ardia builds on and ships third-party software under its own licenses, including
   services.helium.imput.net/bangs.json: a snapshot in packages/core/src/bangList.ts
 - React Native and React Native macOS (MIT)
 - T3 Code (MIT), copyright T3 Tools Inc., https://github.com/pingdotgg/t3code: the AI plugin's runtime, its server built
-  from a pinned commit with the patches in plugins/ai/runtime (plugins/ai/runtime/NOTICE)
+  from a pinned commit with the patches in the AI plugin's runtime folder; the plugin lives in ardia-browser/plugins,
+  mounted here as the plugins submodule (plugins/plugins/ai/runtime/NOTICE)

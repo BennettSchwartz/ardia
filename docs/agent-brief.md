@@ -145,6 +145,20 @@ Engine files are in `engine/ardiacore/src/ardia/core`, app files in `packages/ar
   `ArdiaStartup.mm`; `ACEngine.mm` → `ardiacore_*.mm`; `helper/page_script.js` → `packages/ardiacore/ios/`;
   `packages/cef/src` → `packages/ardiacore/src`.
 
+## First-party plugins
+
+Ardia's own plugins (the AI plugin, #2463) live in the public repo ardia-browser/plugins, mounted here as a git
+submodule at `plugins/` (each plugin at `plugins/plugins/<name>`). The plugin host stays in this repo; a plugin uses
+only its public contributions (`docs/plugins.md`).
+
+- A plain `git clone` builds and tests the browser without it: nothing in the app's build, tests or CI reads
+  `plugins/`. To work on a plugin, `git submodule update --init plugins` (or clone with `--recurse-submodules`).
+- Change a plugin in the submodule on a branch and open a pull request on ardia-browser/plugins; once it's in, move
+  the pointer here in a pull request (`git submodule update --remote plugins`, then commit `plugins`).
+- Each plugin's README says how it's built and tested (the AI plugin: `plugins/plugins/ai/build.sh`,
+  `node --test plugins/plugins/ai/tests/*.test.mjs`). In-app checks that drive a real Ardia stay here, in
+  `scripts/plugins/` (`ai-m1.mjs`).
+
 ## Rules
 - **Stay inside the files you own** (listed in your task). If you need a change elsewhere,
   make the smallest possible change, or describe it in your report instead. Other agents
