@@ -50,7 +50,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Feature | State | Tracked in |
 | --- | --- | --- |
 | New tab, close, reopen closed tab (Ctrl+Shift+T) | Works | |
-| Ctrl+Z reopens closed tabs | Works once turned on in Keyboard Shortcuts (off by default, as on the Mac) | |
+| Ctrl+Z reopens closed tabs | Works once turned on in Settings › Shortcuts (off by default, as on the Mac) | |
 | New window | Works | |
 | Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again) | #1453 |
 | Close-tabs confirm while other windows load | Works: the confirm (like the prompt and the file pickers) runs on its own thread, so other windows keep loading and taking input while it is open; it stays in front of its own window and comes forward with it (#1688's self-check holds a confirm while a page loads, on CI; not walked here) | #1672, #1688 |
@@ -122,7 +122,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Profiles: create, switcher | Works | |
 | Appearance: light and dark | Works | |
 | Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). A contrast theme switched on or off no longer crashes the app (#1900): the Windows App SDK repainted every window's caption buttons from a thread-pool thread when the colours changed, because the app set `AppWindowTitleBar.PreferredTheme`, and that raced the window's own repaint (`CTitleBar::PaintTitle`, an access violation in `dcomp` on x64, a Control Flow Guard fail-fast on ARM64; the ARM64 runner crashed on every contrast switch, browser window alone included). The app now leaves `PreferredTheme` at `Legacy`, so that handler paints nothing, and sets the caption buttons' colours itself on the UI thread (`WindowManager::ApplyCaptionColors`). Under a contrast theme they keep the app's palette with stronger ink (the resting glyph at full strength, hover and pressed twice as strong), as the sidebar's text does through `highContrastText` and as the Mac's Increase Contrast does: the buttons draw over the app's own chrome, which keeps its palette, so the theme's palette there would put white glyphs on a light sidebar. The launch check switches contrast on and off under the app, slowly and fast, with and without Settings, on x64 and ARM64. The app's own colours (sidebar, toolbar, Settings) don't follow a contrast theme yet | #1831, #1882, #1900 |
-| Keyboard Shortcuts pane | Works, Windows keys | |
+| Shortcuts pane (Keyboard Shortcuts before the Settings redesign) | Works, Windows keys | |
 | "…" menu | Works, except Check for Updates | #1517 |
 | Sync | Works: Turn On Sync at the default folder shows the Recovery Kit, the pane says updated just now, every What Syncs row but Passwords; a Mac and a PC exchanged pinned tabs and bookmarks both ways (#1594) | #1575, #1425 |
 | Calendar | Does nothing; hidden | #1521 |
