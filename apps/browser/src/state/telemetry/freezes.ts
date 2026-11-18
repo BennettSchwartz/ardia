@@ -67,6 +67,8 @@ export function stallFields(thread: "main" | "js", tally: StallTally | null | un
   return fields;
 }
 
+export const freezeEpoch = () => epoch;
+
 const newEpoch = () => 1 + Math.floor(Math.random() * 0x7fff_fffe);
 
 export function setFreezeConsent(sharing: boolean) {

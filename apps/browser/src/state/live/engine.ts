@@ -18,6 +18,7 @@ import { isPlaying, useMedia } from "../media/media";
 import { usePages } from "../tabs/pageState";
 import { liveOf, onLiveChange } from "../tabs/tabLive";
 import type { MediaAccess } from "../../platform/tabs";
+import { during } from "../app/jobActivity";
 
 const INTERVAL_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
 const STALE_ON_FOCUS_MS = 60_000;
@@ -48,7 +49,7 @@ function order(items: LiveItem[]): LiveItem[] {
 export function refreshFolder(folderId: string, interactive = false): Promise<void> {
   const running = inflight.get(folderId);
   if (running) return running;
-  const task = run(folderId, interactive).finally(() => inflight.delete(folderId));
+  const task = during("liveFolders", () => run(folderId, interactive)).finally(() => inflight.delete(folderId));
   inflight.set(folderId, task);
   return task;
 }

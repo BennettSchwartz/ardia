@@ -1,4 +1,5 @@
 #import "ArdiaFreezeWatch.h"
+#import "ArdiaFreezeCapture.h"
 
 #import <React/RCTBridge+Private.h>
 #import <React/RCTBridgeModule.h>
@@ -37,12 +38,13 @@ struct StallTally {
 
 struct LoopWatch {
   int thread = kMain;
-  std::atomic<uint64_t> start{0};
+  ardia_freeze::Stretch stretch;
   uint64_t epochAtStart = 0;
   double inputWaitMs = 0;
   int depth = 0;
   jsi::Runtime *runtime = nullptr;
   double gcAtStartMs = -1;
+  double gcCountAtStart = -1;
   CFRunLoopObserverRef wake = nullptr;
   CFRunLoopObserverRef sleep = nullptr;
   CFRunLoopRef loop = nullptr;
@@ -72,22 +74,32 @@ int BucketOf(double ms) {
   return bucket;
 }
 
-double ReadGcMs(jsi::Runtime *runtime) {
-  if (!runtime) return -1;
+struct GcReading {
+  double ms = -1;
+  double count = -1;
+};
+
+GcReading ReadGc(jsi::Runtime *runtime) {
+  GcReading reading;
+  if (!runtime) return reading;
   try {
     jsi::Runtime &rt = *runtime;
     jsi::Value internal = rt.global().getProperty(rt, "HermesInternal");
-    if (!internal.isObject()) return -1;
+    if (!internal.isObject()) return reading;
     jsi::Object hermes = internal.getObject(rt);
     jsi::Value read = hermes.getProperty(rt, "getInstrumentedStats");
-    if (!read.isObject() || !read.getObject(rt).isFunction(rt)) return -1;
+    if (!read.isObject() || !read.getObject(rt).isFunction(rt)) return reading;
     jsi::Value stats = read.getObject(rt).getFunction(rt).callWithThis(rt, hermes);
-    if (!stats.isObject()) return -1;
-    jsi::Value seconds = stats.getObject(rt).getProperty(rt, "js_gcTime");
-    return seconds.isNumber() && seconds.getNumber() >= 0 ? seconds.getNumber() * 1000 : -1;
+    if (!stats.isObject()) return reading;
+    jsi::Object values = stats.getObject(rt);
+    jsi::Value seconds = values.getProperty(rt, "js_gcTime");
+    jsi::Value count = values.getProperty(rt, "js_numGCs");
+    if (seconds.isNumber() && seconds.getNumber() >= 0) reading.ms = seconds.getNumber() * 1000;
+    if (count.isNumber() && count.getNumber() >= 0) reading.count = count.getNumber();
   } catch (...) {
-    return -1;
+    return GcReading();
   }
+  return reading;
 }
 
 double FirstInputWaitMs(double startMs, double endMs, double earliestMs) {
@@ -134,27 +146,34 @@ void LoopActivity(CFRunLoopObserverRef, CFRunLoopActivity activity, void *info) 
   if (activity == kCFRunLoopAfterWaiting) {
     const uint64_t epoch = gEpoch.load(std::memory_order_relaxed);
     if (js) gJsFirstInputMs.store(-1, std::memory_order_relaxed);
-    if (js) gJsBusySinceMs.store(epoch ? TicksToMs(now) : 0, std::memory_order_relaxed);
-    watch.start.store(epoch ? now : 0, std::memory_order_relaxed);
+    if (js) gJsBusySinceMs.store(TicksToMs(now), std::memory_order_relaxed);
+    watch.stretch.id.fetch_add(1, std::memory_order_release);
+    watch.stretch.start.store(now, std::memory_order_release);
     watch.epochAtStart = epoch;
     watch.inputWaitMs = 0;
-    watch.gcAtStartMs = epoch && js && watch.depth == 1 ? ReadGcMs(watch.runtime) : -1;
+    const GcReading gc = epoch && js && watch.depth == 1 ? ReadGc(watch.runtime) : GcReading();
+    watch.gcAtStartMs = gc.ms;
+    watch.gcCountAtStart = gc.count;
+    ardia_freeze::Arm();
     return;
   }
   if (js) gJsBusySinceMs.store(0, std::memory_order_relaxed);
   const double earliestInputMs = js ? gJsFirstInputMs.exchange(-1, std::memory_order_relaxed) : -1;
-  const uint64_t start = watch.start.exchange(0, std::memory_order_relaxed);
+  const uint64_t start = watch.stretch.start.exchange(0, std::memory_order_acq_rel);
   if (!start) return;
+  ardia_freeze::Idle();
   const double ms = TicksToMs(now - start);
   if (ms < kStallMs) return;
   const double endMs = TicksToMs(now);
   const double inputWaitMs = js ? FirstInputWaitMs(TicksToMs(start), endMs, earliestInputMs) : watch.inputWaitMs;
-  double gcMs = -1;
+  double gcMs = -1, gcCount = -1;
   if (js && watch.depth == 1 && watch.gcAtStartMs >= 0) {
-    const double gcNow = ReadGcMs(watch.runtime);
-    if (gcNow >= 0) gcMs = std::clamp(gcNow - watch.gcAtStartMs, 0.0, ms);
+    const GcReading gc = ReadGc(watch.runtime);
+    if (gc.ms >= 0) gcMs = std::clamp(gc.ms - watch.gcAtStartMs, 0.0, ms);
+    if (gc.count >= 0 && watch.gcCountAtStart >= 0) gcCount = std::max(0.0, gc.count - watch.gcCountAtStart);
   }
   RecordStall(watch.thread, ms, watch.epochAtStart, inputWaitMs, gcMs);
+  ardia_freeze::StretchEnded({watch.thread, &watch.stretch, watch.stretch.id.load(std::memory_order_acquire), ms, inputWaitMs, gcMs, gcCount, watch.epochAtStart});
 }
 
 void Observe(LoopWatch &watch, CFRunLoopRef loop) {
@@ -166,10 +185,12 @@ void Observe(LoopWatch &watch, CFRunLoopRef loop) {
   watch.depth = 1;
   CFRunLoopAddObserver(loop, watch.wake, kCFRunLoopCommonModes);
   CFRunLoopAddObserver(loop, watch.sleep, kCFRunLoopCommonModes);
+  ardia_freeze::Watch(watch.thread, pthread_self(), &watch.stretch);
 }
 
 void StopObserving(LoopWatch &watch) {
   if (!watch.loop) return;
+  ardia_freeze::Unwatch(watch.thread, &watch.stretch);
   CFRunLoopRemoveObserver(watch.loop, watch.wake, kCFRunLoopCommonModes);
   CFRunLoopRemoveObserver(watch.loop, watch.sleep, kCFRunLoopCommonModes);
   CFRunLoopObserverInvalidate(watch.wake);
@@ -180,7 +201,7 @@ void StopObserving(LoopWatch &watch) {
   watch.wake = watch.sleep = nullptr;
   watch.loop = nullptr;
   watch.runtime = nullptr;
-  watch.start = 0;
+  watch.stretch.start = 0;
 }
 
 bool OnJsThread() {
@@ -206,13 +227,12 @@ NSDictionary *Describe(const StallTally &tally) {
 }
 
 void ArdiaFreezeNoteInput(NSTimeInterval eventUptime) {
-  if (!gEpoch.load(std::memory_order_relaxed)) return;
   const double eventMs = eventUptime * 1000;
   const double jsBusySinceMs = gJsBusySinceMs.load(std::memory_order_relaxed);
   double noInputYet = -1;
   if (jsBusySinceMs > 0 && eventMs >= jsBusySinceMs) gJsFirstInputMs.compare_exchange_strong(noInputYet, eventMs, std::memory_order_relaxed);
   gInputs[gInputNext.fetch_add(1, std::memory_order_relaxed) % kInputRing].store(eventMs, std::memory_order_relaxed);
-  if (!pthread_main_np() || !gMain.start.load(std::memory_order_relaxed)) return;
+  if (!pthread_main_np() || !gMain.stretch.start.load(std::memory_order_relaxed)) return;
   gMain.inputWaitMs = std::max(gMain.inputWaitMs, TicksToMs(mach_absolute_time()) - eventMs);
 }
 
@@ -242,6 +262,10 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(start) {
   RCTBridge *bridge = _bridge;
   if ([bridge respondsToSelector:@selector(runtime)]) _js->runtime = (jsi::Runtime *)((RCTCxxBridge *)bridge).runtime;
   Observe(*_js, CFRunLoopGetCurrent());
+  __weak RCTBridge *weakBridge = bridge;
+  ardia_freeze::SetEmitter(^(NSDictionary *record) {
+    [weakBridge enqueueJSCall:@"RCTDeviceEventEmitter" method:@"emit" args:@[ @"ardiaFreeze", record ] completion:NULL];
+  });
   dispatch_async(dispatch_get_main_queue(), ^{
     Observe(gMain, CFRunLoopGetMain());
   });
@@ -266,6 +290,11 @@ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(take : (double)epoch) {
   std::memset(gTally, 0, sizeof gTally);
   os_unfair_lock_unlock(&gTallyLock);
   return @{@"main" : Describe(main), @"js" : Describe(js)};
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(annotate : (double)freezeId activity : (NSString *)activity) {
+  if (freezeId > 0) ardia_freeze::Annotate((uint64_t)freezeId, activity);
+  return @YES;
 }
 
 - (void)invalidate {

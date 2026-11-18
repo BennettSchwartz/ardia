@@ -1,6 +1,7 @@
 import type { Plugin } from "vite";
 import type { Wording } from "./credentialWording";
 import { hasMacModifiers, linuxShortcutText } from "./shortcutText";
+import { PHRASES_ONLY_WITH } from "../browser/src/state/telemetry/platformWording";
 
 export const LINUX_WORDING: readonly Wording[] = [
   {
@@ -47,6 +48,7 @@ export const LINUX_WORDING: readonly Wording[] = [
   {
     file: "state/telemetry/copy.ts",
     replacements: [
+      ...[PHRASES_ONLY_WITH.freezeWatch ?? []].flat().map((phrase): [string, string] => [phrase, ""]),
       ["how many tab changes this Mac sent,", "how many tab changes this computer sent,"],
       ["Sent to ardia.dev with a random ID made on this Mac, and kept", "Sent to ardia.dev with a random ID made on this computer, and kept"],
       [`keptOnThisMac: "Kept on this Mac"`, `keptOnThisMac: "Kept on this computer"`],

@@ -10,6 +10,7 @@ import { isWebPageUrl } from "../../lib/url";
 import { engineProfiles } from "../profiles/engineProfiles";
 import { onProfilesOpened, onProfilesUnloaded, openedEngineProfiles } from "../profiles/profileLoading";
 import { migrateLegacyFile } from "../app/legacyFiles";
+import { during } from "../app/jobActivity";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 
@@ -234,7 +235,9 @@ function applyPending() {
   pending = [];
   const batches = new Map<string, ListChange[]>();
   const show = () => {
-    for (const [engine, batch] of batches) setView(engine, applyHistoryChanges(viewOf(engine), batch, gapNoter(engine)));
+    during("historyApply", () => {
+      for (const [engine, batch] of batches) setView(engine, applyHistoryChanges(viewOf(engine), batch, gapNoter(engine)));
+    });
     batches.clear();
   };
   for (const change of changes) {

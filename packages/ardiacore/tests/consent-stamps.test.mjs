@@ -127,3 +127,11 @@ test("a hover-loss episode carries the consent epoch from when its mouse event a
   assert.match(open, /gEpisode\.stamp = stamp;/);
   assert.doesNotMatch(open, /ArdiaConsentStamp\.begin|\[ArdiaConsentStamp begin\]/);
 });
+
+test("a freeze record is stamped with the epoch when its capture begins, and the record JS reads carries that stamp", () => {
+  const capture = read("../ios/ArdiaFreezeCapture.mm");
+  const begin = capture.slice(capture.indexOf("void Begin("), capture.indexOf("void Clear("));
+  assert.match(begin, /strlcpy\(c\.consent, ArdiaEvents\.consentEpoch\.UTF8String \?: "", sizeof c\.consent\);/);
+  assert.match(capture, /gEmit\(\[\[\[ArdiaConsentStamp alloc\] initWithEpoch:@\(done\.consent\)\] onto:record\]\)/);
+  assert.doesNotMatch(capture, /record\[@"epoch"\]/);
+});

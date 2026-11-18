@@ -46,6 +46,7 @@ import {
 import { importModule } from "./importApi";
 import { listFoundExtensions } from "./listedExtensions";
 import type { ExtensionGroup } from "./extensionListing";
+import { during } from "../app/jobActivity";
 
 export function continueImport() {
   const { source, step, kinds, sourceProfiles } = importNow();
@@ -176,7 +177,9 @@ const nothingRead = (browserId: string, profileId: string, failed: ImportKind[])
   warnings: [],
 });
 
-export async function runImport(wanted: ReadonlySet<ImportKind>, withoutKey = false) {
+export const runImport = (wanted: ReadonlySet<ImportKind>, withoutKey = false) => during("import", () => runImportJob(wanted, withoutKey));
+
+async function runImportJob(wanted: ReadonlySet<ImportKind>, withoutKey: boolean) {
   const { source, sourceProfiles, spaces, target } = importNow();
   if (!source) return;
   const consent = consentToken();

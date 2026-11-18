@@ -79,6 +79,9 @@ type Pending = NewTab | Switch | Navigate | Launch;
 
 const MAX_PENDING = 50;
 let pending: Pending[] = [];
+const JOURNEY_ACTIONS = { j1: "launch", j2: "newTab", j3: "switchTab", j4: "navigate" } as const;
+export const journeyInFlight = (end: number): (typeof JOURNEY_ACTIONS)[Pending["journey"]] | "none" =>
+  JOURNEY_ACTIONS[pending.filter((p) => p.t0 <= end).at(-1)?.journey as Pending["journey"]] ?? "none";
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function begin(p: Pending) {

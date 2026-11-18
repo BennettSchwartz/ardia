@@ -205,8 +205,8 @@ export function startDevHarness() {
       }, 0);
       return ms;
     },
-    get freezes(): typeof import("../../state/telemetry/freezes") {
-      return require("../../state/telemetry/freezes");
+    get freezes(): typeof import("../../state/telemetry/freezes") & typeof import("../../state/telemetry/freezeRecords") {
+      return { ...require("../../state/telemetry/freezes"), ...require("../../state/telemetry/freezeRecords") };
     },
   };
   (globalThis as { ac?: typeof ac }).ac = ac;
