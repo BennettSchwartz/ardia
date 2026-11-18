@@ -21,13 +21,51 @@ const SHEET_TOP_GAP = materialSize.topAppBar;
 
 type MaterialBackHandlers = { onProgress?: (progress: number) => void; onCancel?: () => void; onCommit: () => void };
 
+let materialBackSwiped = () => undefined as void;
+
+export const onMaterialBackSwiped = (count: () => void) => {
+  materialBackSwiped = count;
+};
+
+export const countMaterialBackSwipe = () => materialBackSwiped();
+
+export function backSwipe(count: () => void) {
+  let moved = false;
+  return {
+    progress: (progress: number) => {
+      if (progress > 0) moved = true;
+    },
+    cancel: () => {
+      moved = false;
+    },
+    commit: () => {
+      if (moved) count();
+      moved = false;
+    },
+  };
+}
+
 export function useMaterialBack(active: boolean, handlers: MaterialBackHandlers, fallback = true) {
   const latest = useRef(handlers);
   latest.current = handlers;
   useEffect(() => {
     if (!active) return;
     if (predictiveBack.isNative()) {
-      const claim = predictiveBack.claim({ onProgress: (progress) => latest.current.onProgress?.(progress), onCancel: () => latest.current.onCancel?.(), onCommit: () => latest.current.onCommit() });
+      const swipe = backSwipe(countMaterialBackSwipe);
+      const claim = predictiveBack.claim({
+        onProgress: (progress) => {
+          swipe.progress(progress);
+          latest.current.onProgress?.(progress);
+        },
+        onCancel: () => {
+          swipe.cancel();
+          latest.current.onCancel?.();
+        },
+        onCommit: () => {
+          swipe.commit();
+          latest.current.onCommit();
+        },
+      });
       return () => claim.remove();
     }
     if (!fallback) return;

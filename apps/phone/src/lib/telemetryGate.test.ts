@@ -75,7 +75,7 @@ test("the import from the old app cannot switch sharing on", () => {
 test("with sharing off nothing is captured, counted, written or sent", async () => {
   const { gate, posts, writes, timers, runTimers } = harness();
   writes.length = 0;
-  gate.capture("app_launched", { legacy_import: "none", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac" });
+  gate.capture("app_launched", { legacy_import: "none", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac", material_colors: "wallpaper" });
   gate.count("tabs_opened");
   gate.count("searches");
   gate.rollDaily();
@@ -96,7 +96,7 @@ test("turning sharing off drops what is waiting, the day's counts and anything i
   const { gate, stored, posts, runTimers } = harness();
   gate.setSharing(true, "settings");
   gate.count("tabs_opened");
-  gate.capture("app_launched", { legacy_import: "none", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac" });
+  gate.capture("app_launched", { legacy_import: "none", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac", material_colors: "wallpaper" });
   assert.equal(gate.pending(), 2);
   assert.ok(stored.get(DAILY_KEY));
   gate.setSharing(false, "settings");
@@ -124,7 +124,7 @@ test("an answer that arrives after sharing was turned off is ignored, and nothin
     clearTimer: () => {},
   });
   gate.load();
-  gate.capture("app_launched", { legacy_import: "imported", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac" });
+  gate.capture("app_launched", { legacy_import: "imported", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac", material_colors: "wallpaper" });
   gate.flushNow();
   gate.setSharing(false, "settings");
   release(500);
@@ -137,9 +137,9 @@ test("an answer that arrives after sharing was turned off is ignored, and nothin
 test("every payload the phone can send validates against the schema, with no free text", async () => {
   const { gate, runTimers, sent } = harness();
   gate.setSharing(true, "settings");
-  gate.capture("app_launched", { legacy_import: "started_fresh", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac" });
+  gate.capture("app_launched", { legacy_import: "started_fresh", legacy_import_failures: 0, look_mode: "full", interface_style: "match_mac", color_scheme: "match_mac", material_colors: "wallpaper" });
   gate.capture("perf_launch", { launch_ms: 812, js_ms: 240 });
-  for (const field of ["tabs_opened", "searches", "pins_to_mac", "tabs_sent", "page_processes_gone", "links_given_up", "pages_reloaded_online", "find_opened_system", "find_opened_bar", "spaces_swiped", "tray_hidden_rows_opened", "deck_pictures_late", "tray_back_swiped", "search_tabs_opened", "spaces_picked", "tabs_moved_to_space", "pages_printed", "pages_translated", "pinned_tabs_refound", "site_permissions_revoked", "card_opens_waited", "native_menus_opened", "library_opened", "deck_grid_shown", "landscape_shown", "duo_layout_shown", "list_sheets_late", "list_pages_added", "search_reveals_late", "address_field_scrolled", "card_close_tapped"] as const) gate.count(field);
+  for (const field of ["tabs_opened", "searches", "pins_to_mac", "tabs_sent", "page_processes_gone", "links_given_up", "pages_reloaded_online", "find_opened_system", "find_opened_bar", "spaces_swiped", "tray_hidden_rows_opened", "deck_pictures_late", "tray_back_swiped", "search_tabs_opened", "spaces_picked", "tabs_moved_to_space", "pages_printed", "pages_translated", "pinned_tabs_refound", "site_permissions_revoked", "card_opens_waited", "native_menus_opened", "library_opened", "deck_grid_shown", "landscape_shown", "duo_layout_shown", "list_sheets_late", "list_pages_added", "search_reveals_late", "address_field_scrolled", "card_close_tapped", "material_back_swiped"] as const) gate.count(field);
   await runTimers();
   const records = sent();
   assert.deepEqual(records.map((record) => record.event).sort(), ["app_launched", "perf_launch", "sharing_turned_on"]);
@@ -170,6 +170,7 @@ test("the schema refuses free text, unknown fields and identifiers it doesn't kn
       look_mode: "no_motion",
       interface_style: "classic",
       color_scheme: "dark",
+      material_colors: "fallback",
     },
   };
   assert.deepEqual(recordProblems(base), []);
@@ -177,6 +178,7 @@ test("the schema refuses free text, unknown fields and identifiers it doesn't kn
   assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, look_mode: "half" } }), []);
   assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, interface_style: "frosted" } }), []);
   assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, color_scheme: "sepia" } }), []);
+  assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, material_colors: "#3EB489" } }), []);
   assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, url: "https://example.com/" } }), []);
   assert.notDeepEqual(recordProblems({ ...base, properties: { ...base.properties, $os_version: "Pixel of Ada" } }), []);
   assert.notDeepEqual(recordProblems({ ...base, distinct_id: "ada@example.com" }), []);

@@ -2,7 +2,7 @@ import { predictiveBack, type PredictiveBackHandlers } from "@ardia/phone-native
 import { Platform, Text } from "react-native";
 import { act } from "react-test-renderer";
 import { Dialog, DesignProvider, Menu, Sheet } from "../components/ui";
-import { materialSheetBackOffset } from "../components/ui/MaterialSurfaces";
+import { backSwipe, materialSheetBackOffset, onMaterialBackSwiped } from "../components/ui/MaterialSurfaces";
 import { renderSurface, unmount } from "../../test/render/harness";
 
 const onAndroid = Platform.OS === "android" ? test : test.skip;
@@ -76,4 +76,29 @@ onAndroid("a closed sheet holds no claim", () => {
   );
   expect(claims).toHaveLength(0);
   unmount(root);
+});
+
+onAndroid("a committed back swipe that moved counts once; a 3-button Back, which never moves, and a cancelled swipe count nothing", () => {
+  const counted = jest.fn();
+  onMaterialBackSwiped(counted);
+  const root = material(
+    <Sheet open onDismiss={() => undefined} onHidden={() => undefined}>
+      <Text>Rows</Text>
+    </Sheet>,
+  );
+  act(() => top().onCommit?.());
+  expect(counted).not.toHaveBeenCalled();
+  act(() => top().onProgress?.(0.4, "left"));
+  act(() => top().onCancel?.());
+  act(() => top().onCommit?.());
+  expect(counted).not.toHaveBeenCalled();
+  act(() => top().onProgress?.(0.6, "right"));
+  act(() => top().onCommit?.());
+  expect(counted).toHaveBeenCalledTimes(1);
+  unmount(root);
+  onMaterialBackSwiped(() => undefined);
+  const swipe = backSwipe(counted);
+  swipe.progress(0);
+  swipe.commit();
+  expect(counted).toHaveBeenCalledTimes(1);
 });

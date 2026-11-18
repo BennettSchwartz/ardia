@@ -34,7 +34,7 @@ import { useSelectedProfile, useSyncEnabled } from "../../state/sync/hooks";
 import { useTabs } from "../../state/tabs/store";
 import { ConfirmDialog, Favicon, FloatingMenu, Symbol, type Confirmation, type MenuItem, type SymbolName } from "../ui";
 import { useReduceMotion } from "../ui/contrast";
-import { useMaterialRipple } from "../ui/MaterialSurfaces";
+import { backSwipe, countMaterialBackSwipe, useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
 import { materialDuration, materialMotion, materialMove, materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { reducedMotionMs } from "../ui/motion";
@@ -117,14 +117,18 @@ function MaterialLibraryView({ open, onGone }: { open: boolean; onGone: () => vo
   const claimsBack = open && menu === null && confirmation === null;
   useEffect(() => {
     if (!claimsBack) return;
+    const swipe = backSwipe(countMaterialBackSwipe);
     const claim = predictiveBack.claim({
       onProgress: (progress) => {
+        swipe.progress(progress);
         back.value = progress;
       },
       onCancel: () => {
+        swipe.cancel();
         back.value = materialMove(0, "standard", materialDuration.short4);
       },
       onCommit: () => {
+        swipe.commit();
         back.value = materialMove(0, "standard", materialDuration.short4);
         step.current();
       },

@@ -9,5 +9,13 @@ export function schemePairFor(choice: string | null, dynamic: MaterialSchemePair
   return dynamic ?? SEEDED_SCHEMES[MATERIAL_FALLBACK_SEED];
 }
 
+export type MaterialColorSource = "wallpaper" | "profile" | "fallback" | "not_material";
+
+export function materialColorSource(material: boolean, choice: string | null, dynamic: MaterialSchemePair | null): MaterialColorSource {
+  if (!material) return "not_material";
+  if (choice && choice in SEEDED_SCHEMES && choice !== MATERIAL_FALLBACK_SEED) return "profile";
+  return dynamic ? "wallpaper" : "fallback";
+}
+
 export const schemeFor = (pair: MaterialSchemePair, dark: boolean): MaterialScheme => (dark ? pair.dark : pair.light);
 

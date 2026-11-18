@@ -10,7 +10,8 @@ import { tabsMotion } from "./motion";
 import { Portal } from "./Overlay";
 import { useTheme } from "./theme";
 import { useDesign } from "./design";
-import { currentMaterialTheme, materialDesignApplied, useMaterialTheme } from "./materialTheme";
+import { schemeFor } from "../../lib/material/schemePick";
+import { currentMaterialTheme, materialDesignApplied, useMaterialSchemePair } from "./materialTheme";
 
 export type MenuHandlers = { onPress?: () => void; onLongPress?: () => void };
 
@@ -81,7 +82,7 @@ export function MenuTrigger(props: Props) {
 function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClose, disabled, dark, style, testID, children }: Props) {
   const theme = useTheme();
   const material = useDesign() === "material";
-  const { scheme } = useMaterialTheme();
+  const pair = useMaterialSchemePair();
   const menu = nativeMenu(items);
   const actions = useRef(menu.actions);
   actions.current = menu.actions;
@@ -108,7 +109,7 @@ function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClo
   );
   const content = children(handlers);
   return (
-    <ContextMenuView ref={native} testID={testID} style={style} collapsable={false} items={disabled ? [] : menu.items} trigger={trigger} fixedOrder={fixedOrder} onSelect={select} onOpen={opened} onClose={onClose} appearance={material ? { dark: dark ?? theme.dark, scheme } : { dark: dark ?? theme.dark }}>
+    <ContextMenuView ref={native} testID={testID} style={style} collapsable={false} items={disabled ? [] : menu.items} trigger={trigger} fixedOrder={fixedOrder} onSelect={select} onOpen={opened} onClose={onClose} appearance={material ? { dark: dark ?? theme.dark, scheme: schemeFor(pair, dark ?? theme.dark) } : { dark: dark ?? theme.dark }}>
       {android && trigger === "longPress" ? (
         <GestureDetector gesture={press}>
           <View style={styles.pressArea} collapsable={false}>

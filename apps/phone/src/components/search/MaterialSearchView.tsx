@@ -15,7 +15,7 @@ import { useTabs } from "../../state/tabs/store";
 import { useTrayCovers } from "../../state/search/trayBack";
 import { FloatingMenu, Symbol, useTheme } from "../ui";
 import { useReduceMotion } from "../ui/contrast";
-import { useMaterialRipple } from "../ui/MaterialSurfaces";
+import { backSwipe, useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
 import { materialDuration, materialMotion, materialMove, materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { reducedMotionMs } from "../ui/motion";
@@ -53,15 +53,20 @@ function MaterialSearchView({ open, onGone }: { open: boolean; onGone: () => voi
   const claimsBack = open && !voice && !covered;
   useEffect(() => {
     if (!claimsBack) return;
+    const swipe = backSwipe(() => {
+      if (!useTabs.getState().incognito) countUsage("tray_back_swiped");
+    });
     const claim = predictiveBack.claim({
       onProgress: (progress) => {
+        swipe.progress(progress);
         back.value = progress;
       },
       onCancel: () => {
+        swipe.cancel();
         back.value = materialMove(0, "standard", materialDuration.short4);
       },
       onCommit: () => {
-        if (!useTabs.getState().incognito) countUsage("tray_back_swiped");
+        swipe.commit();
         cancelSearch();
       },
     });

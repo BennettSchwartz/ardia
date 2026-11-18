@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MATERIAL_FALLBACK_SEED, schemeFor, schemePairFor } from "./schemePick.ts";
+import { materialColorSource, MATERIAL_FALLBACK_SEED, schemeFor, schemePairFor } from "./schemePick.ts";
 import { MATERIAL_SCHEME_KEYS, SEEDED_SCHEMES, type MaterialSchemePair } from "./schemes.ts";
 
 const wallpaper: MaterialSchemePair = { light: { ...SEEDED_SCHEMES.purple.light, primary: "#123456" }, dark: { ...SEEDED_SCHEMES.purple.dark, primary: "#654321" } };
@@ -35,4 +35,12 @@ test("a profile colour the user picked seeds the scheme over the wallpaper", () 
 test("the dark setting picks the dark half", () => {
   assert.equal(schemeFor(wallpaper, true).primary, "#654321");
   assert.equal(schemeFor(wallpaper, false).primary, "#123456");
+});
+
+test("the launch event's colour source says wallpaper, a picked profile colour, the fallback palette, or not the material design", () => {
+  assert.equal(materialColorSource(true, null, wallpaper), "wallpaper");
+  assert.equal(materialColorSource(true, "pink", wallpaper), "profile");
+  assert.equal(materialColorSource(true, null, null), "fallback");
+  assert.equal(materialColorSource(true, MATERIAL_FALLBACK_SEED, null), "fallback");
+  assert.equal(materialColorSource(false, "pink", wallpaper), "not_material");
 });

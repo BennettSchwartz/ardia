@@ -53,6 +53,8 @@ import { useIncognito, useSelectedTab } from "./state/tabs/hooks";
 import { setRootSize } from "./state/app/rootSize";
 import { syncOffered } from "./state/sync/offer";
 import { followDynamicScheme } from "./state/app/dynamicScheme";
+import { onMaterialBackSwiped } from "./components/ui/MaterialSurfaces";
+import { useTabs } from "./state/tabs/store";
 
 export default function App() {
   useState(() =>
@@ -108,6 +110,10 @@ export default function App() {
 const SYSTEM_SHEETS = Platform.OS === "ios";
 
 onNativeMenuOpened(() => countUsage("native_menus_opened"));
+
+onMaterialBackSwiped(() => {
+  if (!useTabs.getState().incognito) countUsage("material_back_swiped");
+});
 
 export function Surfaces() {
   const surface = useSurface();
