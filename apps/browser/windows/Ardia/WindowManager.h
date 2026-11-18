@@ -413,6 +413,12 @@ struct WindowManager {
     }
   }
 
+  void RefreshCaptionColors() noexcept {
+    bool contrast = HighContrastOn();
+    for (auto &[id, entry] : m_windows) ApplyTheme(entry, m_dark);
+    LaunchLog::Write(L"window", contrast ? L"caption buttons take the app's stronger contrast colours" : L"caption buttons take the app's usual colours again");
+  }
+
   void SetDark(bool dark) noexcept {
     m_dark = dark;
     for (auto &[id, entry] : m_windows) ApplyTheme(entry, dark);
@@ -633,8 +639,6 @@ struct WindowManager {
       auto titleBar = entry.appWindow.TitleBar();
       titleBar.ExtendsContentIntoTitleBar(true);
       titleBar.PreferredHeightOption(winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Standard);
-      titleBar.ButtonBackgroundColor(winrt::Windows::UI::Color{0, 0, 0, 0});
-      titleBar.ButtonInactiveBackgroundColor(winrt::Windows::UI::Color{0, 0, 0, 0});
       if (presenter) presenter.SetBorderAndTitleBar(true, false);
       if (entry.IsBrowser()) {
         if (presenter) {
@@ -843,15 +847,40 @@ struct WindowManager {
     WindowPlacement::Save(*m_lastPlacement);
   }
 
+  static bool HighContrastOn() noexcept {
+    HIGHCONTRASTW contrast{};
+    contrast.cbSize = sizeof(contrast);
+    return SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+  }
+
+  static void ApplyCaptionColors(winrt::Microsoft::UI::Windowing::AppWindowTitleBar const &titleBar, bool dark, bool contrast) {
+    using winrt::Windows::UI::Color;
+    Color clear{0, 0, 0, 0};
+    Color glyph = dark ? Color{255, 255, 255, 255} : Color{255, 27, 27, 27};
+    Color resting = contrast ? glyph : dark ? Color{255, 128, 128, 128} : Color{255, 138, 138, 138};
+    uint8_t hoverAlpha = contrast ? 46 : 23;
+    uint8_t pressedAlpha = contrast ? 92 : 46;
+    Color hover = dark ? Color{hoverAlpha, 255, 255, 255} : Color{hoverAlpha, 0, 0, 0};
+    Color pressed = dark ? Color{pressedAlpha, 255, 255, 255} : Color{pressedAlpha, 0, 0, 0};
+    titleBar.ButtonBackgroundColor(clear);
+    titleBar.ButtonInactiveBackgroundColor(clear);
+    titleBar.ButtonForegroundColor(glyph);
+    titleBar.ButtonInactiveForegroundColor(resting);
+    titleBar.ButtonHoverBackgroundColor(hover);
+    titleBar.ButtonHoverForegroundColor(glyph);
+    titleBar.ButtonPressedBackgroundColor(pressed);
+    titleBar.ButtonPressedForegroundColor(glyph);
+  }
+
   static void ApplyTheme(ManagedWindow &entry, bool dark) noexcept {
     static constexpr DWORD kUseImmersiveDarkMode = 20;
     BOOL useDark = dark ? TRUE : FALSE;
     DwmSetWindowAttribute(entry.hwnd, kUseImmersiveDarkMode, &useDark, sizeof(useDark));
     ThemedErase::Apply(entry.hwnd, dark);
     try {
-      entry.appWindow.TitleBar().PreferredTheme(
-          dark ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark : winrt::Microsoft::UI::Windowing::TitleBarTheme::Light);
+      ApplyCaptionColors(entry.appWindow.TitleBar(), dark, HighContrastOn());
     } catch (...) {
+      LaunchLog::Write(L"warning", L"caption button colours could not be set");
     }
   }
 

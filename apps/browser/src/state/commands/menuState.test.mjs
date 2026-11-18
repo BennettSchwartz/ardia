@@ -193,3 +193,12 @@ test("the shown Peek's page rebuilds the menu like a shown tab; a Peek hidden be
   assert.equal(menuChanges(() => S().updateTab(shownPeek, { muted: true })), true, "Mute Tab becomes Unmute Tab");
   assert.equal(menuChanges(() => S().updateTab(hiddenPeek, { muted: true })), false);
 });
+
+test("the menu state tells the shell whether links from other apps open in Little Ardia", () => {
+  S().hydrate({});
+  S().createWindow({ url: "https://a.example/" });
+  S().updateSettings({ openLinksInLittleArdia: true });
+  assert.equal(menuState(S()).linksOpenInLittleArdia, true);
+  S().updateSettings({ openLinksInLittleArdia: false });
+  assert.equal(menuState(S()).linksOpenInLittleArdia, false);
+});

@@ -1626,7 +1626,17 @@ public static class ArdiaFirstFrames {
     public int R, G, B;
     public int Width, Height;
     public byte[] Pixels;
+    public byte[] Grid;
     public string Kind = "";
+  }
+
+  public static double Share(byte[] grid, byte[] reference, int tolerance) {
+    if (grid == null || reference == null || grid.Length != reference.Length || grid.Length == 0) return 0;
+    int same = 0, points = grid.Length / 3;
+    for (int at = 0; at < grid.Length; at += 3) {
+      if (Math.Abs(grid[at] - reference[at]) <= tolerance && Math.Abs(grid[at + 1] - reference[at + 1]) <= tolerance && Math.Abs(grid[at + 2] - reference[at + 2]) <= tolerance) same++;
+    }
+    return same / (double)points;
   }
 
   public class Launch {
@@ -1710,6 +1720,7 @@ public static class ArdiaFirstFrames {
     frame.Alpha = Math.Max(frame.Alpha, AlphaOf(window));
     if (pixels == null) { frame.Kind = KindOf(frame, 1); return frame; }
     int same = 0, compared = 0;
+    byte[] grid = new byte[40 * 24 * 3];
     frame.Width = width;
     frame.Height = height;
     int white = 0, count = 0;
@@ -1720,6 +1731,9 @@ public static class ArdiaFirstFrames {
         int x = (int)((column + 0.5) * width / 40), y = (int)((row + 0.5) * height / 24);
         int at = (y * width + x) * 4;
         int b = pixels[at], g = pixels[at + 1], r = pixels[at + 2];
+        grid[count * 3] = (byte)r;
+        grid[count * 3 + 1] = (byte)g;
+        grid[count * 3 + 2] = (byte)b;
         count++;
         if (r >= 240 && g >= 240 && b >= 240) white++;
         minR = Math.Min(minR, r); minG = Math.Min(minG, g); minB = Math.Min(minB, b);
@@ -1736,6 +1750,7 @@ public static class ArdiaFirstFrames {
     frame.White = white / (double)count;
     frame.Uniform = maxR - minR <= 16 && maxG - minG <= 16 && maxB - minB <= 16;
     frame.R = (int)(sumR / count); frame.G = (int)(sumG / count); frame.B = (int)(sumB / count);
+    frame.Grid = grid;
     if (keep) frame.Pixels = pixels;
     frame.Kind = KindOf(frame, compared > 0 ? same / (double)compared : 1);
     return frame;
@@ -1878,6 +1893,21 @@ public static class ArdiaFirstFramesFront {
       }
       Write-Host "First frames ($Label) sequence: $($sequence -join '; ')"
       $problems = @()
+      $tone = if ($Dark) { "dark" } else { "light" }
+      $firstUi = @($frames | Where-Object { $_.Kind -eq "content" -and $_.Grid } | Select-Object -First 1)
+      if ($Onboarded -and $firstUi.Count) { $script:BrowserGrids[$tone] = $firstUi[0].Grid }
+      if (-not $Onboarded) {
+        $reference = $script:BrowserGrids[$tone]
+        if (-not $reference) { $problems += "first frames ($Label): no settled browser frame from the second launch in $tone to compare the first launch with" }
+        else {
+          $browser = @()
+          for ($i = [Math]::Max(0, $shownIndex); $i -lt $frames.Count; $i++) {
+            if ($frames[$i].Kind -in @("plain", "content") -and [ArdiaFirstFrames]::Share($frames[$i].Grid, $reference, 6) -ge 0.9) { $browser += $frames[$i] }
+          }
+          Write-Host "First frames ($Label): $($browser.Count) captures show the browser instead of the intro$(if ($browser.Count) { ", from $($browser[0].Ms) to $($browser[-1].Ms) ms" })."
+          if ($browser.Count) { $problems += "first frames ($Label): the browser showed instead of the intro in $($browser.Count) captures, from $($browser[0].Ms) to $($browser[-1].Ms) ms" }
+        }
+      }
       $leaks = @($frames | Where-Object { $_.Kind -eq "leak" })
       if ($leaks.Count) { $problems += "first frames ($Label): something showed in $($leaks.Count) captures while the window was still transparent, from $($leaks[0].Ms) ms" }
       if ($contentIndex -lt 0) { $problems += "first frames ($Label): the window never showed its UI in 9 s" }
@@ -1902,10 +1932,11 @@ public static class ArdiaFirstFramesFront {
   $themesKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
   $savedTheme = (Get-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue).AppsUseLightTheme
   try {
-    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
-    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
+    $script:BrowserGrids = @{}
     Measure-FirstFrames "second-launch-light" -Onboarded -Dark $false -Click | ForEach-Object { $failures += $_ }
     Measure-FirstFrames "second-launch-dark" -Onboarded -Dark $true -Click | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-light" -Dark $false | ForEach-Object { $failures += $_ }
+    Measure-FirstFrames "first-launch-dark" -Dark $true | ForEach-Object { $failures += $_ }
   } finally {
     if ($null -ne $savedTheme) { Set-ItemProperty -Path $themesKey -Name AppsUseLightTheme -Value $savedTheme -Type DWord }
     else { Remove-ItemProperty -Path $themesKey -Name AppsUseLightTheme -ErrorAction SilentlyContinue }
@@ -1943,6 +1974,189 @@ if ($Part -ne "gate" -and $httpPagesUp -and (Test-Path -LiteralPath (Join-Path (
     elseif ([int]$mediaDone.Matches[0].Groups[1].Value -eq 0) { $failures += "the media self-check ran no checks" }
     if (Select-String -Path $mediaLog -Pattern "^(js-error|fatal|error) " -Quiet) { $failures += "the media self-check log has errors" }
   } else { $failures += "the media self-check wrote no log" }
+}
+
+if ($Part -ne "gate" -and $withEngineForEdge -and $httpPagesUp) {
+  if (-not ([System.Management.Automation.PSTypeName]"ArdiaContrast").Type) {
+    Add-Type @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class ArdiaContrast {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct HighContrast { public uint Size; public uint Flags; public IntPtr Scheme; }
+  public delegate bool EnumProc(IntPtr window, IntPtr data);
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)] static extern bool SystemParametersInfo(uint action, uint size, ref HighContrast value, uint flags);
+  [DllImport("user32.dll")] public static extern uint GetSysColor(int index);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int size);
+
+  public static bool IsOn() {
+    HighContrast value = new HighContrast();
+    value.Size = (uint)Marshal.SizeOf(typeof(HighContrast));
+    return SystemParametersInfo(0x0042, value.Size, ref value, 0) && (value.Flags & 1) != 0;
+  }
+
+  public static string Set(bool on, string scheme) {
+    HighContrast value = new HighContrast();
+    value.Size = (uint)Marshal.SizeOf(typeof(HighContrast));
+    SystemParametersInfo(0x0042, value.Size, ref value, 0);
+    IntPtr name = on && !string.IsNullOrEmpty(scheme) ? Marshal.StringToHGlobalUni(scheme) : IntPtr.Zero;
+    try {
+      value.Flags = on ? (value.Flags | 1u) : (value.Flags & ~1u);
+      if (name != IntPtr.Zero) value.Scheme = name;
+      bool done = SystemParametersInfo(0x0043, value.Size, ref value, 0x03);
+      return done ? "set" : "refused, error " + Marshal.GetLastWin32Error();
+    } finally {
+      if (name != IntPtr.Zero) Marshal.FreeHGlobal(name);
+    }
+  }
+
+  public static int CountWindows(int process) {
+    int count = 0;
+    EnumWindows((window, data) => {
+      uint owner;
+      GetWindowThreadProcessId(window, out owner);
+      if (owner != (uint)process || !IsWindowVisible(window)) return true;
+      StringBuilder name = new StringBuilder(64);
+      GetClassName(window, name, 64);
+      if (name.ToString() == "Microsoft.UI.Windowing.Window") count++;
+      return true;
+    }, IntPtr.Zero);
+    return count;
+  }
+}
+"@
+  }
+
+  function Get-SystemColours {
+    $window = [ArdiaContrast]::GetSysColor(5)
+    $text = [ArdiaContrast]::GetSysColor(8)
+    return "window #{0:X6}, text #{1:X6}" -f $window, $text
+  }
+
+  function Set-Contrast([bool]$On) {
+    $answer = [ArdiaContrast]::Set($On, "High Contrast Black")
+    return "contrast $(if ($On) { 'on' } else { 'off' }) $answer (now $([ArdiaContrast]::IsOn()), $(Get-SystemColours))"
+  }
+
+  function Get-AppErrors([datetime]$Since) {
+    try {
+      return @(Get-WinEvent -FilterHashtable @{ LogName = "Application"; ProviderName = "Application Error"; StartTime = $Since } -ErrorAction Stop | Where-Object { $_.Message -match "Ardia" } | ForEach-Object { ($_.Message -replace "\s+", " ").Substring(0, [Math]::Min(500, ($_.Message -replace "\s+", " ").Length)) })
+    } catch {
+      return @()
+    }
+  }
+
+  function Save-ContrastShot([string]$Path) {
+    try {
+      Save-Screenshot $Path
+    } catch {
+    }
+  }
+
+  function Invoke-ContrastScenario([string]$Name, [switch]$Settings, [switch]$Dark, [int]$Pairs, [int]$PauseMs) {
+    $log = Join-Path $Out "contrast-$Name.log"
+    $launchActions = if ($Settings) { ',"launchActions":["openSettings"]' } else { "" }
+    $appearance = if ($Dark) { ',"appearance":"dark"' } else { "" }
+    Set-Content -Path (Join-Path $contrastData "config.json") -Value ('{"settings":{"openLinksInLittleArdia":false' + $launchActions + $appearance + '}}') -Encoding utf8NoBOM
+    $env:ARDIA_DATA_DIR = $contrastData
+    $env:ARDIA_CONFIG_DIR = $contrastData
+    $since = Get-Date
+    $app = Start-Process -FilePath $App -ArgumentList "--log-file=`"$log`"", "http://127.0.0.1:$httpPagesPort/a" -PassThru
+    $env:ARDIA_CONFIG_DIR = ""
+    $notes = @()
+    $problems = @()
+    try {
+      Start-Sleep -Seconds 12
+      $app.Refresh()
+      if ($app.HasExited) { return @("contrast ($Name): the app exited before the switch (exit code $($app.ExitCode))") }
+      if ($Settings) {
+        $open = [ArdiaContrast]::CountWindows($app.Id)
+        $notes += "windows open with the openSettings launch action: $open"
+        if ($open -lt 2) { $problems += "contrast ($Name): Settings did not open from the launch action" }
+      }
+      Save-ContrastShot (Join-Path $Out "contrast-$Name-0-before.png")
+      for ($pair = 1; $pair -le $Pairs; $pair++) {
+        $notes += Set-Contrast $true
+        Start-Sleep -Milliseconds $PauseMs
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-on.png") }
+        if ($app.HasExited) { $notes += "the app exited after contrast went on in pair $pair"; break }
+        $notes += Set-Contrast $false
+        Start-Sleep -Milliseconds $PauseMs
+        if ($pair -eq 1 -or $pair -eq $Pairs) { Save-ContrastShot (Join-Path $Out "contrast-$Name-$pair-off.png") }
+        if ($app.HasExited) { $notes += "the app exited after contrast went off in pair $pair"; break }
+      }
+      Start-Sleep -Seconds 3
+      $app.Refresh()
+      if ($app.HasExited) {
+        $problems += "contrast ($Name): the app exited during the contrast switches (exit code 0x$('{0:X8}' -f $app.ExitCode))"
+      } else {
+        $notes += "the app is still up with $([ArdiaContrast]::CountWindows($app.Id)) windows"
+      }
+    } finally {
+      if ([ArdiaContrast]::IsOn()) { $notes += "cleanup: " + (Set-Contrast $false) }
+      if (-not $app.HasExited) {
+        Stop-Process -Id $app.Id -Force
+        $app.WaitForExit(10000) | Out-Null
+      }
+    }
+    foreach ($note in $notes) { Write-Host "Contrast ($Name): $note" }
+    if (Test-Path $log) { Select-String -Path $log -Pattern "^(fatal|error) |highContrast|appearance" | Select-Object -First 60 | ForEach-Object { Write-Host "Contrast ($Name) log: $($_.Line)" } }
+    $errors = Get-AppErrors $since
+    foreach ($e in $errors) { Write-Host "Contrast ($Name) Application Error: $e" }
+    if ($errors.Count) { $problems += "contrast ($Name): Windows logged $($errors.Count) Application Error events for Ardia" }
+    return $problems
+  }
+
+  $contrastData = New-DataDirectory "contrast-data"
+  Set-Content -Path (Join-Path $contrastData "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
+  Set-Content -Path (Join-Path $contrastData "automation-approvals.json") -Value '{"approved":{"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06":{"key":"launchAction:0bf81ac9164ae0b44bd89f5cbc792c06","kind":"launchAction","name":"launchActions: openSettings","summary":"Runs openSettings each time Ardia starts","at":1700000000000}},"dismissed":[],"version":1}' -Encoding utf8NoBOM
+  $dumps = Join-Path $Out "contrast-dumps"
+  New-Item -ItemType Directory -Force -Path $dumps | Out-Null
+  $dumpKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
+  $dumpsOn = $false
+  try {
+    New-Item -Path $dumpKey -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpFolder -PropertyType ExpandString -Value $dumps -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpType -PropertyType DWord -Value 2 -Force -ErrorAction Stop | Out-Null
+    New-ItemProperty -Path $dumpKey -Name DumpCount -PropertyType DWord -Value 10 -Force -ErrorAction Stop | Out-Null
+    $dumpsOn = $true
+  } catch {
+    Write-Host "Contrast: full crash dumps could not be turned on: $($_.Exception.Message)"
+  }
+  Write-Host "Contrast: on $env:PROCESSOR_ARCHITECTURE $((Get-CimInstance Win32_OperatingSystem).Caption) build $([Environment]::OSVersion.Version.Build); before the checks, $(Get-SystemColours), contrast on: $([ArdiaContrast]::IsOn()); full dumps on: $dumpsOn."
+  $contrastProblems = @()
+  try {
+    $contrastProblems += @(Invoke-ContrastScenario "browser" -Pairs 2 -PauseMs 4000)
+    $contrastProblems += @(Invoke-ContrastScenario "settings" -Settings -Pairs 2 -PauseMs 4000)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-fast" -Settings -Pairs 5 -PauseMs 300)
+    $contrastProblems += @(Invoke-ContrastScenario "browser-fast" -Pairs 5 -PauseMs 300)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-many" -Settings -Pairs 15 -PauseMs 200)
+    $contrastProblems += @(Invoke-ContrastScenario "settings-dark" -Settings -Dark -Pairs 2 -PauseMs 4000)
+  } finally {
+    if ([ArdiaContrast]::IsOn()) { Write-Host "Contrast: final cleanup, $(Set-Contrast $false)" }
+    if ($dumpsOn) { Remove-Item -Path $dumpKey -Force -ErrorAction SilentlyContinue }
+  }
+  $found = @(Get-ChildItem -LiteralPath $dumps -Filter "*.dmp" -ErrorAction SilentlyContinue)
+  Write-Host "Contrast: $($found.Count) crash dumps written."
+  if ($found.Count) {
+    $machine = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+    $debugger = @("${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\$machine\cdb.exe", "$env:ProgramFiles\Windows Kits\10\Debuggers\$machine\cdb.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $debugger) { Write-Host "Contrast: no cdb.exe on this runner; the dumps are in the artifact." }
+    else {
+      $symbols = Join-Path $Out "contrast-symbols"
+      foreach ($dump in ($found | Select-Object -First 2)) {
+        Write-Host "Contrast: $($dump.Name), as cdb reads it:"
+        & $debugger -z $dump.FullName -y "srv*$symbols*https://msdl.microsoft.com/download/symbols" -c ".ecxr; kn 40; lm m Ardia*; q" 2>&1 | Select-Object -Last 70 | ForEach-Object { Write-Host "  $_" }
+      }
+    }
+  }
+  $contrastProblems | ForEach-Object { $failures += $_ }
 }
 
 $env:ARDIA_DATA_DIR = New-DataDirectory "self-check-data"
