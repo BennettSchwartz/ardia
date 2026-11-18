@@ -9,7 +9,7 @@ import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
 import { shownTone } from "../../lib/pageTone";
 import { snapshotPageTop } from "../../lib/shownSnapshots";
-import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, space, Symbol, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useTheme, isDarkColor, type MenuItem, type MotionCurve } from "../ui";
+import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, space, Symbol, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useTheme, isDarkColor, type MenuItem, type MotionCurve, type SymbolName } from "../ui";
 import { MenuTrigger, nativeMenus, spaceSystemImage, type MenuHandlers } from "../ui/MenuTrigger";
 import { hideArchiveCard } from "../../state/browse/archiveCard";
 import { OPENING_COVER_ID } from "../../state/browse/store";
@@ -117,14 +117,8 @@ export function cardPose(g: DeckGeometry, role: DeckRole, relative: number, sp: 
   return { x, y, scale, corner, opacity, header: Math.min(1, settle) * Math.min(1, liftFade) * (1 - fade), visible: deckVisibleWidth(g, relative, isLast), lift, vanish: fade };
 }
 
-export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion, onOpen, onClose, onCloseNow }: Props) {
-  countRender("DeckCard");
-  const theme = useTheme();
-  const design = useDesign();
-  const tone = shownTone(useHeldPageTone(tab.id), tab.themeColorHex);
+export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion, restCorner: number = DECK.cardRadius) {
   const { orderIds, shiftBy, fromSlots, gap, phase, expandedIndex, scroll, scaleProgress, positionProgress, dragIndex, dragLift, flyIndex, flyLift, flyVanish, covering } = motion;
-  const id = tab.id;
-
   const at = useDerivedValue(() => orderIds.value.indexOf(id), [id]);
   const vanished = useSharedValue(false);
   useAnimatedReaction(
@@ -144,26 +138,19 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
     const slot = listed ? deckSlot(id, i, fromSlots.value, shiftBy.value, gap.value) : 0;
     const p = cardPose(g, role, slot - scroll.value, scaleProgress.value, positionProgress.value, lift, flying ? flyVanish.value : vanished.value || !listed ? 1 : 0, isLast);
     const top = p.y - (g.cardHeight * p.scale) / 2 - tabsLayout.headerGap - tabsLayout.headerHeight;
-    return { pose: p, top, place: deckHeaderPlacement(p.x - (g.cardWidth * p.scale) / 2, p.visible), z: Math.max(i, 0) * 2 + (role === "expanded" ? EXPANDED_Z : 0), expanded: role === "expanded" };
+    const growing = role === "expanded" || role === "launcher";
+    return { pose: p, top, place: deckHeaderPlacement(p.x - (g.cardWidth * p.scale) / 2, p.visible), z: Math.max(i, 0) * 2 + (role === "expanded" ? EXPANDED_Z : 0), expanded: role === "expanded", rest: growing ? scaleProgress.value : 1 };
   }, [g, id]);
   const cardStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
+    const corner = p.corner + (restCorner - DECK.cardRadius) * placed.value.rest;
     return {
       zIndex: placed.value.z,
       opacity: covering.value === id ? 0 : p.opacity,
-      borderRadius: p.corner / Math.max(p.scale, 0.01),
+      borderRadius: corner / Math.max(p.scale, 0.01),
       transform: [{ translateX: p.x - g.cardWidth / 2 }, { translateY: p.y - g.cardHeight / 2 }, { scale: p.scale }],
     };
-  }, [g]);
-  const titleWidth = useSharedValue(0);
-  const headerStyle = useAnimatedStyle(() => {
-    const { pose: p, top, place } = placed.value;
-    return {
-      zIndex: placed.value.z + 1,
-      opacity: p.header * deckHeaderIconReveal(place.available, tabsLayout.faviconSize),
-      transform: [{ translateX: place.left + place.available - g.cardWidth }, { translateY: top }],
-    };
-  });
+  }, [g, restCorner]);
   const reachStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
     return {
@@ -176,6 +163,27 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
       ],
     };
   }, [g]);
+  return { placed, cardStyle, reachStyle };
+}
+
+export type DeckCardProps = Props;
+
+export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion, onOpen, onClose, onCloseNow }: Props) {
+  countRender("DeckCard");
+  const theme = useTheme();
+  const design = useDesign();
+  const tone = shownTone(useHeldPageTone(tab.id), tab.themeColorHex);
+  const { scaleProgress } = motion;
+  const { placed, cardStyle, reachStyle } = useCardPlacement(tab.id, g, motion);
+  const titleWidth = useSharedValue(0);
+  const headerStyle = useAnimatedStyle(() => {
+    const { pose: p, top, place } = placed.value;
+    return {
+      zIndex: placed.value.z + 1,
+      opacity: p.header * deckHeaderIconReveal(place.available, tabsLayout.faviconSize),
+      transform: [{ translateX: place.left + place.available - g.cardWidth }, { translateY: top }],
+    };
+  });
   const rowStyle = useAnimatedStyle(() => {
     const available = placed.value.place.available;
     return { transform: [{ translateX: g.cardWidth - available + deckHeaderLeading(available, tabsLayout.faviconSize, tabsLayout.headerSpacing, titleWidth.value, titleReveal(available)) }] };
@@ -258,11 +266,27 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
 
 type SendTarget = ReturnType<typeof sendTargetsFor>[number];
 
-type CardMenuContext = { devices: SendTarget[]; pinned: boolean; syncEnabled: boolean; spaces: SyncedProfile[] };
+type CardMenuContext = { devices: SendTarget[]; pinned: boolean; syncEnabled: boolean; spaces: SyncedProfile[]; icons?: boolean };
 
 const deviceSystemImage = (device: Pick<SendTarget, "name" | "kind">) => (device.kind === "phone" ? "iphone" : /book/i.test(device.name) ? "laptopcomputer" : "desktopcomputer");
 
-export function cardMenuItems(tab: BrowserTab, { devices, pinned, syncEnabled, spaces }: CardMenuContext, close: () => void): MenuItem[] {
+const CARD_MENU_ICONS: Record<string, { icon: SymbolName; systemImage: string }> = {
+  "Copy Link": { icon: "link", systemImage: "link" },
+  Share: { icon: "squareAndArrowUp", systemImage: "square.and.arrow.up" },
+  "Pin to Mac": { icon: "star", systemImage: "star" },
+  "Pinned to Mac": { icon: "starFill", systemImage: "star.fill" },
+  "Move to Space": { icon: "squareStack", systemImage: "square.stack" },
+  "Close Tab": { icon: "xmark", systemImage: "xmark" },
+};
+
+const withMenuIcon = (item: MenuItem): MenuItem => (item === "divider" || "heading" in item || !CARD_MENU_ICONS[item.label] ? item : { ...item, ...CARD_MENU_ICONS[item.label] });
+
+export function cardMenuItems(tab: BrowserTab, context: CardMenuContext, close: () => void): MenuItem[] {
+  const items = plainCardMenuItems(tab, context, close);
+  return context.icons ? items.map(withMenuIcon) : items;
+}
+
+function plainCardMenuItems(tab: BrowserTab, { devices, pinned, syncEnabled, spaces }: CardMenuContext, close: () => void): MenuItem[] {
   const closing: MenuItem = { label: "Close Tab", destructive: true, onPress: close };
   if (!canShareTab(tab)) return [closing];
   const send = (device: SendTarget) => () => void sendTab(tab, device);
@@ -287,8 +311,9 @@ export function CardMenu({ tab, close, testID, haptic, style, children }: CardMe
   const tabSpaces = useTabSpaces();
   const profiles = useSyncView().profiles;
   const spaces = moveTargets(tabSpaces, profiles, tab);
+  const icons = useDesign() === "material";
   return (
-    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces }, close)} trigger="longPress" haptic={haptic} onOpen={hideArchiveCard} style={style}>
+    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces, icons }, close)} trigger="longPress" haptic={haptic} onOpen={hideArchiveCard} style={style}>
       {children}
     </MenuTrigger>
   );

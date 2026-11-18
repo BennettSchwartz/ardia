@@ -1,0 +1,71 @@
+import { useMemo } from "react";
+import { deckGeometry, deckLeading, deckVisibleWidth, type DeckGeometry } from "../../lib/deckGeometry";
+import type { MaterialScheme } from "../../lib/material/schemes";
+import { schemeFor, schemePairFor } from "../../lib/material/schemePick";
+import { useDynamicScheme } from "../../state/app/dynamicScheme";
+import { usePreferences } from "../../state/settings/store";
+import { useMaterialTheme } from "../ui/materialTheme";
+import { materialSize } from "../ui/materialTokens";
+import { tabsLayout } from "../ui/tokens";
+
+export const MATERIAL_DECK = {
+  edge: 16,
+  rowGap: 12,
+  barSide: 4,
+  titleInset: 12,
+  closeIcon: 18,
+  closeRipple: 20,
+  closeShownFrom: materialSize.touchTarget + 24,
+  headerInset: 4,
+  chipHeight: 32,
+  chipGlyph: 18,
+  fabElevation: 6,
+  cardElevation: 14,
+  searchGap: 16,
+  keyboardGap: 8,
+} as const;
+
+const REDESIGN_BAR_ABOVE_SAFE_BOTTOM = 11;
+
+export const materialBottomRowCenter = (safeBottom: number) => safeBottom + MATERIAL_DECK.edge + materialSize.fab / 2;
+
+export function fitsMaterialChrome(g: DeckGeometry): boolean {
+  const cardTop = g.cardCenterY - g.cardHeight / 2;
+  const titleRowTop = cardTop - tabsLayout.headerGap - tabsLayout.headerHeight;
+  const rowTop = g.height - g.safeBottom - MATERIAL_DECK.edge - materialSize.fab;
+  return titleRowTop >= g.safeTop + materialSize.topAppBar && g.cardCenterY + g.cardHeight / 2 <= rowTop;
+}
+
+export function materialDeckGeometry(width: number, height: number, safeTop: number, safeBottom: number, safeSide: number, os: string, classicChrome: number, screenCorner: number): DeckGeometry {
+  const classic = deckGeometry(width, height, safeTop, safeBottom, safeSide, os, "material", classicChrome, screenCorner);
+  if (fitsMaterialChrome(classic)) return classic;
+  const rowCenter = materialBottomRowCenter(safeBottom);
+  const between = deckGeometry(width, height, safeTop, rowCenter - REDESIGN_BAR_ABOVE_SAFE_BOTTOM, safeSide, "ios", "redesigned", materialSize.topAppBar, screenCorner);
+  return { ...between, safeBottom };
+}
+
+export function materialCloseCenter(g: DeckGeometry, relative: number, isLast: boolean): { x: number; y: number; visible: number } {
+  "worklet";
+  const visible = deckVisibleWidth(g, relative, isLast);
+  const cardTop = g.cardCenterY - g.cardHeight / 2;
+  return { x: deckLeading(g, relative) + visible - materialSize.touchTarget / 2, y: cardTop - tabsLayout.headerGap - tabsLayout.headerHeight / 2, visible };
+}
+
+export function materialCloseHit(g: DeckGeometry, relative: number, isLast: boolean, x: number, y: number): boolean {
+  "worklet";
+  const close = materialCloseCenter(g, relative, isLast);
+  const half = materialSize.touchTarget / 2;
+  return close.visible >= MATERIAL_DECK.closeShownFrom && Math.abs(x - close.x) <= half && Math.abs(y - close.y) <= half;
+}
+
+export function useIncognitoScheme(): MaterialScheme {
+  const choice = usePreferences((p) => p.colorChoice);
+  const dynamic = useDynamicScheme((s) => s.pair);
+  return useMemo(() => schemeFor(schemePairFor(choice, dynamic), true), [choice, dynamic]);
+}
+
+export function useDeckScheme(incognito: boolean): MaterialScheme {
+  const { scheme } = useMaterialTheme();
+  const dark = useIncognitoScheme();
+  return incognito ? dark : scheme;
+}
