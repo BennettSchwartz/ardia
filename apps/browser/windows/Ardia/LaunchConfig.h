@@ -73,6 +73,7 @@ inline std::vector<std::string_view> const &TestKeys() noexcept {
       "liveMock", "calendarFixture", "appMenu", "appDialog", "loginsTimeout", "externalAppLaunch", "nativeDragRefused", "httpPages", "selfCheckStage",
       "keyHold", "keyHoldReadyMs", "quitWaitMs", "quitUnloadHoldMs", "quitFlushHoldMs", "handOffHoldMs", "handOffDeliveryHoldMs", "handOffTimeoutMs", "lastWindowWaitMs",
       "windowOpenHoldMs", "quitReason", "quitByMessage", "quitAnswerHoldMs",
+      "fadeLab", "rawBackgrounds",
   };
   return keys;
 }

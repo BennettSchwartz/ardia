@@ -1,4 +1,3 @@
-import { changedIds } from "../browser/changes";
 import { onWindowEvent } from "../../platform/windows";
 import { everySlowly } from "../../platform/slowTimers";
 import { useBrowser, type BrowserState } from "../browser/store";
@@ -15,6 +14,7 @@ import { noteLiveCompletedTabsClosed } from "../telemetry/liveCompletedTabs";
 import { noteLiveSourceFetch } from "../telemetry/workCounts";
 import { isPlaying, useMedia } from "../media/media";
 import { usePages } from "../tabs/pageState";
+import { liveOf, onLiveChange } from "../tabs/tabLive";
 import type { MediaAccess } from "../../platform/tabs";
 
 const INTERVAL_MS: Record<LiveFolderKind, number> = { pullRequests: 3 * 60_000, documents: 10 * 60_000 };
@@ -263,10 +263,8 @@ const capturing = (access: MediaAccess | null | undefined) => !!access && (acces
 
 const inUse = (s: BrowserState, id: string) => {
   const media = useMedia.getState();
-  return !!s.live[id]?.playingAudio || !!media.pipOpen[id] || isPlaying(media.sessions[id]) || capturing(usePages.getState().pages[id]?.mediaAccess) || !!media.tabShares[id] || Object.values(media.tabShares).some((share) => share.capturedTabId === id);
+  return liveOf(id).playingAudio || !!media.pipOpen[id] || isPlaying(media.sessions[id]) || capturing(usePages.getState().pages[id]?.mediaAccess) || !!media.tabShares[id] || Object.values(media.tabShares).some((share) => share.capturedTabId === id);
 };
-
-const playbackEnded = (s: BrowserState, prev: BrowserState) => s.live !== prev.live && changedIds(s.live, prev.live).some((id) => prev.live[id]?.playingAudio && !s.live[id]?.playingAudio);
 
 function closeCompletedTabs() {
   const s = useBrowser.getState();
@@ -326,7 +324,10 @@ export function startLiveEngine() {
   });
 
   useBrowser.subscribe((s, prev) => {
-    if (s.windows !== prev.windows || s.splits !== prev.splits || s.peeks !== prev.peeks || playbackEnded(s, prev)) closeCompletedTabs();
+    if (s.windows !== prev.windows || s.splits !== prev.splits || s.peeks !== prev.peeks) closeCompletedTabs();
+  });
+  onLiveChange((id, now, was) => {
+    if (was.playingAudio && !now.playingAudio && useBrowser.getState().tabs[id]) closeCompletedTabs();
   });
   usePages.subscribe((p, prev) => {
     if (p.pages !== prev.pages && Object.keys(prev.pages).some((id) => capturing(prev.pages[id]?.mediaAccess) && !capturing(p.pages[id]?.mediaAccess))) closeCompletedTabs();
