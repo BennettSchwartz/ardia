@@ -80,7 +80,7 @@ export const WHATS_SENT: { title: string; items: string[] }[] = [
       "How many times you chose No Icon for a pinned tab, so it shows its title alone, summed up once an hour. Never which tab",
       "How many tab hover cards the tab strip across the top showed, and how many of those were for a tab from a profile other than the window's, summed up once an hour. Never which tab",
       "How many times the profile pages came to rest after a swipe, a profile shortcut or a page dot, and how many of those stayed on the same profile, summed up once an hour. Never which profile",
-      "How many times the toolbar hid while you scrolled a page, and how many of those came less than a second after it had shown again, summed up once an hour. Never which page",
+      "How many times the toolbar hid while you scrolled a page, how many of those came less than a second after it had shown again, how many times the hidden toolbar peeked out under the pointer, and on Linux how many times a page stopped drawing while the toolbar peeked over it, summed up once an hour. Never which page",
       "While a window is being resized, how many size changes its page area got and how many of them it laid out again, and how many resizes were made from the window's center with Option held, summed up once an hour",
       "How many pinned tabs and split views an import from Arc or Dia brought over, and for an import with spaces (Arc or Zen) how many spaces came over, how many went to a profile of their own because their Zen container keeps its own cookies, how many profiles with their own data they filled, how many Essentials came over, and how many times the first space named an untouched starter profile, summed up once an hour. Never which pages or names",
       "For an import from Arc: how many of its Air Traffic Control rules came over and how many were left out, how many archived tabs went to Recently Cleaned, how many spaces with an icon from Arc's Icon tab got a matching emoji, and how many tab icons came from Arc's own sidebar icon cache, summed up once an hour. Never which sites, rules, tabs or spaces",
@@ -278,7 +278,7 @@ const ADDED_ITEMS = {
     "How many times a window's interface was started a second time while the first was still up, summed up once an hour",
     "How many times suggestions that came in late waited because the pointer was over the command bar's list or its Go button, summed up once an hour. Never what you typed",
     "On Windows, how many times Ardia held the keys you typed right after opening a new tab or the command bar until its field was ready, how many of those keys it then typed into the field, how many times the command bar's completion stayed off for a replay whose end never came, and how many holds it let go and why (a shortcut, a key that isn't a letter, a click, another window, the field going away or taking too long), summed up once an hour. Never which keys or what you typed",
-    "On Windows, how many times Ardia asked before quitting right after you confirmed closing a window's tabs, because your other window had closed meanwhile, and how many of those you cancelled, summed up once an hour",
+    "On Windows, how many times Ardia asked before quitting right after you confirmed closing a window's tabs, because your other window had closed meanwhile, and how many of those you cancelled; and how many times it asked before quitting with a download still running, and how many of those you cancelled, summed up once an hour",
   ],
 };
 

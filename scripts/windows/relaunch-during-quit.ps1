@@ -15,6 +15,10 @@ public static class QuitPages {
   public static int Port;
   static readonly ConcurrentDictionary<string, int> loads = new ConcurrentDictionary<string, int>();
   static readonly ConcurrentDictionary<string, string> scripts = new ConcurrentDictionary<string, string>();
+  static readonly ManualResetEvent downloadsReleased = new ManualResetEvent(false);
+  static int downloadsStarted;
+  public static int DownloadsStarted { get { return Volatile.Read(ref downloadsStarted); } }
+  public static void ReleaseDownloads() { downloadsReleased.Set(); }
   public static void Start() {
     listener = new TcpListener(IPAddress.Loopback, 0);
     listener.Start();
@@ -29,7 +33,7 @@ public static class QuitPages {
     runner.IsBackground = true;
     runner.Start();
   }
-  public static void Stop() { try { listener.Stop(); } catch { } }
+  public static void Stop() { ReleaseDownloads(); try { listener.Stop(); } catch { } }
   public static void SetScript(string name, string script) { scripts[name] = script; }
   public static int LoadsOf(string name) { int n; return loads.TryGetValue(name, out n) ? n : 0; }
   static void Serve(TcpClient client) {
@@ -46,6 +50,16 @@ public static class QuitPages {
         }
         string[] line = request.ToString().Split(' ');
         string path = line.Length > 1 ? line[1] : "/";
+        if (path == "/download-held") {
+          byte[] start = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nX-Content-Type-Options: nosniff\r\nContent-Disposition: attachment; filename=\"relaunch-download.txt\"\r\nContent-Length: 104857600\r\nConnection: keep-alive\r\n\r\n");
+          stream.Write(start, 0, start.Length);
+          byte[] first = Encoding.ASCII.GetBytes(new string('r', 65536));
+          stream.Write(first, 0, first.Length);
+          stream.Flush();
+          Interlocked.Increment(ref downloadsStarted);
+          downloadsReleased.WaitOne();
+          return;
+        }
         string status = "404 Not Found";
         string body = "";
         if (path.StartsWith("/quit-") && path.EndsWith(".html")) {
@@ -228,6 +242,70 @@ function Test-LaunchBeforeTheQuitBegins {
   Assert-NoQuitLine 'began \((user|update)\)' $what "a quit began although a launch came before it"
   Note "$what`: the same Ardia ($($shown.Pid)) showed a window with the link, loaded once"
   Close-QuitInstance $what $shown
+}
+
+function Read-QuitDialog {
+  $file = Join-Path $script:QuitData "dialog.json"
+  if (-not (Test-Path -LiteralPath $file)) { return $null }
+  try { return Get-Content -LiteralPath $file -Raw | ConvertFrom-Json } catch { return $null }
+}
+
+function Wait-QuitDialog([string]$what, [int]$processId, [int]$seconds = 15) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $deadline) {
+    $asked = Read-QuitDialog
+    $shown = @([RelaunchCheck.Native]::DialogWindows([uint32]$processId))
+    if ($asked -and $shown.Count) { return [pscustomobject]@{ Asked = $asked; Window = $shown[0]; Pid = $processId } }
+    Start-Sleep -Milliseconds 100
+  }
+  Fail-Quit $what "no question on screen within $seconds s (dialog.json written: $($null -ne (Read-QuitDialog)); Ardia $processId running: $($null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)))"
+}
+
+function Answer-QuitDialog($dialog, [int]$button) {
+  Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
+  [RelaunchCheck.Native]::PostMessageW($dialog.Window, 0x0466, [IntPtr]$button, [IntPtr]::Zero) | Out-Null
+  $deadline = (Get-Date).AddSeconds(5)
+  while ((Get-Date) -lt $deadline -and (@([RelaunchCheck.Native]::DialogWindows([uint32]$dialog.Pid)) -contains $dialog.Window)) { Start-Sleep -Milliseconds 50 }
+}
+
+function Test-LaunchWhileTheDownloadsQuestionShows {
+  $what = "a launch while the question about running downloads is on screen"
+  $old = Open-QuitInstance $what "appDialog"
+  $starter = Start-WithTest "" @((Quit-Link "download" "setTimeout(() => { location.href = '/download-held'; }, 300);"))
+  if (-not $starter.WaitForExit(30000) -or $starter.ExitCode -ne 0) { Fail-Quit $what "the launch that opens the download page didn't hand over and exit 0" }
+  Wait-QuitLinkOnce $what "download"
+  $deadline = (Get-Date).AddSeconds(30)
+  while ((Get-Date) -lt $deadline -and -not [QuitPages]::DownloadsStarted) { Start-Sleep -Milliseconds 100 }
+  if (-not [QuitPages]::DownloadsStarted) { Fail-Quit $what "the page never started its download" }
+  Start-Sleep -Seconds 3
+  Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
+  [RelaunchCheck.Native]::PostMessageW($old.Window, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
+  $question = $null
+  $earlier = @()
+  for ($round = 0; $round -lt 3 -and -not $question; $round++) {
+    $dialog = Wait-QuitDialog $what $old.Pid
+    if ("$($dialog.Asked.message)" -match 'downloads? in progress') { $question = $dialog; break }
+    $earlier += "'$($dialog.Asked.title)'"
+    Answer-QuitDialog $dialog 1001
+  }
+  if (-not $question) { Fail-Quit $what "closing the window never asked about the running download (asked first: $($earlier -join ', '))" }
+  $link = Quit-Link "asking"
+  $launched = Start-WithTest "" @($link)
+  $shown = Assert-SameArdiaKeepsIt $what $old $launched "asking"
+  if (-not (@([RelaunchCheck.Native]::DialogWindows([uint32]$old.Pid)) -contains $question.Window)) { Fail-Quit $what "the launch took the question about downloads off the screen" }
+  Assert-NoQuitLine 'began \((user|update)\)' $what "a quit began although the question was still on screen"
+  Assert-NoQuitLine 'relaunch: a launch cancels the quit' $what "the launch cancelled a quit that hadn't begun"
+  $ended = Count-QuitsEnded
+  Answer-QuitDialog $question 1001
+  Wait-Exit $old.Pid $what | Out-Null
+  Assert-QuitLine 'began \(user\)' $what "answering Quit didn't start the normal quit"
+  Assert-QuitLine 'the app answered yes after \d+ ms' $what "the app didn't answer the quit after the question"
+  Assert-QuitsEnded $what ($ended + 1)
+  Assert-LoadedOnce $what "asking"
+  [QuitPages]::ReleaseDownloads()
+  Keep-QuitLog $what
+  $before = if ($earlier.Count) { " after $($earlier -join ', ')" } else { "" }
+  Note "$what`: the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once with no quit begun, and Quit then ended it through the normal quit with its 'process ending'"
 }
 
 function Test-LaunchAtTheQuitSeam {
@@ -594,6 +672,7 @@ function Test-LaunchesDuringQuit {
   $watch = [Diagnostics.Stopwatch]::StartNew()
   try {
     Test-LaunchBeforeTheQuitBegins
+    Test-LaunchWhileTheDownloadsQuestionShows
     Test-LaunchAtTheQuitSeam
     Test-LaunchDuringTheQuitWait
     Test-LaunchTakenInTheTurnOfTheAnswer
@@ -607,7 +686,7 @@ function Test-LaunchesDuringQuit {
     Test-QuitWithABeforeUnloadPage
     Test-TurnedAwayLaunchKeepsItsUserDataDir
     Test-LaunchRefusedForGood
-    Note "launches during a quit: 14 cases in $([int]$watch.Elapsed.TotalSeconds) s"
+    Note "launches during a quit: 15 cases in $([int]$watch.Elapsed.TotalSeconds) s"
   } finally {
     Keep-QuitLog "final"
     [QuitPages]::Stop()

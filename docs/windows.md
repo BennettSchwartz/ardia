@@ -129,6 +129,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Trackpad gestures, video upscaling, reorder haptics, thin scroll bars | Does nothing; hidden | #1522, #1520 |
 | Keep new-tab links inside a Little Ardia window, zoom with Ctrl and the mouse wheel, offer to save and fill passwords | Does nothing (the engine has no call for them yet); hidden | #1783, #1425 |
 | Warn before quitting | Works (#1796's build 1f4d97db1, run 43631924720): with it on, closing the last window (close button, Alt+F4, Ctrl+Shift+W, a lone Little Ardia's Ctrl+W; Ctrl+W on a window's last tab follows the same rule) asks first with the Mac's words; Cancel keeps the app running, Quit exits, Don't ask again turns it off; a hidden instance never asks | #1782, #1803 |
+| Quitting with a download running | Asks first, like the Mac. Seen in the tour (run 44238038941): Alt+F4 asks, Cancel keeps the window, Quit ends the app; Ctrl+W on the only tab asks "Close 1 tab?", then the downloads question, and Cancel keeps the window and the tab; no download, no question. The update's install sentence is unit-tested only | #2488 |
 | Widevine | Not offered (says so) | |
 | Copy naming the Mac | Works: the walk found three more (a ⌘T, "History › Recently Closed", "File › Close All Tabs"), fixed in #1668's PR | #1522, #1668 |
 
@@ -263,6 +264,16 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     the only window left quits without asking: Settings closes without a close request (#1803). When another window
     closes while a close-tabs confirm is open, confirming it asks the quit question too, since that close now quits:
     the only close that shows both dialogs (#1889; `quit_warnings_after_tabs_confirm` and its `_cancelled` count them).
+    A close that quits while a download is running asks as well, whatever the setting, with the Mac's words
+    ("You have 1 download in progress. If you quit now, this download will be cancelled."), after the warning when
+    both apply; Cancel keeps the window, so the download goes on. Paused downloads count, finished ones don't, and
+    another open window means no question, because nothing quits; the last-tab confirm stands in for the warning but
+    never for this question (#2488; `quit_warnings_with_downloads` and its
+    `_cancelled` count them). It is asked in the UI before the window closes: once the app has decided to quit, the
+    engine closes without a second question. A launch while the question is up is an ordinary launch: the same Ardia
+    opens it, nothing is cancelled or held, and the answer then quits or not as usual. The update's "ready to install" question adds a sentence when a
+    download is running, since installing closes Ardia. A quit that never passes through the UI (Windows ending the
+    session) isn't asked.
   - Windows fade as on the Mac (`WindowFade.h`), fade only with no grow. A window opened with `animated`, and every
     window that is not a browser window (Little Ardia, Settings, Import: the Mac's system animates those open),
     stays transparent until its React root has content or for 0.6 s, then fades in over 0.25 s (Little Ardia
@@ -792,15 +803,18 @@ is plain Chromium.
     events do (the engine has no one to give it to); automation and headless launches, which Chromium drops itself;
     and a session end, which is Chromium's own `SessionEnding()`: it never goes through the app's quit and pumps no
     messages until it ends the process, so a launch gets no answer and waits for that process like a hung one.
-  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, has 14 cases. It stages each stretch with test-only
+  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, has 15 cases. It stages each stretch with test-only
     `ARDIA_TEST` keys (`lastWindowWaitMs`, `windowOpenHoldMs`, `quitWaitMs`, `quitReason`, `quitAnswerHoldMs`,
     `quitUnloadHoldMs`, `quitFlushHoldMs`, `handOffHoldMs`, `handOffDeliveryHoldMs`, `handOffTimeoutMs`, which
     shortens Chromium's 20 s hand-off timeout through `SetNotificationTimeoutForTesting`, and `quitByMessage`, which
     lets the registered message `ArdiaTestQuit` start a quit with windows open). Links are served by the check's own
     server, which counts their loads, so "opened once" means loaded once; a launch that should start a fresh Ardia
-    must still be there 20 s later. The check turns on full Windows Error Reporting dumps for `Ardia.exe` for its
-    whole run (`dumps` in the artifact, read with `cdb` when the runner has it), keeps each case's launch log, and
-    names each crash event's process id, start time and path. The cases take about 8 minutes and the whole relaunch
+    must still be there 20 s later. One case holds a download open on that server, closes the window so the
+    downloads question shows, and launches with a link while it is up: the same Ardia opens it once, no quit begins,
+    and answering Quit afterwards ends Ardia through the normal quit. The check turns on full Windows Error Reporting
+    dumps for `Ardia.exe` for its whole run (`dumps` in the artifact, read with `cdb` when the runner has it) and puts
+    back whatever that machine-wide setting held before, keeps each case's launch log, and names each crash event's
+    process id, start time and path; only a crash of a process the check started (same id and start time) fails it. The cases take about 8 minutes and the whole relaunch
     step about 14; its timeout is 22 minutes.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and

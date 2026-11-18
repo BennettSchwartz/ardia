@@ -202,6 +202,7 @@ test("the quit's stretches are test-only keys, the update installer quits with i
   const during = script("relaunch-during-quit.ps1");
   const steps = [
     "Test-LaunchBeforeTheQuitBegins",
+    "Test-LaunchWhileTheDownloadsQuestionShows",
     "Test-LaunchAtTheQuitSeam",
     "Test-LaunchDuringTheQuitWait",
     "Test-LaunchTakenInTheTurnOfTheAnswer",

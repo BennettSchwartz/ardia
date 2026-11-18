@@ -28,6 +28,17 @@ public static System.Collections.Generic.List<IntPtr> AppWindows(uint process) {
   }, IntPtr.Zero);
   return found;
 }
+public static System.Collections.Generic.List<IntPtr> DialogWindows(uint process) {
+  var found = new System.Collections.Generic.List<IntPtr>();
+  EnumWindows((window, state) => {
+    uint owner; GetWindowThreadProcessId(window, out owner);
+    if (owner != process || !IsWindowVisible(window)) return true;
+    var name = new System.Text.StringBuilder(128); GetClassNameW(window, name, 128);
+    if (name.ToString() == "#32770") found.Add(window);
+    return true;
+  }, IntPtr.Zero);
+  return found;
+}
 public static string ProfileKey(string folder) {
   ulong hash = 14695981039346656037UL;
   foreach (char c in folder.TrimEnd('\\', '/')) {
