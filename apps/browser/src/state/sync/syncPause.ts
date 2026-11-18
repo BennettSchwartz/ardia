@@ -6,10 +6,12 @@ import { warnFor } from "../telemetry/logs";
 import { noteSyncPause } from "../telemetry/syncPauseCounts";
 import type { ConsentToken } from "../telemetry/choice";
 import type { SyncDoc, SyncUi } from "./syncDoc";
+import { SyncStateDamaged } from "./savedStateChecks";
 
 export const SYNC_PAUSED = "Sync is paused because Ardia didn’t start properly.";
 export const SYNC_PAUSED_DETAIL = "Nothing was deleted. Resume loads Sync again.";
 export const SYNC_LOCKED = `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.`;
+export const SYNC_DAMAGED = `Sync’s saved data on this ${PLATFORM_TERMS.computer} is damaged, so Sync can’t load it. To rebuild it, stop syncing here, then turn Sync on again with your recovery phrase.`;
 export const SYNC_PAUSED_REFUSAL = "Sync is paused. Resume it, or stop syncing, first.";
 export const CHAIN_MISSING = "Ardia can’t find its sync data in the sync folder, so Sync is still paused.";
 export const QUIT_DURING_RESUME = "Ardia quit before Sync finished resuming.";
@@ -20,6 +22,19 @@ export const UNSETTLED_STARTS_LIMIT = 2;
 export const SETTLED_AFTER_MS = 120_000;
 
 export const pausedByGuard = (doc: SyncDoc) => doc.enabled && !!doc.pausedByGuard;
+
+export function damagedLoads() {
+  let noted = false;
+  return (error: unknown, consent: ConsentToken | null): string | null => {
+    if (!(error instanceof SyncStateDamaged)) return null;
+    if (!noted) {
+      noted = true;
+      noteSyncPause("sync_loads_refused_damaged", consent);
+      warnFor(consent, "[sync] the saved state is damaged", error);
+    }
+    return SYNC_DAMAGED;
+  };
+}
 
 export function pauseAfterUnsettledStarts(doc: SyncDoc, consent: ConsentToken | null) {
   if (!doc.enabled || doc.pausedByGuard || (doc.unsettledStarts ?? 0) < UNSETTLED_STARTS_LIMIT) return false;
@@ -84,6 +99,7 @@ export type ResumeSteps = {
   quitting: () => boolean;
   settlePaused: (error: string | null) => void;
   carryOn: () => void;
+  damaged: (error: unknown, consent: ConsentToken | null) => string | null;
 };
 
 export function guardResume(steps: ResumeSteps) {
@@ -121,8 +137,9 @@ export function guardResume(steps: ResumeSteps) {
       steps.carryOn();
       steps.arm();
     } catch (error) {
-      warnFor(consent, "[sync] resuming failed", error);
-      steps.settlePaused(errorText(error));
+      const words = steps.damaged(error, consent);
+      if (!words) warnFor(consent, "[sync] resuming failed", error);
+      steps.settlePaused(words ?? errorText(error));
     }
   }
 

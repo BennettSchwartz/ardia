@@ -25,7 +25,7 @@ import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { syncStopper } from "./syncStop";
-import { CHAIN_MISSING, guardResume, pauseAfterRecoveredStart, pauseAfterUnsettledStarts, pausedByGuard, QUIT_DURING_RESUME, SYNC_LOCKED, SYNC_PAUSED_REFUSAL, unsettledStarts } from "./syncPause";
+import { CHAIN_MISSING, damagedLoads, guardResume, pauseAfterRecoveredStart, pauseAfterUnsettledStarts, pausedByGuard, QUIT_DURING_RESUME, SYNC_LOCKED, SYNC_PAUSED_REFUSAL, unsettledStarts } from "./syncPause";
 
 export { onTabsReceived } from "./sentTabs";
 export { takeSnapshotWrites } from "./snapshotWrites";
@@ -65,6 +65,8 @@ const paused = () => pausedByGuard(doc);
 const refused = () => paused() || !!running();
 const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded, docsSettled } = syncFiles(() => doc);
 const loadOnce = () => (loading ??= (starts.arm(), loadSavedState()).finally(() => (loading = null)));
+const damaged = damagedLoads();
+const loadRefused = (consent: ReturnType<typeof consentToken>, warning = "[sync] loading the saved state failed") => (error: unknown) => void publishUi({ status: "stalled", error: damaged(error, consent) ?? (warnFor(consent, warning, error), errorText(error)) });
 const report = (patch: Partial<SyncUi>) => void (paused() ? (outcome = patch) : publishUi(patch));
 const standsDown = () => paused() && isQuitting() && (report({ status: "stalled", error: QUIT_DURING_RESUME }), true);
 
@@ -104,7 +106,7 @@ function scheduleSync(delay = AFTER_EDIT_MS) {
 
 export async function syncNow() {
   if (refused()) return;
-  if (!loaded() && keyUnlocked && !loading && doc.enabled) await loadOnce().catch((error: unknown) => publishUi({ status: "stalled", error: errorText(error) }));
+  if (!loaded() && keyUnlocked && !loading && doc.enabled) await loadOnce().catch(loadRefused(consentToken()));
   await runCycle({ forcePasswords: true });
 }
 
@@ -274,12 +276,13 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
   if (!native) return { error: "unavailable" };
   if (doc.enabled && doc.deviceId && useSync.getState().status === "locked") {
     const asked = doc;
+    const consent = consentToken();
     const result = await native.enterPhrase(doc.deviceId, text, doc.folder ?? folder);
     if (doc !== asked || stopper.stopping() || !doc.enabled) return result;
     if ("ok" in result && paused()) void continueAfterPhrase();
     else if ("ok" in result) {
       keyUnlocked = true;
-      await loadOnce();
+      if (!(await loadOnce().then(() => true, (error: unknown) => (loadRefused(consent)(error), false)))) return result;
       publishUi({ status: "starting", error: null });
       scheduleSync(0);
     }
@@ -327,7 +330,7 @@ function settlePaused(error: string | null) {
 
 const starts = unsettledStarts({ doc: () => doc, persist: () => saveDocNow(), counting: () => counting });
 const resumeCycle = async () => ((outcome = null), await runCycle({}, true), outcome);
-const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => (keyUnlocked = !!(await SyncNative?.unlock(deviceId))), load: loadSavedState, countLoad: starts.countLoad, arm: starts.arm, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS) });
+const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => (keyUnlocked = !!(await SyncNative?.unlock(deviceId))), load: loadSavedState, countLoad: starts.countLoad, arm: starts.arm, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS), damaged });
 export { resumeSync };
 
 export function startSync({ countStarts = true } = {}) {
@@ -353,10 +356,7 @@ export function startSync({ countStarts = true } = {}) {
         publishUi();
         scheduleSync(500);
       })
-      .catch((error: unknown) => {
-        warnFor(consent, "[sync] unlocking at launch failed", error);
-        publishUi({ status: "stalled", error: errorText(error) });
-      });
+      .catch(loadRefused(consent, "[sync] unlocking at launch failed"));
   }
   saveBeforeQuit("sync", async () => {
     starts.stop();
