@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -100,6 +101,7 @@ struct ManagedWindow {
   std::vector<std::function<void()>> exits;
   std::vector<std::function<void()>> revealWaiters;
   int closeGeneration{0};
+  std::set<std::string> swipeAreas;
 
   bool IsBrowser() const noexcept {
     return kind == "browser" || kind == "small";
@@ -465,6 +467,13 @@ struct WindowManager {
     ManagedWindow *entry = Find(id);
     if (!entry || Background()) return;
     ToggleMaximized(*entry);
+  }
+
+  void SetSwipeArea(std::string const &id, std::string const &key, bool on) noexcept {
+    ManagedWindow *entry = Find(id);
+    if (!entry) return;
+    if (on) entry->swipeAreas.insert(key);
+    else entry->swipeAreas.erase(key);
   }
 
   void SetCaptionRegions(std::string const &id, std::vector<std::array<double, 4>> regions) noexcept {
@@ -944,6 +953,7 @@ struct WindowManager {
     entry.destroying = entry.appWindow.Destroying(
         [this, id](winrt::Microsoft::UI::Windowing::AppWindow const &, winrt::Windows::Foundation::IInspectable const &) noexcept { Closed(id); });
     SetWindowSubclass(entry.hwnd, &WindowManager::WindowProc, kSubclassId, reinterpret_cast<DWORD_PTR>(this));
+    WatchSwipeWheel(entry);
   }
 
   static void Mount(ManagedWindow &entry) {
@@ -1560,6 +1570,43 @@ struct WindowManager {
     m_captionPressed = nullptr;
     ManagedWindow *entry = FindByHwnd(hwnd);
     if (entry) LaunchLog::Write(L"window", std::wstring(L"system move began on ").append(Paths::Wide(entry->id)));
+  }
+
+  void WatchSwipeWheel(ManagedWindow &entry) noexcept {
+    try {
+      auto island = entry.window.ReactNativeIsland().Island();
+      if (!island) {
+        LaunchLog::Write(L"window", std::wstring(L"sideways wheel not watched for ").append(Paths::Wide(entry.id)).append(L": no content island"));
+        return;
+      }
+      std::string id = entry.id;
+      winrt::Microsoft::UI::Input::InputPointerSource::GetForIsland(island).PointerWheelChanged(
+          [this, id](winrt::Microsoft::UI::Input::InputPointerSource const &, winrt::Microsoft::UI::Input::PointerEventArgs const &args) noexcept {
+            try {
+              SwipeWheel(id, args);
+            } catch (...) {
+            }
+          });
+    } catch (...) {
+      LaunchLog::Write(L"window", std::wstring(L"sideways wheel not watched for ").append(Paths::Wide(entry.id)));
+    }
+  }
+
+  void SwipeWheel(std::string const &id, winrt::Microsoft::UI::Input::PointerEventArgs const &args) {
+    ManagedWindow *entry = Find(id);
+    if (!entry || entry->swipeAreas.empty()) return;
+    auto point = args.CurrentPoint();
+    auto properties = point.Properties();
+    int32_t delta = properties.MouseWheelDelta();
+    if (!properties.IsHorizontalMouseWheel() || delta == 0) return;
+    auto position = point.Position();
+    winrt::Microsoft::ReactNative::JSValueObject event;
+    event["type"] = "swipeWheel";
+    event["id"] = id;
+    event["point"] = winrt::Microsoft::ReactNative::JSValueArray{static_cast<double>(position.X), static_cast<double>(position.Y)};
+    event["delta"] = delta;
+    EmitWindow(std::move(event));
+    LaunchLog::Write(L"window", std::wstring(L"sideways wheel ").append(std::to_wstring(delta)).append(L" in ").append(Paths::Wide(id)));
   }
 
   void EmitWindow(winrt::Microsoft::ReactNative::JSValueObject &&event) noexcept {

@@ -1,11 +1,13 @@
+import type { ConsentToken } from "./choice";
+import { countFor } from "./countFor";
+
 let asked = 0;
 let cancelled = 0;
 let askedWithDownloads = 0;
 let cancelledWithDownloads = 0;
 
-export function noteQuitAskedAfterTabsConfirm(wasCancelled: boolean) {
-  asked++;
-  if (wasCancelled) cancelled++;
+export function noteQuitAskedAfterTabsConfirm(wasCancelled: boolean, consent?: ConsentToken | null) {
+  countFor(consent, () => void (asked++, wasCancelled && cancelled++), { quit_warnings_after_tabs_confirm: 1, quit_warnings_after_tabs_confirm_cancelled: +wasCancelled });
 }
 
 export function noteQuitAskedWithDownloads(wasCancelled: boolean) {

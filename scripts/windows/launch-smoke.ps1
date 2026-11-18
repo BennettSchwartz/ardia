@@ -2172,6 +2172,11 @@ if ($Part -ne "gate" -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent
   } else { $failures += "the meadow self-check on WARP wrote no log" }
 }
 
+if ($Part -ne "gate") {
+  $fadeProblems = @(& (Join-Path $PSScriptRoot "fade-check.ps1") -App $App -Out $Out)
+  if ($fadeProblems.Count) { $failures += $fadeProblems }
+}
+
 $gateApp = (Resolve-Path -LiteralPath $App).Path
 $withEngine = Test-Path -LiteralPath (Join-Path (Split-Path -Parent $gateApp) "chrome.dll")
 $gatePort = 9338

@@ -469,6 +469,27 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   `TextInputState.focusInput`/`blurInput` and tells `ArdiaFocus.setTextInputFocused`; a page is a Chromium window on the
   same thread, so the hook reads the focused window's class (`Chrome_*`). The launch log says `ctrl+z reopens the last
   closed tab`, `ctrl+z left to the focused text field`, `ctrl+z left to the focused dialog or page` or `ctrl+z left to the focused page`.
+- A child mounted after its parent's first mount draws under the parent's background (#2197), in React Native
+  Windows 0.81.38 and upstream `main`. `ComponentView::updateProps` puts a view's background sprite at index 0 of its
+  visual, and `ViewComponentView::MountChildComponentView` inserts children at their index plus the border and outline
+  visuals but not the background. React Native mounts children inside a view only when it forms a stacking context
+  (`zIndex` with a position, `opacity` below 1, a transform, `pointerEvents="none"` and so on), so only a view with a
+  background and a stacking context is hit: a later child lands under the background, or under its previous sibling.
+  - **Remedy:** `BackedView` (`packages/expo-windows/src/views/BackedView.tsx`) draws the background on a permanent
+    first child at the padding box (an absolute child's offsets already start inside the border), with each corner's
+    radius less the borders that meet there and the lowest `zIndex`, so later children land above it. Its background
+    has to come through `style`: one set with `setNativeProps` or an animated `backgroundColor` reaches the outer view
+    and brings the fault back. Corners assume left-to-right. It's registered as `ArdiaBackedView`; nothing uses it yet.
+    A shared view would adopt it through the shell, like `ClipView`: a `packages/shell/src/backedView.ts` exporting
+    React Native's `View`, a `backedView.windows.ts` exporting `requireNativeViewManager("ArdiaBackedView")`, and an
+    export from `index.tsx`.
+  - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
+    child mounted into a `BackedView` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
+    round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
+    setup screen, #2280, and report unverified). It logs how many rounds a raw view still hides the child (5 of 5 on
+    0.81.38); when that reads 0 after an upgrade, `BackedView` can go. The same lab shows fades on mount draw and land.
+  - **Known, not fixed:** the top toolbar's address field (tabs on top) has a hover pill and mouse handlers, so the
+    reload glow and the not-secure lock mounted while it's hovered draw under the 6 to 10% pill.
 - Animations run in JavaScript on Windows (`packages/expo-windows/src/animation`). React Native for Windows' native
   animation driver adds what it animates to the view's own style instead of replacing it, turns a scale around the
   top-left corner, never reports where an animation ended, and drops scroll and gesture events, so anything but a
@@ -521,8 +542,16 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   (`Pager.swift`) has a TypeScript version in `packages/expo-windows/src/pager`: the `ArdiaSwipe` view and module with
   the same events (`onPagerPosition` every frame, `onPagerState` on select and settle), sequence numbers and spring
   (critically damped, a quarter-second period), stepped on the app's 60 Hz frames. With Windows' animations off it
-  lands at once. Swipe gestures (two-finger scroll, the rubber band, haptics) have no input on Windows yet, so only
-  clicks, shortcuts and outside switches page.
+  lands at once. A sideways wheel over the sidebar (a tilt wheel, or a sideways two-finger pan on a touchpad that sends
+  wheel input) pages to the next or previous profile, as the Mac's wheel paging does (#2406). `WindowManager`'s
+  handler on each window island's `InputPointerSource.PointerWheelChanged` (the input path React Native for Windows
+  itself takes; a CI probe showed `WH_MOUSE` and `WH_GETMESSAGE` thread hooks see no wheel over the island) sends a
+  `swipeWheel` window event with the point, in layout units, for a window with a paging `SwipeArea`. Each such area
+  measures itself then, so a moved, resized or hidden sidebar is never judged by an old rectangle, and pages through
+  the Mac's `wheel` swipe event (a 120 delta is 10 points) for `profilePager.ts` when the point is inside it. Only the
+  sidebar's area pages this way (`wheelPages`, set by `ProfileSwipeArea` for the sidebar): the top tab strip's area
+  sits over its own horizontal scrolling, which keeps the sideways wheel. Shift with the wheel doesn't page, since the vertical list scrolls with it too. A vertical wheel
+  is left to the tab list. The finger-following swipe with its rubber band and haptics still has no input on Windows.
 - Shadows of the views drawn in TypeScript (`Surface`, popover bubbles) are rounded rings drawn behind the fill
   (`src/views/shadowLayers.ts`), fading like a Gaussian blur of the edge: React Native for Windows casts a view's shadow
   from its rectangle whatever its corner radius, which left grey square corners behind the new tab's command bar.

@@ -1879,6 +1879,61 @@ function Invoke-SidebarWheelTour {
   Stop-Ardia $session
 }
 
+function Read-WindowProfile($Session) {
+  $path = Join-Path $Session.Data "session.json"
+  try {
+    $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)
+    try { $text = [System.IO.StreamReader]::new($stream).ReadToEnd() } finally { $stream.Dispose() }
+    $saved = $text | ConvertFrom-Json
+    return [string](@($saved.windows)[0].profileId)
+  } catch {
+    return ""
+  }
+}
+
+function Send-SidewaysWheel([int]$Notches) {
+  $delta = [int64](120 * $Notches)
+  if ($delta -lt 0) { $delta += 4294967296 }
+  [ArdiaTour]::mouse_event([uint32]0x01000, 0, 0, [uint32]$delta, [UIntPtr]::Zero)
+}
+
+function Invoke-SidebarPagerWheelTour {
+  $data = Join-Path (Join-Path $Out "data") "sidebar-pager-wheel"
+  Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $data
+  New-Item -ItemType Directory -Force -Path $data | Out-Null
+  $saved = '{"version":11,"profiles":{"default":{"id":"default","name":"Personal","color":"plum","icon":null,"createdAt":0},"p-work":{"id":"p-work","name":"Work","color":"blue","icon":null,"createdAt":1790812800000,"dataId":"default"}},"profileOrder":["default","p-work"],"settings":{},"windows":[{"id":"w-pager-1","profileId":"default","tabIds":[],"activeTabIds":{},"sidebarOpen":true,"frame":null,"createdAt":1790812800000,"incognito":false}],"windowOrder":["w-pager-1"],"focusedWindowId":"w-pager-1","tabs":[]}'
+  Set-Content -LiteralPath (Join-Path $data "session.json") -Value $saved -Encoding utf8NoBOM
+  $session = Start-Ardia "sidebar-pager-wheel" -Onboarded -KeepData
+  if (-not (Test-Usable $session)) { Stop-Ardia $session; return }
+  Invoke-Stop $session "sidebar-pager-wheel" "A sideways wheel over the sidebar pages between profiles; a vertical one does not" {
+    param($stop)
+    $stop.Did = "Started with two profiles, Personal shown. Over the middle of the sidebar: turned the wheel down 3 notches, then sent a sideways wheel notch right, then one left, reading the window's profile in session.json after each."
+    $stop.Expected = "the vertical wheel leaves Personal; right pages to Work; left pages back to Personal."
+    Focus-Window $session $session.Main $stop | Out-Null
+    $client = Get-Client $session.Main
+    if (-not $client) { $stop.Seen = "no"; $stop.Facts.Add("the window could not be measured"); return }
+    Send-MouseMove ($client.X + [int](90 * $client.Scale)) ($client.Y + [int]($client.Height / 2))
+    Start-Sleep -Milliseconds 400
+    $wait = { param($want) Wait-Until $session { (Read-WindowProfile $session) -eq $want } 4000 | Out-Null; Read-WindowProfile $session }
+    $start = Read-WindowProfile $session
+    $mark = Get-LogCount $session
+    [ArdiaTour]::mouse_event([uint32]0x0800, 0, 0, [uint32]4294966936, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 1500
+    $afterVertical = Read-WindowProfile $session
+    Send-SidewaysWheel 1
+    $afterRight = & $wait "p-work"
+    Start-Sleep -Milliseconds 600
+    Save-Shot $stop $session.Main | Out-Null
+    Send-SidewaysWheel -1
+    $afterLeft = & $wait "default"
+    $lines = @(Get-LinesSince $session $mark 'sideways wheel')
+    $stop.Facts.Add("profile at the start: $start; after the vertical wheel: $afterVertical; after right: $afterRight; after left: $afterLeft")
+    $stop.Facts.Add("log lines: $(@($lines | ForEach-Object { $_ -replace '^\w+ \d+ ', '' }) -join '; ')")
+    Set-Seen $stop ($start -eq "default" -and $afterVertical -eq "default" -and $afterRight -eq "p-work" -and $afterLeft -eq "default")
+  } | Out-Null
+  Stop-Ardia $session
+}
+
 function Invoke-ShortcutStop($Session, [string]$Slug, [string]$Title, [string]$Keys, [byte[]]$Modifiers, [byte]$Key, [string]$Command, [string]$Expected, [switch]$WatchBand, [switch]$ClosesOnEscape, [switch]$EscapeCaptured) {
   Invoke-Stop $Session $Slug $Title {
     param($stop)
@@ -3104,7 +3159,8 @@ $tours = @(
   @{ Name = "sidebar on the right"; Run = { Invoke-LayoutTour "sidebar-right" @{ sidebarSide = "right" } "Sidebar on the right" "the window buttons sit in the sidebar's header, and the gap beside them is a caption region." } },
   @{ Name = "dark"; Run = { Invoke-DarkTour } },
   @{ Name = "motion"; Run = { Invoke-MotionTour } },
-  @{ Name = "sidebar wheel"; Run = { Invoke-SidebarWheelTour } }
+  @{ Name = "sidebar wheel"; Run = { Invoke-SidebarWheelTour } },
+  @{ Name = "sidebar pager wheel"; Run = { Invoke-SidebarPagerWheelTour } }
 )
 
 if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
