@@ -154,6 +154,18 @@ test("a state the ordinary transaction put back after a run together is not take
   assert.deepEqual(heard, ["00>10"]);
 });
 
+test("a run together after the ordinary transaction put the entry state back settles against that state, not the earlier run's", () => {
+  const { store, settled, heard, transaction } = settling();
+  transaction(() => {
+    const entry = store.getState();
+    transaction(() => store.getState().bump("x"), { together: true });
+    store.setState(entry, true);
+    transaction(() => store.getState().bump("x"), { together: true });
+  });
+  assert.deepEqual(settled, ["00>10", "00>10"], "the second run is settled from the entry state, so a step that watches x sees it change");
+  assert.deepEqual(heard, ["00>10"]);
+});
+
 test("a run together is counted by the options it was given, whatever the run does to them", () => {
   const { store, heard, transaction } = settling((s, prev) => s.x !== prev.x);
   const options = { together: true };

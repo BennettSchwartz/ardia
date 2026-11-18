@@ -57,10 +57,11 @@ export function splitsWithin(s: Pick<BrowserState, "splits">, tabIds: string[]):
 }
 
 export function withSplitsBack(s: BrowserState, kept: SplitView[], windowId: string): BrowserState {
+  const carried = kept.filter((v) => s.splits[v.id] !== v);
   const taken = new Set(Object.values(s.splits).flatMap((v) => splitTabIds(v)));
   let splits = s.splits;
   let restored = 0;
-  for (const v of kept) {
+  for (const v of carried) {
     const profileId = s.tabs[splitTabIds(v)[0]!]?.profileId;
     if (!splitTabIds(v).every((id) => s.tabs[id]?.windowId === windowId && s.tabs[id]?.profileId === profileId && !taken.has(id))) continue;
     const id = splits[v.id] ? newId("split") : v.id;
@@ -68,6 +69,6 @@ export function withSplitsBack(s: BrowserState, kept: SplitView[], windowId: str
     splitTabIds(v).forEach((t) => taken.add(t));
     restored++;
   }
-  if (kept.length) noteGroupMoveSplits(kept.length, restored);
+  if (carried.length) noteGroupMoveSplits(carried.length, restored);
   return splits === s.splits ? s : { ...s, splits };
 }

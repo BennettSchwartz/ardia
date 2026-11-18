@@ -157,6 +157,16 @@ test("a group move counts the splits that came along, none for a group without o
   assert.deepEqual(takeGroupMoveSplitCounts(), { group_move_splits_kept: 0, group_move_splits_dropped: 0 });
 });
 
+test("a move its destination refuses leaves the split where it was, and counts it neither kept nor dropped", () => {
+  const { w, ids } = windowWith("a", "b", "c", "d");
+  const g = S().groupTabs([ids[1], ids[2], ids[3]], { name: "Trip", pinned: false });
+  S().createSplit([ids[1], ids[2]]);
+  takeGroupMoveSplitCounts();
+  S().moveGroupToWindow(g, "no-such-window");
+  assert.deepEqual(splitIn(w).map((v) => v.tabs), [["b", "c"]], "the split is still in the window the group stayed in");
+  assert.deepEqual(takeGroupMoveSplitCounts(), { group_move_splits_kept: 0, group_move_splits_dropped: 0 });
+});
+
 test("Move to Window with shared tabs keeps the destination group's own members, a split with a local pane included", () => {
   const { w, ids } = windowWith("a", "b", "c");
   const other = S().createWindow({ url: "https://x.com/" });

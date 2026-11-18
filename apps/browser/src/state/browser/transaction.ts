@@ -53,7 +53,10 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
         if (!depth) return publish(prev);
         heard ??= prev;
         if (together) settledAt = settleNow(settledAt ?? heard);
-        else if (heardAlone?.(s, prev)) hear();
+        else {
+          settledAt = null;
+          if (heardAlone?.(s, prev)) hear();
+        }
       });
       api.subscribe = (listener) => {
         listeners.add(listener);
