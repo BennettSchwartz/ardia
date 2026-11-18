@@ -18,6 +18,7 @@ import { watchPressLoops } from "./pressLoops";
 import { reportIdentity, resetAnonymousId, telemetryIdentity } from "./identity";
 import { diagnosticsText } from "./diagnosticsSnapshot";
 import { watchPasteRefused } from "./pasteRefused";
+import { startFreezeWatch } from "./freezes";
 
 export { installErrorReporting };
 export { telemetryIdentity, reportIdentity, resetAnonymousId, type ReportIdentity, type TelemetryIdentity } from "./identity";
@@ -31,6 +32,7 @@ export function startTelemetry({ continuing = false }: { continuing?: boolean } 
   watchPasteRefused();
   startWatchNotice();
   watchPressLoops();
+  startFreezeWatch();
   startDaily(onboardingCompletedAt() !== null);
   if (__DEV__) {
     (globalThis as { acTelemetry?: unknown }).acTelemetry = {

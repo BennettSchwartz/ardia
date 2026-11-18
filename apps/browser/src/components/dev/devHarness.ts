@@ -193,6 +193,21 @@ export function startDevHarness() {
     get airTraffic(): typeof import("../../state/airTraffic/store") & typeof import("../../state/airTraffic/preview") & typeof import("../../state/littleArdia/actions") {
       return { ...require("../../state/airTraffic/store"), ...require("../../state/airTraffic/preview"), ...require("../../state/littleArdia/actions") };
     },
+    blockJs(ms: number, garbage = false) {
+      setTimeout(() => {
+        const until = Date.now() + ms;
+        let kept: number[][] = [];
+        while (Date.now() < until) {
+          if (!garbage) continue;
+          kept.push(new Array(256).fill(kept.length));
+          if (kept.length > 4000) kept = [];
+        }
+      }, 0);
+      return ms;
+    },
+    get freezes(): typeof import("../../state/telemetry/freezes") {
+      return require("../../state/telemetry/freezes");
+    },
   };
   (globalThis as { ac?: typeof ac }).ac = ac;
   watchDevEval(readDocument, __DEV__ ? 50 : 250, (id, source) => {

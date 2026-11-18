@@ -251,6 +251,7 @@ const scripting: Modules["ArdiaScripting"] = {
 
 const dev: Modules["ArdiaDev"] = {
   devCrash: () => Promise.resolve(),
+  devBlockMain: (ms) => Promise.resolve(ms),
   devRenderIntroMusic: () => Promise.resolve(null),
   devRunAppleScript: () => Promise.resolve({ ok: false, error: "no AppleScript in tests" }),
   devSnapshotWindow: () => Promise.resolve(false),

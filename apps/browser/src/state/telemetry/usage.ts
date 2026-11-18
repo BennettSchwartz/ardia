@@ -18,6 +18,7 @@ import { emitJourneys, journeysEnding, startJourneys } from "./journeys";
 import { commandBarPlacementLabel, takeExternalAppRequests, takeNotificationRequestCounts, takeRecentlyClosedCounts, takeHistoryRemovalCounts, takeOmniboxLatency, takePopupTabCounts, takeSearchSuggests } from "./track";
 import { contextSamples, noteAppMemory, recordContext, takeMainProcessWork, takeContentDriftCounts, takeColdTabHoldCounts, startContextSamples, stopContextSamples, watchEngineReports } from "./diagnostics";
 import { emitTabPresses } from "./tabPresses";
+import { takeFreezeCounts } from "./freezes";
 import { switcherSwitchProperties } from "./switcherPresses";
 import { profileSwitched } from "./profileSwap";
 import type { SavedContext } from "./savedContext";
@@ -299,7 +300,10 @@ async function sampleMemory(consent: ConsentToken | null) {
     }
     if (!total) return;
     if (stillValid(consent)) noteAppMemory(mb(total));
-    capture("perf_memory", { ...(await takeMainProcessWork()), ...(await takeContentDriftCounts()), ...(await takeColdTabHoldCounts()),
+    const mainProcessWork = await takeMainProcessWork();
+    const contentDrift = await takeContentDriftCounts();
+    const coldTabHolds = await takeColdTabHoldCounts();
+    capture("perf_memory", { ...mainProcessWork, ...contentDrift, ...takeFreezeCounts(consent), ...coldTabHolds,
       total_mb: mb(total),
       browser_mb: mb(browser),
       gpu_mb: mb(gpu),

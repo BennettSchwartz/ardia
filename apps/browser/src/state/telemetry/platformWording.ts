@@ -12,6 +12,7 @@ export const PHRASES_ONLY_WITH: Readonly<Partial<Record<FeatureFlag, string>>> =
   launchLoad: ". Also at launch: the Mac's load average (one number, how busy it was) and whether the app was started as a login item",
   holdsColdPagesUntilPainted:
     ". Also how many times a tab that hadn't loaded yet kept the New Tab page's background until its page first drew, how many of those waits ended because the page drew, finished loading, was clicked or took over 4 seconds, and how long they took in all",
+  freezeWatch: ", and how many times Ardia's windows or its interface code stopped responding for a quarter of a second or more, in rough lengths from a quarter of a second to over 10 seconds, with the longest one, how many of those held up a click or key press and the longest such wait, how many of the interface code's stops had their time spent freeing its memory measured, how much time that was in all and the longest in one stop, how many of those stops went mostly to freeing memory, and how many times and for how long it freed memory in that hour, with that memory's size in rough steps",
 };
 
 export const termRules = (terms: PlatformTerms): readonly { mac: RegExp; platform: string }[] => [
