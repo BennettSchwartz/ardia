@@ -5,6 +5,10 @@ import { descendantIds, nestGroups, withGroupsPlaced, withParent } from "../grou
 import { keyField } from "../pins/pinMirror";
 import { splitTabIds } from "../splits/splits";
 
+let moveTransaction: (run: () => void) => void = (run) => run();
+export const setGroupMoveTransaction = (transaction: (run: () => void) => void) => void (moveTransaction = transaction);
+export const inOneUpdate = (run: () => void) => moveTransaction(run);
+
 export function groupTree(groups: Record<string, TabGroup>, groupId: string): TabGroup[] {
   const root = groups[groupId];
   return root ? [withParent(root, undefined), ...descendantIds(groups, groupId).map((id) => groups[id]!)] : [];

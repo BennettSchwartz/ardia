@@ -120,6 +120,23 @@ for (const to of ["window", "profile"]) {
   });
 }
 
+for (const toNewWindow of [false, true]) {
+  test(`Move to Window${toNewWindow ? " › New Window" : ""} tells the store's listeners once, with the group's split already back`, () => {
+    const { w, ids } = windowWith("a", "b", "c", "d");
+    const open = toNewWindow ? null : S().createWindow({ url: "https://x.com/" });
+    const g = S().groupTabs([ids[1], ids[2], ids[3]], { name: "Trip", pinned: false });
+    S().createSplit([ids[1], ids[2]]);
+    assert.deepEqual(splitIn(w).map((v) => v.tabs), [["b", "c"]]);
+    const heard = [];
+    const stop = useBrowser.subscribe((s) => heard.push(Object.values(s.splits).map((v) => ({ window: v.windowId, tabs: splitTabIdsOf(v).map(host) }))));
+    const dest = S().moveGroupToWindow(g, open);
+    stop();
+    assert.ok(dest && dest !== w);
+    assert.equal(heard.length, 1, "one notification for the whole move");
+    assert.deepEqual(heard[0], [{ window: dest, tabs: ["b", "c"] }], "the split was never heard taken apart");
+  });
+}
+
 test("Move to Window with shared tabs keeps the destination group's own members, a split with a local pane included", () => {
   const { w, ids } = windowWith("a", "b", "c");
   const other = S().createWindow({ url: "https://x.com/" });
