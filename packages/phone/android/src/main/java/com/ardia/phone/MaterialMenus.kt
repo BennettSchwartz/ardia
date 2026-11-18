@@ -31,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -80,6 +82,10 @@ internal object MaterialMenuRules {
         return next
     }
 
+    fun isDark(scheme: ColorScheme): Boolean = scheme.surface.luminance() < 0.5f
+
+    fun groupColor(scheme: ColorScheme, standard: Color): Color = if (isDark(scheme)) scheme.surfaceContainerHigh else standard
+
     fun buttonsInOrder(sheet: NativeMenuRules.Sheet): List<NativeMenuRules.ActionSheetActionShape> = sheet.buttons.asReversed()
 }
 
@@ -103,11 +109,12 @@ private fun MaterialMenuPages(rows: List<NativeMenuRules.Row>, onPick: (String) 
     val page = pages.last()
     val scheme = MaterialTheme.colorScheme
     val sections = MaterialMenuRules.sections(page.rows)
+    val groupColor = MaterialMenuRules.groupColor(scheme, MenuDefaults.groupStandardContainerColor)
     val back = page.title
     val groupCount = sections.size + if (back != null) 1 else 0
     var groupIndex = 0
     if (back != null) {
-        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount)) {
+        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount), containerColor = groupColor) {
             DropdownMenuItem(
                 onClick = { pages = pages.dropLast(1) },
                 text = { Text(back, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -120,7 +127,7 @@ private fun MaterialMenuPages(rows: List<NativeMenuRules.Row>, onPick: (String) 
     for (section in sections) {
         if (groupIndex > 0) Spacer(Modifier.height(MenuDefaults.GroupSpacing))
         val actions = section.filterIsInstance<NativeMenuRules.Action>()
-        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount)) {
+        DropdownMenuGroup(shapes = MenuDefaults.groupShape(groupIndex++, groupCount), containerColor = groupColor) {
             for (row in section) {
                 when (row) {
                     is NativeMenuRules.Header -> MenuDefaults.DropdownMenuGroupLabel(modifier = Modifier.semantics { heading() }) {

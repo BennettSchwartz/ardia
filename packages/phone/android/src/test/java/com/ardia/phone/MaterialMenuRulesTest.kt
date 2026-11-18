@@ -3,6 +3,7 @@ package com.ardia.phone
 import com.ardia.phone.MaterialMenuRules.Bounds
 import com.ardia.phone.NativeMenuRules.ActionSheetActionShape
 import com.ardia.phone.NativeMenuRules.MenuItemShape
+import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -69,6 +70,15 @@ class MaterialMenuRulesTest {
         val after = NativeMenuRules.rows(listOf(MenuItemShape("c", "Copy Link")))
         val open = listOf(MaterialMenuRules.Page(null, before), MaterialMenuRules.Page("Theme", (before.single() as NativeMenuRules.Action).item.children!!))
         assertEquals(listOf<String?>(null), MaterialMenuRules.refreshed(open, after).map { it.title })
+    }
+
+    @Test
+    fun darkMenusSitOnTheHigherContainerSoTheyStandOutFromTheDarkSurfaceBehindThem() {
+        val standard = Color(0xFF241913)
+        val dark = androidx.compose.material3.darkColorScheme(surface = Color(0xFF1B110C), surfaceContainerHigh = Color(0xFF322824))
+        val light = androidx.compose.material3.lightColorScheme(surface = Color(0xFFFFF8F6))
+        assertEquals(Color(0xFF322824), MaterialMenuRules.groupColor(dark, standard))
+        assertEquals("light keeps the library's own colour", standard, MaterialMenuRules.groupColor(light, standard))
     }
 
     @Test
