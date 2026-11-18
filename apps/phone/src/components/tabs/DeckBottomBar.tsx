@@ -7,7 +7,7 @@ import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useIncognito } from "../../state/tabs/hooks";
 import { countUsage } from "../../state/telemetry/telemetry";
 import { noteDeckBarTop, watchDeckBar } from "../../state/toasts/store";
-import { capsule, chromeInk, ChromeSurface, deckChromeLayout, deckChromeMotion, font, iPhoneOr, PressScale, rolesFor, startLayout, Symbol, tabsCurve, tabsLayout, useTheme, type MenuItem, SystemGlyph } from "../ui";
+import { capsule, ChromeSurface, deckChromeLayout, deckChromeMotion, font, ink, iPhoneOr, PressScale, rolesFor, startLayout, Symbol, tabsCurve, tabsInk, tabsLayout, useTheme, type MenuItem, SystemGlyph } from "../ui";
 import { MenuTrigger } from "../ui/MenuTrigger";
 import { useKeyboardHeight } from "../search/useKeyboardHeight";
 import { FadingGlyphs, GlassPlusButton, type ChromeFade } from "./ChromeButtons";
@@ -47,8 +47,9 @@ export function IncognitoSwitch({ incognito, dark, glassShown, glassShownMs, gly
   return (
     <PressScale label="Incognito" hint={incognito ? "Shows your tabs." : "Shows your Incognito tabs."} checked={incognito} onPress={switchDeckIncognito} onPressIn={haptics.barPress} style={size}>
       <ChromeSurface testID="deckBarIncognito" shape="circle" cornerRadius={capsule(deckChromeLayout.barCircle)} incognito={incognito} dark={dark || incognito} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
-        <FadingGlyphs testID="deckBarIncognitoGlyph" pointerEvents="none" fade={glyphFade}>
-          <Symbol name="eyes" size={deckChromeLayout.incognitoGlyph} color={incognito ? chromeInk.dark.foreground : rolesFor(dark).label} />
+        <FadingGlyphs testID="deckBarIncognitoGlyph" pointerEvents="none" fade={glyphFade} style={[styles.centered, size]}>
+          {incognito ? <View testID="deckBarIncognitoOn" style={[styles.switchOn, { backgroundColor: dark ? ink.white : tabsInk.incognitoCard }]} /> : null}
+          <Symbol name="eyes" size={deckChromeLayout.incognitoGlyph} color={incognito ? (dark ? tabsInk.incognitoCard : ink.white) : rolesFor(dark).label} />
         </FadingGlyphs>
       </ChromeSurface>
     </PressScale>
@@ -160,6 +161,7 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, safeSide, incogni
 const styles = StyleSheet.create({
   place: { position: "absolute", left: 0, right: 0 },
   centered: { alignItems: "center", justifyContent: "center" },
+  switchOn: { position: "absolute", width: deckChromeLayout.incognitoOn, height: deckChromeLayout.incognitoOn, borderRadius: capsule(deckChromeLayout.incognitoOn) },
   bar: { height: deckChromeLayout.barCircle, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.barGap },
   searchHit: { flex: 1, height: deckChromeLayout.barCircle },
   search: { flex: 1, paddingLeft: deckChromeLayout.searchLead },
