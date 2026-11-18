@@ -12,6 +12,7 @@
 #include "ardia/core/ac_host_visibility.h"
 #include "ardia/core/ac_launch_switches.h"
 #include "ardia/win/autoplay.h"
+#include "ardia/win/contents_background.h"
 #include "ardia/win/context_menu.h"
 #include "ardia/win/frame_view.h"
 #include "ardia/win/hooks.h"
@@ -67,6 +68,7 @@
 #include "ui/gfx/geometry/rect.h"
 #include "third_party/blink/public/mojom/window_features/window_features.mojom.h"
 #include "url/gurl.h"
+#include "url/url_constants.h"
 
 namespace ardia_win {
 
@@ -336,6 +338,7 @@ void Host::Start() {
   g_ardia_win_offer_inserted = &HostNotesOfferInserted;
   InstallHostedPageMenus();
   InstallAutoplayPolicy();
+  InstallContentsBackground();
   browsers_observation_.Observe(GlobalBrowserCollection::GetInstance());
 }
 
@@ -344,7 +347,10 @@ void Host::Call(const std::string& verb,
                 HWND window,
                 Reply reply) {
   if (ardiacore::TestInstance()) {
-    NoteForTest("host call " + verb + " " + Text(args, "key"));
+    const bool colored = (verb == "tab.create" || verb == "tab.show") &&
+                         ReadContentsBackground(args).given;
+    NoteForTest("host call " + verb + " " + Text(args, "key") +
+                (colored ? " contentsBackground set" : ""));
     reply = base::BindOnce(
         [](std::string verb, Reply reply, base::DictValue answer) {
           NoteForTest("host answered " + verb);
@@ -553,6 +559,11 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
     std::move(reply).Run(Error("a tab needs a key and a window"));
     return;
   }
+  const ContentsBackgroundArgument background = ReadContentsBackground(args);
+  if (background.malformed) {
+    std::move(reply).Run(Error("contentsBackground is not a #RRGGBB colour"));
+    return;
+  }
   std::string adopt = Text(args, "adopt");
   content::WebContents* existing = Find(key);
   if (!existing && !adopt.empty()) {
@@ -569,6 +580,9 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
   if (existing) {
     NowPlaying::CancelWake(existing);
     NowPlaying::Resend(existing);
+    if (background.color) {
+      SetContentsBackground(existing, *background.color);
+    }
     if (!PlaceTab(existing, parent)) {
       std::move(reply).Run(Error("the tab could not move to this window"));
       return;
@@ -583,13 +597,14 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
               base::BindOnce(&Host::CreateTabInProfile,
                              weak_factory_.GetWeakPtr(), std::move(key),
                              Text(args, "url"), profile_name, parent,
-                             std::move(reply)));
+                             background.color, std::move(reply)));
 }
 
 void Host::CreateTabInProfile(std::string key,
                               std::string url,
                               std::string profile_name,
                               HWND parent,
+                              std::optional<SkColor> background,
                               Reply reply,
                               Profile* profile) {
   if (!profile || !::IsWindow(parent)) {
@@ -598,6 +613,9 @@ void Host::CreateTabInProfile(std::string key,
   }
   profile_names_[profile] = profile_name;
   if (content::WebContents* existing = Find(key)) {
+    if (background) {
+      SetContentsBackground(existing, *background);
+    }
     PlaceTab(existing, parent);
     base::DictValue result;
     result.Set("tab", TabState::IdOf(existing));
@@ -629,8 +647,12 @@ void Host::CreateTabInProfile(std::string key,
   }
   tabs_[key] = contents;
   TabState* state = TabState::Bind(contents, key);
+  if (background) {
+    SetContentsBackground(contents, *background);
+  }
   if (url.empty()) {
     state->WatchOpeningBlank(opening_navigation_id);
+    MarkAheadBlank(contents);
   }
   state->NoteNavigation();
   TabEvents::Attach(contents);
@@ -644,6 +666,13 @@ base::DictValue Host::ShowTab(const base::DictValue& args, HWND parent) {
   content::WebContents* contents = Find(key);
   if (!contents) {
     return Error("no such tab");
+  }
+  const ContentsBackgroundArgument background = ReadContentsBackground(args);
+  if (background.malformed) {
+    return Error("contentsBackground is not a #RRGGBB colour");
+  }
+  if (background.color) {
+    SetContentsBackground(contents, *background.color);
   }
   Browser* browser = BrowserOf(contents);
   auto found = hosted_.find(browser);
@@ -682,6 +711,7 @@ base::DictValue Host::ShowTab(const base::DictValue& args, HWND parent) {
   if (index != TabStripModel::kNoTab && index != model->active_index()) {
     model->ActivateTabAt(index);
   }
+  RefreshContentsBackground(contents);
   hosted.parent = parent;
   WatchParent(parent);
   SetOwner(window, parent);
@@ -867,6 +897,9 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
     bool user_initiated = args.FindBool("userInitiated").value_or(false);
     content::NavigationController::LoadURLParams params(
         GURL(Text(args, "url")));
+    if (params.url.SchemeIs(url::kJavaScriptScheme)) {
+      EndAheadBlank(contents);
+    }
     params.transition_type =
         user_initiated
             ? ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |

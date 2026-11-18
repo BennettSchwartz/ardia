@@ -622,10 +622,25 @@ is plain Chromium.
   Chromium opens by itself (a link opened in a new window) stays off screen until the app adopts its tabs.
 - The verbs: `tab.create` (a key, a profile, a URL or a tab to adopt; the same key again moves the tab to the window
   that asks), `tab.show` (visible, and where in the window, in the UI's points; a corner radius and holes),
+  both with an optional `contentsBackground`,
   `tab.close`, `tab.call` (load, back, forward, reload, stop, find, zoom, scripts, DevTools, print, site info and the
   rest of the Mac tab's methods, `tab_calls.cc`), `tab.discard`, `tabs.list`, `host.info`, `app.quit`. Events come as
   the topic `tab` with a key, a name and data (navigation, progress, favicon, find, zoom, security, media, pagePress,
   windowClose and more), and `tab.opened` for a tab Chromium made itself, with who opened it.
+- `contentsBackground` is the tab's empty card colour, `opaqueCard(theme)` as `#RRGGBB` in capitals (anything else is
+  refused with an error; absent or empty leaves the tab as it is). It is the Mac's `ContentsBackground`
+  (`contents_background.cc`): the colour goes on the page view (its colour before a frame) and on Chromium's contents
+  view (`chromium-win-contents-background.patch`, which otherwise paints the theme's New Tab colour there and on the
+  page view). A tab created with no URL keeps its prewarmed `about:blank` transparent, page base and page view both, so
+  the contents view's card colour shows through, until a real navigation is ready to commit, a same-document
+  navigation, an access to the initial document, a `javascript:` load, a script call or a DevTools client that isn't
+  the engine's own link watcher. Both must be transparent: an opaque page view makes the compositor treat the page
+  as covering the contents view and draw nothing under it, and an opaque base on an `about:blank` is replaced by
+  Chromium's `#121212` under a dark preference (`AboutBlankPageRespectsDarkModeOnUserAction`). So a slow load from
+  the New Tab shows the card colour until it commits, and wherever Chromium has no frame yet (a new page view before
+  its first frame after a cross-site Back or reload, a woken tab) the colour shows instead of white. `tab.show` sends
+  it again, which is how a theme change reaches a tab. Self-checks: `engine contents background:`
+  (`selfCheck/engineContentsBackground.ts`, #2666), with Chromium's dark preference on and off (`preferDarkForTest`).
 - `tab.close` closes as the Mac's `TabBridge::CloseAfterUnloadHandlers` does: a page with `beforeunload` or `unload`
   handlers gets `beforeunload` with its prompt cancelled (no "Leave site?" is ever shown for a tab the app closed), then
   its unload handlers whatever it answered, each step with 2 seconds, and then the host deletes the tab

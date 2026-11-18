@@ -8,6 +8,8 @@ source_set("win") {
     "api.h",
     "autoplay.cc",
     "autoplay.h",
+    "contents_background.cc",
+    "contents_background.h",
     "context_menu.cc",
     "context_menu.h",
     "external_apps.cc",
