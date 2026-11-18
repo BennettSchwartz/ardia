@@ -16,16 +16,18 @@ export type AppEvent =
   | { type: "dragEscape" }
   | { type: "unclaimedEscape"; windowId: string }
   | { type: "snapKeyHandedBack"; windowId: string; afterMenu?: boolean }
-  | { type: "centeredResize" }
+  | { type: "centeredResize"; epoch: string }
   | { type: "appLinkOpened"; windowId: string | null }
   | { type: "littleArdiaReturnedToApp" }
-  | { type: "windowTitleRead" }
+  | { type: "littleArdiaLinkKeptBehind"; when: "activation" | "arrival" | "open" | "released" }
+  | { type: "windowTitleRead"; epoch: string }
   | { type: "keyHoldReplay"; tag: number; count: number }
   | { type: "littleArdiaGlobalShortcut" }
-  | { type: "windowDragLoop" }
+  | { type: "windowDragLoop"; epoch: string }
   | {
       type: "pasteRefused";
       reason: string;
+      epoch: string;
       gateOpen: boolean;
       layout?: string;
       types?: string[];
