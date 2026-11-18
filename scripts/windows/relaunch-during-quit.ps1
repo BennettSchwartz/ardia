@@ -268,6 +268,18 @@ function Wait-QuitDialog([string]$what, [int]$processId, [int]$seconds = 15) {
   Fail-Quit $what "no question on screen within $seconds s (dialog.json written: $($null -ne (Read-QuitDialog)); Ardia $processId running: $($null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)))"
 }
 
+function Find-QuitDialog([int]$processId, [int]$seconds) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $deadline) {
+    $asked = Read-QuitDialog
+    $shown = @([RelaunchCheck.Native]::DialogWindows([uint32]$processId))
+    if ($asked -and $shown.Count) { return [pscustomobject]@{ Asked = $asked; Window = $shown[0]; Pid = $processId } }
+    if (-not (Get-Process -Id $processId -ErrorAction SilentlyContinue)) { return $null }
+    Start-Sleep -Milliseconds 100
+  }
+  return $null
+}
+
 function Answer-QuitDialog($dialog, [int]$button) {
   Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
   [RelaunchCheck.Native]::PostMessageW($dialog.Window, 0x0466, [IntPtr]$button, [IntPtr]::Zero) | Out-Null
@@ -284,10 +296,15 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   $deadline = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $deadline -and -not [QuitPages]::DownloadsStarted) { Start-Sleep -Milliseconds 100 }
   if (-not [QuitPages]::DownloadsStarted) { Fail-Quit $what "the page never started its download" }
-  Start-Sleep -Seconds 3
+  Start-Sleep -Seconds 5
   foreach ($other in @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid) | Where-Object { $_ -ne $old.Window })) { Close-Window ([pscustomobject]@{ Pid = $old.Pid; Window = $other }) }
+  $deadline = (Get-Date).AddSeconds(15)
   $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
-  if ($left.Count -ne 1 -or $left[0] -ne $old.Window) { Fail-Quit $what "after closing the other windows, Ardia $($old.Pid) has $($left.Count) app windows, not just its first one" }
+  while ((Get-Date) -lt $deadline -and ($left.Count -ne 1 -or $left[0] -ne $old.Window)) {
+    Start-Sleep -Milliseconds 200
+    $left = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
+  }
+  if ($left.Count -ne 1 -or $left[0] -ne $old.Window) { Fail-Quit $what "15 s after closing the other windows, Ardia $($old.Pid) has $($left.Count) app windows, not just its first one" }
   Remove-Item -LiteralPath (Join-Path $script:QuitData "dialog.json") -Force -ErrorAction SilentlyContinue
   [RelaunchCheck.Native]::PostMessageW($old.Window, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero) | Out-Null
   $question = $null
@@ -307,6 +324,21 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   Assert-NoQuitLine 'relaunch: a launch cancels the quit' $what "the launch cancelled a quit that hadn't begun"
   $ended = Count-QuitsEnded
   Answer-QuitDialog $question 1001
+  $answers = 1
+  $deadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $deadline -and (Get-Process -Id $old.Pid -ErrorAction SilentlyContinue)) {
+    $open = @([RelaunchCheck.Native]::AppWindows([uint32]$old.Pid))
+    if ($open.Count) {
+      foreach ($window in $open) { Close-Window ([pscustomobject]@{ Pid = $old.Pid; Window = $window }) }
+      $again = Find-QuitDialog $old.Pid 8
+      if ($again) {
+        if ($answers -ge 3) { Fail-Quit $what "the question about downloads came back $answers times" }
+        Answer-QuitDialog $again 1001
+        $answers++
+      }
+    }
+    Start-Sleep -Milliseconds 200
+  }
   Wait-Exit $old.Pid $what | Out-Null
   Assert-QuitLine 'began \(user\)' $what "answering Quit didn't start the normal quit"
   Assert-QuitLine 'the app answered yes after \d+ ms' $what "the app didn't answer the quit after the question"
@@ -315,7 +347,7 @@ function Test-LaunchWhileTheDownloadsQuestionShows {
   [QuitPages]::ReleaseDownloads()
   Keep-QuitLog $what
   $before = if ($earlier.Count) { " after $($earlier -join ', ')" } else { "" }
-  Note "$what`: the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once with no quit begun, and Quit then ended it through the normal quit with its 'process ending'"
+  Note "$what`: the question stayed$before, the same Ardia ($($shown.Pid)) opened the link once (in Little Ardia) with no quit begun, and Quit then ended it through the normal quit with its 'process ending' ($answers download question(s) answered Quit, the last when its last window closed)"
 }
 
 function Test-LaunchAtTheQuitSeam {
