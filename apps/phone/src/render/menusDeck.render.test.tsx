@@ -300,6 +300,18 @@ drawnTest("on Android the ··· menu is drawn with main's items, and Close All 
   unmount(root);
 });
 
+drawnTest("on Android Settings chosen from the drawn ··· menu opens Settings, with no native menu view mounted to lose the choice", () => {
+  withSpaces([WORK]);
+  const settings = jest.spyOn(settingsNav, "openSettings").mockImplementation(() => undefined);
+  const root = deck();
+  expect(contextMenus(root)).toHaveLength(0);
+  press(root, "More");
+  expect(contextMenus(root)).toHaveLength(0);
+  pick(root, "Settings");
+  expect(settings).toHaveBeenCalledTimes(1);
+  unmount(root);
+});
+
 drawnTest("on Android the space switcher and the Incognito pill are drawn menus, and leaving Incognito asks in the drawn action sheet", () => {
   withSpaces([WORK, HOME]);
   act(() => tabStore.useTabs.setState((state) => ({ ...state, privates: someTabs(2, true) })));
