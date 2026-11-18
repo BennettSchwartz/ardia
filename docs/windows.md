@@ -1360,11 +1360,6 @@ does run in a test instance. A scratch folder with the marker must get both powe
   report names the build whose map to use. Compose the two maps, then look the offset up as line 1, column
   `bundle_offset`: `node node_modules/react-native/scripts/compose-source-maps.js index.windows.bundle.packager.map
   index.windows.bundle.hbc.map -o index.windows.bundle.map`.
-  `windows.yml` passes `-MapOut` in the launch part of every run and uploads the folder as the artifact
-  `windows-hermes-maps-<cpu>-build-<build>`, named by the build number stamped in `Ardia.build.json`, which is the
-  `$app_build` of an event. It is kept 90 days for a release run and 14 days otherwise.
-  `index.windows.bundle.packager.map` is written next to `Bundle` in the `windows-javascript` artifact so the step
-  finds it.
 - A push to `main` or to the Windows branch gets the full run, and so does a pull request with the `full-ci` label
   (add the label, then push or re-run the run). A pull request can read its base branch's caches and no other pull
   request's, which is why the Windows branch builds on every push: without that, each pull request into it would
