@@ -5,6 +5,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -46,6 +47,14 @@ class MaterialSchemeTest {
         assertEquals(MaterialFallback.dark, MaterialScheme.roles(MaterialScheme.colorScheme(app, dark = true, given = null)))
         assertEquals(36, MaterialFallback.light.size)
         assertEquals(MaterialFallback.light.keys, MaterialFallback.dark.keys)
+    }
+
+    @Test
+    fun anOpenDialogFollowsTheWallpaperOnlyWhenItWasGivenTheWallpapersScheme() {
+        val wallpaper = darkColorScheme(primary = Color(0xFF535A92))
+        assertTrue("no scheme from JS", MaterialScheme.followsWallpaper(null, wallpaper))
+        assertTrue("JS passed the wallpaper's own scheme", MaterialScheme.followsWallpaper(mapOf("primary" to "#535a92"), wallpaper))
+        assertFalse("a profile colour seeded the scheme", MaterialScheme.followsWallpaper(mapOf("primary" to "#894A67"), wallpaper))
     }
 
     @Test

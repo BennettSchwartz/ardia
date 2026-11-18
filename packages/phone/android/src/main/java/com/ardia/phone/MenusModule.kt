@@ -270,9 +270,19 @@ class MenusModule : Module() {
                 promise.resolve(null)
                 return@AsyncFunction
             }
-            val colors = MaterialScheme.colorScheme(activity, NativeMenuRules.isDark(activity, options.appearance?.dark), options.appearance?.scheme)
+            val dark = { NativeMenuRules.isDark(activity, options.appearance?.dark) }
+            val given = options.appearance?.scheme
+            val followsWallpaper = MaterialScheme.followsWallpaper(given, MaterialScheme.colorScheme(activity, dark(), null))
+            val colors = mutableStateOf(MaterialScheme.colorScheme(activity, dark(), given))
             val sheet = NativeMenuRules.sheet(options.actions.map { NativeMenuRules.ActionSheetActionShape(it.id, it.title, it.destructive, it.cancel) })
-            val view = ComposeView(activity).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+            val compose = ComposeView(activity).apply { setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow) }
+            val view = object : FrameLayout(activity) {
+                override fun onConfigurationChanged(newConfig: Configuration?) {
+                    super.onConfigurationChanged(newConfig)
+                    if (followsWallpaper) post { colors.value = MaterialScheme.colorScheme(activity, dark(), null) }
+                }
+            }
+            view.addView(compose, FrameLayout.LayoutParams(0, 0))
             var answered = false
             val answer = { id: String? ->
                 if (!answered) {
@@ -281,7 +291,7 @@ class MenusModule : Module() {
                     content.post { content.removeView(view) }
                 }
             }
-            view.setContent { MaterialSheetDialog(colors, options.title, options.message, sheet, answer) }
+            compose.setContent { MaterialSheetDialog(colors.value, options.title, options.message, sheet, answer) }
             content.addView(view, FrameLayout.LayoutParams(0, 0))
         }.runOnQueue(Queues.MAIN)
 
