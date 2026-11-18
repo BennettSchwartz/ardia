@@ -3,7 +3,8 @@ import { View } from "react-native";
 import { startChromeTabs } from "../../state/tabs/chromeTabs";
 import { useIsSmallWindow, useSplitOf } from "../../state/windows/card";
 import { usePeekOpenedFrom } from "../../state/peek/hooks";
-import { useActiveTabId, useSettings, useWindowFullScreen, useWindowId } from "../../state/browser/hooks";
+import { useActiveTabId, useSettings, useTabsShown, useWindowFullScreen, useWindowId } from "../../state/browser/hooks";
+import { useSidebarField } from "../../state/sidebar/chrome";
 import { useBookmarksBarHeight } from "../bookmarks/barSize";
 import { useBookmarksBarMode } from "../../state/bookmarks/hooks";
 import { POPOVER_MARGIN } from "../ui";
@@ -24,6 +25,7 @@ import { PeekOverlay } from "../peek/PeekOverlay";
 import { dismissPeek, startPeeks } from "../../state/peek/actions";
 import { usePaneLayout } from "./usePaneLayout";
 import { cardChrome } from "./paneChrome";
+import { useCardFrame } from "./cardFrame";
 import { TabPane } from "./TabPane";
 import { BesidePeekPopovers, PeekPage } from "./PageOverlays";
 import { besidePeekSpan } from "./pageAnchors";
@@ -45,6 +47,10 @@ export function ContentCard() {
   const barMode = useBookmarksBarMode(windowId);
   const toolbarRow = useToolbarRow();
   const barHeight = useBookmarksBarHeight();
+  const cardRadius = useCardFrame().radius;
+  const sidebarField = useSidebarField();
+  const sidebarShown = useTabsShown(windowId);
+  const fieldInSidebar = !!sidebarField && sidebarShown;
   const captionRoom = useCardCaptionRoom(usePageFrameInset());
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [origin, setOrigin] = useState<{ x: number; y: number } | null>(null);
@@ -168,6 +174,10 @@ export function ContentCard() {
               peekShown={!!peekId}
               lingering={tabId === lingerId}
               seeThrough={!!lingerId && tabId === activeId}
+              toolbarHeight={toolbarRow.height}
+              bookmarksBarHeight={barHeight}
+              radius={cardRadius}
+              fieldInSidebar={fieldInSidebar}
             />
           );
         })}

@@ -114,6 +114,8 @@ export function useWindowUi() {
 
 export const useSettings = <T>(select: (settings: Settings) => T): T => useKeyed(watchSettings, ALL, () => select(useBrowser.getState().settings));
 
+export const useSettingsWhile = <T>(live: boolean, select: (settings: Settings) => T): T => useKeyed(watchSettings, live ? ALL : null, () => select(useBrowser.getState().settings));
+
 export const useChosenSettings = (): readonly string[] => useBrowser((s) => s.settingsMeta.chosen);
 
 export function useIsBookmarked(url: string): boolean {

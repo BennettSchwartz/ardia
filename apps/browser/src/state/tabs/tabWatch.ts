@@ -112,9 +112,9 @@ function lookSnapshot<T>(profileId: string, look: Look<T>): () => T {
   };
 }
 
-export function useLookValue<T>(profileId: string, look: Look<T>): T {
+export function useLookValue<T>(profileId: string, look: Look<T>, live = true): T {
   const get = useMemo(() => lookSnapshot(profileId, look), [profileId]);
-  return useSyncExternalStore(watchLooks, get);
+  return useSyncExternalStore(live ? watchLooks : inert, get);
 }
 
 type Settings = BrowserState["settings"];

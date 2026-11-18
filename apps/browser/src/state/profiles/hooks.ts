@@ -35,7 +35,7 @@ export const useWindowProfileValue = <T>(windowId: string, select: (profile: Pro
 
 type ProfileLook<T> = (profile: Profile | undefined, appDark: boolean, settings: Settings, palette: BasePalette | null) => T;
 
-export const useProfileLook = <T>(profileId: string, look: ProfileLook<T>): T => useLookValue(profileId, look);
+export const useProfileLook = <T>(profileId: string, look: ProfileLook<T>, live = true): T => useLookValue(profileId, look, live);
 
 export function useProfileLooks<T>(pages: readonly { id: string }[], look: ProfileLook<T>): T[] {
   const palette = useBasePaletteValue();

@@ -43,16 +43,18 @@ type ToolbarMotion = {
 export function useToolbarMotion({
   enabled,
   mode,
+  rowHeight,
   extra,
   doc,
 }: {
   enabled: boolean;
   mode: ToolbarMode;
+  rowHeight: number;
   extra: number;
   doc: string;
 }): ToolbarMotion {
   const collapsed = mode !== "shown";
-  const shownTop = useToolbarRow().height + extra;
+  const shownTop = rowHeight + extra;
   const room = shownTop - STRIP_HEIGHT;
   const [tallState, setTall] = useState<TallPage>({ on: collapsed, doc });
   const tall = tallPage(tallState, { enabled, collapsed, doc });
