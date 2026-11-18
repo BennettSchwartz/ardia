@@ -2,7 +2,7 @@ import { Dimensions, Platform, StyleSheet, Text } from "react-native";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { DesignProvider, Dialog, Menu, Sheet, useTheme } from "../components/ui";
 import { rolesFromScheme } from "../components/ui/materialRoles";
-import { materialSheetMs } from "../components/ui/MaterialSurfaces";
+import { materialMenuFill, materialSheetMs } from "../components/ui/MaterialSurfaces";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
 import { setDynamicScheme } from "../state/app/dynamicScheme";
 import { currentPreferences, setPreference } from "../state/settings/store";
@@ -165,4 +165,10 @@ onAndroid("with Android's Remove animations the material sheet comes and goes at
   expect(materialSheetMs(true, false)).toBe(0);
   expect(materialSheetMs(false, true)).toBe(400);
   expect(materialSheetMs(false, false)).toBe(200);
+});
+
+onAndroid("in dark, drawn menus sit on surfaceContainerHigh so they stand off the dark page behind them, as the native menus do; light keeps surfaceContainer", () => {
+  const dark = SEEDED_SCHEMES.ardia.dark;
+  expect(materialMenuFill(dark, true)).toBe(dark.surfaceContainerHigh);
+  expect(materialMenuFill(LIGHT, false)).toBe(LIGHT.surfaceContainer);
 });

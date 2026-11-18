@@ -273,6 +273,8 @@ export function materialMenuWidth(entries: readonly MaterialMenuEntry[]): number
   return Math.min(MENU_MAX_WIDTH, Math.max(MENU_MIN_WIDTH, Math.ceil(widest / MENU_WIDTH_STEP) * MENU_WIDTH_STEP));
 }
 
+export const materialMenuFill = (scheme: { surfaceContainer: string; surfaceContainerHigh: string }, dark: boolean) => (dark ? scheme.surfaceContainerHigh : scheme.surfaceContainer);
+
 export function materialMenuGroups(entries: readonly MaterialMenuEntry[]): { entry: MaterialMenuEntry; index: number }[][] {
   const groups: { entry: MaterialMenuEntry; index: number }[][] = [[]];
   entries.forEach((entry, index) => {
@@ -286,7 +288,7 @@ export function materialMenuGroups(entries: readonly MaterialMenuEntry[]): { ent
 }
 
 export function MaterialMenuPanel({ entries, place, panel }: { entries: MaterialMenuEntry[]; place: ViewStyle; panel?: React.RefObject<ViewInstance | null> }) {
-  const { scheme } = useMaterialTheme();
+  const { scheme, dark } = useMaterialTheme();
   const ripple = useMaterialRipple();
   const shown = useSharedValue(0);
   useEffect(() => {
@@ -296,7 +298,7 @@ export function MaterialMenuPanel({ entries, place, panel }: { entries: Material
   return (
     <Animated.View ref={panel} testID="materialMenu" accessibilityViewIsModal style={[styles.menu, { width: materialMenuWidth(entries) }, place, enter]}>
       {materialMenuGroups(entries).map((group, groupIndex) => (
-        <View key={groupIndex} testID="materialMenuGroup" style={[styles.menuGroup, { backgroundColor: scheme.surfaceContainer }]}>
+        <View key={groupIndex} testID="materialMenuGroup" style={[styles.menuGroup, { backgroundColor: materialMenuFill(scheme, dark) }]}>
           {group.map(({ entry, index }) => {
             if (entry === "divider") return null;
             if ("heading" in entry)
