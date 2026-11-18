@@ -17,11 +17,17 @@ const CHECKPOINT_MIGRATIONS: Migrations = { 0: (doc) => (typeof doc.covers === "
 const PART_VERSION = 1;
 const PART_MIGRATIONS: Migrations = { 0: unchanged };
 
+function withOwnMaps<T extends object>(parsed: T): T {
+  const rebuilt: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(parsed)) rebuilt[field] = isFields(value) ? { ...value } : value;
+  return rebuilt as T;
+}
+
 function readScopes(v: unknown): SyncDoc["scopes"] {
   const scopes: SyncDoc["scopes"] = {};
   if (!isFields(v)) return scopes;
   for (const [name, scope] of Object.entries(v)) {
-    if (isFields(scope) && isFields(scope.records) && isFields(scope.base)) scopes[name] = { ...emptyScope(), ...(scope as Partial<ScopeState>) };
+    if (isFields(scope) && isFields(scope.records) && isFields(scope.base)) scopes[name] = { ...emptyScope(), ...withOwnMaps(scope as Partial<ScopeState>) };
   }
   return scopes;
 }
@@ -83,7 +89,7 @@ function replayChanges(scopes: SyncDoc["scopes"], changes: Record<string, ScopeC
       if (json !== null) base[key] = json;
       else delete base[key];
     }
-    scopes[scope] = { ...emptyScope(), ...change.rest, records, base };
+    scopes[scope] = { ...emptyScope(), ...withOwnMaps(change.rest), records, base };
   }
 }
 
