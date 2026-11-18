@@ -59,5 +59,12 @@ class ReactChildrenLayoutTest {
     }
 
     @Test
+    fun aNativeContextMenuLetsWhatItWrapsDrawPastItsBoxSoShadowsAndRipplesAreNotCut() {
+        val menu = NativeContextMenuView(activity, appContext)
+        assertFalse("the FAB's shadow was cut at the trigger's 56 dp box", menu.clipChildren)
+        assertFalse(menu.clipToPadding)
+    }
+
+    @Test
     fun aNativeContextMenuKeepsTheViewItWrapsWhereReactPutIt() = keepsItsOnlyChildWhereReactPutIt(NativeContextMenuView(activity, appContext))
 }

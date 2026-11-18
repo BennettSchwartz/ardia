@@ -71,6 +71,15 @@ internal object MaterialMenuRules {
 
     data class Page(val title: String?, val rows: List<NativeMenuRules.Row>)
 
+    fun refreshed(pages: List<Page>, rows: List<NativeMenuRules.Row>): List<Page> {
+        val next = mutableListOf(Page(null, rows))
+        for (page in pages.drop(1)) {
+            val parent = next.last().rows.filterIsInstance<NativeMenuRules.Action>().firstOrNull { it.item.title == page.title && it.item.children != null } ?: break
+            next += Page(page.title, parent.item.children!!)
+        }
+        return next
+    }
+
     fun buttonsInOrder(sheet: NativeMenuRules.Sheet): List<NativeMenuRules.ActionSheetActionShape> = sheet.buttons.asReversed()
 }
 
@@ -90,6 +99,7 @@ internal fun MaterialMenu(scheme: ColorScheme, expanded: MutableState<Boolean>, 
 @Composable
 private fun MaterialMenuPages(rows: List<NativeMenuRules.Row>, onPick: (String) -> Unit) {
     var pages by remember { mutableStateOf(listOf(MaterialMenuRules.Page(null, rows))) }
+    if (pages.first().rows !== rows) pages = MaterialMenuRules.refreshed(pages, rows)
     val page = pages.last()
     val scheme = MaterialTheme.colorScheme
     val sections = MaterialMenuRules.sections(page.rows)

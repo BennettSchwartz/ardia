@@ -136,6 +136,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     private var host: ComposeView? = null
     private var expanded: MutableState<Boolean>? = null
     private var shownColors: MutableState<ColorScheme>? = null
+    private var shownRows: MutableState<List<NativeMenuRules.Row>>? = null
     private var downX = 0f
     private var downY = 0f
     private var downAt: Long? = null
@@ -154,6 +155,11 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     ).apply { setIsLongpressEnabled(false) }
 
     internal val opensOnItsOwnTimer: Boolean get() = gestures.isLongpressEnabled
+
+    init {
+        clipChildren = false
+        clipToPadding = false
+    }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) =
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec))
@@ -191,13 +197,13 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         val origin = IntArray(2).also(content::getLocationInWindow)
         val bounds = MaterialMenuRules.anchor(here[0] - origin[0], here[1] - origin[1], width, height, resources.displayMetrics.density, pressX, pressY)
         val colors = mutableStateOf(currentColors())
-        val rows = NativeMenuRules.rows(items)
+        val rows = mutableStateOf(NativeMenuRules.rows(items))
         val open = mutableStateOf(true)
         val view = ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             setContent {
-                MaterialMenu(colors.value, open, rows, onPick = { id ->
+                MaterialMenu(colors.value, open, rows.value, onPick = { id ->
                     onSelect(mapOf("id" to id))
                     close()
                 }, onDismiss = ::close)
@@ -210,6 +216,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         host = view
         expanded = open
         shownColors = colors
+        shownRows = rows
         onOpen(emptyMap())
     }
 
@@ -219,6 +226,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
         open.value = false
         expanded = null
         shownColors = null
+        shownRows = null
         onClose(emptyMap())
         val view = host
         postDelayed({
@@ -230,6 +238,12 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
     private fun currentColors(): ColorScheme {
         val fresh = appContext.currentActivity ?: context
         return MaterialScheme.colorScheme(fresh, NativeMenuRules.isDark(fresh, dark), scheme)
+    }
+
+    internal fun refreshRows() {
+        val shown = shownRows ?: return
+        val next = NativeMenuRules.rows(items)
+        if (next.isEmpty()) close() else shown.value = next
     }
 
     internal fun refreshColors() {
@@ -302,7 +316,10 @@ class MenusModule : Module() {
         View(NativeContextMenuView::class) {
             Events("onSelect", "onOpen", "onClose")
 
-            Prop("items") { view: NativeContextMenuView, items: List<MenuItemRecord> -> view.items = items.map(NativeMenuRules::shape) }
+            Prop("items") { view: NativeContextMenuView, items: List<MenuItemRecord> ->
+                view.items = items.map(NativeMenuRules::shape)
+                view.refreshRows()
+            }
 
             Prop("trigger") { view: NativeContextMenuView, value: String? -> view.trigger = if (value == "tap") "tap" else "longPress" }
 

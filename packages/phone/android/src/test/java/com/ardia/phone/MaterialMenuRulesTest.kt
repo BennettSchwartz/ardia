@@ -53,6 +53,25 @@ class MaterialMenuRulesTest {
     }
 
     @Test
+    fun newRowsReachAnOpenMenuAndKeepTheSubmenuItWasShowing() {
+        val before = NativeMenuRules.rows(listOf(MenuItemShape("t", "Theme", children = listOf(MenuItemShape("l", "Light", checked = true), MenuItemShape("d", "Dark")))))
+        val after = NativeMenuRules.rows(listOf(MenuItemShape("t", "Theme", children = listOf(MenuItemShape("l", "Light"), MenuItemShape("d", "Dark", checked = true)))))
+        val open = listOf(MaterialMenuRules.Page(null, before), MaterialMenuRules.Page("Theme", (before.single() as NativeMenuRules.Action).item.children!!))
+        val refreshed = MaterialMenuRules.refreshed(open, after)
+        assertEquals(listOf(null, "Theme"), refreshed.map { it.title })
+        val dark = refreshed.last().rows.filterIsInstance<NativeMenuRules.Action>().single { it.item.id == "d" }
+        assertEquals(true, dark.item.checked)
+    }
+
+    @Test
+    fun aSubmenuThatIsGoneAfterTheUpdateFallsBackToTheTop() {
+        val before = NativeMenuRules.rows(listOf(MenuItemShape("t", "Theme", children = listOf(MenuItemShape("l", "Light")))))
+        val after = NativeMenuRules.rows(listOf(MenuItemShape("c", "Copy Link")))
+        val open = listOf(MaterialMenuRules.Page(null, before), MaterialMenuRules.Page("Theme", (before.single() as NativeMenuRules.Action).item.children!!))
+        assertEquals(listOf<String?>(null), MaterialMenuRules.refreshed(open, after).map { it.title })
+    }
+
+    @Test
     fun aMenuRowCarriesItsIconToTheNativeMenu() {
         val rows = NativeMenuRules.rows(listOf(MenuItemShape("0", "Share", systemImage = "square.and.arrow.up")))
         assertEquals("square.and.arrow.up", (rows.single() as NativeMenuRules.Action).item.systemImage)
