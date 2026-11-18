@@ -7,6 +7,11 @@ import { presentSearch, useSearch } from "../state/search/store";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 import { useTabs } from "../state/tabs/store";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const telemetry = require("../state/telemetry/telemetry") as typeof import("../state/telemetry/telemetry");
 
 const mockField = { native: true, setText: [] as [string, boolean][], focused: 0, blurred: 0 };

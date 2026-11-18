@@ -5,6 +5,11 @@ import { openPage, useBrowse } from "../state/browse/store";
 import { presentSearch } from "../state/search/store";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const appState = AppState as unknown as { currentState: string; addEventListener: jest.Mock };
 const realState = appState.currentState;
 

@@ -2,6 +2,11 @@ import { getAnimatedStyle } from "react-native-reanimated";
 import { BackHandler } from "react-native";
 import { act } from "react-test-renderer";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 type Handlers = { onProgress?: (progress: number, edge: "left" | "right") => void; onCancel?: () => void; onCommit?: () => void };
 
 const mockBack = { enabled: [] as boolean[], handlers: null as Handlers | null };

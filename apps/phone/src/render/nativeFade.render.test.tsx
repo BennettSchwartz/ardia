@@ -7,6 +7,11 @@ import { presentSearch, useSearch } from "../state/search/store";
 import type { TrayRow } from "../state/search/omnibox";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const fadeModule = require("@ardia/phone-native/src/fade") as typeof import("@ardia/phone-native/src/fade");
 
 beforeEach(() => jest.useFakeTimers());

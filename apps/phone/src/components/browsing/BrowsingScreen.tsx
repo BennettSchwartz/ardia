@@ -44,6 +44,7 @@ import {
 } from "../ui";
 import { BottomBar } from "./BottomBar";
 import { FloatingBar } from "./FloatingBar";
+import { MaterialBarBand } from "./MaterialPageBar";
 import { HostPill, useBarFold } from "./HostPill";
 import { hostPillLayout } from "./hostPillTokens";
 import { FindBar } from "./FindBar";
@@ -98,7 +99,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const pageTone = failed ? null : shownTone(tone, tab.themeColorHex);
   const top = pageTone?.top ?? theme.surface;
   const bottom = pageTone?.bottom ?? theme.surface;
-  const barDark = design === "redesigned" && !pageTone?.bottom ? theme.dark : isDarkColor(bottom);
+  const barDark = design === "material" || (design === "redesigned" && !pageTone?.bottom) ? theme.dark : isDarkColor(bottom);
   useSystemBars(isDarkColor(top), barDark);
   const collapse = useBarCollapse(tab.id, finding, design === "redesigned");
   const staged = design === "redesigned" && !column && searchStageIsNative();
@@ -205,6 +206,8 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                     </Animated.View>
                   ) : null}
                 </View>
+              ) : design === "material" ? (
+                <MaterialBarBand tab={tab} order={order} showsPlus={!searching} safeSide={safeSide} onTabs={showDeck} onTabsMenu={openTabsMenu} onStep={stepTab} onAddress={editPageQuery} onPlus={newTab} onMore={openPageMenu} />
               ) : (
                 <>
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: barDark ? tabsInk.barShadeOnDark : tabsInk.barShadeOnLight }]} />

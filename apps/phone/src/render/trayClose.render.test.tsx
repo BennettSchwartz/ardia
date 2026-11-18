@@ -4,7 +4,7 @@ import { act } from "react-test-renderer";
 import { SearchTray } from "../components/search/SearchTray";
 import * as browse from "../state/browse/store";
 import { presentSearch } from "../state/search/store";
-import { renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { classicOnAndroid, renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 let keyboard: jest.SpyInstance;
 
@@ -23,7 +23,7 @@ afterEach(() => {
 
 test("closing the tray clears its dim even while a keyboard stays up, as one a page's own field took would", () => {
   presentSearch("page", "");
-  const root = renderSurface(<SearchTray />);
+  const root = renderSurface(classicOnAndroid(<SearchTray />));
   const dim = () => root.root.findAll((node) => node.props.testID === "trayDim" && typeof node.type === "string")[0];
   act(() => jest.advanceTimersByTime(600));
   expect(getAnimatedStyle(dim()!).opacity).toBeGreaterThan(0.9);
