@@ -1923,7 +1923,7 @@ function Invoke-SettingsStops($Session, [string]$Suffix, [string]$Label, [switch
   } | Out-Null
   if (-not $script:SettingsWindow -or -not [ArdiaTour]::IsWindow($script:SettingsWindow)) { return }
   if ($Panes) {
-    foreach ($pane in @(@{ Name = "Appearance"; Slug = "settings-appearance"; Row = 4 }, @{ Name = "Keyboard Shortcuts"; Slug = "settings-shortcuts"; Row = 11 })) {
+    foreach ($pane in @(@{ Name = "Appearance"; Slug = "settings-appearance"; Row = 4 }, @{ Name = "Shortcuts"; Slug = "settings-shortcuts"; Row = 6 })) {
       Invoke-Stop $Session $pane.Slug "Settings window, $($pane.Name)" {
         param($stop)
         $stop.Expected = "the pane changes (more than 5% of the Settings window changes)."

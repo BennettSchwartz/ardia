@@ -50,7 +50,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Feature | State | Tracked in |
 | --- | --- | --- |
 | New tab, close, reopen closed tab (Ctrl+Shift+T) | Works | |
-| Ctrl+Z reopens closed tabs | Works once turned on in Keyboard Shortcuts (off by default, as on the Mac) | |
+| Ctrl+Z reopens closed tabs | Works once turned on in Settings › Shortcuts (off by default, as on the Mac) | |
 | New window | Works | |
 | Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again) | #1453 |
 | Close-tabs confirm while other windows load | Works: the confirm (like the prompt and the file pickers) runs on its own thread, so other windows keep loading and taking input while it is open; it stays in front of its own window and comes forward with it (#1688's self-check holds a confirm while a page loads, on CI; not walked here) | #1672, #1688 |
@@ -122,7 +122,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Profiles: create, switcher | Works | |
 | Appearance: light and dark | Works | |
 | Higher contrast text | Works (403b48b2c, walked 2026-11-14): Automatic follows a Windows contrast theme turned on while the app runs and one already on at launch, through the shell's `isHighContrast` and its `highContrast` event (react-native-windows' `AppTheme` is UWP-only and always read off). Changing the theme while Settings is open can crash the window layer, on older builds too | #1831, #1882, #1900 |
-| Keyboard Shortcuts pane | Works, Windows keys | |
+| Shortcuts pane (Keyboard Shortcuts before the Settings redesign) | Works, Windows keys | |
 | "…" menu | Works, except Check for Updates | #1517 |
 | Sync | Works: Turn On Sync at the default folder shows the Recovery Kit, the pane says updated just now, every What Syncs row but Passwords; a Mac and a PC exchanged pinned tabs and bookmarks both ways (#1594) | #1575, #1425 |
 | Calendar | Does nothing; hidden | #1521 |
