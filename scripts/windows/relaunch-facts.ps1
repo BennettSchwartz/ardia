@@ -26,7 +26,7 @@ function Read-LaunchGuard([string[]]$Lines) {
 }
 
 function Read-SyncTrace([string[]]$Lines) {
-  $trace = [pscustomobject]@{ Recovered = $null; Statuses = @(); TurnedOn = $null; UnlocksOrCycles = @() }
+  $trace = [pscustomobject]@{ Recovered = $null; Statuses = @(); TurnedOn = $null; UnlocksOrCycles = @(); Unlocked = $null }
   foreach ($line in $Lines) {
     if (-not $line) { continue }
     if ($line -match '\[sync\] test: recoveredStart (true|false), status (\w+)') {
@@ -38,6 +38,7 @@ function Read-SyncTrace([string[]]$Lines) {
       $trace.TurnedOn = $Matches[1]
     } elseif ($line -match '\[sync\] (?!test:).*(unlock|cycle)') {
       $trace.UnlocksOrCycles += $line
+      if ($line -match '\[sync\] unlock finished: (unlocked|not unlocked)') { $trace.Unlocked = $Matches[1] -eq 'unlocked' }
     }
   }
   return $trace

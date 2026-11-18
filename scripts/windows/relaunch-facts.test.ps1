@@ -68,6 +68,11 @@ $ordinary = Read-SyncTrace @(
 Check "an ordinary start is read from the sync trace" $false $ordinary.Recovered
 Check "an ordinary start's statuses are read in order" "starting,updating,updated" ($ordinary.Statuses -join ",")
 Check "unlock and cycle lines are found" 2 $ordinary.UnlocksOrCycles.Count
+Check "a trace without the unlock line doesn't say it unlocked" "" $ordinary.Unlocked
+$unlocked = Read-SyncTrace @("info 650 [sync] test: recoveredStart false, status starting", "info 700 [sync] unlock finished: unlocked", "info 2100 [sync] test: status updated")
+Check "the unlock that comes before the load is read" $true $unlocked.Unlocked
+Check "the unlock line counts as an unlock" 1 $unlocked.UnlocksOrCycles.Count
+Check "a key that didn't unlock is read" $false (Read-SyncTrace @("info 700 [sync] unlock finished: not unlocked")).Unlocked
 Check "turning Sync on is read" "turned on" (Read-SyncTrace @("info 5000 [sync] test: turned on")).TurnedOn
 Check "a log without the sync trace reads as unknown" $null (Read-SyncTrace @("info 1 hello")).Recovered
 

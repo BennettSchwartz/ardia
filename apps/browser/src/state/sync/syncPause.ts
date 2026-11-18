@@ -28,26 +28,41 @@ export function pauseAfterUnsettledStarts(doc: SyncDoc, consent: ConsentToken | 
   return true;
 }
 
-export function unsettledStarts({ doc, persist }: { doc: () => SyncDoc; persist: () => Promise<void> }) {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+type CountSteps = { doc: () => SyncDoc; persist: () => Promise<void>; counting: () => boolean };
 
-  async function settle(consent: ConsentToken | null) {
+export function unsettledStarts({ doc, persist, counting }: CountSteps) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  let consent: ConsentToken | null = null;
+
+  async function settle() {
     clearTimeout(timer);
     const current = doc();
-    if (pausedByGuard(current) || !current.unsettledStarts) return;
+    if (!counting() || pausedByGuard(current) || !current.unsettledStarts) return;
     current.unsettledStarts = 0;
     await persist().catch((error: unknown) => warnFor(consent, "[sync] couldn't save that this start settled", error));
   }
 
-  async function countLoad(consent: ConsentToken | null) {
+  async function countLoad(taken: ConsentToken | null) {
+    if (!counting()) return;
+    consent = taken;
     const current = doc();
     current.unsettledStarts = (current.unsettledStarts ?? 0) + 1;
     await persist().catch((error: unknown) => warnFor(consent, "[sync] couldn't count this start", error));
-    clearTimeout(timer);
-    timer = setTimeout(() => void settle(consent), SETTLED_AFTER_MS);
   }
 
-  return { countLoad, settle, stop: () => clearTimeout(timer) };
+  function arm() {
+    if (!counting() || stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => void settle(), SETTLED_AFTER_MS);
+  }
+
+  function stop() {
+    stopped = true;
+    clearTimeout(timer);
+  }
+
+  return { countLoad, arm, settle, stop };
 }
 
 export function pauseAfterRecoveredStart(doc: SyncDoc, consent: ConsentToken | null, recovered = recoveredStart()) {
@@ -62,8 +77,9 @@ export type ResumeSteps = {
   unlock: (deviceId: string) => Promise<boolean>;
   load: () => Promise<void>;
   countLoad: (consent: ConsentToken | null) => Promise<void>;
+  arm: () => void;
   cycle: () => Promise<Partial<SyncUi> | null>;
-  persist: () => Promise<void>;
+  persist: (patch?: Partial<SyncDoc>) => Promise<void>;
   publish: (patch?: Partial<SyncUi>) => void;
   quitting: () => boolean;
   settlePaused: (error: string | null) => void;
@@ -87,21 +103,23 @@ export function guardResume(steps: ResumeSteps) {
       waitingForPhrase = null;
       if (steps.quitting()) return steps.settlePaused(QUIT_DURING_RESUME);
       await steps.countLoad(consent);
+      steps.arm();
       await steps.load();
       const outcome = await steps.cycle();
-      if (outcome?.status !== "updated") return steps.settlePaused(outcome?.error ?? (steps.quitting() ? QUIT_DURING_RESUME : FOLDER_UNREACHABLE));
-      const doc = steps.doc();
-      delete doc.pausedByGuard;
+      if (steps.quitting()) return steps.settlePaused(QUIT_DURING_RESUME);
+      if (outcome?.status !== "updated") return steps.settlePaused(outcome?.error ?? FOLDER_UNREACHABLE);
       try {
-        await steps.persist();
+        await steps.persist({ pausedByGuard: undefined });
       } catch (error) {
-        doc.pausedByGuard = true;
         warnFor(consent, "[sync] couldn't save the resumed state", error);
+        await steps.persist().catch(() => {});
         return steps.settlePaused(CLEAR_UNSAVED);
       }
+      delete steps.doc().pausedByGuard;
       steps.publish(outcome);
       noteSyncPause("sync_resumes_completed", consent);
       steps.carryOn();
+      steps.arm();
     } catch (error) {
       warnFor(consent, "[sync] resuming failed", error);
       steps.settlePaused(errorText(error));

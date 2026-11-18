@@ -699,10 +699,13 @@ is plain Chromium.
   `seqs` it read, and any synced tab closed meanwhile), because a profile whose Sync load crashes the app (#2570) would
   otherwise crash every recovered start too. While paused, every Sync action refuses and Settings offers only Resume
   and Stop Syncing. The pause sticks across starts until Resume, which unlocks, loads Sync's saved state and runs one
-  cycle, and clears the pause only once that cycle has ended updated and the clear has been saved. A Resume that fails
-  (a failed cycle, the sync data missing from the folder, a quit, a clear that didn't save) leaves Sync exactly as a
-  fresh paused start: nothing loaded or running, `sync.json` read again. A missing chain during Resume never resets
-  this device. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
+  cycle, and clears the pause only once that cycle has ended updated and the clear has been saved; until then every
+  other Sync action still refuses. A Resume that fails (a failed cycle, the sync data missing from the folder, a quit
+  that began during it, a clear that didn't save) leaves Sync as a fresh paused start: nothing loaded or running,
+  `sync.json` read again (a clear refused but staged anyway is overwritten with the paused document). The promise that
+  the state and journal stay byte for byte as they were is for a paused start; a failed Resume can still let a
+  checkpoint it had already handed to the native save land, which is a true state with its journal kept. A missing
+  chain during Resume never resets this device. No cycle runs before the saved state is loaded, at any start. A start with the pause on disk and the sync key missing shows paused; Resume then shows locked and asks
   for the recovery phrase, and entering it finishes the resume. Stop Syncing while paused turns Sync off here without
   a last cycle and never deletes the sync folder's data. Only Windows sets the flag today; the switch is shared
   (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`
@@ -711,16 +714,21 @@ is plain Chromium.
   On Windows `recoveredStart` is true only when the engine's `launch-guard.json` in the data folder parses, says
   `"restoreStateSetAside": true`, and was written at or after this process started (`AppModule.h` `LaunchGuard`); a
   missing, unreadable or stale file, or the app outside the engine, reads false. A test instance logs
-  `[sync] test: recoveredStart …, status …` and each Sync status after it, and `ARDIA_TEST=syncTurnOn=1` turns Sync on
-  in the `syncFolder` folder after the first window.
+  `[sync] test: recoveredStart …, status …` and each Sync status after it, writes `[sync] unlock finished: unlocked`
+  (or `not unlocked`) when the native unlock returns, just before the load and its 2-minute timer begin, and
+  `ARDIA_TEST=syncTurnOn=1` turns Sync on in the `syncFolder` folder after the first window.
 - Sync keeps its own count of unsettled starts, because the launch guard misses a Sync crash that comes later than
   15 s (#2570's profile died at 5.2, 19.4, 3.8, 18.9 and 4.6 s, so the guard's count went 1, 0, 1, 0, 1). It's shared
-  code, so it holds on the Mac and Linux too. At a start with Sync on and no pause, before the unlock and the load,
+  code, so it holds on the Mac too; Linux doesn't keep it, because its Sync starts again at every handover between
+  windows and nothing there runs the quit's save (Linux has no pause trigger for now). At a start with Sync on and no
+  pause, before the unlock and the load,
   Sync reads `unsettledStarts` from `sync.json`: at 2 or more it pauses exactly as a recovered start does; otherwise
   it adds 1 and waits for that write to land (a refused write is logged and the load goes on). The count goes back to
-  0, saved, on a clean quit (even one seconds after the start) and once the app has stayed alive 2 minutes after Sync
-  began loading; never at the end of a cycle, since a death can come after one has finished. A Resume counts as a load
-  the same way, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
+  0, saved, on a clean quit (after the quit's checkpoint, so a death in that checkpoint stays counted; even a quit
+  seconds after the start) and once the app has stayed alive 2 minutes after the load of the saved state began (an
+  unlock waiting on a prompt, or a start waiting at the recovery phrase, stays counted); never at the end of a cycle,
+  since a death can come after one has finished. A Resume counts as a load the same way, arms the 2 minutes again
+  when it ends updated, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
   count is kept. `recoveredStart` stays a second trigger. On the dashboard,
   `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
@@ -733,10 +741,11 @@ is plain Chromium.
 - `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
   Sync on, checks an ordinary start reports `recoveredStart` false, writes `unsettledStarts` 1 before it unlocks,
   keeps it through a finished cycle and leaves 0 after a clean quit; a full run (`FULL`, `-SettleCheck`) also keeps a
-  start alive until the count goes back to 0, at least 100 s after it was written. Then it records two unfinished
+  start alive until the count goes back to 0, between 110 and 200 s after its `[sync] unlock finished: unlocked` line
+  (the load's start); a start whose key didn't unlock is never asserted to reach 0. Then it records two unfinished
   starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`,
   `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
-  the sync folder, no unlock or cycle, and `sync_paused_by_launch_guard` once (and
+  the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and
   `sync_paused_after_unsettled_starts` never) in the local telemetry copy. The start after it must still be paused.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and

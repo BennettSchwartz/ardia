@@ -167,7 +167,7 @@ async function becomeAuthority(host: ArdiaHost) {
   keyStore = await syncKeyStoreStatus(host).catch(() => null);
   adoptHeldLogins();
   dropDeletedProfiles();
-  engine.startSync();
+  engine.startSync({ countStarts: false });
   resumeWhenKeyringOpens(host);
   return { store: engine.useSync, remote: remoteFor(host) };
 }

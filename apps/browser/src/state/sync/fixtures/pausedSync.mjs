@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 
 export const stub = { timers: [], unlockAnswer: true, chainFails: false, chainAnswer: "ok", duringRead: null, hold: { unlock: false, read: false } };
-globalThis.setTimeout = (fn, ms) => (stub.timers.push({ fn, ms }), stub.timers.length);
-globalThis.clearTimeout = () => {};
+let nextTimer = 0;
+globalThis.setTimeout = (fn, ms) => {
+  const id = ++nextTimer;
+  stub.timers.push({ fn, ms, id });
+  return id;
+};
+globalThis.clearTimeout = (id) => void (stub.timers = stub.timers.filter((timer) => timer.id !== id));
 globalThis.__DEV__ = false;
 
 export const folder = new Map();
@@ -157,14 +162,14 @@ export function restore(disk) {
 
 export const retire = (engine) => engine.stopSync();
 
-export async function pausedStart(disk, { recoveredStart = true, keyMissing = false, before } = {}) {
+export async function pausedStart(disk, { recoveredStart = true, keyMissing = false, before, startOptions } = {}) {
   restore(disk);
   recovered(recoveredStart);
   quiet();
   stub.unlockAnswer = !keyMissing;
   before?.();
   const engine = await engineInstance();
-  engine.startSync();
+  engine.startSync(startOptions);
   await settle();
   return engine;
 }

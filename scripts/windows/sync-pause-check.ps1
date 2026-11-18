@@ -134,6 +134,13 @@ function Wait-Doc($run, [scriptblock]$ready, [string]$waitingFor, [int]$seconds)
   throw "$($run.What): sync.json never showed $waitingFor within $seconds s (unsettledStarts $((Read-SyncDocWhileRunning $docPath).UnsettledStarts))"
 }
 
+function Wait-LoadBegan($run) {
+  $trace = Wait-Trace $run { param($t) $null -ne $t.Unlocked } "the unlock that comes before the load" 60
+  $seen = Get-Date
+  if (-not $trace.Unlocked) { throw "$($run.What): the sync key didn't unlock, so the start stays counted and can't be checked for a reset" }
+  return $seen
+}
+
 function Assert-StaysPaused($run, [bool]$recovered, $digests, [string]$seqs, [int]$unsettled) {
   $trace = Read-SyncTrace @(Run-Lines $run)
   if ($trace.Recovered -ne $recovered) { throw "$($run.What): recoveredStart was $($trace.Recovered), not $recovered" }
@@ -177,11 +184,12 @@ try {
   Note "turning Sync on: a test start turned Sync on in a scratch folder and finished a cycle (statuses $($trace.Statuses -join ', '))"
 
   $run = Start-Run "ordinary start"
-  $counted = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60
+  Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60 | Out-Null
+  $loadBegan = Wait-LoadBegan $run
   $trace = Wait-Trace $run { param($t) $null -ne $t.Recovered -and $t.Statuses -contains "updated" } "a finished cycle"
-  $aliveSeconds = [int]((Get-Date) - $counted).TotalSeconds
+  $sinceLoad = [int]((Get-Date) - $loadBegan).TotalSeconds
   $beforeQuit = (Read-SyncDocWhileRunning $docPath).UnsettledStarts
-  if ($aliveSeconds -lt 100 -and $beforeQuit -ne 1) { throw "ordinary start: unsettledStarts went from 1 to $beforeQuit $aliveSeconds s after the count, before 2 minutes or a quit" }
+  if ($sinceLoad -lt 100 -and $beforeQuit -ne 1) { throw "ordinary start: unsettledStarts went from 1 to $beforeQuit $sinceLoad s after the load began, before 2 minutes or a quit" }
   if ($trace.Recovered -ne $false) { throw "ordinary start: recoveredStart was $($trace.Recovered), not false" }
   if ($trace.Statuses -contains "paused") { throw "ordinary start: Sync paused on a start the guard didn't recover" }
   $guard = Read-LaunchGuard @(Run-Lines $run)
@@ -189,19 +197,21 @@ try {
   Stop-Run $run
   $afterQuit = (Read-SyncDoc $docPath).UnsettledStarts
   if ($afterQuit -ne 0) { throw "ordinary start: a clean quit left unsettledStarts $afterQuit" }
-  Note "ordinary start: recoveredStart false, unsettledStarts 1 before the unlock and still $beforeQuit after the cycle ($aliveSeconds s), Sync unlocked and finished a cycle (statuses $($trace.Statuses -join ', ')), unsettledStarts 0 after the clean quit"
+  Note "ordinary start: recoveredStart false, unsettledStarts 1 before the unlock and still $beforeQuit after the cycle ($sinceLoad s after the load began), Sync unlocked and finished a cycle (statuses $($trace.Statuses -join ', ')), unsettledStarts 0 after the clean quit"
 
   if ($SettleCheck) {
     $run = Start-Run "two minutes alive"
-    $counted = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60
+    Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60 | Out-Null
+    $loadBegan = Wait-LoadBegan $run
     Wait-Trace $run { param($t) $t.Statuses -contains "updated" } "a finished cycle" | Out-Null
-    $settledAt = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 0 } "unsettledStarts back to 0" 170
-    $afterSeconds = [int]($settledAt - $counted).TotalSeconds
-    if ($afterSeconds -lt 100) { throw "two minutes alive: unsettledStarts went back to 0 only $afterSeconds s after the count, before 2 minutes" }
+    $left = [Math]::Max(1, 200 - [int]((Get-Date) - $loadBegan).TotalSeconds)
+    $settledAt = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 0 } "unsettledStarts back to 0 within 200 s of the load" $left
+    $afterSeconds = [int]($settledAt - $loadBegan).TotalSeconds
+    if ($afterSeconds -lt 110) { throw "two minutes alive: unsettledStarts went back to 0 only $afterSeconds s after the load began, before 2 minutes" }
     Stop-Run $run
     $afterQuit = (Read-SyncDoc $docPath).UnsettledStarts
     if ($afterQuit -ne 0) { throw "two minutes alive: unsettledStarts is $afterQuit after the quit" }
-    Note "two minutes alive: unsettledStarts 1 at the start, 0 about $afterSeconds s after the count was seen, and 0 after the quit"
+    Note "two minutes alive: unsettledStarts 1 at the start, 0 about $afterSeconds s after the load began (the [sync] unlock finished line), and 0 after the quit"
   } else {
     Note "two minutes alive: not run (full runs only)"
   }
