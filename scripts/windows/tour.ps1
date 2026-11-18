@@ -2354,6 +2354,197 @@ function Open-Page($Session, $Stop, [string]$Address, [string]$TitlePattern) {
   return $loaded
 }
 
+if (-not ([System.Management.Automation.PSTypeName]"ArdiaSwapCapture").Type) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public static class ArdiaSwapCapture {
+  [StructLayout(LayoutKind.Sequential)] struct Header { public uint Size; public int Width, Height; public ushort Planes, BitCount; public uint Compression, SizeImage; public int XPels, YPels; public uint Used, Important; }
+  [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
+  [DllImport("user32.dll")] static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref Header header, uint usage, out IntPtr bits, IntPtr section, uint offset);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr item);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dc, int x, int y, int width, int height, IntPtr source, int sx, int sy, uint op);
+  [DllImport("gdi32.dll")] static extern bool GdiFlush();
+
+  public class Frame { public double Ms; public byte[] Pixels; }
+  public class Capture { public DateTime ClickUtc; public int Left, Top, Width, Height; public List<Frame> Frames = new List<Frame>(); }
+
+  public static Capture Run(int left, int top, int width, int height, int milliseconds) {
+    Capture capture = new Capture();
+    capture.Left = left; capture.Top = top; capture.Width = width; capture.Height = height;
+    IntPtr screen = GetDC(IntPtr.Zero);
+    IntPtr memory = CreateCompatibleDC(screen);
+    Header header = new Header();
+    header.Size = (uint)Marshal.SizeOf(typeof(Header));
+    header.Width = width;
+    header.Height = -height;
+    header.Planes = 1;
+    header.BitCount = 32;
+    IntPtr bits;
+    IntPtr section = CreateDIBSection(screen, ref header, 0, out bits, IntPtr.Zero, 0);
+    IntPtr previous = SelectObject(memory, section);
+    try {
+      Stopwatch clock = Stopwatch.StartNew();
+      Grab(capture, memory, screen, bits, -1);
+      mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+      Thread.Sleep(30);
+      mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+      capture.ClickUtc = DateTime.UtcNow;
+      clock.Restart();
+      while (clock.ElapsedMilliseconds < milliseconds) Grab(capture, memory, screen, bits, clock.Elapsed.TotalMilliseconds);
+    } finally {
+      SelectObject(memory, previous);
+      DeleteObject(section);
+      DeleteDC(memory);
+      ReleaseDC(IntPtr.Zero, screen);
+    }
+    return capture;
+  }
+
+  static void Grab(Capture capture, IntPtr memory, IntPtr screen, IntPtr bits, double ms) {
+    if (!BitBlt(memory, 0, 0, capture.Width, capture.Height, screen, capture.Left, capture.Top, 0x40CC0020)) { Thread.Sleep(1); return; }
+    GdiFlush();
+    Frame frame = new Frame();
+    frame.Ms = ms;
+    frame.Pixels = new byte[capture.Width * capture.Height * 4];
+    Marshal.Copy(bits, frame.Pixels, 0, frame.Pixels.Length);
+    capture.Frames.Add(frame);
+  }
+
+  public static double Between(byte[] now, byte[] from, byte[] to) {
+    double moved = 0, total = 0;
+    for (int at = 0; at + 3 < now.Length; at += 4) {
+      int span = Math.Abs(to[at] - from[at]) + Math.Abs(to[at + 1] - from[at + 1]) + Math.Abs(to[at + 2] - from[at + 2]);
+      if (span < 90) continue;
+      moved += Math.Abs(now[at] - from[at]) + Math.Abs(now[at + 1] - from[at + 1]) + Math.Abs(now[at + 2] - from[at + 2]);
+      total += span;
+    }
+    return total > 0 ? moved / total : -1;
+  }
+
+  public static int Differing(byte[] from, byte[] to) {
+    int count = 0;
+    for (int at = 0; at + 3 < from.Length; at += 4) {
+      if (Math.Abs(to[at] - from[at]) + Math.Abs(to[at + 1] - from[at + 1]) + Math.Abs(to[at + 2] - from[at + 2]) >= 90) count++;
+    }
+    return count;
+  }
+}
+"@
+}
+
+if (-not ([System.Management.Automation.PSTypeName]"ArdiaAnimationEffects").Type) {
+  Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class ArdiaAnimationEffects {
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] static extern bool Get(uint action, uint parameter, ref int value, uint change);
+  [DllImport("user32.dll", EntryPoint = "SystemParametersInfoW")] static extern bool Set(uint action, uint parameter, IntPtr value, uint change);
+  public static bool On() { int value = 1; Get(0x1042, 0, ref value, 0); return value != 0; }
+  public static bool Turn(bool on) { return Set(0x1043, 0, new IntPtr(on ? 1 : 0), 3); }
+}
+"@
+}
+
+function Save-SwapFrame($Capture, $Frame, [string]$Path) {
+  Add-Type -AssemblyName System.Drawing
+  $zoom = 6
+  $bitmap = [System.Drawing.Bitmap]::new($Capture.Width * $zoom, $Capture.Height * $zoom)
+  try {
+    for ($y = 0; $y -lt $Capture.Height; $y++) {
+      for ($x = 0; $x -lt $Capture.Width; $x++) {
+        $at = ($y * $Capture.Width + $x) * 4
+        $colour = [System.Drawing.Color]::FromArgb(255, $Frame.Pixels[$at + 2], $Frame.Pixels[$at + 1], $Frame.Pixels[$at])
+        for ($dy = 0; $dy -lt $zoom; $dy++) { for ($dx = 0; $dx -lt $zoom; $dx++) { $bitmap.SetPixel($x * $zoom + $dx, $y * $zoom + $dy, $colour) } }
+      }
+    }
+    $bitmap.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+  } finally {
+    $bitmap.Dispose()
+  }
+}
+
+function Invoke-FolderSwapStop([bool]$EffectsOn) {
+  $was = [ArdiaAnimationEffects]::On()
+  $turned = $false
+  if ($was -ne $EffectsOn) { $turned = [ArdiaAnimationEffects]::Turn($EffectsOn) }
+  try {
+    $name = if ($EffectsOn) { "folder-swap-effects-on" } else { "folder-swap-effects-off" }
+    $session = Start-Ardia $name -Onboarded -Settings @{ appearance = "light" }
+    $title = if ($EffectsOn) { "A group's folder opens and closes over about 0.2 s with Windows' animation effects on (#2645)" } else { "A group's folder swaps at once with Windows' animation effects off (#2645)" }
+    Invoke-Stop $session $name $title {
+      param($stop)
+      $stop.Did = "Windows' animation effects $(if ($EffectsOn) { 'turned on for this launch' } else { 'off, as on the runner' }) (they were on before: $was; changed: $turned). Pressed Ctrl+Alt+G to put the starting tab in a group, named the group 'tourgroup' and pressed Enter. Rested the mouse on the group's name, then clicked it to collapse the group, capturing the folder icon's box (the row left of the name) as fast as it reads for 600 ms."
+      if ($EffectsOn) {
+        $stop.Expected = "the app logs 'folder icon closes over 200 ms'; captures between the open and the closed drawing (part way from one to the other on the pixels where the two differ) for about 0.2 s after the click."
+      } else {
+        $stop.Expected = "the app logs 'folder icon closes over 0 ms'; no capture between the open and the closed drawing."
+      }
+      if (-not (Test-Usable $session)) { $stop.Seen = "no"; $stop.Facts.Add("no usable window"); return }
+      Focus-Window $session $session.Main $stop | Out-Null
+      Send-Chord @(0x11, 0x12) 0x47
+      Start-Sleep -Milliseconds 600
+      Send-Chord @(0x11) 0x41
+      Send-Text "tourgroup"
+      Send-Key 0x0D 0
+      Send-Key 0x0D 2
+      Start-Sleep -Milliseconds 900
+      $label = @(Find-Named $session.Main "tourgroup") | Select-Object -First 1
+      $stop.Facts.Add("the group's name found: $(if ($label) { "$($label.Left),$($label.Top) $($label.Width)x$($label.Height)" } else { 'no' })")
+      if (-not $label) { $stop.Seen = "no"; return }
+      Send-MouseMove $label.X $label.Y
+      Start-Sleep -Milliseconds 900
+      $mark = Get-LogCount $session
+      $left = [Math]::Max(0, $label.Left - 40)
+      $capture = [ArdiaSwapCapture]::Run($left, $label.Top - 6, $label.Left - 2 - $left, $label.Height + 12, 600)
+      Start-Sleep -Milliseconds 500
+      $line = @(Get-LinesSince $session $mark "folder icon (opens|closes) over") | Select-Object -First 1
+      $frames = @($capture.Frames)
+      $first = $frames[0]
+      $last = $frames[-1]
+      $differing = [ArdiaSwapCapture]::Differing($first.Pixels, $last.Pixels)
+      $rows = @($frames | Select-Object -Skip 1 | ForEach-Object { [pscustomobject]@{ Frame = $_; Ms = [int]$_.Ms; Share = [ArdiaSwapCapture]::Between($_.Pixels, $first.Pixels, $last.Pixels) } })
+      $between = @($rows | Where-Object { $_.Share -gt 0.15 -and $_.Share -lt 0.85 })
+      $settled = @($rows | Where-Object { $_.Share -ge 0.85 }) | Select-Object -First 1
+      $started = @($rows | Where-Object { $_.Share -gt 0.15 }) | Select-Object -First 1
+      $stop.Facts.Add("the app logged: '$($line -replace '^.*\[ardia windows\] ', '')'; the box $($capture.Width)x$($capture.Height) at $left,$($capture.Top), $($frames.Count) captures, $differing pixels differ between the first and the last")
+      $stop.Facts.Add("share of the way from the open to the closed drawing (ms after the click): $(($rows | ForEach-Object { "+$($_.Ms) $([Math]::Round($_.Share, 2))" }) -join '; ')")
+      $span = if ($started -and $settled) { $settled.Ms - $started.Ms } else { $null }
+      $stop.Facts.Add("captures part way: $($between.Count); the swap began at +$(if ($started) { $started.Ms } else { '?' }) ms and settled at +$(if ($settled) { $settled.Ms } else { '?' }) ms")
+      $folder = Split-Path -Parent $stop.Shot
+      $prefix = [IO.Path]::GetFileNameWithoutExtension($stop.Shot)
+      Save-SwapFrame $capture $first (Join-Path $folder "$prefix-before.png")
+      foreach ($row in @($between | Select-Object -First 4)) { Save-SwapFrame $capture $row.Frame (Join-Path $folder ("{0}-{1:000}ms.png" -f $prefix, $row.Ms)) }
+      Save-SwapFrame $capture $last (Join-Path $folder "$prefix-after.png")
+      $capture.Frames.Clear()
+      if ($differing -lt 8) { $stop.Seen = "no"; $stop.Facts.Add("the box hardly changed, so the folder didn't swap there"); return }
+      if ($EffectsOn) {
+        Set-Seen $stop ($line -match "closes over 200 ms" -and $between.Count -ge 2 -and $null -ne $span -and $span -ge 80 -and $span -le 400)
+      } else {
+        Set-Seen $stop ($line -match "closes over 0 ms" -and $between.Count -eq 0)
+      }
+    } | Out-Null
+    Stop-Ardia $session
+  } finally {
+    if ($turned) { [ArdiaAnimationEffects]::Turn($was) | Out-Null }
+  }
+}
+
+function Invoke-FolderSwapTour {
+  Invoke-FolderSwapStop $false
+  Invoke-FolderSwapStop $true
+}
+
 function Invoke-PagesTour {
   $session = Start-Ardia "pages" -Onboarded
   Invoke-Stop $session "page-loads" "A page loads in a tab" {
@@ -3160,7 +3351,8 @@ $tours = @(
   @{ Name = "dark"; Run = { Invoke-DarkTour } },
   @{ Name = "motion"; Run = { Invoke-MotionTour } },
   @{ Name = "sidebar wheel"; Run = { Invoke-SidebarWheelTour } },
-  @{ Name = "sidebar pager wheel"; Run = { Invoke-SidebarPagerWheelTour } }
+  @{ Name = "sidebar pager wheel"; Run = { Invoke-SidebarPagerWheelTour } },
+  @{ Name = "folder-swap"; Run = { Invoke-FolderSwapTour } }
 )
 
 if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
