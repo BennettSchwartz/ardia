@@ -252,12 +252,12 @@ NSView *LingeringPaneOver(NSView *view) {
   self.alphaValue = _frameHold.awaiting && (_standIn.page.superview != self || _standIn.leaving) ? 0 : _visible || _reveal.active || _frameHold.holding || !(_warm || _leave.active) ? 1 : 0;
   const BOOL shown = self.paints;
   if (shown && NSIsEmptyRect(self.bounds)) [self layoutPage];
-  for (NSView *sub in self.subviews) {
-    sub.hidden = !shown;
-    AcceptDrops(sub, _visible);
-  }
+  for (NSView *sub in self.subviews) sub.hidden = !shown;
+  [self acceptDropsIfShown];
   [CATransaction commit];
   if (_visible) [self takeFocusFromLingeringPane];
+  [self noteOnScreenAhead:NO];
+  [self settleOnScreenAhead];
   if (TraceVisibility())
     NSLog(@"[ardiacore-vis] %@ paint visible=%d warm=%d tab=%d page=%@ inWindow=%ld hiddenAncestor=%d alpha=%d reveal=%d awaiting=%d",
           _transferKey, _visible, _warm, _tab ? (int)_tab.tabId : -1, _tab.view.superview == self ? @"here" : @"elsewhere",
