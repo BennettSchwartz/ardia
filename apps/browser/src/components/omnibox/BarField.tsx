@@ -1,7 +1,8 @@
 import type { SearchScope } from "@ardia/core";
-import { useLayoutEffect, useRef, type ComponentProps, type RefObject } from "react";
-import { findNodeHandle, TextInput } from "react-native";
-import { useTheme } from "../ui";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
+import { Animated, findNodeHandle, StyleSheet, TextInput, View } from "react-native";
+import { curve, duration, Text, useTheme } from "../ui";
+import { reduceMotion } from "../ui/reduceMotion";
 import { barFieldMarks } from "../../state/omnibox/barMarks";
 import { PASTED_TYPES } from "./omniboxKeys";
 import { useClaimFollowsFocus, type FocusClaim } from "./claimFollowsFocus";
@@ -47,7 +48,9 @@ export function BarField({
   const claimOnFocus = useClaimFollowsFocus(inputRef, claim);
   const repair = useRevertRepair(inputRef, variant, events.value, events.onChangeText, onSelection);
   const type = variant === "hero" ? BAR_TYPE.heroField : variant === "sidebar" || floating ? BAR_TYPE.floatingField : BAR_TYPE.panelField;
-  return (
+  const shownPlaceholder = placeholder ?? (scope ? `Search ${scope.name}` : incognito ? "Search privately or enter address" : "Search or enter address");
+  const swap = usePlaceholderSwap(shownPlaceholder, !events.value);
+  const field = (
     <TextInput
       ref={inputRef}
       {...events}
@@ -73,13 +76,13 @@ export function BarField({
         }
         onSelection(next);
       }}
-      placeholder={placeholder ?? (scope ? `Search ${scope.name}` : incognito ? "Search privately or enter address" : "Search or enter address")}
+      placeholder={swap ? "" : shownPlaceholder}
       placeholderTextColor={theme.placeholder}
       pastedTypes={PASTED_TYPES}
       selectionColor={theme.selection}
       enableFocusRing={false}
       style={{
-        flex: 1,
+        alignSelf: "stretch",
         ...type,
         color: theme.textPrimary,
         paddingVertical: 0,
@@ -87,4 +90,41 @@ export function BarField({
       }}
     />
   );
+  const label = (text: string, opacity: Animated.AnimatedInterpolation<number> | Animated.Value) => (
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { justifyContent: "center", paddingLeft: PLACEHOLDER_INSET, marginTop: variant === "panel" ? BAR.panelFieldLift : 0, opacity }]}>
+      <Text lines={1} style={{ ...type, color: theme.placeholder }}>
+        {text}
+      </Text>
+    </Animated.View>
+  );
+  return (
+    <View style={{ flex: 1, justifyContent: "center" }}>
+      {field}
+      {swap ? label(swap.from, Animated.subtract(1, swap.progress)) : null}
+      {swap ? label(swap.to, swap.progress) : null}
+    </View>
+  );
+}
+
+const PLACEHOLDER_INSET = 2;
+
+function usePlaceholderSwap(text: string, empty: boolean) {
+  const last = useRef(text);
+  const progress = useRef(new Animated.Value(1)).current;
+  const [swap, setSwap] = useState<{ from: string; to: string } | null>(null);
+  if (last.current !== text) {
+    const from = last.current;
+    last.current = text;
+    if (empty && !reduceMotion()) {
+      progress.setValue(0);
+      setSwap({ from: swap ? swap.to : from, to: text });
+    } else if (swap) setSwap(null);
+  }
+  useEffect(() => {
+    if (!swap) return;
+    const run = Animated.timing(progress, { toValue: 1, duration: duration.base, easing: curve.fade, useNativeDriver: true });
+    run.start(({ finished }) => finished && setSwap(null));
+    return () => run.stop();
+  }, [swap]);
+  return swap && empty ? { ...swap, progress } : null;
 }

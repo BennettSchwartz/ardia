@@ -22,8 +22,14 @@ export function useSlidingThumb(selected: string | null) {
       width.setValue(slot.width);
       return;
     }
-    Animated.spring(x, { toValue: slot.x, ...springs.snappy, useNativeDriver: true }).start();
-    Animated.spring(width, { toValue: slot.width, ...springs.snappy, useNativeDriver: false }).start();
+    x.stopAnimation((from) => {
+      x.setValue(from);
+      Animated.spring(x, { toValue: slot.x, ...springs.snappy, useNativeDriver: true }).start();
+    });
+    width.stopAnimation((from) => {
+      width.setValue(from);
+      Animated.spring(width, { toValue: slot.width, ...springs.snappy, useNativeDriver: false }).start();
+    });
   };
 
   useEffect(() => {
