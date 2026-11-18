@@ -37,6 +37,15 @@ test("the dark setting picks the dark half", () => {
   assert.equal(schemeFor(wallpaper, false).primary, "#123456");
 });
 
+test("the dynamic toggle overrides a saved custom color without forgetting it", () => {
+  assert.equal(schemePairFor("blue", wallpaper, true), wallpaper);
+  assert.equal(schemePairFor("blue", wallpaper, false), SEEDED_SCHEMES.blue);
+  assert.equal(schemePairFor("blue", null, true), SEEDED_SCHEMES.ardia);
+  assert.equal(schemePairFor(null, wallpaper, false), SEEDED_SCHEMES.plum);
+  assert.equal(materialColorSource(true, "blue", wallpaper, true), "wallpaper");
+  assert.equal(materialColorSource(true, "blue", wallpaper, false), "profile");
+});
+
 test("the launch event's colour source says wallpaper, a picked profile colour, the fallback palette, or not the material design", () => {
   assert.equal(materialColorSource(true, null, wallpaper), "wallpaper");
   assert.equal(materialColorSource(true, "pink", wallpaper), "profile");

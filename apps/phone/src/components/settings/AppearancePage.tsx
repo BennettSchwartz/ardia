@@ -11,7 +11,7 @@ import { matchMyMac } from "../../state/sync/actions";
 import { useSyncEnabled } from "../../state/sync/hooks";
 import { deckGridOffered, setDeckGrid, useDeckGrid } from "../../state/browse/deckGrid";
 import { useIncognito } from "../../state/tabs/hooks";
-import { capsule, font, PROFILE_COLORS, settingsLayout, settingsMotion, settingsTint, space, Symbol, useProfileLook, useTheme, type ProfileColor } from "../ui";
+import { capsule, font, PROFILE_COLORS, settingsLayout, settingsMotion, settingsTint, space, Symbol, useDesign, useProfileLook, useTheme, type ProfileColor } from "../ui";
 import { Divider, Group, IconTile, NavRow, SettingsPage, ToggleRow } from "./SettingsKit";
 
 const COLORS = Object.keys(PROFILE_COLORS) as ProfileColor[];
@@ -93,6 +93,8 @@ export function MatchMyMac({ labelled = true }: { labelled?: boolean }) {
 export function ColorRow({ labelled = true }: { labelled?: boolean }) {
   const theme = useTheme();
   const look = useProfileLook();
+  const choice = usePreferences((p) => p.colorChoice);
+  const selected = useDesign() === "material" ? choice ?? "plum" : look.preset;
   return (
     <View style={[styles.colorRow, labelled ? null : styles.colorRowPlain]}>
       <View style={styles.colorLabel}>
@@ -101,7 +103,7 @@ export function ColorRow({ labelled = true }: { labelled?: boolean }) {
       </View>
       <View style={styles.swatches} accessibilityRole="radiogroup">
         {COLORS.map((color) => (
-          <Swatch key={color} color={color} selected={color === look.preset} />
+          <Swatch key={color} color={color} selected={color === selected} />
         ))}
       </View>
     </View>

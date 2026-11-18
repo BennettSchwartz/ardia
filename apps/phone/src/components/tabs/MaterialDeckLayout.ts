@@ -1,10 +1,8 @@
 import { useMemo } from "react";
 import { deckGeometry, deckLeading, deckVisibleWidth, type DeckGeometry } from "../../lib/deckGeometry";
 import type { MaterialScheme } from "../../lib/material/schemes";
-import { schemeFor, schemePairFor } from "../../lib/material/schemePick";
-import { useDynamicScheme } from "../../state/app/dynamicScheme";
-import { usePreferences } from "../../state/settings/store";
-import { useMaterialTheme } from "../ui/materialTheme";
+import { schemeFor } from "../../lib/material/schemePick";
+import { useMaterialSchemePair, useMaterialTheme } from "../ui/materialTheme";
 import { materialSize } from "../ui/materialTokens";
 import { tabsLayout } from "../ui/tokens";
 
@@ -70,9 +68,8 @@ export function materialCloseAt(g: DeckGeometry, count: number, scroll: number, 
 }
 
 export function useIncognitoScheme(): MaterialScheme {
-  const choice = usePreferences((p) => p.colorChoice);
-  const dynamic = useDynamicScheme((s) => s.pair);
-  return useMemo(() => schemeFor(schemePairFor(choice, dynamic), true), [choice, dynamic]);
+  const pair = useMaterialSchemePair();
+  return useMemo(() => schemeFor(pair, true), [pair]);
 }
 
 export function useDeckScheme(incognito: boolean): MaterialScheme {

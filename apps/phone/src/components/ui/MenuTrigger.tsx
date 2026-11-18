@@ -12,6 +12,7 @@ import { useTheme } from "./theme";
 import { useDesign } from "./design";
 import { schemeFor } from "../../lib/material/schemePick";
 import { currentMaterialTheme, materialDesignApplied, useMaterialSchemePair } from "./materialTheme";
+import { countUsage } from "../../state/telemetry/telemetry";
 
 export type MenuHandlers = { onPress?: () => void; onLongPress?: () => void };
 
@@ -86,7 +87,12 @@ function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClo
   const menu = nativeMenu(items);
   const actions = useRef(menu.actions);
   actions.current = menu.actions;
-  const select = useCallback((id: string) => actions.current.get(id)?.(), []);
+  const select = useCallback((id: string) => {
+    const action = actions.current.get(id);
+    if (!action) return;
+    countUsage("native_menu_actions");
+    action();
+  }, []);
   const opened = useCallback(() => {
     nativeMenuOpened();
     onOpen?.();

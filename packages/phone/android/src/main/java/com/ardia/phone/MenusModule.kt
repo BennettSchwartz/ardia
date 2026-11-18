@@ -125,7 +125,7 @@ internal object NativeMenuRules {
 }
 
 class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
-    private val onSelect by EventDispatcher()
+    private val onMenuSelect by EventDispatcher()
     private val onOpen by EventDispatcher()
     private val onClose by EventDispatcher()
 
@@ -204,7 +204,7 @@ class NativeContextMenuView(context: Context, appContext: AppContext) : ExpoView
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             setContent {
                 MaterialMenu(colors.value, open, rows.value, onPick = { id ->
-                    onSelect(mapOf("id" to id))
+                    onMenuSelect(mapOf("id" to id))
                     close()
                 }, onDismiss = ::close)
             }
@@ -314,7 +314,7 @@ class MenusModule : Module() {
         }.runOnQueue(Queues.MAIN)
 
         View(NativeContextMenuView::class) {
-            Events("onSelect", "onOpen", "onClose")
+            Events("onMenuSelect", "onOpen", "onClose")
 
             Prop("items") { view: NativeContextMenuView, items: List<MenuItemRecord> ->
                 view.items = items.map(NativeMenuRules::shape)

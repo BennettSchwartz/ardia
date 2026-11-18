@@ -1,6 +1,6 @@
 import { requireNativeViewManager, requireOptionalNativeModule } from "expo-modules-core";
 import { createElement, type ComponentType, type ReactNode, type Ref } from "react";
-import { View, type NativeSyntheticEvent, type ViewProps } from "react-native";
+import { Platform, View, type NativeSyntheticEvent, type ViewProps } from "react-native";
 import type { LookColors } from "./look";
 import type { MaterialRole } from "./material";
 
@@ -43,7 +43,8 @@ type NativeMenus = {
 };
 
 type NativeProps = Omit<ContextMenuProps, "onSelect" | "onOpen" | "onClose"> & {
-  onSelect: (event: NativeSyntheticEvent<{ id: string }>) => void;
+  onSelect?: (event: NativeSyntheticEvent<{ id: string }>) => void;
+  onMenuSelect?: (event: NativeSyntheticEvent<{ id: string }>) => void;
   onOpen?: () => void;
   onClose?: () => void;
 };
@@ -64,7 +65,7 @@ export function ContextMenuView({ ref, onSelect, onOpen, onClose, trigger = "lon
     ...rest,
     ref,
     trigger,
-    onSelect: (event: NativeSyntheticEvent<{ id: string }>) => onSelect(event.nativeEvent.id),
+    [Platform.OS === "android" ? "onMenuSelect" : "onSelect"]: (event: NativeSyntheticEvent<{ id: string }>) => onSelect(event.nativeEvent.id),
     onOpen: onOpen ? () => onOpen() : undefined,
     onClose: onClose ? () => onClose() : undefined,
   });

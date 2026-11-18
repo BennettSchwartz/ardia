@@ -73,6 +73,7 @@ export const setAutoOpenKeyboard = (on: boolean) => setPreference("autoOpensKeyb
 export const setSwipeNavigation = (mode: SwipeNavigationMode) => setPreference("swipeNavigation", mode);
 export const setCollapsesBottomBar = (on: boolean) => setPreference("collapsesBottomBar", on);
 export const setColorChoice = (choice: ColorChoice) => setPreference("colorChoice", choice);
+export const setDynamicColors = (on: boolean) => setPreference("dynamicColors", on);
 export const setInterfaceStyle = (choice: InterfaceStyleChoice) => setPreference("interfaceStyle", choice);
 export const setSchemeChoice = (choice: SchemeChoice) => setPreference("schemeChoice", choice);
 export const setArchiveInterval = (interval: AutoArchiveInterval) => setAutoArchiveInterval(interval);

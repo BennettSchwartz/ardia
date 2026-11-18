@@ -7,7 +7,8 @@ import { markSheetFromSettings, openArchive, openSpaces } from "../../state/brow
 import { useSyncEnabled, useSyncStatus, useSyncView } from "../../state/sync/hooks";
 import { syncedEngineName, syncRowSubtitle } from "../../state/sync/syncRules";
 import { showOnboardingFromSettings } from "../../state/onboarding/store";
-import { appVersion, exportOpenTabs, setAppLinks, setArchiveInterval, setAutoOpenKeyboard, setSearchSuggestions, useEngines } from "../../state/settings/actions";
+import { appVersion, exportOpenTabs, setAppLinks, setArchiveInterval, setAutoOpenKeyboard, setDynamicColors, setSearchSuggestions, useEngines } from "../../state/settings/actions";
+import { wallpaperColorsEnabled } from "../../lib/material/schemePick";
 import { usePreferences } from "../../state/settings/hooks";
 import { closeSettings, pushSettings } from "../../state/settings/nav";
 import { AUTO_ARCHIVE_INTERVALS, autoArchiveTitle, type AutoArchiveInterval } from "../../state/tabs/tabModels";
@@ -45,6 +46,7 @@ export function SettingsRoot() {
   const design = useDesign();
   const redesigned = design === "redesigned";
   const material = design === "material";
+  const dynamicColors = wallpaperColorsEnabled(usePreferences((p) => p.colorChoice), usePreferences((p) => p.dynamicColors));
   return (
     <SettingsPage title="Settings" onClose={material ? closeSettings : undefined} trailing={material ? undefined : <BarButton title="Done" emphasized onPress={closeSettings} />}>
       {syncOffered() ? (
@@ -83,6 +85,11 @@ export function SettingsRoot() {
       {redesigned ? (
         <Group>
           <AppearanceRow />
+        </Group>
+      ) : material ? (
+        <Group footer={dynamicColors ? "Use colors from your wallpaper." : "Choose a color for Ardia."}>
+          <ToggleRow title="Dynamic Colors" icon="paintpaletteFill" tint={settingsTint.neutral} value={dynamicColors} onChange={setDynamicColors} />
+          {!dynamicColors ? <ColorRow /> : null}
         </Group>
       ) : (
         <Group>

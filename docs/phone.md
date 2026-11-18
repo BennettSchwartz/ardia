@@ -143,6 +143,10 @@ says what happened, and no tab or removed visit is lost or shows up twice.
   with the Compose app's CameraX and ZXing code and hands the text to `sync.connect`; expo-camera and its ML Kit are
   gone (00b9064e9). It asks for the camera again once a one-time grant has expired (d8460729e).
 
+Android native menu actions use `onMenuSelect`, because `onSelect` collides with React Native's bubbling selection event. Verified 2026-11-18 on the OnePlus MT2111: Tabs › More › Settings opens the Settings sheet. The consent-gated daily `usage_counts.native_menu_actions` counter measures successful dispatches without recording the action or its label; compare it with `native_menus_opened`.
+
+Settings › Dynamic Colors switches between the wallpaper palette and a custom color (2026-11-18). Turning it off shows the existing color picker; turning it on keeps the custom color saved. The choice is stored in `settings.dynamicColors`, applies immediately to the app, native menus and Incognito, and survives relaunches. Phones without a wallpaper palette use Ardia's fallback when enabled. Existing installs retain their current theme until the switch changes. Watch the existing `app_launched.material_colors` values for adoption; no new telemetry fields.
+
 ## System entry points on Android
 
 The Expo app has the Compose app's entry points, beside the iPhone's:

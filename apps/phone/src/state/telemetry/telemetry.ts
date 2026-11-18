@@ -75,8 +75,8 @@ export async function reportLaunch(firstScreenAt: number) {
   reported = true;
   const boot = useBoot.getState();
   const look = lookBudget.mode(await systemLook());
-  const { interfaceStyle, schemeChoice, colorChoice } = currentPreferences();
-  const material_colors = materialColorSource(useAppearanceDesign.getState().design === "material", colorChoice, useDynamicScheme.getState().pair);
+  const { interfaceStyle, schemeChoice, colorChoice, dynamicColors } = currentPreferences();
+  const material_colors = materialColorSource(useAppearanceDesign.getState().design === "material", colorChoice, useDynamicScheme.getState().pair, dynamicColors);
   gate.capture("app_launched", { legacy_import: legacyImportOutcome(boot.outcome), legacy_import_failures: boot.failures, look_mode: look, ...appearanceTelemetry(offeredInterfaceStyle(interfaceStyle, syncOffered()), offeredScheme(schemeChoice, syncOffered())), material_colors });
   const processStart = await processStartedAt();
   const timings = launchProps(processStart, JS_STARTED_AT, firstScreenAt);

@@ -7,6 +7,7 @@ import { SEEDED_SCHEMES } from "../lib/material/schemes";
 import { setDynamicScheme } from "../state/app/dynamicScheme";
 import * as settingsActions from "../state/settings/actions";
 import { closeSettings, openSettings, pushSettings, useSettingsNav } from "../state/settings/nav";
+import { currentPreferences, loadPreferences, setPreference } from "../state/settings/store";
 import { classicOnAndroid, renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 const onAndroid = Platform.OS === "android" ? test : test.skip;
@@ -83,6 +84,27 @@ onAndroid("switch rows are one switch for TalkBack with a Material switch inside
     row.props.onPress();
   });
   expect(set).toHaveBeenCalledWith(!checked);
+  unmount(root);
+});
+
+onAndroid("Dynamic Colors switches immediately between wallpaper and a saved custom color and survives reloading preferences", () => {
+  setDynamicScheme(SEEDED_SCHEMES.green);
+  setPreference("colorChoice", "blue");
+  setPreference("dynamicColors", true);
+  const root = settings();
+  const toggle = () => pressable(root, "materialSettingsRow:Dynamic Colors");
+  expect(toggle().props.accessibilityState.checked).toBe(true);
+  expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(SEEDED_SCHEMES.green.light.surfaceContainer);
+  expect(root.root.findAll((found) => found.props.accessibilityRole === "radio")).toHaveLength(0);
+  act(() => toggle().props.onPress());
+  expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(SEEDED_SCHEMES.blue.light.surfaceContainer);
+  expect(root.root.findAll((found) => found.props.accessibilityRole === "radio").length).toBeGreaterThan(0);
+  act(() => loadPreferences());
+  expect(currentPreferences().dynamicColors).toBe(false);
+  expect(currentPreferences().colorChoice).toBe("blue");
+  act(() => toggle().props.onPress());
+  expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(SEEDED_SCHEMES.green.light.surfaceContainer);
+  expect(currentPreferences().colorChoice).toBe("blue");
   unmount(root);
 });
 

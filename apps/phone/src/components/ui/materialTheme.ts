@@ -9,20 +9,21 @@ export type MaterialTheme = { scheme: MaterialScheme; dark: boolean };
 
 export function useMaterialSchemePair() {
   const choice = usePreferences((p) => p.colorChoice);
+  const enabled = usePreferences((p) => p.dynamicColors);
   const dynamic = useDynamicScheme((s) => s.pair);
-  return useMemo(() => schemePairFor(choice, dynamic), [choice, dynamic]);
+  return useMemo(() => schemePairFor(choice, dynamic, enabled), [choice, dynamic, enabled]);
 }
 
 export function useMaterialTheme(): MaterialTheme {
   const dark = useDarkScheme();
-  const choice = usePreferences((p) => p.colorChoice);
-  const dynamic = useDynamicScheme((s) => s.pair);
-  return useMemo(() => ({ scheme: schemeFor(schemePairFor(choice, dynamic), dark), dark }), [choice, dynamic, dark]);
+  const pair = useMaterialSchemePair();
+  return useMemo(() => ({ scheme: schemeFor(pair, dark), dark }), [pair, dark]);
 }
 
 export function currentMaterialTheme(): MaterialTheme {
   const dark = currentDarkScheme();
-  return { scheme: schemeFor(schemePairFor(currentPreferences().colorChoice, useDynamicScheme.getState().pair), dark), dark };
+  const { colorChoice, dynamicColors } = currentPreferences();
+  return { scheme: schemeFor(schemePairFor(colorChoice, useDynamicScheme.getState().pair, dynamicColors), dark), dark };
 }
 
 export const materialDesignApplied = () => useAppearanceDesign.getState().design === "material";
