@@ -16,7 +16,7 @@ import { tabsInSpace } from "../../state/tabs/spaces";
 import { useTabs } from "../../state/tabs/store";
 import { recencyOrder, type BrowserTab } from "../../state/tabs/tabModels";
 import { countUsage } from "../../state/telemetry/telemetry";
-import { capsule, ChromeSurface, ConfirmDialog, Favicon, font, rolesFor, startInk, startLayout, Symbol, tabsInk, tabsLayout, useTheme, type Confirmation, type MenuItem } from "../ui";
+import { capsule, ChromeSurface, ConfirmSheet, Favicon, font, rolesFor, startInk, startLayout, Symbol, tabsInk, tabsLayout, useTheme, type Confirmation, type MenuItem } from "../ui";
 import { confirmInSheet, MenuTrigger, spaceSystemImage } from "../ui/MenuTrigger";
 import { barAddress, spokenAddress } from "../browsing/FloatingBar";
 import { spaceMenuSymbol, SpaceTitle } from "../search/StartSpaces";
@@ -101,7 +101,7 @@ export function DuoSidebar({ variant, onClose }: Props) {
         <AddressField dark={dark} onClose={onClose} />
       </View>
       <SpacePages spaces={spaces} current={current} showsTiles={variant === "overlay"} dark={dark} onChoose={choose} onClose={onClose} />
-      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
+      {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </View>
   );
 }

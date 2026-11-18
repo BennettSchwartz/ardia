@@ -16,3 +16,13 @@ export function useCoverFocus(target: RefObject<ViewInstance | null>) {
     };
   }, [target]);
 }
+
+export function returnAccessibilityFocus(target: RefObject<ViewInstance | null>) {
+  void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
+    if (!on) return;
+    requestAnimationFrame(() => {
+      const handle = target.current ? findNodeHandle(target.current) : null;
+      if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+    });
+  });
+}

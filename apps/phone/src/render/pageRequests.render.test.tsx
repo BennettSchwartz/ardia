@@ -86,3 +86,17 @@ onAndroid("on Android a page's alert stays the drawn dialog", () => {
   expect(root.root.findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button").length).toBeGreaterThan(0);
   unmount(root);
 });
+
+onAndroid("on Android a file input that offers the camera asks in the drawn action sheet, as iPhone's system sheet does, and its Cancel dismisses", () => {
+  const sheet = jest.spyOn(ActionSheetIOS, "showActionSheetWithOptions").mockImplementation(() => undefined);
+  ask({ ...base, kind: "fileChooser", offersPhoto: true, offersVideo: false, capturesDirectly: false, allowsMultiple: false } as Request);
+  const root = renderSurface(<PageRequestHost tabId="p1" />);
+  expect(sheet).not.toHaveBeenCalled();
+  expect(root.root.findAll((node) => node.props.testID === "drawnActionSheet" && typeof node.type === "string")).toHaveLength(1);
+  const button = (label: string) => root.root.findAll((node) => node.props.accessibilityRole === "button" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!;
+  act(() => button("Take Photo").props.onPress());
+  expect(answered).toHaveBeenLastCalledWith("p1", expect.objectContaining({ id: "r1" }), { type: "takePhoto" });
+  act(() => button("Cancel").props.onPress());
+  expect(answered).toHaveBeenLastCalledWith("p1", expect.objectContaining({ id: "r1" }), { type: "dismiss" });
+  unmount(root);
+});

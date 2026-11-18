@@ -77,7 +77,7 @@ test("with a row's menu open over the tray, Back goes to the menu: the tray's na
   expect(mockBack.enabled).toEqual([true]);
   const listening = jest.spyOn(BackHandler, "addEventListener");
   const row = root.root.findAll((node) => typeof node.props.onMenu === "function" && node.props.row !== undefined && Array.isArray(node.props.menu) && node.props.menu.length > 0)[0]!;
-  await act(async () => row.props.onMenu(row.props.row, 300));
+  await act(async () => row.props.onMenu(row.props.row, { x: 120, y: 300 }));
   await act(async () => jest.advanceTimersByTime(50));
   expect(mockBack.enabled.at(-1)).toBe(false);
   expect(mockBack.handlers).toBeNull();

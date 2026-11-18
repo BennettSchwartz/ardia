@@ -1,16 +1,15 @@
-import { actionSheet, ContextMenuView, nativeMenusAvailable, settingsUI, type ContextMenuHandle, type MenuItem as NativeMenuItem } from "@ardia/phone-native";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Platform, StyleSheet, View, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
+import { actionSheet, ContextMenuView, nativeMenusAvailable, settingsUI, type MenuItem as NativeMenuItem } from "@ardia/phone-native";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
+import type { Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
+import { returnAccessibilityFocus } from "./coverFocus";
 import type { Confirmation } from "./Dialog";
-import { FloatingMenu, isSubmenu, Menu, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
-import { tabsMotion } from "./motion";
+import { FloatingMenu, isSubmenu, Menu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { Portal } from "./Overlay";
 import { useTheme } from "./theme";
 
-export type MenuHandlers = { onPress?: () => void; onLongPress?: () => void };
+export type MenuHandlers = { onPress?: () => void; onLongPress?: (event?: GestureResponderEvent) => void };
 
 type Props = {
   items: MenuItem[];
@@ -29,7 +28,7 @@ type Props = {
 
 export type NativeMenu = { items: NativeMenuItem[]; actions: Map<string, () => void> };
 
-export const nativeMenus = () => nativeMenusAvailable().contextMenu;
+export const nativeMenus = () => Platform.OS === "ios" && nativeMenusAvailable().contextMenu;
 
 export const spaceSystemImage = (name: string, icon: string | null): string | undefined => settingsUI.spaceMenuSymbol(name, icon) ?? undefined;
 
@@ -86,74 +85,63 @@ function NativeTrigger({ items, trigger = "longPress", fixedOrder, onOpen, onClo
     nativeMenuOpened();
     onOpen?.();
   }, [onOpen]);
-  const native = useRef<ContextMenuHandle>(null);
-  const show = useCallback(() => void native.current?.show(), []);
-  const showAt = useCallback((x: number, y: number) => void native.current?.show(x, y), []);
-  const android = Platform.OS === "android";
-  const handlers: MenuHandlers = !android || disabled ? {} : trigger === "tap" ? { onPress: show } : { onLongPress: show };
-  const press = useMemo(
-    () =>
-      Gesture.LongPress()
-        .withTestId(testID ? `${testID}LongPress` : "menuLongPress")
-        .enabled(android && trigger === "longPress" && !disabled)
-        .minDuration(tabsMotion.longPress)
-        .onStart((event) => {
-          runOnJS(showAt)(event.x, event.y);
-        }),
-    [android, trigger, disabled, testID, showAt],
-  );
-  const content = children(handlers);
   return (
-    <ContextMenuView ref={native} testID={testID} style={style} collapsable={false} items={disabled ? [] : menu.items} trigger={trigger} fixedOrder={fixedOrder} onSelect={select} onOpen={opened} onClose={onClose} appearance={{ dark: dark ?? theme.dark }}>
-      {android && trigger === "longPress" ? (
-        <GestureDetector gesture={press}>
-          <View style={styles.pressArea} collapsable={false}>
-            {content}
-          </View>
-        </GestureDetector>
-      ) : (
-        content
-      )}
+    <ContextMenuView testID={testID} style={style} collapsable={false} items={disabled ? [] : menu.items} trigger={trigger} fixedOrder={fixedOrder} onSelect={select} onOpen={opened} onClose={onClose} appearance={{ dark: dark ?? theme.dark }}>
+      {children({})}
     </ContextMenuView>
   );
 }
 
+const pressPoint = (event?: GestureResponderEvent): Point | null => {
+  const touch = event?.nativeEvent;
+  return touch && typeof touch.pageX === "number" && typeof touch.pageY === "number" ? { x: touch.pageX, y: touch.pageY } : null;
+};
+
 function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
-  const [opened, setOpened] = useState(false);
+  const frost = useMenuFrost();
+  const [opened, setOpened] = useState<{ at: Point | null } | null>(null);
   useEffect(() => {
     if (!disabled || !opened) return;
-    setOpened(false);
+    setOpened(null);
     onClose?.();
   }, [disabled]);
-  const open = useCallback(() => {
-    if (disabled) return;
-    haptic?.();
-    setOpened(true);
-    onOpen?.();
-  }, [disabled, haptic, onOpen]);
+  const open = useCallback(
+    (event?: GestureResponderEvent) => {
+      if (disabled) return;
+      haptic?.();
+      setOpened({ at: trigger === "longPress" ? pressPoint(event) : null });
+      onOpen?.();
+    },
+    [disabled, haptic, onOpen, trigger],
+  );
   const dismiss = useCallback(() => {
-    setOpened(false);
+    setOpened(null);
     onClose?.();
+    returnAccessibilityFocus(anchor);
   }, [onClose]);
+  const held = trigger === "longPress";
+  const fixed = place && (place.top !== undefined || place.bottom !== undefined) && !opened?.at;
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
-      {children(trigger === "tap" ? { onPress: open } : { onLongPress: open })}
+      {children(held ? { onLongPress: open } : { onPress: open })}
       {opened && !disabled ? (
-        place && (place.top !== undefined || place.bottom !== undefined) ? (
+        fixed ? (
           <Portal>
-            <Menu items={items} place={place} onDismiss={dismiss} />
+            <Menu items={items} place={place} origin={place.bottom !== undefined ? "bottom" : "top"} dimmed={held} frost={frost} onDismiss={dismiss} />
           </Portal>
         ) : (
-          <FloatingMenu items={items} anchor={anchor} place={place ?? {}} onDismiss={dismiss} />
+          <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} frost={frost} onDismiss={dismiss} />
         )
       ) : null}
     </View>
   );
 }
 
+const nativeActionSheet = () => Platform.OS === "ios" && nativeMenusAvailable().actionSheet;
+
 export function confirmInSheet(confirmation: Confirmation, drawn: () => void) {
-  if (!nativeMenusAvailable().actionSheet) {
+  if (!nativeActionSheet()) {
     drawn();
     return;
   }
@@ -169,4 +157,3 @@ export function confirmInSheet(confirmation: Confirmation, drawn: () => void) {
   });
 }
 
-const styles = StyleSheet.create({ pressArea: { flexGrow: 1, alignSelf: "stretch" } });

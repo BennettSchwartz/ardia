@@ -1,3 +1,4 @@
+import { Platform } from "react-native";
 import { getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { renderSurface, someTabs, unmount } from "../../test/render/harness";
@@ -87,7 +88,10 @@ const cardMenus = (root: Root) => contextMenus(root).filter((menu) => menu.props
 const items = (menu: ReactTestInstance): NativeItem[] => menu.props.items;
 const choose = (menu: ReactTestInstance, title: string) => act(() => menu.props.onSelect(idOf(menu.props.items, title)));
 
-test("each deck card is a system context menu on a long press with main's CardMenu, and our own long-press gesture steps aside", () => {
+
+const nativeTest = Platform.OS === "ios" ? test : test.skip;
+
+nativeTest("each deck card is a system context menu on a long press with main's CardMenu, and our own long-press gesture steps aside", () => {
   withSpaces([WORK, HOME]);
   jest.spyOn(syncHooks, "useSendTargets").mockReturnValue([STUDIO, BOOK, PIXEL] as never);
   jest.spyOn(syncHooks, "useIsPinned").mockReturnValue(false);
@@ -106,7 +110,7 @@ test("each deck card is a system context menu on a long press with main's CardMe
   unmount(root);
 });
 
-test("a card menu's items do what they say: Send, Pin, Move to Space and Close Tab", () => {
+nativeTest("a card menu's items do what they say: Send, Pin, Move to Space and Close Tab", () => {
   withSpaces([WORK, HOME]);
   jest.spyOn(syncHooks, "useSendTargets").mockReturnValue([PIXEL] as never);
   jest.spyOn(syncHooks, "useIsPinned").mockReturnValue(false);
@@ -132,7 +136,7 @@ test("a card menu's items do what they say: Send, Pin, Move to Space and Close T
   unmount(root);
 });
 
-test("a pinned tab reads Pinned to Mac, disabled, and a tab that can't be shared offers only Close Tab", () => {
+nativeTest("a pinned tab reads Pinned to Mac, disabled, and a tab that can't be shared offers only Close Tab", () => {
   withSpaces([WORK]);
   jest.spyOn(syncHooks, "useIsPinned").mockReturnValue(true);
   act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.map((tab, at) => (at === 2 ? { ...tab, url: "about:blank" } : tab)) })));
@@ -144,7 +148,7 @@ test("a pinned tab reads Pinned to Mac, disabled, and a tab that can't be shared
   unmount(root);
 });
 
-test("the ··· menu is main's DeckMoreMenu on a tap, in fixed order, and Close All asks with the system's action sheet", async () => {
+nativeTest("the ··· menu is main's DeckMoreMenu on a tap, in fixed order, and Close All asks with the system's action sheet", async () => {
   withSpaces([WORK]);
   jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
   const settings = jest.spyOn(settingsNav, "openSettings").mockImplementation(() => undefined);
@@ -168,7 +172,7 @@ test("the ··· menu is main's DeckMoreMenu on a tap, in fixed order, and Close
   unmount(root);
 });
 
-test("the space switcher lists the spaces with a check on the current one and their symbols, and picking one switches", () => {
+nativeTest("the space switcher lists the spaces with a check on the current one and their symbols, and picking one switches", () => {
   withSpaces([WORK, HOME]);
   const select = jest.spyOn(syncActions, "selectProfile").mockImplementation(() => undefined);
   const root = deck();
@@ -183,7 +187,7 @@ test("the space switcher lists the spaces with a check on the current one and th
   unmount(root);
 });
 
-test("the deck header shows a space's name alone when it has no icon of its own, with no initial in a circle, and the space's icon beside its name when it has one", () => {
+nativeTest("the deck header shows a space's name alone when it has no icon of its own, with no initial in a circle, and the space's icon beside its name when it has one", () => {
   withSpaces([HOME, WORK]);
   const plain = deck();
   const title = menuAround(plain, "Space, Home");
@@ -198,7 +202,7 @@ test("the deck header shows a space's name alone when it has no icon of its own,
   unmount(marked);
 });
 
-test("the Incognito pill's menu is Close Incognito Tabs, which asks with an action sheet first", async () => {
+nativeTest("the Incognito pill's menu is Close Incognito Tabs, which asks with an action sheet first", async () => {
   act(() => tabStore.useTabs.setState((state) => ({ ...state, privates: someTabs(2, true) })));
   const leave = jest.spyOn(browse, "leaveIncognito").mockImplementation(() => undefined);
   const root = deck();
@@ -216,7 +220,7 @@ test("the Incognito pill's menu is Close Incognito Tabs, which asks with an acti
   unmount(root);
 });
 
-test("the plus keeps its tap and its long press is main's PlusButton menu", () => {
+nativeTest("the plus keeps its tap and its long press is main's PlusButton menu", () => {
   jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
   const opened = jest.spyOn(browse, "newTab").mockImplementation(() => undefined);
   const incognito = jest.spyOn(browse, "newIncognitoTab").mockImplementation(() => undefined);
@@ -234,7 +238,7 @@ test("the plus keeps its tap and its long press is main's PlusButton menu", () =
   unmount(root);
 });
 
-test("the Archive capsule's interval is a tap menu of main's intervals with the current one checked", () => {
+nativeTest("the Archive capsule's interval is a tap menu of main's intervals with the current one checked", () => {
   const set = jest.spyOn(settingsActions, "setArchiveInterval").mockImplementation(() => undefined);
   act(() => useArchiveCard.setState({ showing: true }));
   const root = deck();
@@ -245,5 +249,83 @@ test("the Archive capsule's interval is a tap menu of main's intervals with the 
   const other = items(picker).find((item) => !item.checked)!;
   act(() => picker.props.onSelect(other.id));
   expect(set).toHaveBeenCalledTimes(1);
+  unmount(root);
+});
+
+const drawnTest = Platform.OS === "android" ? test : test.skip;
+const menuitems = (root: Root) => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").map((node) => node.props.accessibilityLabel);
+const pick = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
+const press = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
+
+drawnTest("on Android a deck card's long press opens main's CardMenu drawn at the finger, dimmed, where the system's menu would have been", () => {
+  withSpaces([WORK]);
+  const root = deck();
+  expect(contextMenus(root)).toHaveLength(0);
+  const { State } = require("react-native-gesture-handler") as typeof import("react-native-gesture-handler");
+  const { fireGestureHandler } = require("react-native-gesture-handler/jest-utils") as typeof import("react-native-gesture-handler/jest-utils");
+  const { deckCardAt, deckGeometry, initialDeckScroll } = require("../lib/deckGeometry") as typeof import("../lib/deckGeometry");
+  const { deckHeaderBottom } = require("../components/tabs/DeckHeader") as typeof import("../components/tabs/DeckHeader");
+  const g = deckGeometry(393, 873, 40, 24, 0, Platform.OS, "redesigned", deckHeaderBottom());
+  const y = g.cardCenterY;
+  let x = 0;
+  while (x < 393 && deckCardAt(g, 3, initialDeckScroll(3), x, y) < 0) x += 2;
+  expect(getByGestureTestId("deckLongPress").config.enabled).toBe(true);
+  act(() => fireGestureHandler(getByGestureTestId("deckLongPress"), [{ state: State.BEGAN, x, y, absoluteX: x, absoluteY: y }, { state: State.ACTIVE, x, y, absoluteX: x, absoluteY: y }, { state: State.END, x, y, absoluteX: x, absoluteY: y }]));
+  act(() => jest.advanceTimersByTime(16));
+  expect(menuitems(root)).toEqual(["Copy Link", "Share", "Pin to Mac", "Close Tab"]);
+  const { Menu } = require("../components/ui") as typeof import("../components/ui");
+  const menu = root.root.findAll((node) => node.type === Menu)[0]!;
+  expect(menu.props.dimmed).toBe(true);
+  const { width, height } = require("react-native").Dimensions.get("window");
+  const { menuAtPoint } = require("../components/ui") as typeof import("../components/ui");
+  expect(menu.props.place).toEqual(menuAtPoint({ x, y }, { width, height }, { top: 40, bottom: 24, left: 0, right: 0 }, 250, menu.props.items).place);
+  expect(menu.props.place.top).toBeGreaterThanOrEqual(40);
+  unmount(root);
+});
+
+drawnTest("on Android the ··· menu is drawn with main's items, and Close All asks in the drawn action sheet before it closes anything", () => {
+  withSpaces([WORK]);
+  jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
+  const closeAll = jest.spyOn(browse, "closeAllFromDeck").mockImplementation(() => undefined);
+  const root = deck();
+  press(root, "More");
+  expect(menuitems(root)).toEqual(["Archive", "Spaces From Your Mac", "New Incognito Tab", "Reopen Closed Tab", "Close All Tabs", "Settings"]);
+  pick(root, "Close All Tabs");
+  expect(mockNative.sheets).toHaveLength(0);
+  expect(closeAll).not.toHaveBeenCalled();
+  expect(root.root.findAll((node) => node.props.testID === "drawnActionSheet" && typeof node.type === "string")).toHaveLength(1);
+  press(root, "Close All Tabs");
+  expect(closeAll).toHaveBeenCalledTimes(1);
+  unmount(root);
+});
+
+drawnTest("on Android the space switcher and the Incognito pill are drawn menus, and leaving Incognito asks in the drawn action sheet", () => {
+  withSpaces([WORK, HOME]);
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, privates: someTabs(2, true) })));
+  const select = jest.spyOn(syncActions, "selectProfile").mockImplementation(() => undefined);
+  const leave = jest.spyOn(browse, "leaveIncognito").mockImplementation(() => undefined);
+  const root = deck();
+  press(root, "Space, Work");
+  expect(menuitems(root)).toEqual(["Work", "Home"]);
+  pick(root, "Home");
+  expect(select).toHaveBeenCalledWith("home");
+  press(root, "Incognito, 2 tabs");
+  pick(root, "Close Incognito Tabs");
+  expect(leave).not.toHaveBeenCalled();
+  press(root, "Cancel");
+  expect(leave).not.toHaveBeenCalled();
+  unmount(root);
+});
+
+drawnTest("on Android holding the plus opens main's PlusButton menu at the finger", () => {
+  jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
+  const root = deck();
+  const plus = root.root.findAll((node) => node.props.accessibilityLabel === "New Tab" && typeof node.props.onLongPress === "function")[0]!;
+  act(() => plus.props.onLongPress({ nativeEvent: { pageX: 340, pageY: 820 } }));
+  const { FloatingMenu } = require("../components/ui") as typeof import("../components/ui");
+  const menu = root.root.findAll((node) => node.type === FloatingMenu)[0]!;
+  expect(menu.props.at).toEqual({ x: 340, y: 820 });
+  expect(menu.props.dimmed).toBe(true);
+  expect((menu.props.items as { label: string }[]).map((item) => item.label)).toEqual(["New Incognito Tab", "Reopen Closed Tab"]);
   unmount(root);
 });

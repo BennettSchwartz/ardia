@@ -37,6 +37,7 @@ import { commandBarMotion, commandPanelPlace, useCommandBar } from "../duo/Comma
 
 const LARGE_FONT_SCALE = 1.5;
 import { useTrayKeyboard } from "./useTrayKeyboard";
+import type { Point } from "../../lib/menuPlace";
 
 const SHEET_ABOVE_KEYBOARD = 274;
 
@@ -939,14 +940,14 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
   const [room, setRoom] = useState(0);
   const [bottoms, setBottoms] = useState<number[]>([]);
   const refine = useCallback((row: TrayRow) => setSearchText(refinedText(row)), []);
-  const [menu, setMenu] = useState<{ row: TrayRow; y: number } | null>(null);
+  const [menu, setMenu] = useState<{ row: TrayRow; at: Point } | null>(null);
   const menuOpen = menu !== null;
   useEffect(() => (menuOpen ? coverTray() : undefined), [menuOpen]);
   const window = useWindowDimensions();
-  const showMenu = useCallback((row: TrayRow, y: number) => {
+  const showMenu = useCallback((row: TrayRow, at: Point) => {
     if (!trayRowActions(row).length) return;
     menuOpenedHaptic();
-    setMenu({ row, y });
+    setMenu({ row, at });
   }, []);
   const newTab = useContext(NewTabPanelContext);
   const list = useContext(TrayListContext);
@@ -973,11 +974,10 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
   const menuView = menu ? (
     <FloatingMenu
       items={trayRowActions(menu.row).map((action) => ({ label: action.label, icon: action.icon, onPress: action.run }))}
-      place={{
-        top: Math.max(space.l, Math.min(menu.y, window.height - tabsLayout.cardMenuHeight)),
-        left: space.xl,
-        width: Math.min(tabsLayout.menuWidth, window.width - space.xl * 2),
-      }}
+      at={menu.at}
+      dimmed
+      frost={null}
+      place={{ width: Math.min(tabsLayout.menuWidth, window.width - space.xl * 2) }}
       onDismiss={() => setMenu(null)}
     />
   ) : null;
@@ -1031,7 +1031,7 @@ type ScrubbedProps = {
   typed: string;
   budget: number;
   onRefine: (row: TrayRow) => void;
-  onMenu: (row: TrayRow, y: number) => void;
+  onMenu: (row: TrayRow, at: Point) => void;
 };
 
 function ScrubbedRows({ rows, typed, budget, onRefine, onMenu }: ScrubbedProps) {
@@ -1061,10 +1061,10 @@ function ScrubbedRows({ rows, typed, budget, onRefine, onMenu }: ScrubbedProps) 
   };
   const tick = () => haptics.selection();
   const openMenu = useCallback(
-    (row: TrayRow, y: number) => {
+    (row: TrayRow, at: Point) => {
       menuTaken.value = true;
       scrub.value = idleScrub;
-      onMenu(row, y);
+      onMenu(row, at);
     },
     [onMenu],
   );

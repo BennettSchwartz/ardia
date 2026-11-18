@@ -31,7 +31,9 @@ export function OverlayHost({ children }: { children: ReactNode }) {
   );
   return (
     <OverlayContext.Provider value={overlay}>
-      {children}
+      <View style={styles.content} collapsable={false} importantForAccessibility={layers.length ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={layers.length > 0}>
+        {children}
+      </View>
       <View ref={root} style={StyleSheet.absoluteFill} pointerEvents="box-none" collapsable={false}>
         {layers.map((layer) => (
           <Fragment key={layer.id}>{layer.node}</Fragment>
@@ -57,3 +59,5 @@ export function useOverlayFrame() {
 }
 
 export const measureAnchor = (anchor: RefObject<ViewInstance | null>) => measure(anchor.current);
+
+const styles = StyleSheet.create({ content: { flex: 1 } });

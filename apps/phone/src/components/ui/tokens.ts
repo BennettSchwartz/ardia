@@ -143,7 +143,7 @@ export const readerInk = {
 
 export const readerLayout = { minLeadAspect: 0.75, maxWidth: 680, topBar: 52, chromeBand: 46, chromeSide: 16, chromeButton: 44, chromeCapsulePadding: 16, leadRadius: 12, lineHeight: 1.52, titleScale: 1.55, titleLine: 1.2, paragraphGap: 0.9, headerGap: 1.2 } as const;
 
-export const dialogLayout = { width: 312, radius: 28, fieldHeight: 48, choiceHeight: 48 } as const;
+export const dialogLayout = { width: 312, radius: 28, fieldHeight: 48 } as const;
 
 export const settingsLayout = {
   expoListTop: 12,
@@ -190,6 +190,49 @@ export const settingsTint = {
 export const faviconInk = { letter: "#FFFFFF", lightPlate: "rgba(255,255,255,0.92)", darkPlate: "rgba(0,0,0,0.78)" } as const;
 
 export const menuShadow = { opacity: 0.18, radius: 24, offsetY: 8 } as const;
+
+export const menuLook = {
+  width: 250,
+  radius: 13,
+  sideInset: 16,
+  labelGap: 12,
+  iconSize: 18,
+  iconSlot: 22,
+  checkSize: 15,
+  checkSlot: 20,
+  iconSide: "trailing" as "leading" | "trailing",
+  rowSeparators: true,
+  disabledOpacity: 0.3,
+  labelLines: 2,
+  frost: "thin",
+} as const;
+
+export const menuInk = {
+  light: { fill: "rgba(255,255,255,0.72)", solid: "#F2F2F2", highlight: "rgba(0,0,0,0.08)", separator: "rgba(60,60,67,0.29)", groupSeparator: "rgba(0,0,0,0.08)", heading: "rgba(60,60,67,0.6)", shadow: "rgba(0,0,0,0.18)" },
+  dark: { fill: "rgba(37,37,37,0.72)", solid: "#252525", highlight: "rgba(255,255,255,0.12)", separator: "rgba(84,84,88,0.6)", groupSeparator: "rgba(0,0,0,0.24)", heading: "rgba(235,235,245,0.6)", shadow: "rgba(0,0,0,0.5)" },
+} as const;
+
+export const actionSheetLook = {
+  sideInset: 8,
+  bottomGap: 8,
+  gap: 8,
+  maxWidth: 420,
+  radius: 13,
+  rowHeight: 57,
+  headerSide: 16,
+  headerVertical: 14,
+  headerGap: 2,
+  title: { fontSize: 13, lineHeight: 18, fontWeight: "600" },
+  message: { fontSize: 13, lineHeight: 18 },
+  action: { fontSize: 20, lineHeight: 25 },
+  cancelWeight: "600",
+  frost: "thin",
+} as const;
+
+export const actionSheetInk = {
+  light: { fill: "rgba(255,255,255,0.78)", solid: "#F2F2F2", cancel: "#FFFFFF", highlight: "rgba(0,0,0,0.08)", separator: "rgba(60,60,67,0.29)", header: "rgba(60,60,67,0.6)", scrim: "rgba(0,0,0,0.2)" },
+  dark: { fill: "rgba(37,37,37,0.78)", solid: "#252525", cancel: "#2C2C2E", highlight: "rgba(255,255,255,0.12)", separator: "rgba(84,84,88,0.6)", header: "rgba(235,235,245,0.6)", scrim: "rgba(0,0,0,0.48)" },
+} as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;
 

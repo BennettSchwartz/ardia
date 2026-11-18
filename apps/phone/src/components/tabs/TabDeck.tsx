@@ -71,7 +71,7 @@ import {
 } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useHasArchivedTabs, useIncognito, usePrivateCount, useShownSpace } from "../../state/tabs/hooks";
-import { archiveCardLayout, ConfirmDialog, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, moveTo, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
+import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, menuAtPoint, moveTo, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
 import { openSettings } from "../../state/settings/hooks";
 import { confirmInSheet, nativeMenus } from "../ui/MenuTrigger";
 import { useSyncEnabled } from "../../state/sync/hooks";
@@ -970,7 +970,7 @@ export const TabDeck = memo(function TabDeck() {
     .minDuration(tabsMotion.longPress)
     .onStart((e) => {
       const card = deckCardAt(g, count, scroll.value, e.x, e.y);
-      if (card >= 0) runOnJS(showCardMenu)(card, e.x, e.y);
+      if (card >= 0) runOnJS(showCardMenu)(card, e.absoluteX, e.absoluteY);
     });
   const tapFrom = useSharedValue({ x: 0, y: 0 });
   const tap = Gesture.Manual()
@@ -1253,18 +1253,8 @@ export const TabDeck = memo(function TabDeck() {
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-      {cardMenu ? (
-        <Menu
-          items={cardMenuItems(cardMenu.index)}
-          place={{
-            top: Math.min(cardMenu.y, height - tabsLayout.cardMenuHeight),
-            left: contentLeft + Math.min(Math.max(cardMenu.x - tabsLayout.menuWidth / 2, space.l), deckWidth - tabsLayout.menuWidth - space.l),
-            width: tabsLayout.menuWidth,
-          }}
-          onDismiss={() => setCardMenu(null)}
-        />
-      ) : null}
-      {confirmation ? <ConfirmDialog confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
+      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} at={cardMenu} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
+      {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
   );
 });
@@ -1349,3 +1339,9 @@ const styles = StyleSheet.create({
   hidden: { display: "none" },
   parked: { transform: [{ translateX: HANDED_OVER_AWAY }] },
 });
+
+function CardMenuAt({ items, at, screen, onDismiss }: { items: MenuItem[]; at: { x: number; y: number }; screen: { width: number; height: number }; onDismiss: () => void }) {
+  const insets = useSafeAreaInsets();
+  const spot = menuAtPoint(at, screen, insets, tabsLayout.menuWidth, items);
+  return <Menu items={items} place={spot.place} origin={spot.origin} dimmed onDismiss={onDismiss} />;
+}

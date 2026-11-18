@@ -60,6 +60,16 @@ export const tabsMotion = {
   deckStandby: 600,
 } as const;
 
+export const menuMotion = {
+  open: spring(0.32, 0.82),
+  fromScale: 0.4,
+  opaqueAt: 0.35,
+  close: 150,
+  dim: 200,
+  sheetIn: spring(0.4, 1),
+  sheetOut: 220,
+} as const;
+
 export const trayMotion = {
   settle: iPhoneOr(spring(0.26, 1), spring(0.34, 0.86)),
   dismiss: iPhoneOr(spring(0.14, 1), spring(0.32, 1)),

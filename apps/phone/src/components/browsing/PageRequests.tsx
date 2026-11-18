@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, TextInput } from "react-native";
+import { Platform, StyleSheet, TextInput } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { answerRequest, dismissPress, pressAction } from "../../state/page/actions";
 import { usePageRequest, usePress } from "../../state/page/hooks";
-import { confirmAnswer, pressHeading, pressMenuGroups, PRESS_TITLES, requestPlan, type PressAction, type Request, type RequestChoice } from "../../state/page/pagePrompts";
+import { confirmAnswer, pressHeading, pressMenuGroups, PRESS_TITLES, requestPlan, type PressAction, type Request } from "../../state/page/pagePrompts";
 import { presentSystemRequest } from "./systemRequest";
-import { dialogLayout, Dialog, font, Menu, radius, space, Symbol, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { ActionSheet, Dialog, dialogLayout, font, Menu, radius, space, useTheme, type MenuItem, type SymbolName } from "../ui";
 
 export function PageRequestHost({ tabId }: { tabId: string }) {
   const request = usePageRequest(tabId);
@@ -41,23 +41,8 @@ function RequestDialog({ tabId, request }: { tabId: string; request: Request }) 
       style={[font.body, styles.field, { color: theme.label, borderColor: theme.separator }]}
     />
   );
-  if (dialog.choices.length) {
-    return (
-      <Dialog title={dialog.title} message={null} onDismiss={dismiss} buttons={[{ title: dialog.cancel ?? "Cancel", onPress: dismiss }]}>
-        {dialog.choices.map((choice) => (
-          <Pressable
-            key={choice.title}
-            accessibilityRole="button"
-            onPress={() => answerRequest(tabId, request, choice.answer)}
-            style={({ pressed }) => [styles.choice, pressed ? { backgroundColor: theme.rowHighlight } : null]}
-          >
-            <Symbol name={CHOICE_ICONS[choice.icon]} size={20} color={theme.formAccent} />
-            <Text style={[font.body, { color: theme.formAccent }]}>{choice.title}</Text>
-          </Pressable>
-        ))}
-      </Dialog>
-    );
-  }
+  if (dialog.choices.length)
+    return <ActionSheet title={dialog.title || null} message={dialog.message} cancel={dialog.cancel ?? "Cancel"} onCancel={dismiss} actions={dialog.choices.map((choice) => ({ title: choice.title, onPress: () => answerRequest(tabId, request, choice.answer) }))} />;
   return (
     <Dialog
       title={dialog.title}
@@ -77,8 +62,6 @@ function RequestDialog({ tabId, request }: { tabId: string; request: Request }) 
 }
 
 const SYSTEM_DIALOGS = Platform.OS === "ios";
-
-const CHOICE_ICONS: Record<RequestChoice["icon"], SymbolName> = { camera: "camera", video: "video", folder: "folderFill" };
 
 const PRESS_ICONS: Record<PressAction, SymbolName> = {
   openInNewTab: "plusSquareOnSquare",
@@ -107,6 +90,5 @@ const PRESS_MENU_WIDTH = 280;
 const PRESS_MENU_HEIGHT = 380;
 
 const styles = StyleSheet.create({
-  choice: { flexDirection: "row", alignItems: "center", gap: space.m, minHeight: dialogLayout.choiceHeight, paddingHorizontal: space.s, borderRadius: radius.row },
   field: { minHeight: dialogLayout.fieldHeight, borderWidth: StyleSheet.hairlineWidth, borderRadius: radius.row, paddingHorizontal: space.m },
 });

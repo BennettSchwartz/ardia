@@ -1,4 +1,4 @@
-import { Platform, Pressable, Text } from "react-native";
+import { BackHandler, Platform, Pressable, Text } from "react-native";
 import { act } from "react-test-renderer";
 import { renderSurface, unmount } from "../../test/render/harness";
 import { mockNative, resetNativeMenus } from "./nativeMenusMock";
@@ -6,6 +6,7 @@ import { mockNative, resetNativeMenus } from "./nativeMenusMock";
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
 const { MenuTrigger, confirmInSheet, nativeMenu } = require("../components/ui/MenuTrigger") as typeof import("../components/ui/MenuTrigger");
+const { FloatingMenu } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
 type MenuItem = import("../components/ui").MenuItem;
 
 type Root = ReturnType<typeof renderSurface>;
@@ -40,6 +41,15 @@ function trigger(trigger: "tap" | "longPress") {
   );
 }
 
+function pressBack() {
+  const listening = jest.spyOn(BackHandler, "addEventListener");
+  return () =>
+    act(() => {
+      const backs = listening.mock.calls.filter((call) => call[0] === "hardwareBackPress").map((call) => call[1]);
+      for (const back of [...backs].reverse()) if (back({ type: "hardwareBackPress", timeStamp: 0 } as never)) break;
+    });
+}
+
 beforeEach(() => {
   jest.useFakeTimers();
   ran.length = 0;
@@ -47,6 +57,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  jest.restoreAllMocks();
   jest.useRealTimers();
 });
 
@@ -76,7 +87,8 @@ test("a menu with no dividers stays flat", () => {
   ]);
 });
 
-test("with the system's menus the trigger is a native context menu, by tap or long press, and choosing an item runs it", () => {
+test("on iPhone, with the system's menus, the trigger is a native context menu, by tap or long press, and choosing an item runs it", () => {
+  if (Platform.OS !== "ios") return;
   mockNative.contextMenu = true;
   for (const kind of ["tap", "longPress"] as const) {
     const root = trigger(kind);
@@ -85,13 +97,7 @@ test("with the system's menus the trigger is a native context menu, by tap or lo
     expect(menu.props.fixedOrder).toBe(true);
     expect(menu.props.items.map((item: { title: string }) => item.title)).toEqual(["Copy Link", "Send to Device", "Theme", ""]);
     const pressable = root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && "onPress" in node.props)[0]!;
-    if (Platform.OS === "android") {
-      act(() => (kind === "tap" ? pressable.props.onPress() : pressable.props.onLongPress()));
-      expect(mockNative.shown).toBe(1);
-      mockNative.shown = 0;
-    } else {
-      expect(pressable.props.onLongPress).toBeUndefined();
-    }
+    expect(pressable.props.onLongPress).toBeUndefined();
     act(() => menu.props.onSelect("1.1"));
     expect(ran).toEqual(["pixel"]);
     ran.length = 0;
@@ -99,16 +105,114 @@ test("with the system's menus the trigger is a native context menu, by tap or lo
   }
 });
 
-test("on Android a long press opens the system's menu at the press through the gesture system, where a pan that takes the touch fails it", () => {
+test("Android never opens a system menu or action sheet, even where a native one would answer", async () => {
   if (Platform.OS !== "android") return;
-  const { State } = require("react-native-gesture-handler") as typeof import("react-native-gesture-handler");
-  const { fireGestureHandler, getByGestureTestId } = require("react-native-gesture-handler/jest-utils") as typeof import("react-native-gesture-handler/jest-utils");
   mockNative.contextMenu = true;
-  const root = trigger("longPress");
-  act(() => fireGestureHandler(getByGestureTestId("menuLongPress"), [{ state: State.BEGAN, x: 40, y: 12 }, { state: State.ACTIVE, x: 40, y: 12 }, { state: State.END, x: 40, y: 12 }]));
-  act(() => jest.runOnlyPendingTimers());
-  expect(mockNative.shownAt).toEqual([[40, 12]]);
+  mockNative.actionSheet = true;
+  const root = trigger("tap");
+  expect(contextMenus(root)).toHaveLength(0);
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  expect(menuLabels(root)).toEqual(["Copy Link", "Send to Device", "Light", "Dark", "Close Tab"]);
   unmount(root);
+  const drawn = jest.fn();
+  confirmInSheet({ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: jest.fn() }, drawn);
+  await act(async () => undefined);
+  expect(drawn).toHaveBeenCalledTimes(1);
+  expect(mockNative.sheets).toHaveLength(0);
+});
+
+test("a long press opens the drawn menu at the finger, dimmed, and a tap opens it beside its trigger, undimmed", () => {
+  const held = trigger("longPress");
+  act(() => held.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress({ nativeEvent: { pageX: 120, pageY: 300 } }));
+  const floating = held.root.findAll((node) => node.type === FloatingMenu)[0]!;
+  expect(floating.props.at).toEqual({ x: 120, y: 300 });
+  expect(floating.props.dimmed).toBe(true);
+  unmount(held);
+  const tapped = renderSurface(
+    <MenuTrigger items={ITEMS} trigger="tap" place={{ right: 16, width: 250 }}>
+      {({ onPress }) => (
+        <Pressable accessibilityLabel="Trigger" onPress={onPress}>
+          <Text>Trigger</Text>
+        </Pressable>
+      )}
+    </MenuTrigger>,
+  );
+  act(() => tapped.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ nativeEvent: { pageX: 300, pageY: 80 } }));
+  const beside = tapped.root.findAll((node) => node.type === FloatingMenu)[0]!;
+  expect(beside.props.at).toBeNull();
+  expect(beside.props.anchor.current).not.toBeUndefined();
+  expect(beside.props.dimmed).toBe(false);
+  unmount(tapped);
+});
+
+test("Back closes the drawn menu, and on a submenu's page goes back to the menu first", () => {
+  const back = pressBack();
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  pickMenu(root, "Send to Device");
+  expect(menuLabels(root)).toEqual(["Studio", "Pixel"]);
+  back();
+  expect(menuLabels(root)).toEqual(["Copy Link", "Send to Device", "Light", "Dark", "Close Tab"]);
+  back();
+  expect(menuLabels(root)).toEqual([]);
+  expect(ran).toEqual([]);
+  unmount(root);
+});
+
+test("the drawn menu reads as a menu: rows are menu items with their checked and disabled state, and a submenu's page has a way back", () => {
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  expect(root.root.findAll((node) => node.props.accessibilityRole === "menu" && typeof node.type !== "string")).not.toHaveLength(0);
+  const row = (label: string) => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === label && typeof node.type === "string")[0]!;
+  expect(row("Light").props.accessibilityState).toMatchObject({ checked: true });
+  expect(row("Dark").props.accessibilityState).toMatchObject({ disabled: true });
+  pickMenu(root, "Send to Device");
+  const backRow = root.root.findAll((node) => node.props.accessibilityLabel === "Back, Send to Device" && typeof node.props.onPress === "function")[0]!;
+  act(() => backRow.props.onPress());
+  expect(menuLabels(root)).toContain("Copy Link");
+  unmount(root);
+});
+
+test("each drawn menu and drawn action sheet counts drawn_menus_opened once as it opens", () => {
+  const opened = jest.fn();
+  const { onDrawnMenuOpened } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
+  onDrawnMenuOpened(opened);
+  const root = trigger("tap");
+  const open = () => act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  open();
+  expect(opened).toHaveBeenCalledTimes(1);
+  pickMenu(root, "Send to Device");
+  expect(opened).toHaveBeenCalledTimes(1);
+  pickMenu(root, "Pixel");
+  open();
+  expect(opened).toHaveBeenCalledTimes(2);
+  unmount(root);
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: jest.fn() }} onClose={jest.fn()} />);
+  expect(opened).toHaveBeenCalledTimes(3);
+  unmount(sheet);
+  onDrawnMenuOpened(() => undefined);
+});
+
+test("the drawn action sheet confirms with its action and cancels with Cancel, a tap outside or Back", () => {
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const back = pressBack();
+  const confirmation = { title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: jest.fn() };
+  const closed = jest.fn();
+  const press = (root: Root, label: string) => act(() => root.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!.props.onPress());
+  const sheet = renderSurface(<ConfirmSheet confirmation={confirmation} onClose={closed} />);
+  const text = sheet.root.findAll((node) => typeof node.type === "string" && typeof node.props.children === "string").map((node) => node.props.children).join("\n");
+  expect(text).toContain("Close 3 Tabs?");
+  expect(text).toContain("They’ll stay in your Archive.");
+  press(sheet, "Cancel");
+  press(sheet, "Dismiss");
+  back();
+  expect(closed).toHaveBeenCalledTimes(3);
+  expect(confirmation.run).not.toHaveBeenCalled();
+  press(sheet, "Close All Tabs");
+  expect(closed).toHaveBeenCalledTimes(4);
+  expect(confirmation.run).toHaveBeenCalledTimes(1);
+  unmount(sheet);
 });
 
 test("without them the trigger opens the drawn menu on tap or long press, and a submenu opens as its own page", () => {
@@ -129,7 +233,8 @@ test("without them the trigger opens the drawn menu on tap or long press, and a 
   unmount(held);
 });
 
-test("a confirmation is the system's action sheet when there is one, and runs only when its action is chosen", async () => {
+test("on iPhone a confirmation is the system's action sheet when there is one, and runs only when its action is chosen", async () => {
+  if (Platform.OS !== "ios") return;
   const drawn = jest.fn();
   const confirmed = jest.fn();
   const confirmation = { title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: confirmed };
