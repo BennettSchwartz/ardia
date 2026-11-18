@@ -1,7 +1,7 @@
 import { Platform, StyleSheet, Text } from "react-native";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { SearchTray } from "../components/search/SearchTray";
-import { materialSearchMs } from "../components/search/MaterialSearchView";
+import { materialSearchFocusDelay, materialSearchMs } from "../components/search/MaterialSearchView";
 import { DesignProvider } from "../components/ui";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
 import { setDynamicScheme } from "../state/app/dynamicScheme";
@@ -103,4 +103,10 @@ onAndroid("with Remove animations the search view comes and goes at once; otherw
   expect(materialSearchMs(true, true)).toBe(0);
   expect(materialSearchMs(false, true)).toBe(250);
   expect(materialSearchMs(false, false)).toBe(100);
+});
+
+onAndroid("the field takes focus, and with it the keyboard, only once the view has faded in, so Android doesn't drop the request on a half-shown view", () => {
+  expect(materialSearchFocusDelay(250, 0)).toBe(282);
+  expect(materialSearchFocusDelay(250, 400)).toBe(32);
+  expect(materialSearchFocusDelay(0, 0)).toBe(32);
 });

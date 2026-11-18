@@ -27,6 +27,10 @@ const HEADER_HEIGHT = 72;
 export const materialSearchMs = (reduceMotion: boolean, entering: boolean) =>
   reduceMotion ? reducedMotionMs(materialDuration.short3) : entering ? materialMotion.fadeThroughIn.durationMs : materialMotion.fadeThroughOut.durationMs;
 
+const FOCUS_AFTER_ENTER_MS = 32;
+
+export const materialSearchFocusDelay = (enterMs: number, sinceOpenMs: number) => Math.max(0, enterMs - sinceOpenMs) + FOCUS_AFTER_ENTER_MS;
+
 export function MaterialSearchTray() {
   const open = useSearchOpen();
   const session = useSearchSession();
@@ -48,6 +52,7 @@ function MaterialSearchView({ open, onGone }: { open: boolean; onGone: () => voi
   const back = useSharedValue(0);
   const version = useSearchFieldVersion();
   const field = useRef<TrayInputHandle | null>(null);
+  const openedAt = useRef(Date.now());
   const voice = useVoice((state) => state.presented);
   const covered = useTrayCovers((state) => state.covers > 0);
   const claimsBack = open && !voice && !covered;
@@ -107,7 +112,7 @@ function MaterialSearchView({ open, onGone }: { open: boolean; onGone: () => voi
             <Symbol name="arrowRight" size={materialSize.icon} color={ink} />
           </View>
         </Pressable>
-        <MaterialSearchField key={version} first={version === 0} ink={ink} hint={inkVariant} accent={scheme.primary} handle={field} />
+        <MaterialSearchField key={version} first={version === 0} ink={ink} hint={inkVariant} accent={scheme.primary} handle={field} focusDelayMs={materialSearchFocusDelay(materialSearchMs(reduceMotion, true), Date.now() - openedAt.current)} />
         <Pressable
           testID="materialSearchIncognito"
           accessibilityRole="button"
@@ -126,7 +131,7 @@ function MaterialSearchView({ open, onGone }: { open: boolean; onGone: () => voi
   );
 }
 
-function MaterialSearchField({ first, ink, hint, accent, handle }: { first: boolean; ink: string; hint: string; accent: string; handle: React.MutableRefObject<TrayInputHandle | null> }) {
+function MaterialSearchField({ first, ink, hint, accent, handle, focusDelayMs }: { first: boolean; ink: string; hint: string; accent: string; handle: React.MutableRefObject<TrayInputHandle | null>; focusDelayMs: number }) {
   const icon = useMaterialRipple(true);
   const initialText = useSearchInitialText();
   const incognito = useIncognito();
@@ -135,7 +140,7 @@ function MaterialSearchField({ first, ink, hint, accent, handle }: { first: bool
   const input = useRef<TrayInputHandle | null>(null);
   const submitted = useRef(false);
   useEffect(() => {
-    const focus = setTimeout(() => input.current?.focus(), 0);
+    const focus = setTimeout(() => input.current?.focus(), focusDelayMs);
     return () => clearTimeout(focus);
   }, []);
   return (
