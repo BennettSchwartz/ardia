@@ -134,11 +134,12 @@ void RememberOwnStart() {
   if (!block) {
     return;
   }
-  const wchar_t* end = block;
+  const wchar_t* const first = block;
+  const wchar_t* end = first;
   while (*end) {
     end += wcslen(end) + 1;
   }
-  start.environment.assign(block, end + 1);
+  start.environment.assign(first, end + 1);
   ::FreeEnvironmentStringsW(block);
 }
 
