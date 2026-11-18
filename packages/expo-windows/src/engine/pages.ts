@@ -332,7 +332,7 @@ export function showPage(key: string, visible: boolean, shape: PageShape | null,
   return (askShow(page, visible && shape ? { key, visible: true, ...shape } : { key, visible: false }), true);
 }
 
-const REOPENING_METHODS = new Set(["loadUrl", "reload", "forceReload"]);
+const REOPENING_METHODS = new Set(["loadUrl", "reload", "reloadToPlay", "forceReload"]);
 
 function readyOrReopened(page: Page, url: unknown): Promise<boolean> {
   page.ready = page.ready.then((opened) => {
