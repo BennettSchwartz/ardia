@@ -24,7 +24,7 @@ export type DragRegions = { rootTag: number; scale: number; nonClient: boolean; 
 export type SidebarEdgeWatch = { running: boolean; windows: string[] };
 
 export type AppWindowsOnWindows = {
-  quit(): Promise<void>;
+  quit(reason: "user" | "update"): Promise<void>;
   requestClose(id: string): Promise<void>;
   setPageFullScreen(windowId: string, on: boolean): Promise<unknown>;
   beginWindowDrag(rootTag: number): Promise<void>;

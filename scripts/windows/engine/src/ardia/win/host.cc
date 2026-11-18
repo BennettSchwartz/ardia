@@ -418,6 +418,10 @@ void Host::Call(const std::string& verb,
     std::move(reply).Run(Ok());
     QuitApp();
     return;
+  } else if (verb == "app.quitting") {
+    AppQuitting(Text(args, "phase"), Text(args, "reason"),
+                args.FindInt("waitMs").value_or(-1), Text(args, "answer"));
+    result = Ok();
   } else {
     result = Error("unknown verb");
   }
