@@ -703,7 +703,11 @@ is plain Chromium.
   asks for the recovery phrase, and entering it finishes the resume. The switch is shared (`state/sync/syncPause.ts`),
   so the Mac's and Linux's guards can set the same flag. On the dashboard, `usage_counts` carries `sync_paused_by_launch_guard`, `sync_resumes` and
   `sync_resumes_completed`: resumes well below pauses means people don't find Resume, and completed well below resumes
-  means the crash comes back when Sync loads.
+  means the crash comes back when Sync loads. On Windows `recoveredStart` is true only when the engine's
+  `launch-guard.json` in the data folder parses, says `"restoreStateSetAside": true`, and was written at or after this
+  process started (`AppModule.h` `LaunchGuard`); a missing, unreadable or stale file, or the app outside the engine,
+  reads false. A test instance logs `[sync] test: recoveredStart …, status …` and each Sync status after it, and
+  `ARDIA_TEST=syncTurnOn=1` turns Sync on in the `syncFolder` folder after the first window.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens
@@ -711,6 +715,11 @@ is plain Chromium.
   wait, with no second browser), once with two unfinished starts recorded (the session must be set aside), and
   once with `Microsoft.ReactNative.dll` hidden (it must exit 0 with the reason logged). Every launch must show one
   window from one browser, and Windows must log no Ardia crash, Crashpad no dump and the launch log no fatal line.
+- `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
+  Sync on, checks an ordinary start reports `recoveredStart` false and finishes a cycle, then records two unfinished
+  starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`, the same
+  `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and the sync folder, no unlock or cycle,
+  and `sync_paused_by_launch_guard` once in the local telemetry copy. The start after it must still be paused.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and
   file addresses on it. The app treats them as links from another app (`onOpenURLs`: a Little Ardia window or a tab,
