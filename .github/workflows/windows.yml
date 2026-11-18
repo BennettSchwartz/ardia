@@ -388,6 +388,10 @@ jobs:
         if: env.COMPILED == 'true' && env.PART == 'launch'
         shell: pwsh
         run: scripts/windows/rebundle.ps1 -App $env:APP -Hermes $env:HERMES -Javascript "${{ runner.temp }}/javascript" -Verify
+      - name: The Hermes pin holds
+        if: env.PART == 'launch'
+        shell: pwsh
+        run: scripts/windows/hermes-pin-check.ps1 -App $env:APP -Hermes $env:HERMES -Cpu $env:SLUG -GeneratorRuns $(if ($env:SLUG -eq 'x64') { 5 } else { 0 })
       - if: env.PART == 'launch'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -503,7 +507,7 @@ jobs:
         timeout-minutes: 20
         shell: pwsh
         run: |
-          scripts/windows/tour.ps1 -App "${{ runner.temp }}/Ardia/Ardia.exe" -Out "${{ runner.temp }}/tour-engine" -Only pages,peek,peek-dark,peek-tabs,peek-layouts,quit-downloads,download-flight
+          scripts/windows/tour.ps1 -App "${{ runner.temp }}/Ardia/Ardia.exe" -Out "${{ runner.temp }}/tour-engine" -Only pages,peek,peek-dark,peek-tabs,peek-layouts,quit-downloads,download-flight,private-pages
           if (Test-Path "${{ runner.temp }}/tour-engine/tour.md") { Get-Content "${{ runner.temp }}/tour-engine/tour.md" >> $env:GITHUB_STEP_SUMMARY }
       - name: Tour the first run
         if: ${{ !cancelled() && env.SLUG == 'x64' && env.PART == 'launch' && env.FULL == 'true' && steps.engine.outcome == 'success' }}
