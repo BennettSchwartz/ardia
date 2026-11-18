@@ -19,7 +19,7 @@ import { TabContentArea } from "./TabContentArea";
 import { InternalPage } from "../pages";
 import { ShareBar } from "../media/ShareBar";
 import { PluginBanner } from "../plugins/PluginBanner";
-import { usePageOnWindow, usePluginPageFocused } from "../../state/plugins/hooks";
+import { usePageBackground, usePluginPageFocused } from "../../state/plugins/hooks";
 import { pluginPageOf } from "../../state/plugins/pageNames";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
@@ -89,7 +89,7 @@ export const TabPane = memo(function TabPane({
   const toolbarHeight = useToolbarRow().height;
   const isNewTab = !own.url;
   const glassPanes = useGlass("panes");
-  const onGlass = usePageOnWindow(own.url) && glassPanes;
+  const onGlass = usePageBackground(own.url) === "glass" && glassPanes;
   const ownPluginPage = !!pluginPageOf(own.url);
   const pluginPageFocused = usePluginPageFocused(windowId);
   const emptyCard = useSettings((st) => isNewTab && newTabOpensOf(st) === "commandBar");

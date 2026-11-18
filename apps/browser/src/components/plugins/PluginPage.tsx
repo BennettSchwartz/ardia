@@ -54,7 +54,7 @@ export function PluginPage({ tabId, name }: { tabId: string; name: string }) {
     return <Notice name={name} title={failed ? `${spec.title} stopped` : `${spec.title} is starting…`} detail={failed ? "Its program isn't running. Restart it from Settings › Plugins." : "Its program is getting the page ready."} />;
   }
   return (
-    <View style={[StyleSheet.absoluteFill, spec.background === "window" ? null : { backgroundColor: theme.card }]}>
+    <View style={[StyleSheet.absoluteFill, spec.background === "card" ? { backgroundColor: theme.card } : null]}>
       <PluginPageView style={StyleSheet.absoluteFill} plugin={name} url={url} network={network} look={passed.vars} colorScheme={passed.appearance} onOpenUrl={(e) => openPageLink(windowId, e.nativeEvent.url)} tabKey={tabId} glassTints={glassTints} onTitle={(e) => updateTab(tabId, { title: e.nativeEvent.title })} onNavigate={(e) => followPage(tabId, name, e.nativeEvent)} />
     </View>
   );

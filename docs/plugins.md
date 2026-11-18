@@ -158,10 +158,12 @@ names the tab and `icon` its command bar entry. The tab's content is one of:
   their type from the extension; anything else is a 404.
 - `"served": true`: the helper serves it and tells Ardia where with `page.serve` (below).
 
-`background` (optional) is what the page sits on: `"card"` (the default) is the tab's usual card, filled with the card
-color; `"window"` keeps the card's frame, edge and insets but fills it with Ardia's panel glass (Liquid Glass, tinted
-with the card color; the card color on a Mac without it), so a page with a transparent background shows the window's
-tinted glass through it. The URL must be
+`background` (optional) is what the page sits on, inside the tab card's frame, edge and insets: `"card"` (the default)
+is the card color, as under a web page; `"newTab"` is exactly the surface the New Tab page sits on in that window and
+profile (today the theme's card over the window's tint), so a page with a transparent background and the New Tab it
+was opened from look continuous; `"glass"` fills the card with Ardia's panel glass (Liquid Glass tinted with the card
+color; the card color on a Mac without it). Only `"card"` paints under the page view itself; with the others a
+transparent page shows the host's surface. The URL must be
   `http://127.0.0.1:<port>/…`, `http://localhost:<port>/…` or `http://[::1]:<port>/…`. Until it arrives the tab says the
   plugin is starting.
 

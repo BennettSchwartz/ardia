@@ -56,7 +56,7 @@ export type CommandAction =
   | { open: "tab" | "split"; context: boolean; side: PageSide; sideSetting: string | null; path: string };
 export type CommandSpec = { name: string; title: string; icon: string; keywords: string[]; action: CommandAction };
 export type ToolSpec = { name: string; title: string; description: string; timeout: number };
-export const PAGE_BACKGROUNDS = ["card", "window"] as const;
+export const PAGE_BACKGROUNDS = ["card", "newTab", "glass"] as const;
 export type PageBackground = (typeof PAGE_BACKGROUNDS)[number];
 export type PageSpec = { title: string; icon: string; background: PageBackground; source: { file: string } | { served: true } };
 

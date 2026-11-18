@@ -63,7 +63,7 @@ export function pluginSchema(eventNames: readonly string[]): Record<string, unkn
           ["name", "title"],
         ),
       },
-      page: closed({ title: textOf(LIMITS.pageTitle), icon: symbol, file: { type: "string", pattern: "^[^/\\\\][^\\\\]*$" }, served: { const: true }, background: { enum: ["card", "window"], description: "What the page sits on: the tab card (default), or the window's own tinted glass" } }, ["title"]),
+      page: closed({ title: textOf(LIMITS.pageTitle), icon: symbol, file: { type: "string", pattern: "^[^/\\\\][^\\\\]*$" }, served: { const: true }, background: { enum: ["card", "newTab", "glass"], description: "What the page sits on: the tab card (default), the surface New Tab sits on, or the card filled with Ardia's panel glass" } }, ["title"]),
       process: closed(
         {
           run: { type: "array", minItems: 1, maxItems: LIMITS.argv, items: { type: "string", pattern: "^[^\\u0000]{1,1024}$" } },

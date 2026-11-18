@@ -30,10 +30,10 @@ export const usePluginPageFocused = (windowId: string) =>
     const id = w ? activeTabId(s, windowId) : null;
     return !!id && !!pluginPageOf(s.tabs[id]?.url);
   });
-export const usePageOnWindow = (url: string | null | undefined) =>
+export const usePageBackground = (url: string | null | undefined) =>
   usePlugins((s) => {
     const name = url ? pluginPageOf(url) : null;
-    return !!name && !!activeManifest(s, name) && s.listings[name]?.manifest?.page?.background === "window";
+    return name && activeManifest(s, name) ? (s.listings[name]?.manifest?.page?.background ?? null) : null;
   });
 export { usePluginBanner } from "./banners";
 export { usePageRunning } from "./pageGroups";
