@@ -36,7 +36,7 @@ export function featuredPermissions(tabId: string, settings: SiteSettings, list:
   const inUse: Partial<Record<SiteSettingType, boolean>> = {
     camera: !!access?.camera,
     microphone: !!access?.microphone,
-    sound: currentMuteState(tabId) !== null || !!currentLive(tabId)?.playingAudio,
+    sound: currentMuteState(tabId) !== null || currentLive(tabId).playingAudio,
     autoplay: useBrowser.getState().settings.blockAutoplayEverywhere,
   };
   return new Set(list.filter((p) => !settings[p.type]?.isDefault || inUse[p.type]).map((p) => p.type));

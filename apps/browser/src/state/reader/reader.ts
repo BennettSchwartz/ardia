@@ -3,6 +3,7 @@ import { webviews } from "../../platform/webviews";
 import { withDeadline } from "../../lib/deadline";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { changedIds } from "../browser/changes";
+import { liveOf, onLiveChange } from "../tabs/tabLive";
 import { activeTabId } from "../browser/model";
 import { peekTabId } from "../peek/peek";
 import { showToast } from "../app/toasts";
@@ -92,7 +93,7 @@ function later(tabId: string, url: string) {
     setTimeout(() => {
       rechecks.delete(tabId);
       const s = useBrowser.getState();
-      if (s.tabs[tabId]?.url === url && !s.live[tabId]?.isLoading && !readerState(tabId).available) void check(tabId);
+      if (s.tabs[tabId]?.url === url && !liveOf(tabId).isLoading && !readerState(tabId).available) void check(tabId);
     }, RECHECK_MS),
   );
 }
@@ -149,7 +150,7 @@ function schedule(tabId: string) {
       pending.delete(tabId);
       const s = useBrowser.getState();
       const tab = s.tabs[tabId];
-      if (tab && readable(tab.url) && !s.live[tabId]?.isLoading && readerState(tabId).url !== tab.url) void check(tabId);
+      if (tab && readable(tab.url) && !liveOf(tabId).isLoading && readerState(tabId).url !== tab.url) void check(tabId);
     }, CHECK_DELAY_MS),
   );
 }
@@ -198,6 +199,18 @@ export function startReader() {
       timer = null;
     }
   });
+  const scheduleShown = (s: BrowserState) => {
+    for (const id of shownTabIds(s)) {
+      const tab = s.tabs[id];
+      if (tab && readable(tab.url) && !liveOf(id).isLoading && readerState(id).url !== tab.url) schedule(id);
+    }
+  };
+  const stopLive = onLiveChange((id, live, prev) => {
+    if (live.isLoading === prev.isLoading) return;
+    const s = useBrowser.getState();
+    if (!live.isLoading && s.tabs[id] && readerState(id).url) set(id, { ...readerState(id), url: "" });
+    scheduleShown(s);
+  });
   const stop = useBrowser.subscribe((s, prev) => {
     if (s.tabs !== prev.tabs) {
       for (const id of changedIds(s.tabs, prev.tabs)) {
@@ -209,21 +222,13 @@ export function startReader() {
         } else if (was && was.url !== tab.url) navigated(id, was.url, tab.url);
       }
     }
-    if (s.live !== prev.live) {
-      for (const id of changedIds(s.live, prev.live)) {
-        if (prev.live[id]?.isLoading && !s.live[id]?.isLoading && readerState(id).url) set(id, { ...readerState(id), url: "" });
-      }
-    }
     if (s.ui.appDark !== prev.ui.appDark || s.settings.readerTextSize !== prev.settings.readerTextSize || s.settings.readerFont !== prev.settings.readerFont) pushLook(s);
-    if (s.tabs === prev.tabs && s.live === prev.live && s.windows === prev.windows && s.peeks === prev.peeks) return;
-    for (const id of shownTabIds(s)) {
-      const tab = s.tabs[id];
-      if (tab && readable(tab.url) && !s.live[id]?.isLoading && readerState(id).url !== tab.url) schedule(id);
-    }
+    if (s.tabs !== prev.tabs || s.windows !== prev.windows || s.peeks !== prev.peeks) scheduleShown(s);
   });
   return () => {
     if (timer) clearInterval(timer);
     stopTimer();
+    stopLive();
     stop();
   };
 }
