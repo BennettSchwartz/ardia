@@ -1,5 +1,5 @@
 import { type ReactNode, useRef } from "react";
-import { Pressable, type Insets, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Pressable, type Insets, type StyleProp, type ViewStyle } from "react-native";
 import { hostOf } from "@ardia/core";
 import { useSettings } from "../../state/browser/hooks";
 import { tabTitle } from "../../state/browser/model";
@@ -9,6 +9,9 @@ import { dismissHover } from "../../state/sidebar/hover";
 import { openTabMenu } from "../../state/sidebar/menus";
 import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from "../../state/sidebar/heldTabPress";
 import { ContextMenuArea } from "../ui";
+import { buttonMotion, usePressScaleMotion } from "../ui/motion";
+
+const SQUISH = { row: buttonMotion.rowPressScale, tile: buttonMotion.tilePressScale } as const;
 
 export function TabPressArea({
   windowId,
@@ -16,6 +19,7 @@ export function TabPressArea({
   style,
   pressStyle,
   tooltip,
+  squish,
   hitSlop,
   children,
 }: {
@@ -24,11 +28,14 @@ export function TabPressArea({
   style?: StyleProp<ViewStyle>;
   pressStyle?: StyleProp<ViewStyle>;
   tooltip?: string;
+  squish?: keyof typeof SQUISH;
   hitSlop?: Insets;
   children: ReactNode | ((state: { pressed: boolean }) => ReactNode);
 }) {
   const press = useRef<TabPress | null>(null);
   const plainTooltip = useSettings((s) => !s.showTabHoverMenu);
+  const pressMotion = usePressScaleMotion(!!squish, squish ? SQUISH[squish] : undefined);
+  const scale = pressMotion.scale;
   return (
     <ContextMenuArea
       onMiddleClick={() => middleClickTab(tab.id)}
@@ -40,15 +47,19 @@ export function TabPressArea({
     >
       <Pressable
         onPressIn={(e) => {
+          pressMotion.onPressIn?.();
           press.current = holdTabPress(windowId, tab.id, e, press.current);
         }}
         onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
-        onPressOut={(e) => pressOutTabPress(press.current, e)}
+        onPressOut={(e) => {
+          pressMotion.onPressOut?.();
+          pressOutTabPress(press.current, e);
+        }}
         style={pressStyle}
         hitSlop={hitSlop}
         tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
       >
-        {children}
+        {scale ? (state) => <Animated.View style={{ transform: [{ scale }] }}>{typeof children === "function" ? children(state) : children}</Animated.View> : children}
       </Pressable>
     </ContextMenuArea>
   );
