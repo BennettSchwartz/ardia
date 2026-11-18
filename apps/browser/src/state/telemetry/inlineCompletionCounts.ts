@@ -13,7 +13,7 @@ export const noteInlineCompletionShown = () => void (shown += 1);
 
 export const noteSiteSuggestionShown = () => void (sitesShown += 1);
 
-export const noteRoutesListed = () => void (routesListed += 1);
+export const noteRoutesListed = (consent?: ConsentToken | null) => countFor(consent, () => void (routesListed += 1), { command_bar_routes_listed: 1 });
 
 export const noteDroppedLetterRestored = () => void (restored += 1);
 
