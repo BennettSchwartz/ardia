@@ -96,6 +96,8 @@ lib/                    pure helpers: url, color, time, keys
 | `Easing.out(Easing.quad)`, `Easing.bezier(…)` | `curve.enter`, `curve.exit`, `curve.move`, `curve.pulse`, … from `motion.ts` |
 | a numeric `duration:` | `duration.fast`, `duration.base`, `duration.slow`, `duration.long`; a loop's period is `period.spinner` / `period.pulse` |
 | `stiffness: (2π/response)²` written by hand | `springs.snappy` / `smooth` / `bouncy`, or `spring({ response, damping })` for a measured spring |
+| a control that shrinks while pressed | `usePressScaleMotion(enabled, buttonMotion.…)` on its `onPressIn`/`onPressOut`: `springs.press` down, `springs.release` back with a small bounce, and a click shorter than the dip still shows it; a tab row or tile takes `squish` on `TabPressArea` |
+| a hover or pressed highlight behind a row or a button plate | `<HoverFill shown color radius>`: lights in `hoverFade.show`, fades in `hoverFade.hide`; `instant` when the thing becomes selected. Over a fill it has at rest: `<HoverSwap rest color radius>`, with `underBorder` when the control draws a border |
 | a `View` with `padding`/`gap`/`backgroundColor`/`borderRadius` from tokens | `<Box pad="m" gap="s" fill="panel" radius="tile" row>` |
 | `<Text style={{ fontSize: 13, fontWeight: "600", color: theme.textSecondary }}>` | `<Text size="body" weight="semibold" tone="textSecondary">` |
 | a pressable square with an SF Symbol and a hover plate | `<Button variant="icon" icon="…">` (add `toolbar` for toolbar buttons: modifier clicks, long press, context menu, no window drag; `palette` for site-coloured toolbars) |
@@ -205,7 +207,7 @@ writeDocument(DOC, versionedJson(data, VERSION));
 - Covered: `session.json` (10), `downloads.json` (3), `launch-look.json` (2), `air-traffic.json` (2), `bookmarks-cache.json`, `telemetry.json`,
   `telemetry-queue.json`, `telemetry-daily.json`, `release-notes.json`, `onboarding.json`,
   `default-browser-offer.json`, `sync.json`, `sync-extensions.json`, `live.json`, `shared-folders.json`, `ardia-cli.json`,
-  `bangs-state.json`, `Scripts/status.json` and `link-sources.json` (all 1).
+  `bangs-state.json`, `Scripts/status.json`, `link-sources.json` and `freeze-sends.json` (all 1).
 - Native code reads through `ArdiaSavedDocument` (packages/ardiacore/ios), with the same rules: `session.json` and
   `onboarding.json` (any version up to the one JS writes; a test pins each) and `launch-layout.json` (5, written and
   read by native code only, so any other version reads as nothing).
@@ -330,6 +332,7 @@ still counts:
 | `set-state` | `.setState(` in `components/` |
 | `store-reads` | `useBrowser(` in `components/` (read through `state/<domain>/hooks.ts`) |
 | `store-shape` | a zustand store not created as `create<T>()(() => init)` (a `set`/`get` creator, or the uncurried form) |
+| `native-loops` | `Animated.loop(` around `Animated.sequence(`, `parallel(` or `stagger(`: React Native can't run those as a native loop, so JS restarts every leg and macOS starts a new display link each time. Use `nativeLoop(value, legs)` from `components/ui/motion.ts` |
 | `size` | a file over its line cap |
 | `env` | an environment read outside the launch config and the three exempt engine lines |
 | `naming` | a `Cef`, `AC*`/app-side `ArdiaCore*`, `Netnyahoo` or `NN*` name |
