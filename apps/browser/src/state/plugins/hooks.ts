@@ -3,6 +3,7 @@ import { activeManifest, needsReview, recordOf, usePlugins, type PluginsStore } 
 import { pageViewUrl, usePluginPages } from "./pages";
 import { valuesOf } from "./values";
 import { useBrowser } from "../browser/store";
+import { activeTabId } from "../browser/model";
 import { pageHeadOf } from "./pageGroups";
 import { pluginPageOf } from "./pageNames";
 
@@ -22,6 +23,12 @@ export const usePluginPageIcon = (url: string | null | undefined) =>
   usePlugins((s) => {
     const name = url ? pluginPageOf(url) : null;
     return name ? (s.listings[name]?.manifest?.page?.icon ?? null) : null;
+  });
+export const usePluginPageFocused = (windowId: string) =>
+  useBrowser((s) => {
+    const w = s.windows[windowId];
+    const id = w ? activeTabId(s, windowId) : null;
+    return !!id && !!pluginPageOf(s.tabs[id]?.url);
   });
 export const usePageOnWindow = (url: string | null | undefined) =>
   usePlugins((s) => {

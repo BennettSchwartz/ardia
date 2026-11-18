@@ -19,7 +19,8 @@ import { TabContentArea } from "./TabContentArea";
 import { InternalPage } from "../pages";
 import { ShareBar } from "../media/ShareBar";
 import { PluginBanner } from "../plugins/PluginBanner";
-import { usePageOnWindow } from "../../state/plugins/hooks";
+import { usePageOnWindow, usePluginPageFocused } from "../../state/plugins/hooks";
+import { pluginPageOf } from "../../state/plugins/pageNames";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { Toolbar, ToolbarBackdrop } from "../toolbar/Toolbar";
@@ -89,6 +90,8 @@ export const TabPane = memo(function TabPane({
   const isNewTab = !own.url;
   const glassPanes = useGlass("panes");
   const onGlass = usePageOnWindow(own.url) && glassPanes;
+  const ownPluginPage = !!pluginPageOf(own.url);
+  const pluginPageFocused = usePluginPageFocused(windowId);
   const emptyCard = useSettings((st) => isNewTab && newTabOpensOf(st) === "commandBar");
   const newTabShown = useStoreWhile(usePages, live, (s) => !!s.pages[tabId]?.newTabShown);
   const inSomeSplit = useBrowserWhile(!!warm, (s) => !!warm && !!splitOf(s, tabId));
@@ -176,7 +179,7 @@ export const TabPane = memo(function TabPane({
                 newTabShown={newTabShown}
                 statusStyle={autoLayout ? motion.bottomStyle : undefined}
                 popovers={popovers}
-                cliPill={!peekShown && (fullscreen || focused || !inSplit)}
+                cliPill={!peekShown && !ownPluginPage && (fullscreen || focused || !inSplit || pluginPageFocused)}
                 loadingPill={!addressFieldShown && !sidebarFieldShown && !small}
               />
             )}
