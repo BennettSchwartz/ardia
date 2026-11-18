@@ -488,6 +488,8 @@ $held = [System.Collections.Generic.List[object]]::new()
 $artHits = 0
 $artCounts = @{}
 $holdCounts = @{}
+$heldOnce = [System.Collections.Generic.List[object]]::new()
+$released = [System.Collections.Generic.List[object]]::new()
 $artCookies = [System.Collections.Generic.List[string]]::new()
 $bigArt = $null
 $rate = 8000
@@ -513,25 +515,38 @@ $longWav = [byte[]]::new(44 + 2 * $longCount)
 [BitConverter]::GetBytes([int](2 * $longCount)).CopyTo($longWav, 40)
 for ($i = 0; $i -lt $longCount; $i++) { $longWav[44 + 2 * $i] = $wav[44 + 2 * ($i % $count)]; $longWav[45 + 2 * $i] = $wav[45 + 2 * ($i % $count)] }
 while ($true) {
-  $client = $listener.AcceptTcpClient()
+  $replay = $null
+  if ($released.Count) {
+    $replay = $released[0]
+    $released.RemoveAt(0)
+    $client = $replay.Client
+  } else { $client = $listener.AcceptTcpClient() }
   $keep = $false
   try {
-    $client.ReceiveTimeout = 2000
-    $stream = $client.GetStream()
-    if ($tls) {
-      $secure = [System.Net.Security.SslStream]::new($stream, $false)
-      $secure.AuthenticateAsServer($tls)
-      $stream = $secure
+    if ($replay) {
+      $stream = $replay.Stream
+      $request = $replay.Request
+      $headers = $replay.Headers
+    } else {
+      $client.ReceiveTimeout = 2000
+      $stream = $client.GetStream()
+      if ($tls) {
+        $secure = [System.Net.Security.SslStream]::new($stream, $false)
+        $secure.AuthenticateAsServer($tls)
+        $stream = $secure
+      }
+      $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
+      $request = $reader.ReadLine()
+      $headers = [System.Collections.Generic.List[string]]::new()
+      while ($line = $reader.ReadLine()) { $headers.Add($line) }
     }
-    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
-    $request = $reader.ReadLine()
     $socketKey = $null
     $fetchSite = $null
     $cookie = $null
     $ranged = $false
     $rangeFrom = ""
     $rangeTo = ""
-    while ($line = $reader.ReadLine()) { if ($line -match '^Sec-WebSocket-Key:\s*(\S+)') { $socketKey = $Matches[1] }; if ($line -match '^Sec-Fetch-Site:\s*(\S+)') { $fetchSite = $Matches[1] }; if ($line -match '^Cookie:\s*(.*)$') { $cookie = $Matches[1] }; if ($line -match '^Range:\s*bytes=(\d*)-(\d*)\s*$') { $ranged = $true; $rangeFrom = $Matches[1]; $rangeTo = $Matches[2] } }
+    foreach ($line in $headers) { if ($line -match '^Sec-WebSocket-Key:\s*(\S+)') { $socketKey = $Matches[1] }; if ($line -match '^Sec-Fetch-Site:\s*(\S+)') { $fetchSite = $Matches[1] }; if ($line -match '^Cookie:\s*(.*)$') { $cookie = $Matches[1] }; if ($line -match '^Range:\s*bytes=(\d*)-(\d*)\s*$') { $ranged = $true; $rangeFrom = $Matches[1]; $rangeTo = $Matches[2] } }
     $path = if ($request) { $request.Split(" ")[1] } else { "" }
     if ($Log -and $path) { Add-Content -LiteralPath $Log -Value $path }
     if (($path -replace '\?.*$', '') -eq "/hold") {
@@ -539,10 +554,25 @@ while ($true) {
       $keep = $true
       continue
     }
+    if (($path -replace '\?.*$', '') -eq "/release" -and $path -match '[?&]holdonce=([A-Za-z0-9]+)') {
+      $token = $Matches[1]
+      $freed = @($heldOnce | Where-Object { $_.Token -eq $token })
+      foreach ($entry in $freed) {
+        [void]$heldOnce.Remove($entry)
+        $released.Add($entry)
+      }
+      $answer = [System.Text.Encoding]::ASCII.GetBytes([string]$freed.Count)
+      $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 200 OK`r`nContent-Type: text/plain`r`nCache-Control: no-store`r`nContent-Length: $($answer.Length)`r`nConnection: close`r`n`r`n")
+      $stream.Write($head, 0, $head.Length)
+      $stream.Write($answer, 0, $answer.Length)
+      $stream.Flush()
+      continue
+    }
     if ($path -match '[?&]holdonce=([A-Za-z0-9]+)') {
-      $holdCounts[$Matches[1]] = 1 + [int]$holdCounts[$Matches[1]]
-      if ($holdCounts[$Matches[1]] -eq 2) {
-        $held.Add($client)
+      $token = $Matches[1]
+      $holdCounts[$token] = 1 + [int]$holdCounts[$token]
+      if ($holdCounts[$token] -eq 2) {
+        $heldOnce.Add([pscustomobject]@{ Token = $token; Client = $client; Stream = $stream; Request = $request; Headers = $headers })
         $keep = $true
         continue
       }

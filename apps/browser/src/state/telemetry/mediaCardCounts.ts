@@ -1,4 +1,6 @@
 import type { NowPlaying } from "../../platform/media";
+import type { ConsentToken } from "./choice";
+import { countFor } from "./countFor";
 
 const REWIND_SECONDS = 1;
 const PAST_END_SECONDS = 2;
@@ -40,8 +42,8 @@ export function noteMediaCommandAnswer(answer: unknown) {
   if (typeof answer === "object" && answer !== null && (answer as { done?: unknown }).done === false) commandsNotDone++;
 }
 
-export function noteArtworkAnswer(uri: string | null | undefined) {
-  if (!uri) artworkEmpty++;
+export function noteArtworkAnswer(uri: string | null | undefined, consent?: ConsentToken | null) {
+  if (!uri) countFor(consent, () => void artworkEmpty++, { now_playing_artwork_empty: 1 });
 }
 
 export function noteMediaPositionReport(before: PositionReport | undefined, report: PositionReport) {

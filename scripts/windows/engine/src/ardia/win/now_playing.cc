@@ -4,6 +4,7 @@
 #include <cmath>
 #include <utility>
 
+#include "ardia/win/main.h"
 #include "ardia/win/tab_state.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -68,10 +69,16 @@ void NowPlaying::End(content::WebContents* contents) {
 void NowPlaying::ReloadToPlay(content::WebContents* contents) {
   Watch(contents);
   NowPlaying* now = FromWebContents(contents);
-  const bool wake_pending = now->wake_stage_ == WakeStage::kLoading;
-  now->EndWake();
   const TabState* tab = TabState::FromWebContents(contents);
-  const bool wakes = (contents->WasDiscarded() || wake_pending) && tab &&
+  if (now->wake_stage_ == WakeStage::kLoading &&
+      base::TimeTicks::Now() < now->wake_until_) {
+    NoteForTest("now playing " + (tab ? tab->key() : std::string()) +
+                ": wake kept: a reload is already pending");
+    return;
+  }
+  const bool stale_wake = now->wake_stage_ == WakeStage::kLoading;
+  now->EndWake();
+  const bool wakes = (contents->WasDiscarded() || stale_wake) && tab &&
                      !tab->key().empty();
   if (wakes) {
     now->wake_key_ = tab->key();

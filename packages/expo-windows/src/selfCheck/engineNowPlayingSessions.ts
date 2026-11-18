@@ -14,6 +14,7 @@ const RESUME_AT = 20;
 const EARLIER_SEEK = 5;
 const STARTED_FROM_ZERO_BY = 3;
 const HELD_RELOAD_MS = 800;
+const RELEASE_PAGE = "self-check-np-release";
 const REPOST_SETTLES_MS = 1500;
 const PLAYED_BEFORE_SECONDS = 0.3;
 
@@ -53,6 +54,17 @@ async function discardedAndReloaded(key: string, windowId: string, method = "rel
   await discarded(key, windowId);
   await hostCall("tab.call", { key, method });
   await loadedAt(key, "wake");
+}
+
+async function releaseHeld(token: string, windowId: string) {
+  try {
+    await hostCall("tab.create", { key: RELEASE_PAGE, url: `${origin}/a`, profile: "" }, windowId);
+    await until("the release page loads", LOAD_MS, () => listed(RELEASE_PAGE), (tab) => tab?.title === "loaded a" && tab.loading === false);
+    const freed = await evaluate(RELEASE_PAGE, `fetch("/release?holdonce=${token}", { cache: "no-store" }).then((r) => r.text()).then((t) => post("result", JSON.stringify(Number(t))));`);
+    expectEqual(freed, 1, "the page server releases the wake's held request");
+  } finally {
+    await hostCall("tab.close", { key: RELEASE_PAGE }).catch(() => null);
+  }
 }
 
 async function dropsItsMedia(key: string, reports: Reports) {
@@ -206,21 +218,27 @@ const sessionChecks: Check[] = [
       }),
   },
   {
-    name: "engine now playing: a second reloadToPlay while the first wake's reload is still waiting for its page keeps the engine up, and only the second reload's document can use the allowance",
-    run: () =>
-      withReports("np-wake-twice", `nowplaying?plain&long&wake&holdonce=w${Date.now()}`, TITLE, async (key, reports, windowId) => {
+    name: "engine now playing: a second reloadToPlay while the first wake's reload is pending keeps that wake: the page loads when its request is released and uses the one allowance once",
+    run: () => {
+      const token = `w${Date.now()}`;
+      return withReports("np-wake-twice", `nowplaying?plain&long&wake&holdonce=${token}`, TITLE, async (key, reports, windowId) => {
         await discarded(key, windowId);
         await hostCall("tab.call", { key, method: "reloadToPlay" });
         await pause(HELD_RELOAD_MS);
+        const second = await hostCall<{ ok?: unknown }>("tab.call", { key, method: "reloadToPlay" });
+        expectEqual(second?.ok, true, "the engine answers the second reloadToPlay");
         const waiting = await listed(key);
-        await hostCall("tab.call", { key, method: "reloadToPlay" });
-        await loadedAt(key, "wake");
         console.info(`[ardia windows] self-check note: while the first wake's reload waited for its held page the tab was ${JSON.stringify({ loading: waiting?.loading, discarded: waiting?.discarded })}`);
-        expectEqual((await listed(key))?.title, TITLE, "the engine still answers for the tab after the first reload was replaced");
-        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play on the second reload's document");
+        expectEqual({ listed: waiting?.key, loading: waiting?.loading }, { listed: key, loading: true }, "the tab is still listed and still loading its held page");
+        await releaseHeld(token, windowId);
+        await loadedAt(key, "wake");
+        expectEqual(await answerOf(key, "play"), BY_SCRIPT, "the play on the page the kept wake loaded");
         await until("the woken page's player plays", SETTLE_MS, () => mediaOf(key), (now) => now.paused === false);
         await reported(reports, "the woken page reports playing", isPlaying);
-      }),
+        await dropsItsMedia(key, reports);
+        expectEqual(await answerOf(key, "play"), NOT_DONE, "a second play, with no session and the one allowance used");
+      });
+    },
   },
   {
     name: "engine now playing: a wake whose reload Chromium holds back behind its form resubmission warning arms nothing",
