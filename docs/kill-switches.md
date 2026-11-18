@@ -45,7 +45,7 @@ updater, so it never fetches.
 | Switch | Off means | Live |
 |---|---|---|
 | `newTabPrewarm` | a New Tab page's tab is made by Enter, as before the prewarm | yes |
-| `lazySidebarRows` | a launch mounts 64 rows per page and every profile page at once | no |
+| `lazySidebarRows` | a launch mounts 2,400 pt of rows per page, whatever the window's height, and every profile page at once | no |
 | `updatePrewarm` | a staged update installs without the hidden first run, at quit or at once from Install and Relaunch (read natively: `UpdatePrewarm.swift`) | yes |
 | `launchTab` | session.json keeps no launch hint and a launch claims nothing: the restored page loads once its window's content mounts, and the early window stays off | no |
 | `lazyProfiles` | a launch loads every profile and its extensions, as with Settings › Advanced › Load profiles when opened off (`state/profiles/profileLoading.ts`) | no |

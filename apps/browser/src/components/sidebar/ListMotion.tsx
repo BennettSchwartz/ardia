@@ -16,7 +16,7 @@ import { splitTabIdsOf } from "../../state/splits/splits";
 import { noteSidebarMotion } from "../../state/telemetry/usage";
 import { settleSlides, type Slide } from "./slideSettle";
 import { seenSliding, shiftedBand, type ListViewport } from "./listViewport";
-import { offsets, prefixHeight, sharedPrefix, type Height, type Offsets } from "./listOffsets";
+import { offsets, onlySeen, prefixHeight, sharedPrefix, type Height, type InView, type Offsets } from "./listOffsets";
 
 export const SLIDE_MS = SIDEBAR_MOTION.listSlide;
 export const FADE_MS = SIDEBAR_MOTION.listFade;
@@ -31,7 +31,6 @@ type Snapshot = ListSnapshot;
 type Move = { key: string; from: number };
 type Plan = { moves: Move[]; ghosts: Ghost[]; clipped: string[]; below: number };
 type Planner = (before: Snapshot, after: Snapshot, slides: Map<string, Slide>, ghosts: Ghost[], t: number) => Plan | null;
-type InView = (key: string, from: number) => boolean;
 export type ListSlot = { entry: string } | { ghost: Ghost; top: number };
 export type ListMotionScope = { slideBelow: ((entry: string, delta: number) => void) | null };
 
@@ -151,16 +150,12 @@ type Core = {
   nativeTail: boolean;
   below?: ((delta: number) => void) | null;
   inView?: (list: string[]) => InView | null;
+  releases?: boolean;
 };
 
-function onlySeen(plan: Plan, seen: InView | null, slides: Map<string, Slide>): Plan | null {
-  const moves = seen ? plan.moves.filter((m) => m.key === TAIL || slides.get(m.key)?.landed === false || seen(m.key, m.from)) : plan.moves;
-  if (moves.length === plan.moves.length) return plan;
-  if (!moves.length && !plan.ghosts.length && !plan.below) return null;
-  return { ...plan, moves, clipped: moves.length ? plan.clipped : [] };
-}
+const midSlide = (slides: Map<string, Slide>) => (key: string) => key === TAIL || slides.get(key)?.landed === false;
 
-function useMotion({ devKey, entries, from, planner, height, enabled, nativeTail, below, inView }: Core) {
+function useMotion({ devKey, entries, from, planner, height, enabled, nativeTail, below, inView, releases = false }: Core) {
   const slides = useRef(new Map<string, Slide>()).current;
   const contexts = useRef(new Map<string, EntryMotion>()).current;
   const clipped = useRef(new Set<string>()).current;
@@ -235,7 +230,7 @@ function useMotion({ devKey, entries, from, planner, height, enabled, nativeTail
     if (i < 0) return;
     const t = Date.now();
     const keys = [...list.slice(i + 1), TAIL];
-    const plan = onlySeen({ moves: keys.map((key) => ({ key, from: shiftAt(slides.get(key), t) + delta })), ghosts: [], clipped: [list[i + 1] ?? TAIL], below: 0 }, seenNow.current?.(list) ?? null, slides);
+    const plan = onlySeen({ moves: keys.map((key) => ({ key, from: shiftAt(slides.get(key), t) + delta })), ghosts: [], clipped: [list[i + 1] ?? TAIL], below: 0 }, seenNow.current?.(list) ?? null, midSlide(slides));
     if (!plan) return;
     prepare(plan, t);
     rerender((n) => n + 1);
@@ -265,6 +260,7 @@ function useMotion({ devKey, entries, from, planner, height, enabled, nativeTail
         if (slide.run === run) {
           slide.run = null;
           setSliding(slide.value, false);
+          if (releases && ![...slides.values()].some((s) => s.run)) rerender((n) => n + 1);
         }
         if (!finished) return;
         slide.landed = true;
@@ -318,7 +314,8 @@ function useMotion({ devKey, entries, from, planner, height, enabled, nativeTail
     return out;
   };
 
-  return { motion, slots, fading: ghosts.current.length > 0, slideBelow, tail: slides.get(TAIL)?.value ?? null, tailClip: source(TAIL) };
+  const moving = () => [...clipped, ...(queued.current?.moves.map((m) => m.key) ?? []), ...[...slides].flatMap(([key, slide]) => (slide.run ? [key] : []))];
+  return { motion, moving, slots, fading: ghosts.current.length > 0, slideBelow, tail: slides.get(TAIL)?.value ?? null, tailClip: source(TAIL) };
 }
 
 export function useListMotion(windowId: string, profileId: string, entries: string[], from: Capture, enabled: boolean, viewport: ListViewport | null = null, above = 0) {
@@ -356,9 +353,9 @@ export function useListMotion(windowId: string, profileId: string, entries: stri
     const next = offsets(after.state, after.list, now, start, base);
     const snapshot = (e: string) => snapshotEntry(before.state, windowId, profileId, e);
     const plan = buildPlan({ before, after, old, next, removed, added, slides, ghosts, t, tail: true, snapshot, clipAfter: grown, start });
-    return plan && onlySeen(plan, inView(after.state)(after.list), slides);
+    return plan && onlySeen(plan, inView(after.state)(after.list), midSlide(slides));
   };
-  return useMotion({ devKey: windowId, entries, from, planner, height: (e) => height(workspaceSnapshot(), e), enabled, nativeTail: true, inView: (list) => inView(workspaceSnapshot())(list) });
+  return useMotion({ devKey: windowId, entries, from, planner, height: (e) => height(workspaceSnapshot(), e), enabled, nativeTail: true, inView: (list) => inView(workspaceSnapshot())(list), releases: true });
 }
 
 export function useGroupMotion(windowId: string, profileId: string, groupId: string, entries: string[], from: Capture, scope: ListMotionScope, enabled: boolean) {

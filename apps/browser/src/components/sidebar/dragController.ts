@@ -21,7 +21,37 @@ import { tabPlace } from "../../state/sidebar/actions";
 
 export class DragController extends DragTargeting {
   create(key: string): Item {
-    return { key, kind: "row", tabIds: [], section: "list", view: null, header: null, gap: new Animated.Value(0), size: new Animated.Value(0), frame: null, headerFrame: null };
+    return { key, kind: "row", tabIds: [], section: "list", view: null, place: null, header: null, gap: new Animated.Value(0), size: new Animated.Value(0), frame: null, headerFrame: null };
+  }
+
+  adopt(key: string, item: Item) {
+    const before = this.items.get(key);
+    this.items.set(key, item);
+    const session = this.session;
+    if (!session || before === item) return;
+    if (!session.measured) return void session.early.add(key);
+    this.join(session, key, item);
+  }
+
+  private join(session: DragSession, key: string, item: Item) {
+    if (session.gapKey === key) item.gap.setValue(session.pitch);
+    const known = session.baseline.get(key);
+    if (!item.view && item.place) [item.frame, item.headerFrame] = this.placed(item, session.regionFrames);
+    else if (known) [item.frame, item.headerFrame] = known;
+    else {
+      item.frame = null;
+      item.headerFrame = null;
+      void Promise.all([measure(item.view), measure(item.header)]).then(([frame, header]) => {
+        if (this.session !== session || this.items.get(key) !== item) return;
+        const drift = this.scrollY - session.startScrollY;
+        const at = (f: typeof frame) => this.undisplaced(f && { ...f, y: f.y + drift }, key);
+        [item.frame, item.headerFrame] = [at(frame), at(header)];
+        session.baseline.set(key, [item.frame, item.headerFrame]);
+        this.retarget();
+      });
+      return;
+    }
+    session.baseline.set(key, [item.frame, item.headerFrame]);
   }
 
   get active() {
@@ -66,8 +96,17 @@ export class DragController extends DragTargeting {
     this.setGhost(session.ghost);
     if (boxed(item) && !item.collapsed) markDrag(this.marks, { folded: item.key });
     Animated.parallel(closing.map((s) => spring(s.size, 0))).start();
-    session.measured = true;
+    this.started(session);
     this.move(session.pointer.x, session.pointer.y);
+  }
+
+  private started(session: DragSession) {
+    session.measured = true;
+    for (const key of session.early) {
+      const item = this.items.get(key);
+      if (item) this.join(session, key, item);
+    }
+    session.early.clear();
   }
 
   async beginExternal(count: number, x: number, y: number) {
@@ -81,7 +120,7 @@ export class DragController extends DragTargeting {
     await this.measureAll(session);
     if (this.session !== session) return;
     this.setLanding(null);
-    session.measured = true;
+    this.started(session);
     this.move(session.pointer.x, session.pointer.y);
   }
 
@@ -108,12 +147,15 @@ export class DragController extends DragTargeting {
     this.rootFrame = rootFrame ?? this.rootFrame;
     session.viewport = viewport;
     session.startScrollY = this.scrollY;
-    await Promise.all(
-      [...this.items.values()].map(async (i) => {
-        [i.frame, i.headerFrame] = await Promise.all([measure(i.view), measure(i.header)]);
-      }),
-    );
     for (const [name, view] of this.regions) session.regionFrames.set(name, await measure(view));
+    const measured = new Set<Item>();
+    const take = async (i: Item) => {
+      measured.add(i);
+      const known = i.view ? undefined : session.baseline.get(i.key);
+      [i.frame, i.headerFrame] = !i.view && i.place ? this.placed(i, session.regionFrames) : (known ?? (await Promise.all([measure(i.view), measure(i.header)])));
+      session.baseline.set(i.key, [i.frame, i.headerFrame]);
+    };
+    for (let late = [...this.items.values()]; late.length && this.session === session; late = [...this.items.values()].filter((i) => !measured.has(i))) await Promise.all(late.map(take));
     const grid = [...this.items.values()].some((i) => i.kind === "tile");
     session.gridBase = grid ? (session.regionFrames.get("tiles") ?? null) : null;
     session.gridGrowth = 0;

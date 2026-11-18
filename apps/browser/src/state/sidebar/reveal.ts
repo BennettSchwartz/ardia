@@ -9,6 +9,16 @@ const closedAway = (s: BrowserState, prev: BrowserState, tabId: string | undefin
 
 const asked = new Map<string, Set<(tabId: string) => void>>();
 
+type Landing = (tabId: string, ready: () => void) => boolean;
+const landings = new Map<string, Landing>();
+
+export function offerLanding(windowId: string, landing: Landing) {
+  landings.set(windowId, landing);
+  return () => void (landings.get(windowId) === landing && landings.delete(windowId));
+}
+
+export const prepareLanding = (windowId: string, tabId: string, ready: () => void): boolean => landings.get(windowId)?.(tabId, ready) ?? false;
+
 export const revealTab = (windowId: string, tabId: string) => asked.get(windowId)?.forEach((reveal) => reveal(tabId));
 
 export function watchRevealTargets(windowId: string, found: (switched: string | null, opened: string | null) => void) {

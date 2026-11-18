@@ -1,6 +1,29 @@
 export type ListBand = { top: number; bottom: number };
 
-export type ListViewport = { band: () => ListBand | null };
+export type ListViewport = {
+  view: () => ListBand | null;
+  band: () => ListBand | null;
+  watch: (listener: () => void) => () => void;
+  moved: () => void;
+};
+
+export function createListViewport(view: () => ListBand | null): ListViewport {
+  const listeners = new Set<() => void>();
+  return {
+    view,
+    band: () => {
+      const seen = view();
+      return seen && withOverscan(seen.top, seen.bottom - seen.top);
+    },
+    watch: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    moved: () => {
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
 
 export const shiftedBand = (band: ListBand | null, by: number): ListBand | null => (band ? { top: band.top - by, bottom: band.bottom - by } : null);
 

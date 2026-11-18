@@ -28,7 +28,7 @@ import { DOCK_SHARE, DOCKED_ROW_PAD, GLOW_ROOM, pageLayout, tilesFitDock, type S
 import { PageRows } from "./PageRows";
 import { NewTabRow } from "./NewTabRow";
 import { SelectedRowPill, useSelectedRowAway } from "./SelectedRowPill";
-import { withOverscan, type ListViewport } from "./listViewport";
+import { createListViewport } from "./listViewport";
 
 const NONE: string[] = [];
 type PageGeometry = { scrollY: number; viewport: number; regions: SidebarGeometry["regions"] };
@@ -43,13 +43,12 @@ type PageProps = {
   resting: boolean;
   dockAbove: number;
   height: number;
-  rows: number | undefined;
   geometry: RefObject<SidebarGeometry> | undefined;
   onScrollView: (view: ScrollView | null) => void;
   onScrollY: (y: number) => void;
 };
 
-export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, width, current, resting, dockAbove, height, rows, geometry, onScrollView, onScrollY }: PageProps) {
+export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, width, current, resting, dockAbove, height, geometry, onScrollView, onScrollY }: PageProps) {
   const windowId = useWindowId();
   const topGap = listTopGap(useSidebarField() === "top");
   const pinnedShown = useSidebarPart("pinned");
@@ -117,9 +116,13 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
   windowRef.current = windowId;
   const page = useRef<PageGeometry>({ scrollY: 0, viewport: 0, regions: { pinnedGroups: 0, list: 0 } }).current;
   const scrollView = useRef<ScrollView | null>(null);
-  const [listViewport] = useState<ListViewport>(() => ({
-    band: () => (page.viewport ? withOverscan(page.scrollY - LIST_PAD - page.regions.list, page.viewport) : null),
-  }));
+  const [listViewport] = useState(() =>
+    createListViewport(() => {
+      if (!page.viewport) return null;
+      const top = page.scrollY - LIST_PAD - page.regions.list;
+      return { top, bottom: top + page.viewport };
+    }),
+  );
   useLayoutEffect(() => {
     if (!current) return;
     onScrollView(scrollView.current);
@@ -141,6 +144,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
         scrollEdge.follow(page.scrollY);
         scrollEdgeBelow.measure({ offset: page.scrollY });
         selectedRow.judge();
+        listViewport.moved();
         if (!isCurrent.current) return;
         noteRowsScrolled(windowRef.current);
         onScrollY(page.scrollY);
@@ -202,6 +206,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                           page.viewport = e.nativeEvent.layout.height;
                           scrollEdgeBelow.measure({ viewport: page.viewport });
                           selectedRow.relocate();
+                          listViewport.moved();
                           if (!geometry) return;
                           geometry.current.viewport = page.viewport;
                           geometry.current.laidOut?.();
@@ -220,7 +225,6 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                           windowId={windowId}
                           profileId={profileId}
                           current={current}
-                          rows={rows}
                           lazy={lazy}
                           offScreen={offScreen}
                           tiles={scrolledTiles}
