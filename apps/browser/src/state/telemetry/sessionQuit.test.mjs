@@ -10,7 +10,7 @@ const posted = [];
 globalThis.fetch = async (_url, init) => (posted.push(String(init?.body ?? "")), { status: 200 });
 
 const { capture, flush, setSharing, startClient } = await import("./client.ts");
-const { sessionId } = await import("./choice.ts");
+const { consentNow, sessionId } = await import("./choice.ts");
 const { endSessionForQuit, reopenSessionAfterCancelledQuit } = await import("./sessionQuit.ts");
 after(() => setSharing(false, "settings"));
 
@@ -21,8 +21,8 @@ const sessionEnds = () => queuedNames().filter((name) => name === "app_session_e
 test("a quit closes the saved session and keeps its ended event on disk, but never sends it while the quit can still be cancelled", async () => {
   startClient();
   const session = sessionId();
-  capture("app_launched", {});
-  endSessionForQuit({ duration_minutes: 3 });
+  capture("app_launched", {}, consentNow());
+  endSessionForQuit({ duration_minutes: 3 }, consentNow());
   assert.equal(state().sessionOpen, false);
   assert.ok(state().lastQuitAt > 1000);
   assert.equal(sessionEnds(), 1);
@@ -45,7 +45,7 @@ test("a cancelled quit reopens the same session, puts the last quit time back, a
 
 test("a final quit, the same shared code on every platform, ends the session once and leaves the event on disk for the next launch", async () => {
   posted.length = 0;
-  endSessionForQuit({ duration_minutes: 5 });
+  endSessionForQuit({ duration_minutes: 5 }, consentNow());
   assert.equal(sessionEnds(), 1);
   assert.equal(state().sessionOpen, false);
   await flush();

@@ -127,7 +127,8 @@ test("the app counts the answers it owes, so an answer to a cancelled quit never
   before(reply, "if (m_answersOwed > 0) {", "Finish()", "an earlier quit's answer can finish this one");
   assert.match(body(windows, "void Attach("), /m_answersOwed = 0;/);
   assert.match(body(app("WindowsModule.h"), "void replyToTerminate("), /AnswerTerminate\(ok\)/);
-  assert.match(read("../state/app/nativeSync.ts"), /void answerQuitAfterSaves\(QUIT_SAVES_WAIT_MS, \(\) => replyToTerminate\(true\)\);/, "the willQuit branch the feedback thread edits stays as it was");
+  assert.match(read("../state/app/nativeSync.ts"), /void answerQuitAfterSaves\(QUIT_SAVES_WAIT_MS, \(\) => replyToTerminate\(true\), Date\.now\(\) - flushing\);/, "the willQuit branch answers once, with yes");
+  assert.match(read("../state/app/quit.ts"), /\.catch\(reportFailure\)\s*\.then\(\(\) => void answer\(\)\);/, "a willQuit can go unanswered");
 });
 
 test("a process that never becomes the browser writes refused lines with its pid and never 'process ending'; the app's first line carries the pid", () => {

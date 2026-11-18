@@ -1,11 +1,11 @@
-import { save, savedChoice, sessionId } from "./choice";
+import { save, savedChoice, sessionId, type ConsentToken } from "./choice";
 import { captureHeld, endSession, releaseHeld } from "./client";
 
 let lastQuitBeforeThisOne: number | null | undefined;
 
-export function endSessionForQuit(props: Record<string, unknown>) {
+export function endSessionForQuit(props: Record<string, unknown>, consent: ConsentToken | null) {
   lastQuitBeforeThisOne = savedChoice().lastQuitAt;
-  captureHeld("app_session_ended", props);
+  captureHeld("app_session_ended", props, consent);
   endSession();
 }
 

@@ -17,6 +17,8 @@ const { useMedia } = await import("../media/media.ts");
 const { webviews } = await import("../../platform/webviews.ts");
 const lifecycle = await import("../tabs/tabLifecycle.ts");
 const { takeTabSleepCounts } = await import("../telemetry/tabSleepCounts.ts");
+const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
+setConsentPeriod(true, "menus-test");
 
 const S = () => useBrowser.getState();
 const MODS = [

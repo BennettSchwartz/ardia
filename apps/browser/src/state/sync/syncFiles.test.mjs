@@ -416,7 +416,7 @@ test("sync turned off while the state seals leaves an empty state file", async (
 test("quitting waits for a part still sealing and the checkpoint queued behind it, up to a deadline", async () => {
   const { finishQuitSaves, saveBeforeQuit } = await import("../app/quit.ts");
   const { doc, files } = await opening();
-  saveBeforeQuit(files.checkpoint);
+  saveBeforeQuit("sync", files.checkpoint);
   const seal = await sealHeld((text) => text.includes('"journal"'));
   doc.scopes.app = { ...emptyScope(), seq: 1, journal: [batch(1)] };
   const persisting = files.persistJournal("app")([batch(1)]);

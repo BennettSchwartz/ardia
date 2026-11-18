@@ -727,7 +727,11 @@ is plain Chromium.
     cancelled quit only lowers it. A new React instance resets the count, since the old one's answers can't come, and
     the native 3 s timer finishes a quit whose answer never comes. The launch log says `quit … began (user|update)`
     and `the app answered yes after N ms`, `no answer in 3000 ms` or `cancelled by a relaunch after N ms`;
-    `app_launched` reports the last one as a range.
+    `app_launched` reports the last one as a range. That native line is the whole wait from `willQuit` to the answer,
+    as the native side sees it, and nothing else. In a quit's log the UI's `[quit] last saves: …` line (each save's
+    time) comes just before it, then `launch <ms> quitting`, then the flush's `telemetry drained in N ms` and one
+    `document … written at quit in N ms` per file, and `process ending` stays each quitting process's last line.
+    `relaunch-check.ps1`'s `Quit-Writes` reads all of them.
   - From `Finish()` (phase `final`, the point of no return): the engine marks the profile exiting, so a new launch
     waits in the launch guard for this process to end, and one already past the guard is turned away, which Chromium
     turns into `PROFILE_IN_USE` after one retry. `AfterChromeMain` then reads the profile's owner (published once a
