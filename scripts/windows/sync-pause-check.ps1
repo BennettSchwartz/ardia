@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$Setup,
   [Parameter(Mandatory = $true)][string]$Out,
-  [int]$PausedSeconds = 25
+  [int]$PausedSeconds = 25,
+  [switch]$SettleCheck
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,7 +36,9 @@ $Out = [IO.Path]::GetFullPath($Out)
 $work = Join-Path (Split-Path -Parent $Out) "sync-pause-work"
 $data = Join-Path $work "data"
 $syncFolder = Join-Path $work "sync-folder"
+$docPath = Join-Path $data "sync.json"
 $log = Join-Path $data "Logs\launch.log"
+$previousLog = Join-Path $data "Logs\launch.previous.log"
 $reports = Join-Path $data "User Data\Crashpad\reports"
 $started = Get-Date
 $summary = New-Object System.Collections.Generic.List[string]
@@ -52,6 +55,8 @@ function Browsers { return @(Get-BrowserProcesses @(Running)) }
 
 function Launch-Log { if (Test-Path -LiteralPath $log) { return @(Get-Content -LiteralPath $log) } return @() }
 
+function Previous-Log { if (Test-Path -LiteralPath $previousLog) { return @(Get-Content -LiteralPath $previousLog) } return @() }
+
 function Keep-Log([string]$name) {
   foreach ($file in @($log, (Join-Path $data "Logs\launch.previous.log"), (Join-Path $data "sync.json"), (Join-Path $data "launch-guard.json"))) {
     if (Test-Path -LiteralPath $file) { Copy-Item -LiteralPath $file -Destination (Join-Path $Out "$name-$(Split-Path -Leaf $file)") -Force }
@@ -61,7 +66,7 @@ function Keep-Log([string]$name) {
 function Now-Ms { return [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() }
 
 function Start-Run([string]$what) {
-  $from = @(Launch-Log).Count
+  $mark = Get-LogMark @(Launch-Log) @(Previous-Log)
   $startedMs = Now-Ms
   $process = Start-Process -FilePath $exe -PassThru
   $null = $process.Handle
@@ -69,7 +74,7 @@ function Start-Run([string]$what) {
   while ((Get-Date) -lt $deadline) {
     foreach ($browser in @(Browsers)) {
       $windows = [SyncPauseCheck.Native]::AppWindows([uint32]$browser.ProcessId)
-      if ($windows.Count -gt 0) { return [pscustomobject]@{ What = $what; Pid = [int]$browser.ProcessId; From = $from; StartedMs = $startedMs } }
+      if ($windows.Count -gt 0) { return [pscustomobject]@{ What = $what; Pid = [int]$browser.ProcessId; Mark = $mark; StartedMs = $startedMs } }
     }
     Start-Sleep -Milliseconds 250
   }
@@ -77,11 +82,7 @@ function Start-Run([string]$what) {
   throw "$what`: no Ardia window within 180 s"
 }
 
-function Run-Lines($run) {
-  $lines = @(Launch-Log)
-  if ($lines.Count -lt $run.From) { return $lines }
-  return @($lines | Select-Object -Skip $run.From)
-}
+function Run-Lines($run) { return @(Get-RunLines $run.Mark @(Launch-Log) @(Previous-Log)) }
 
 function Wait-Trace($run, [scriptblock]$ready, [string]$waitingFor, [int]$seconds = 120) {
   $deadline = (Get-Date).AddSeconds($seconds)
@@ -110,6 +111,10 @@ function Stop-Run($run) {
   while (@(Browsers).Count -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
   $run | Add-Member -NotePropertyName EndedMs -NotePropertyValue (Now-Ms) -Force
   Keep-Log $run.What
+  $runLines = @(Run-Lines $run)
+  if (-not @($runLines | Where-Object { $_ -match 'process ending' }).Count) { throw "$($run.What): the start's log has no 'process ending', so its quit didn't finish" }
+  $fatal = (Read-LaunchGuard $runLines).Fatal
+  if ($fatal.Count) { throw "$($run.What): the start's log has a fatal line: $($fatal[0])" }
 }
 
 function Local-Telemetry {
@@ -118,14 +123,26 @@ function Local-Telemetry {
   return @(Get-ChildItem -LiteralPath $local -File -Filter *.jsonl | ForEach-Object { Get-Content -LiteralPath $_.FullName })
 }
 
-function Assert-StaysPaused($run, [bool]$recovered, $digests, [string]$seqs) {
+function Wait-Doc($run, [scriptblock]$ready, [string]$waitingFor, [int]$seconds) {
+  $deadline = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $deadline) {
+    $doc = Read-SyncDocWhileRunning $docPath
+    if (& $ready $doc) { return Get-Date }
+    Start-Sleep -Milliseconds 250
+  }
+  Keep-Log $run.What
+  throw "$($run.What): sync.json never showed $waitingFor within $seconds s (unsettledStarts $((Read-SyncDocWhileRunning $docPath).UnsettledStarts))"
+}
+
+function Assert-StaysPaused($run, [bool]$recovered, $digests, [string]$seqs, [int]$unsettled) {
   $trace = Read-SyncTrace @(Run-Lines $run)
   if ($trace.Recovered -ne $recovered) { throw "$($run.What): recoveredStart was $($trace.Recovered), not $recovered" }
   $moved = @($trace.Statuses | Where-Object { $_ -ne "paused" })
   if ($moved.Count) { throw "$($run.What): Sync left the pause: statuses $($trace.Statuses -join ', ')" }
   if ($trace.UnlocksOrCycles.Count) { throw "$($run.What): Sync unlocked or ran a cycle: $($trace.UnlocksOrCycles[0])" }
-  $doc = Read-SyncDoc (Join-Path $data "sync.json")
+  $doc = Read-SyncDoc $docPath
   if (-not $doc.PausedByGuard) { throw "$($run.What): sync.json has no pausedByGuard: true after the start" }
+  if ($doc.UnsettledStarts -ne $unsettled) { throw "$($run.What): a paused start moved unsettledStarts from $unsettled to $($doc.UnsettledStarts)" }
   if ($doc.Seqs -ne $seqs) { throw "$($run.What): sync.json's seqs changed from $seqs to $($doc.Seqs)" }
   $changes = Compare-SyncDigests $digests (Get-SyncDigests $data $syncFolder)
   if ($changes.Count) { throw "$($run.What): Sync's files changed while paused: $($changes -join '; ')" }
@@ -154,20 +171,44 @@ try {
   if ($trace.TurnedOn -ne "turned on") { throw "turning Sync on: $($trace.TurnedOn)" }
   Stop-Run $run
   $env:ARDIA_TEST = ""
-  if (-not (Read-SyncDoc (Join-Path $data "sync.json")).Enabled) { throw "turning Sync on: sync.json doesn't say enabled after the quit" }
+  $doc = Read-SyncDoc $docPath
+  if (-not $doc.Enabled) { throw "turning Sync on: sync.json doesn't say enabled after the quit" }
+  if ($doc.UnsettledStarts -ne 0) { throw "turning Sync on: unsettledStarts is $($doc.UnsettledStarts) after turning Sync on and a clean quit" }
   Note "turning Sync on: a test start turned Sync on in a scratch folder and finished a cycle (statuses $($trace.Statuses -join ', '))"
 
   $run = Start-Run "ordinary start"
+  $counted = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60
   $trace = Wait-Trace $run { param($t) $null -ne $t.Recovered -and $t.Statuses -contains "updated" } "a finished cycle"
+  $aliveSeconds = [int]((Get-Date) - $counted).TotalSeconds
+  $beforeQuit = (Read-SyncDocWhileRunning $docPath).UnsettledStarts
+  if ($aliveSeconds -lt 100 -and $beforeQuit -ne 1) { throw "ordinary start: unsettledStarts went from 1 to $beforeQuit $aliveSeconds s after the count, before 2 minutes or a quit" }
   if ($trace.Recovered -ne $false) { throw "ordinary start: recoveredStart was $($trace.Recovered), not false" }
   if ($trace.Statuses -contains "paused") { throw "ordinary start: Sync paused on a start the guard didn't recover" }
   $guard = Read-LaunchGuard @(Run-Lines $run)
   if ($guard.SetAside) { throw "ordinary start: the guard set the restore state aside" }
   Stop-Run $run
-  Note "ordinary start: recoveredStart false, Sync unlocked and finished a cycle (statuses $($trace.Statuses -join ', '))"
+  $afterQuit = (Read-SyncDoc $docPath).UnsettledStarts
+  if ($afterQuit -ne 0) { throw "ordinary start: a clean quit left unsettledStarts $afterQuit" }
+  Note "ordinary start: recoveredStart false, unsettledStarts 1 before the unlock and still $beforeQuit after the cycle ($aliveSeconds s), Sync unlocked and finished a cycle (statuses $($trace.Statuses -join ', ')), unsettledStarts 0 after the clean quit"
 
-  $doc = Read-SyncDoc (Join-Path $data "sync.json")
+  if ($SettleCheck) {
+    $run = Start-Run "two minutes alive"
+    $counted = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 1 } "unsettledStarts 1 (the start's count)" 60
+    Wait-Trace $run { param($t) $t.Statuses -contains "updated" } "a finished cycle" | Out-Null
+    $settledAt = Wait-Doc $run { param($d) $d.UnsettledStarts -eq 0 } "unsettledStarts back to 0" 170
+    $afterSeconds = [int]($settledAt - $counted).TotalSeconds
+    if ($afterSeconds -lt 100) { throw "two minutes alive: unsettledStarts went back to 0 only $afterSeconds s after the count, before 2 minutes" }
+    Stop-Run $run
+    $afterQuit = (Read-SyncDoc $docPath).UnsettledStarts
+    if ($afterQuit -ne 0) { throw "two minutes alive: unsettledStarts is $afterQuit after the quit" }
+    Note "two minutes alive: unsettledStarts 1 at the start, 0 about $afterSeconds s after the count was seen, and 0 after the quit"
+  } else {
+    Note "two minutes alive: not run (full runs only)"
+  }
+
+  $doc = Read-SyncDoc $docPath
   if ($doc.PausedByGuard) { throw "before the recovered start: sync.json already has pausedByGuard" }
+  if ($doc.UnsettledStarts -ne 0) { throw "before the recovered start: unsettledStarts is $($doc.UnsettledStarts), not 0" }
   $seqs = $doc.Seqs
   $digests = Get-SyncDigests $data $syncFolder
   if (-not @($digests.Keys | Where-Object { $_ -like "data/sync-*" }).Count) { throw "before the recovered start: no sync-state.nns or sync-journal-*.nns in $data" }
@@ -182,30 +223,30 @@ try {
   Start-Sleep -Seconds $PausedSeconds
   $pausedRun = $run
   Stop-Run $run
-  $trace = Assert-StaysPaused $run $true $digests $seqs
+  $trace = Assert-StaysPaused $run $true $digests $seqs 0
   $settled = "$(Get-Content -LiteralPath (Join-Path $data "launch-starts.txt") -ErrorAction SilentlyContinue | Select-Object -First 1)".Trim()
   if ($settled -ne "0") { throw "recovered start: a clean quit left $settled unfinished starts" }
   $pauses = Measure-LocalCount @(Local-Telemetry) "usage_counts" "sync_paused_by_launch_guard" $pausedRun.StartedMs $pausedRun.EndedMs
   if ($pauses -ne 1) { throw "recovered start: the local telemetry copy counts sync_paused_by_launch_guard $pauses times, not once" }
-  Note "recovered start: recoveredStart true, status paused for $PausedSeconds s and through the quit, pausedByGuard in sync.json, seqs and every Sync file unchanged, no unlock or cycle, sync_paused_by_launch_guard 1"
+  $countPauses = Measure-LocalCount @(Local-Telemetry) "usage_counts" "sync_paused_after_unsettled_starts" $pausedRun.StartedMs $pausedRun.EndedMs
+  if ($countPauses -ne 0) { throw "recovered start: the guard's pause was also counted as sync_paused_after_unsettled_starts ($countPauses)" }
+  Note "recovered start: recoveredStart true, status paused for $PausedSeconds s and through the quit, pausedByGuard in sync.json, unsettledStarts still 0, seqs and every Sync file unchanged, no unlock or cycle, sync_paused_by_launch_guard 1"
 
   $run = Start-Run "start after the pause"
   Wait-Trace $run { param($t) $null -ne $t.Recovered } "the start's trace" | Out-Null
   Start-Sleep -Seconds $PausedSeconds
   Stop-Run $run
-  Assert-StaysPaused $run $false $digests $seqs | Out-Null
+  Assert-StaysPaused $run $false $digests $seqs 0 | Out-Null
   $again = Measure-LocalCount @(Local-Telemetry) "usage_counts" "sync_paused_by_launch_guard" $run.StartedMs $run.EndedMs
   if ($again -ne 0) { throw "start after the pause: an ordinary start counted sync_paused_by_launch_guard $again times" }
-  Note "start after the pause: recoveredStart false and Sync still paused, its files unchanged"
+  Note "start after the pause: recoveredStart false and Sync still paused, unsettledStarts still 0, its files unchanged"
 
   $events = @(Get-WinEvent -FilterHashtable @{ LogName = "Application"; StartTime = $started } -ErrorAction SilentlyContinue |
       Where-Object { $_.ProviderName -eq "Application Error" -and $_.Message -match "Ardia\.exe" })
   if ($events.Count) { throw "Windows logged $($events.Count) Ardia crash(es): $(($events[0].Message -split "`n")[0..3] -join ' | ')" }
   $dumps = @(Get-ChildItem -LiteralPath $reports -Filter *.dmp -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started })
   if ($dumps.Count) { throw "Crashpad wrote $($dumps.Count) crash dump(s): $($dumps.Name -join ', ')" }
-  $fatal = (Read-LaunchGuard @(Launch-Log)).Fatal
-  if ($fatal.Count) { throw "the launch log has a fatal line: $($fatal[0])" }
-  Note "no crash events, crash dumps or fatal log lines"
+  Note "no crash events, crash dumps or fatal log lines in any start"
 } catch {
   Note "stopped: $($_.Exception.Message)"
   throw

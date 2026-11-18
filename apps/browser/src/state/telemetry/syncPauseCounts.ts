@@ -1,7 +1,7 @@
 import { onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
-const NONE = { sync_paused_by_launch_guard: 0, sync_resumes: 0, sync_resumes_completed: 0 };
+const NONE = { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 };
 
 export type SyncPauseStep = keyof typeof NONE;
 

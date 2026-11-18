@@ -62,6 +62,7 @@ export type SyncDoc = {
   removing?: string[] | Record<string, ProfileRemoval>;
   removingDevices?: string[] | Record<string, HLC>;
   pausedByGuard?: boolean;
+  unsettledStarts?: number;
 };
 
 export type ProfileRemoval = { keys: Record<string, HLC>; returned?: boolean };
@@ -89,7 +90,7 @@ export const emptyDoc = (): SyncDoc => ({
   joining: false,
 });
 
-export type SyncStatus = "off" | "starting" | "updating" | "updated" | "stalled" | "offline" | "locked" | "paused" | "reset" | "unavailable";
+export type SyncStatus = "off" | "starting" | "updating" | "updated" | "stalled" | "offline" | "locked" | "paused" | "resuming" | "reset" | "unavailable";
 
 export type SyncedDevice = { id: string; name: string; kind: DeviceKind; receivesTabs: boolean; lastSeen: number | null; current: boolean; version?: string; os?: string };
 export type RemoteTabs = { deviceId: string; name: string; kind: DeviceKind; tabs: { url: string; title: string }[] };
@@ -100,6 +101,7 @@ export type RemoteProfile = { syncId: string; name: string; color: Profile["colo
 export type SyncUi = {
   status: SyncStatus;
   enabled: boolean;
+  paused: boolean;
   joining: boolean;
   folder: string | null;
   types: Record<DataType, boolean>;

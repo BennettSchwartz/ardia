@@ -97,6 +97,12 @@ try {
   Check "the same seqs in another order read the same" '{"a":{"x":0,"y":1},"b":2}' (Read-SyncDoc $docPath).Seqs
   Check "a doc without the pause reads as not paused" $false (Read-SyncDoc $docPath).PausedByGuard
   Check "a missing sync.json is not found" $false (Read-SyncDoc (Join-Path $syncData "absent.json")).Found
+  Check "an absent unsettledStarts reads as 0" 0 (Read-SyncDoc $docPath).UnsettledStarts
+  Set-Content -LiteralPath $docPath -Value '{"enabled":true,"unsettledStarts":2,"pausedByGuard":true}'
+  Check "unsettledStarts is read" 2 (Read-SyncDoc $docPath).UnsettledStarts
+  Set-Content -LiteralPath $docPath -Value '{"enabled":true,"unsettledStarts":"2"}'
+  Check "an unsettledStarts that isn't a number reads as 0" 0 (Read-SyncDoc $docPath).UnsettledStarts
+  Check "a sync.json read while running gives the same facts" 0 (Read-SyncDocWhileRunning $docPath).UnsettledStarts
 } finally {
   Remove-Item -LiteralPath $scratch -Recurse -Force -ErrorAction SilentlyContinue
 }
@@ -110,6 +116,24 @@ $local = @(
 )
 Check "the pause count is summed over one start's local events" 1 (Measure-LocalCount $local "usage_counts" "sync_paused_by_launch_guard" 900 2500)
 Check "events outside the start aren't counted" 2 (Measure-LocalCount $local "usage_counts" "sync_paused_by_launch_guard" 0 2500)
+
+$before = @("launch 12 process started inside the engine", "info 40 [sync] test: recoveredStart false, status starting", "launch 9000 process ending")
+$older = @("launch 10 process started inside the engine", "launch 500 process ending")
+$mark = Get-LogMark $before $older
+Check "a mark counts the log's lines" 3 $mark.From
+$grown = $before + @("launch 15 process started inside the engine", "info 308 [sync] test: recoveredStart true, status paused")
+Check "a log that grew gives only the new lines" "launch 15 process started inside the engine|info 308 [sync] test: recoveredStart true, status paused" ((Get-RunLines $mark $grown $older) -join "|")
+$rotatedNew = @("launch 11 process started inside the engine", "engine 0 launch guard: waited 0 ms for a previous Ardia, 2 unfinished starts before this one, restore state set aside", "info 308 [sync] test: recoveredStart true, status paused") + @(1..89 | ForEach-Object { "info $_ line" }) + @("launch 9100 process ending")
+$rotatedPrevious = $before + @("launch 9050 shutdown finished")
+$runLines = Get-RunLines $mark $rotatedNew $rotatedPrevious
+Check "a rotated log is read whole, with the old log's lines after the mark" 94 $runLines.Count
+Check "the old log's tail comes first" "launch 9050 shutdown finished" $runLines[0]
+Check "the rotated run's trace is found" $true (Read-SyncTrace $runLines).Recovered
+Check "the rotated run's guard line is found" $true (Read-LaunchGuard $runLines).SetAside
+Check "a rotation with nothing more in the old log reads the new log alone" 93 (Get-RunLines $mark $rotatedNew $before).Count
+$sameFirst = @($before[0], "launch 20 another start's line")
+Check "a rotated log that happens to start with the same line is still read whole" 2 (Get-RunLines $mark $sameFirst $before).Count
+Check "an empty log at the mark gives every line" 2 (Get-RunLines (Get-LogMark @() @()) @("a", "b") @()).Count
 
 if ($failures.Count) {
   $failures | ForEach-Object { Write-Host "::error::$_" }

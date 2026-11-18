@@ -459,10 +459,10 @@ jobs:
       - name: Pause Sync on a recovered start
         id: sync-pause
         if: ${{ !cancelled() && steps.installer.outcome == 'success' }}
-        timeout-minutes: 15
+        timeout-minutes: 20
         shell: pwsh
         run: |
-          scripts/windows/sync-pause-check.ps1 -Setup "${{ runner.temp }}/installer/Ardia-Setup-$env:SLUG.exe" -Out "${{ runner.temp }}/sync-pause"
+          scripts/windows/sync-pause-check.ps1 -Setup "${{ runner.temp }}/installer/Ardia-Setup-$env:SLUG.exe" -Out "${{ runner.temp }}/sync-pause" -SettleCheck:($env:FULL -eq 'true')
           if (Test-Path "${{ runner.temp }}/sync-pause/sync-pause.md") { "### Sync on a recovered start ($env:SLUG)" >> $env:GITHUB_STEP_SUMMARY; Get-Content "${{ runner.temp }}/sync-pause/sync-pause.md" | ForEach-Object { "- $_" } >> $env:GITHUB_STEP_SUMMARY }
       - if: ${{ !cancelled() && steps.sync-pause.outcome != 'skipped' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

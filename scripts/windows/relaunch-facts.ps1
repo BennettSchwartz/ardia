@@ -76,12 +76,13 @@ function ConvertTo-SortedJson($Value) {
 }
 
 function Read-SyncDoc([string]$Path) {
-  $facts = [pscustomobject]@{ Found = $false; Enabled = $false; PausedByGuard = $false; Seqs = $null }
+  $facts = [pscustomobject]@{ Found = $false; Enabled = $false; PausedByGuard = $false; UnsettledStarts = 0; Seqs = $null }
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $facts }
   $doc = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json -AsHashtable
   $facts.Found = $true
   $facts.Enabled = $doc['enabled'] -eq $true
   $facts.PausedByGuard = $doc['pausedByGuard'] -eq $true
+  if ($doc['unsettledStarts'] -is [ValueType] -and $doc['unsettledStarts'] -isnot [bool]) { $facts.UnsettledStarts = [int]$doc['unsettledStarts'] }
   $facts.Seqs = if ($doc.ContainsKey('seqs')) { ConvertTo-SortedJson $doc['seqs'] } else { "absent" }
   return $facts
 }
@@ -98,4 +99,30 @@ function Measure-LocalCount([string[]]$Lines, [string]$Event, [string]$Field, [d
     if ($properties -is [System.Collections.IDictionary] -and $properties.Contains($Field)) { $total += [int]$properties[$Field] }
   }
   return $total
+}
+
+function Read-SyncDocWhileRunning([string]$Path) {
+  foreach ($attempt in 1..5) {
+    try { return Read-SyncDoc $Path } catch { Start-Sleep -Milliseconds 100 }
+  }
+  return Read-SyncDoc $Path
+}
+
+function Get-LogMark([string[]]$Current, [string[]]$Previous) {
+  return [pscustomobject]@{
+    From = @($Current).Count
+    First = if (@($Current).Count) { @($Current)[0] } else { $null }
+    PreviousFirst = if (@($Previous).Count) { @($Previous)[0] } else { $null }
+  }
+}
+
+function Get-RunLines($Mark, [string[]]$Current, [string[]]$Previous) {
+  $Current = @($Current)
+  $Previous = @($Previous)
+  if (-not $Mark.From) { return $Current }
+  $currentChanged = $Current.Count -lt $Mark.From -or $Current[0] -ne $Mark.First
+  $previousTookIt = $Previous.Count -ge $Mark.From -and $Previous[0] -eq $Mark.First -and $Previous[0] -ne $Mark.PreviousFirst
+  if (-not $currentChanged -and -not $previousTookIt) { return @($Current | Select-Object -Skip $Mark.From) }
+  $straddled = if ($Previous.Count -ge $Mark.From -and $Previous[0] -eq $Mark.First) { @($Previous | Select-Object -Skip $Mark.From) } else { @() }
+  return @($straddled) + $Current
 }
