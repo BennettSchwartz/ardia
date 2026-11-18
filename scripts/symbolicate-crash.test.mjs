@@ -427,3 +427,13 @@ test("release.sh packs the archive's dSYM from the exported app before packaging
   assert.match(publishScript, /^app_uuids="\$dist\/\$\(app_uuids_name "\$version"\)"$/m);
   assert.match(publishScript, /for file in "\$app_symbols" "\$app_uuids"; do\n\s+\[ -f "\$file" \] \|\| die [^\n]+\n\s+assets\+=\("\$file"\)/);
 });
+
+test("the Release workflow's sign job hands the app's symbols to the publish job in its release artifact", () => {
+  const workflow = readFileSync(join(scripts, "../.github/workflows/release.yml"), "utf8");
+  const sign = workflow.slice(workflow.indexOf("\n  sign:\n"), workflow.indexOf("\n  linux:\n"));
+  const upload = sign.slice(sign.indexOf("name: release\n"));
+  assert.ok(upload.includes("Ardia-${{ inputs.version }}-symbols.tar.xz"), "the release artifact lists the symbols archive");
+  assert.ok(upload.includes("Ardia-${{ inputs.version }}-uuids.txt"), "the release artifact lists the UUID file");
+  const publish = workflow.slice(workflow.indexOf("\n  publish:\n"));
+  assert.match(publish, /name: release\n\s+path: dist\/\$\{\{ inputs\.version \}\}\n/);
+});
