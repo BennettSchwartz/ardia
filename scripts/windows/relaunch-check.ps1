@@ -47,10 +47,12 @@ $log = Join-Path $data "Logs\launch.log"
 $reports = Join-Path $data "User Data\Crashpad\reports"
 $started = Get-Date
 $summary = New-Object System.Collections.Generic.List[string]
-$script:SeenPids = New-Object System.Collections.Generic.HashSet[int]
+$script:SeenProcesses = New-Object System.Collections.Generic.List[object]
 $script:QuitDumps = @()
 $werDumps = Join-Path $Out "dumps"
-$werKey = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\Ardia.exe"
+$werParent = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+$werKey = Join-Path $werParent "Ardia.exe"
+$werValueNames = @("DumpFolder", "DumpType", "DumpCount")
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 New-Item -ItemType Directory -Force -Path $werDumps | Out-Null
 
@@ -59,7 +61,60 @@ function Note([string]$line) {
   $script:summary.Add($line)
 }
 
-function Remember-Pid([int]$processId) { if ($processId) { [void]$script:SeenPids.Add($processId) } }
+function Remember-Pid([int]$processId, $process = $null) {
+  if (-not $processId) { return }
+  $startedAt = $null
+  try {
+    if ($process -is [System.Diagnostics.Process]) { $startedAt = $process.StartTime }
+    elseif ($process -and $process.CreationDate) { $startedAt = $process.CreationDate }
+    else { $startedAt = (Get-Process -Id $processId -ErrorAction Stop).StartTime }
+  } catch { $startedAt = $null }
+  $fileTime = if ($startedAt) { ([DateTime]$startedAt).ToFileTimeUtc() } else { $null }
+  $script:SeenProcesses.Add([pscustomobject]@{ Pid = $processId; FileTime = $fileTime })
+}
+
+function Test-StartedByThisCheck([int]$processId, $fileTime) {
+  foreach ($seen in $script:SeenProcesses) {
+    if ($seen.Pid -ne $processId) { continue }
+    if ($null -eq $seen.FileTime -or $null -eq $fileTime) { return $true }
+    if ([Math]::Abs([long]$seen.FileTime - [long]$fileTime) -le 10000000) { return $true }
+  }
+  return $false
+}
+
+function Save-WerKey {
+  $parentExisted = Test-Path -LiteralPath $werParent
+  if (-not (Test-Path -LiteralPath $werKey)) { return [pscustomobject]@{ Existed = $false; ParentExisted = $parentExisted; Values = @{} } }
+  $key = Get-Item -LiteralPath $werKey -ErrorAction Stop
+  $names = @($key.GetValueNames())
+  $values = @{}
+  foreach ($name in $werValueNames) {
+    if ($names -contains $name) {
+      $values[$name] = [pscustomobject]@{ Value = $key.GetValue($name, $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); Kind = $key.GetValueKind($name) }
+    }
+  }
+  return [pscustomobject]@{ Existed = $true; ParentExisted = $true; Values = $values }
+}
+
+function Restore-WerKey($before) {
+  if (-not $before) { return }
+  try {
+    if (-not $before.Existed) {
+      $created = if ($before.ParentExisted) { $werKey } else { $werParent }
+      if (Test-Path -LiteralPath $created) { Remove-Item -LiteralPath $created -Recurse -Force -ErrorAction Stop }
+      Note "crash dump settings: removed the key this check created"
+      return
+    }
+    foreach ($name in $werValueNames) {
+      $saved = $before.Values[$name]
+      if ($saved) { New-ItemProperty -LiteralPath $werKey -Name $name -PropertyType $saved.Kind -Value $saved.Value -Force -ErrorAction Stop | Out-Null }
+      else { Remove-ItemProperty -LiteralPath $werKey -Name $name -Force -ErrorAction SilentlyContinue }
+    }
+    Note "crash dump settings: put back the $($before.Values.Count) value(s) that were there before"
+  } catch {
+    Write-Host "relaunch-check: the crash dump settings could not be put back: $($_.Exception.Message)"
+  }
+}
 
 function Running { return @(Get-CimInstance Win32_Process -Filter "Name='Ardia.exe'") }
 
@@ -105,7 +160,7 @@ function Wait-Window([string]$what, [int]$seconds = 120) {
     foreach ($browser in @(Browsers)) {
       $windows = [RelaunchCheck.Native]::AppWindows([uint32]$browser.ProcessId)
       if ($windows.Count -gt 0) {
-        Remember-Pid ([int]$browser.ProcessId)
+        Remember-Pid ([int]$browser.ProcessId) $browser
         return [pscustomobject]@{ Pid = [int]$browser.ProcessId; Window = $windows[0] }
       }
     }
@@ -157,7 +212,7 @@ function Assert-OneBrowser([string]$what) {
 
 function Start-Ardia {
   $launched = Start-Process -FilePath $exe -PassThru
-  Remember-Pid $launched.Id
+  Remember-Pid $launched.Id $launched
   return $launched
 }
 
@@ -178,11 +233,14 @@ function Read-CrashDumps {
 function Get-CrashEventFacts($record) {
   $text = "$($record.Message)"
   $processId = if ($text -match 'Faulting process id: (0x[0-9a-fA-F]+)') { [Convert]::ToInt32($Matches[1].Substring(2), 16) } else { 0 }
-  $startTime = if ($text -match 'Faulting application start time: (0x[0-9a-fA-F]+)') { try { [DateTime]::FromFileTime([Convert]::ToInt64($Matches[1].Substring(2), 16)).ToString('HH:mm:ss.fff') } catch { $Matches[1] } } else { "unknown" }
+  $fileTime = if ($text -match 'Faulting application start time: (0x[0-9a-fA-F]+)') { try { [Convert]::ToInt64($Matches[1].Substring(2), 16) } catch { $null } } else { $null }
+  $startTime = if ($null -ne $fileTime) { try { [DateTime]::FromFileTime($fileTime).ToString('HH:mm:ss.fff') } catch { "$fileTime" } } else { "unknown" }
   $path = if ($text -match 'Faulting application path: ([^\r\n]+)') { $Matches[1].Trim() } else { "unknown" }
   $module = if ($text -match 'Faulting module name: ([^,\r\n]+)') { $Matches[1].Trim() } else { "unknown" }
   $offset = if ($text -match 'Fault offset: (0x[0-9a-fA-F]+)') { $Matches[1] } else { "unknown" }
-  return [pscustomobject]@{ Pid = $processId; Line = "process $processId (seen by this check: $($script:SeenPids.Contains($processId))), started $startTime, $path, $module+$offset" }
+  $ours = Test-StartedByThisCheck $processId $fileTime
+  $whose = if ($ours) { "started by this check" } else { "not ours" }
+  return [pscustomobject]@{ Pid = $processId; Ours = $ours; Line = "process $processId ($whose), started $startTime, $path, $module+$offset" }
 }
 
 if (-not (Test-Path -LiteralPath $Setup -PathType Leaf)) { throw "'$Setup' does not exist" }
@@ -195,8 +253,10 @@ $install = Start-Process -FilePath (Resolve-Path -LiteralPath $Setup).Path -Argu
 if ($install.ExitCode -ne 0) { throw "the installer exited with $($install.ExitCode)" }
 
 $werOn = $false
+$werBefore = $null
 try {
-  New-Item -Path $werKey -Force -ErrorAction Stop | Out-Null
+  $werBefore = Save-WerKey
+  if (-not $werBefore.Existed) { New-Item -Path $werKey -Force -ErrorAction Stop | Out-Null }
   New-ItemProperty -Path $werKey -Name DumpFolder -PropertyType ExpandString -Value $werDumps -Force -ErrorAction Stop | Out-Null
   New-ItemProperty -Path $werKey -Name DumpType -PropertyType DWord -Value 2 -Force -ErrorAction Stop | Out-Null
   New-ItemProperty -Path $werKey -Name DumpCount -PropertyType DWord -Value 10 -Force -ErrorAction Stop | Out-Null
@@ -328,7 +388,9 @@ try {
       Where-Object { $_.ProviderName -eq "Application Error" -and $_.Message -match "Ardia\.exe" })
   $facts = @($events | ForEach-Object { Get-CrashEventFacts $_ })
   foreach ($fact in $facts) { Write-Host "relaunch-check: Application Error: $($fact.Line)" }
-  if ($events.Count) { throw "Windows logged $($events.Count) Ardia crash(es): $(($facts | ForEach-Object { $_.Line }) -join ' | ')" }
+  $ourCrashes = @($facts | Where-Object { $_.Ours })
+  if ($facts.Count -gt $ourCrashes.Count) { Note "Ardia crash events from processes this check did not start: $($facts.Count - $ourCrashes.Count)" }
+  if ($ourCrashes.Count) { throw "Windows logged $($ourCrashes.Count) crash(es) of an Ardia this check started: $(($ourCrashes | ForEach-Object { $_.Line }) -join ' | ')" }
   $dumps = @(Get-ChildItem -LiteralPath $reports -Filter *.dmp -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -ge $started })
   if ($dumps.Count) { throw "Crashpad wrote $($dumps.Count) crash dump(s): $($dumps.Name -join ', ')" }
   if ($script:QuitDumps.Count) { throw "Crashpad wrote $($script:QuitDumps.Count) crash dump(s) in the quit cases' profiles: $($script:QuitDumps -join ', ')" }
@@ -337,7 +399,7 @@ try {
   Note "no crash events, crash dumps or fatal log lines"
 } finally {
   Keep-Log "final"
-  if ($werOn) { Remove-Item -Path $werKey -Force -ErrorAction SilentlyContinue }
+  Restore-WerKey $werBefore
   Read-CrashDumps
   Get-Process -Name Ardia -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 2

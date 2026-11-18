@@ -52,6 +52,7 @@ source_set("win") {
     "//chrome/browser",
     "//chrome/browser/ardia",
     "//chrome/browser/devtools",
+    "//chrome/browser/headless",
     "//chrome/browser/printing",
     "//chrome/browser/ui:recently_audible_helper",
     "//chrome/browser/win:chrome_process_finder",

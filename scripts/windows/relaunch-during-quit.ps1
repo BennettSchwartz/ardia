@@ -127,7 +127,7 @@ function Start-WithTest([string]$test, [string[]]$arguments = @()) {
   try {
     $started = if ($arguments.Count) { Start-Process -FilePath $exe -ArgumentList $arguments -PassThru } else { Start-Process -FilePath $exe -PassThru }
     $null = $started.Handle
-    Remember-Pid $started.Id
+    Remember-Pid $started.Id $started
     return $started
   } finally {
     if ($null -eq $saved) { Remove-Item -Path Env:ARDIA_TEST -ErrorAction SilentlyContinue } else { $env:ARDIA_TEST = $saved }
@@ -189,7 +189,7 @@ function Assert-OneFreshArdia([string]$what, [int]$old, [string]$name, [int[]]$n
     $windowed = @(Browsers | Where-Object { [RelaunchCheck.Native]::AppWindows([uint32]$_.ProcessId).Count -gt 0 })
     if ($windowed.Count -eq 1 -and (-not $old -or -not (Get-Process -Id $old -ErrorAction SilentlyContinue))) {
       $fresh = [int]$windowed[0].ProcessId
-      Remember-Pid $fresh
+      Remember-Pid $fresh $windowed[0]
       break
     }
     Start-Sleep -Milliseconds 100

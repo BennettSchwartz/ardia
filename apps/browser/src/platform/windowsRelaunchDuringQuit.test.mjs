@@ -76,6 +76,7 @@ test("one hook answers every launch first: turned away, taken and delivered by o
   before(answers, "quit.past_no_return || browser_shutdown::HasShutdownStarted()", "app.launch_arriving()");
   assert.match(answers, /if \(answer != ARDIA_APP_LAUNCH_LEFT_FOR_UPDATE\) \{\s*PostLaunchDelivery\(command_line, cur_dir\);/);
   assert.match(body(main, "bool IsLaunch(const base::CommandLine& command_line) {"), /switches::kUninstall[\s\S]*switches::kEnableAutomation/);
+  assert.match(body(main, "bool IsLaunch(const base::CommandLine& command_line) {"), /!headless::IsHeadlessMode\(\) && !command_line\.HasSwitch\("headless"\)/, "a launch sent to a headless engine skips Chromium's headless refusal");
   assert.match(body(main, "void PostLaunchDelivery("), /PostDelayedTask\(\s*FROM_HERE, base::BindOnce\(&DeliverLaunch, command_line, cur_dir\)/);
   const deliver = body(main, "void DeliverLaunch(");
   before(deliver, "app.launch_delivered()", "EmitRelaunch(");

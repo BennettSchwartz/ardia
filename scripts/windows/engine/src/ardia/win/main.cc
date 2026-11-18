@@ -41,6 +41,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
+#include "chrome/browser/headless/headless_mode_util.h"
 #include "chrome/install_static/user_data_dir.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
@@ -889,7 +890,7 @@ bool IsLaunch(const base::CommandLine& command_line) {
   return !command_line.HasSwitch(switches::kUninstall) &&
          !command_line.HasSwitch(switches::kEnableAutomation) &&
          !own.HasSwitch(switches::kEnableAutomation) &&
-         !command_line.HasSwitch("headless");
+         !headless::IsHeadlessMode() && !command_line.HasSwitch("headless");
 }
 
 void AfterLaunchTaken(int answer) {
