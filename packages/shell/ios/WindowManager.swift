@@ -30,6 +30,8 @@ final class WindowManager: NSObject, NSWindowDelegate {
 
   func isFullScreen(_ id: String) -> Bool { managed[id]?.isFullScreen == true }
 
+  func linkArrivedFromOtherApp(_ urls: [URL]) { linkActivation.linkArrived(urls) }
+
   private func kind(of window: NSWindow?) -> WindowKind? { id(of: window).flatMap { managed[$0]?.kind } }
 
   private func isBrowserWindow(_ window: NSWindow?) -> Bool { kind(of: window)?.isBrowser == true }
@@ -67,6 +69,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     let shown = NSApp.orderedWindows.filter { $0.isVisible && !$0.isMiniaturized && $0.isOnActiveSpace }
     let browserShown = shown.contains { isBrowserWindow($0) }
     let floatingShown = shown.contains { id(of: $0) == nil && !($0 is NSPanel) }
+    linkActivation.reopened()
     if browserShown { return }
     ShellEvents.send(.app, ["type": "reopen", "pastFloating": floatingShown])
   }
