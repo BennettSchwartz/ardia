@@ -2,12 +2,12 @@
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
-import { attach, launch } from "../../../scripts/lib/instance.mjs";
+import { attach, launch } from "../lib/instance.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 if (args.includes("--help") || args.length < 3) {
-  console.log(`Usage: m1.mjs <Debug app> <plugin folder> <out dir> --cli <cli home> [--metro PORT] [--model SLUG] [--keep] [--attach]
+  console.log(`Usage: scripts/plugins/ai-m1.mjs <Debug app> <plugin folder> <out dir> --cli <cli home> [--metro PORT] [--model SLUG] [--keep] [--attach]
   Turns the AI plugin on in a hidden instance (no DevTools port, so the plugin's browse can start the ardia command's
   token server; <cli home>/current/bin/ardia is the ardia command), opens two pages, presses the toolbar button with a
   real click, asks about the page, has the agent open a tab (the permission ask, then the split becoming a group),

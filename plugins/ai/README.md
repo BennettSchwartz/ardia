@@ -1,6 +1,7 @@
 # The AI plugin
 
-Issue #2463. AI in Ardia is a first-party plugin on the plugin host (`docs/plugins.md`, #2462): off until you turn it
+ardia-browser/ardia#2463. AI in Ardia is a first-party plugin on Ardia's plugin host (the host's contract is
+`docs/plugins.md` in ardia-browser/ardia): off until you turn it
 on, and when it's off nothing of it exists anywhere in the browser. It runs a chat at `ardia://ai/<chat id>` on your
 own Claude or ChatGPT plan, through the command line tools you already signed in to, and it reads and uses your tabs
 only as described under Permissions. Everything it needs from the browser is a public plugin-host contribution.
@@ -9,10 +10,11 @@ only as described under Permissions. Everything it needs from the browser is a p
 plugins/ai/
   plugin.json          the manifest: page, process and its home grants, commands, toolbar, New Tab mode, rows
   skill/browser.md     the instructions the agent runs with (installed as CLAUDE.md, AGENTS.md and a skill)
-  page/                the chat page: React, built with esbuild, styled from Ardia's tokens
+  page/                the chat page: React, built with esbuild; src/tokens.css holds fallbacks for the --ardia-*
+                       look variables the host sets on the page at runtime
   runtime/             T3 Code's server, pinned (UPSTREAM) and patched (series, patches/), plus src/: our code
   build.sh             builds the plugin folder: binary, its packages, the page, the manifest and the skill
-  tests/               unit tests: permissions, tools, channel, page state, shell state
+  tests/               unit tests: permissions, tools, channel, page state, shell state, send and tags
 ```
 
 ## How it runs
@@ -74,7 +76,7 @@ and tabs tagged later join it (`POST /ardia/send`).
 
 ## Building
 
-`plugins/ai/build.sh <out dir> [<t3code tree>]` needs Node 26.13.1 (T3's engines) with pnpm on `PATH`. It clones T3
+`build.sh <out dir> [<t3code tree>]` needs Node 26.13.1 (T3's engines) with pnpm on `PATH`. It clones T3
 Code at the pinned commit (or uses the tree given), runs `runtime/apply.sh` (patches once, recorded in
 `.ardia-patches`; copies `runtime/src` to `apps/server/src/ardia`), installs, builds the executable with
 `APP_VERSION` from `runtime/UPSTREAM`, and assembles `<out>/ai`: `plugin.json`, `skill/`, `NOTICE`, `bin/ardia-ai`,
@@ -90,15 +92,17 @@ Code at the pinned commit (or uses the tree given), runs `runtime/apply.sh` (pat
    catch-all). `0002` holds the Ardia entry (`binMain.ts`), the routes, the toolkit list, the disabled services and
    the Claude tool list.
 3. Typecheck (`pnpm -C apps/server typecheck`), and run the page check: copy `page/src` into
-   `apps/web/ardia-page-check/src` with the tsconfig from this doc's history, then `effect-tsgo tsrs --noEmit -p`.
+   `apps/web/ardia-page-check/src` with a tsconfig that extends `../tsconfig.json` (Effect diagnostics
+   `cryptoRandomUUID`, `preferUnsafeConstructor`, `anyUnknownInErrorContext` and the `global*` ones off), then
+   `../../node_modules/.bin/effect-tsgo tsrs --noEmit -p ardia-page-check/tsconfig.json` from `apps/web`.
 4. Update `runtime/UPSTREAM` (commit and version), build, and run the end-to-end test.
 
 ## Tests
 
-- `node --test plugins/ai/tests/*.test.mjs`: permissions, tools against a fake host, the channel, page and shell state.
-- `plugins/ai/tests/e2e.mjs` (needs a Debug build, Node 26 and a signed-in `claude`): a hidden instance with the plugin
-  installed and turned on, the real runtime on the cheapest model, checking each skill rule by the browser's tab
-  state.
+- `node --test tests/*.test.mjs`: permissions, tools against a fake host, the channel, page and shell state.
+- In-app checks drive a real Ardia, so they live in ardia-browser/ardia: `scripts/plugins/ai-m1.mjs` (a hidden
+  instance with this folder installed and turned on, the real runtime on the cheapest model, a real click on the
+  toolbar button, a question, captures).
 
 ## Telemetry
 
