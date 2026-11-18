@@ -94,6 +94,8 @@ export function syncFiles(current: () => SyncDoc) {
   const writtenRest = new Map<string, string>();
   let queue: Promise<void> = Promise.resolve();
   let generation = 0;
+  let docQueue: Promise<void> = Promise.resolve();
+  let docWrites = 0;
 
   function serial<T>(task: () => Promise<T>): Promise<T> {
     const run = queue.then(task);
@@ -244,17 +246,42 @@ export function syncFiles(current: () => SyncDoc) {
     if (!Object.keys(journal.batches).length) clearJournal();
   }
 
-  function docJson() {
-    const { scopes, ...meta } = current();
-    const seqs = state.loaded ? Object.fromEntries(Object.entries(scopes).map(([k, s]) => [k, writtenSeq(s)])) : meta.seqs;
+  const writtenSeqs = () => (state.loaded ? Object.fromEntries(Object.entries(current().scopes).map(([k, s]) => [k, writtenSeq(s)])) : current().seqs);
+
+  function docJson(patch: Partial<SyncDoc>) {
+    const { scopes: _scopes, ...meta } = { ...current(), ...patch };
+    const seqs = writtenSeqs();
     return { json: versionedJson({ ...meta, seqs }, DOC_VERSION, "v"), lasting: versionedJson({ ...meta, lastSyncedAt: null, seqs }, DOC_VERSION, "v") };
   }
 
-  async function saveDocNow() {
-    const { json, lasting } = docJson();
-    await saveDocument(DOC, json);
-    Object.assign(docFile, { json, lasting, savedAt: Date.now() });
+  function issueDoc(always: boolean, patch: Partial<SyncDoc> = {}) {
+    const { json, lasting } = docJson(patch);
+    const now = Date.now();
+    if (!always && (json === docFile.json || (lasting === docFile.lasting && now - docFile.savedAt < DOC_IDLE_MS))) return null;
+    Object.assign(docFile, { json, lasting, savedAt: now });
+    return json;
   }
+
+  function inDocTurn(task: () => Promise<void>) {
+    docWrites++;
+    const run = docQueue.then(task).finally(() => void docWrites--);
+    docQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
+
+  const saveDocNow = (patch: Partial<SyncDoc> = {}) =>
+    inDocTurn(async () => {
+      const json = issueDoc(true, patch)!;
+      try {
+        await saveDocument(DOC, json);
+      } catch (error) {
+        if (docFile.json === json) Object.assign(docFile, { json: "", lasting: "" });
+        throw error;
+      }
+    });
 
   function unload() {
     generation++;
@@ -263,13 +290,14 @@ export function syncFiles(current: () => SyncDoc) {
     writtenRest.clear();
   }
 
+  function writeDocNow() {
+    const json = issueDoc(false);
+    if (json !== null) writeDocument(DOC, json);
+  }
+
   function saveDoc() {
-    const { json, lasting } = docJson();
-    if (json === docFile.json) return;
-    const now = Date.now();
-    if (lasting === docFile.lasting && now - docFile.savedAt < DOC_IDLE_MS) return;
-    Object.assign(docFile, { json, lasting, savedAt: now });
-    writeDocument(DOC, json);
+    if (docWrites) void inDocTurn(async () => writeDocNow());
+    else writeDocNow();
   }
 
   function stateDue() {
@@ -317,6 +345,7 @@ export function syncFiles(current: () => SyncDoc) {
   }
 
   function startOver() {
+    state.loaded = true;
     saveDoc();
     void serial(async () => {
       clearJournal();
@@ -333,5 +362,5 @@ export function syncFiles(current: () => SyncDoc) {
     });
   }
 
-  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint };
+  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded };
 }

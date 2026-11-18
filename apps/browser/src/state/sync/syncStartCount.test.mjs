@@ -147,3 +147,20 @@ test("with sharing off a pause after unsettled starts isn't counted", async () =
     setConsentPeriod(true, "sync-pause-test");
   }
 });
+
+test("an engine started without counting, as Linux's authority is at every handover, keeps no count and never pauses", async () => {
+  const { disk } = await syncedProfile();
+  const { unsettledStarts: _left, ...linuxDoc } = JSON.parse(disk.get("sync.json"));
+  disk.set("sync.json", JSON.stringify(linuxDoc));
+  const linux = { recoveredStart: false, startOptions: { countStarts: false } };
+  const first = await pausedStart(disk, linux);
+  assert.notEqual(ui(first).status, "paused");
+  assert.equal("unsettledStarts" in docOnDisk(), false);
+  const second = await pausedStart(snapshot(), linux);
+  const third = await pausedStart(snapshot(), linux);
+  assert.notEqual(ui(second).status, "paused");
+  assert.notEqual(ui(third).status, "paused");
+  assert.equal("unsettledStarts" in docOnDisk(), false);
+  assert.equal(await runSettleTimer(), 0);
+  assert.deepEqual(takeSyncPauseCounts(), NO_COUNTS);
+});

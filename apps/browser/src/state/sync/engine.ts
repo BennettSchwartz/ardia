@@ -57,8 +57,11 @@ let again = false;
 let forcePasswordsNext = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let outcome: Partial<SyncUi> | null = null;
+let counting = true;
+let stopping = false;
 const paused = () => pausedByGuard(doc);
-const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint } = syncFiles(() => doc);
+const refused = () => paused() || !!running();
+const { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded } = syncFiles(() => doc);
 const report = (patch: Partial<SyncUi>) => void (paused() ? (outcome = patch) : publishUi(patch));
 const standsDown = () => paused() && isQuitting() && (report({ status: "stalled", error: QUIT_DURING_RESUME }), true);
 
@@ -97,13 +100,13 @@ function scheduleSync(delay = AFTER_EDIT_MS) {
 }
 
 export async function syncNow() {
-  if (!paused()) await runCycle({ forcePasswords: true });
+  if (!refused()) await runCycle({ forcePasswords: true });
 }
 
 type CycleOptions = { retiring?: boolean; forcePasswords?: boolean };
 
 async function runCycle({ retiring = false, forcePasswords = false }: CycleOptions = {}, resume = false) {
-  if (!SyncNative || !doc.enabled || !doc.folder || !doc.deviceId || useSync.getState().status === "locked" || (paused() && !resume)) return;
+  if (!SyncNative || !doc.enabled || !doc.folder || !doc.deviceId || !loaded() || useSync.getState().status === "locked" || (paused() && !resume)) return;
   if (cycle) {
     again = true;
     forcePasswordsNext ||= forcePasswords;
@@ -232,7 +235,7 @@ function setSyncFolder(path: string) {
 }
 
 export async function chooseSyncFolder(): Promise<string | null> {
-  if (paused()) return null;
+  if (refused()) return null;
   const picked = (await SyncNative?.chooseFolder(doc.folder)) ?? null;
   if (picked) setSyncFolder(picked);
   return picked;
@@ -248,7 +251,7 @@ function begin(folder: string, deviceId: string, joining: boolean) {
 export async function turnOnSync(folder: string): Promise<{ ok: true } | { error: string }> {
   const native = SyncNative;
   if (!native) return { error: "Sync isn’t available in this build." };
-  if (paused()) return { error: SYNC_PAUSED_REFUSAL };
+  if (refused()) return { error: SYNC_PAUSED_REFUSAL };
   const deviceId = native.newDeviceId();
   try {
     if (!(await native.createPhrase(deviceId))) return { error: `Couldn’t save the sync key in ${PLATFORM_TERMS.secretStore}.` };
@@ -265,16 +268,19 @@ export async function enterRecoveryPhrase(folder: string, text: string): Promise
   const native = SyncNative;
   if (!native) return { error: "unavailable" };
   if (doc.enabled && doc.deviceId && useSync.getState().status === "locked") {
+    const asked = doc;
     const result = await native.enterPhrase(doc.deviceId, text, doc.folder ?? folder);
+    if (doc !== asked || stopping || !doc.enabled) return result;
     if ("ok" in result && paused()) void continueAfterPhrase();
     else if ("ok" in result) {
+      starts.arm();
       await loadSavedState();
       publishUi({ status: "starting", error: null });
       scheduleSync(0);
     }
     return result;
   }
-  if (paused()) return { error: "unavailable" };
+  if (refused()) return { error: "unavailable" };
   const deviceId = native.newDeviceId();
   const result = await native.enterPhrase(deviceId, text, folder);
   if ("ok" in result) begin(folder, deviceId, true);
@@ -285,33 +291,32 @@ export async function stopSync({ deleteData = false } = {}) {
   const native = SyncNative;
   if (!native || !doc.enabled) return;
   const consent = consentToken();
-  await running();
-  clearTimeout(timer);
-  const wasPaused = paused();
-  const reportFailure = (error: unknown) => warnFor(consent, "[sync] the last cycle before stopping failed", error);
-  while (cycle) await cycle.catch(reportFailure);
-  if (!wasPaused && useSync.getState().status !== "locked") await runCycle({ retiring: true }).catch(reportFailure);
-  clearTimeout(timer);
-  const folder = doc.folder;
-  if (deleteData && folder && !wasPaused) {
-    try {
-      await native.deleteChain(folder);
-    } catch (error) {
-      warnFor(consent, "[sync] deleting sync data failed", error);
-    }
+  stopping = true;
+  try {
+    await running();
+    clearTimeout(timer);
+    const wasPaused = paused();
+    const reportFailure = (error: unknown) => warnFor(consent, "[sync] the last cycle before stopping failed", error);
+    while (cycle) await cycle.catch(reportFailure);
+    if (!wasPaused && useSync.getState().status !== "locked") await runCycle({ retiring: true }).catch(reportFailure);
+    clearTimeout(timer);
+    const folder = doc.folder;
+    if (deleteData && folder && !wasPaused) await native.deleteChain(folder).catch((error: unknown) => warnFor(consent, "[sync] deleting sync data failed", error));
+    if (doc.deviceId) await native.forget(doc.deviceId);
+    doc = { ...emptyDoc(), folder, types: doc.types };
+    forgetScopeAdapters();
+    startOver();
+    publishUi({ status: "off", error: null });
+  } finally {
+    stopping = false;
   }
-  if (doc.deviceId) await native.forget(doc.deviceId);
-  doc = { ...emptyDoc(), folder, types: doc.types };
-  forgetScopeAdapters();
-  startOver();
-  publishUi({ status: "off", error: null });
 }
 
 const docChanged = () => void (save(), publishUi(), scheduleSync(0));
 
 export const { adoptProfileTheme, setTypeSynced, setProfileSynced, setOpenTabsSynced, sendTargets, sendTab, addRemoteProfile, removeRemoteProfile, removeSyncedDevice } = syncEdits({
   doc: () => doc,
-  refused: paused,
+  refused,
   locked: () => useSync.getState().status === "locked",
   save,
   changed: docChanged,
@@ -326,22 +331,24 @@ function settlePaused(error: string | null) {
   again = forcePasswordsNext = false;
   stopWatchingExtensionIntents();
   forgetScopeAdapters();
+  const seqs = writtenSeqs();
   unload();
-  doc = { ...(read() ?? { ...doc, scopes: {} }), pausedByGuard: true };
+  doc = { ...(read() ?? { ...doc, scopes: {}, seqs }), pausedByGuard: true };
   publishUi({ status: "paused", error });
 }
 
-const starts = unsettledStarts({ doc: () => doc, persist: saveDocNow });
+const starts = unsettledStarts({ doc: () => doc, persist: () => saveDocNow(), counting: () => counting });
 const resumeCycle = async () => ((outcome = null), await runCycle({}, true), outcome);
-const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => !!(await SyncNative?.unlock(deviceId)), load: loadSavedState, countLoad: starts.countLoad, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS) });
+const { resumeSync, continueAfterPhrase, running } = guardResume({ doc: () => doc, unlock: async (deviceId) => !!(await SyncNative?.unlock(deviceId)), load: loadSavedState, countLoad: starts.countLoad, arm: starts.arm, cycle: resumeCycle, persist: saveDocNow, publish: publishUi, quitting: isQuitting, settlePaused, carryOn: () => scheduleSync(CYCLE_MS) });
 export { resumeSync };
 
-export function startSync() {
+export function startSync({ countStarts = true } = {}) {
   const native = SyncNative;
   if (!native) return;
+  counting = countStarts;
   load();
   const consent = consentToken();
-  if (pauseAfterRecoveredStart(doc, consent) || pauseAfterUnsettledStarts(doc, consent)) void saveDocNow().catch((error: unknown) => warnFor(consent, "[sync] couldn't record the pause", error));
+  if (pauseAfterRecoveredStart(doc, consent) || (counting && pauseAfterUnsettledStarts(doc, consent))) void saveDocNow().catch((error: unknown) => warnFor(consent, "[sync] couldn't record the pause", error));
   publishUi(paused() ? { status: "paused", error: null } : { status: doc.enabled ? "starting" : "off" });
   if (!paused()) watchExtensions();
   if (doc.enabled && doc.deviceId && !paused()) {
@@ -351,6 +358,7 @@ export function startSync() {
       .then(() => native.unlock(deviceId))
       .then(async (ok) => {
         if (!ok) return publishUi({ status: "locked", error: SYNC_LOCKED });
+        starts.arm();
         await loadSavedState();
         publishUi();
         scheduleSync(500);
@@ -364,8 +372,8 @@ export function startSync() {
     starts.stop();
     await running();
     if (paused()) return;
-    await starts.settle(consent);
     await checkpoint();
+    await starts.settle();
   });
   onProfilesOpened(() => {
     if (!doc.enabled || !doc.deviceId || paused()) return;
