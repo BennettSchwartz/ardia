@@ -388,6 +388,10 @@ jobs:
         if: env.COMPILED == 'true' && env.PART == 'launch'
         shell: pwsh
         run: scripts/windows/rebundle.ps1 -App $env:APP -Hermes $env:HERMES -Javascript "${{ runner.temp }}/javascript" -Verify
+      - name: The Hermes pin holds
+        if: env.PART == 'launch'
+        shell: pwsh
+        run: scripts/windows/hermes-pin-check.ps1 -App $env:APP -Hermes $env:HERMES -Cpu $env:SLUG -GeneratorRuns $(if ($env:SLUG -eq 'x64') { 5 } else { 0 })
       - if: env.PART == 'launch'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
