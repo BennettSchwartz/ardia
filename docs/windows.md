@@ -694,6 +694,15 @@ is plain Chromium.
   has opened, so a profile that crashes Ardia at every start opens again on its own. Chromium's profile (bookmarks,
   history, passwords, cookies) isn't touched. #2097's recording (the app gone about 4 s after its window appears, at
   every launch after onboarding) is that shape; the launch log now kept in `Logs` says what ended it.
+  Sync is paused on that recovered start (#2592): the start gets `launchConfig().recoveredStart`, and Sync then
+  unlocks nothing and reads, writes or deletes none of its files; it only records the pause in `sync.json` (keeping the
+  `seqs` it read), because a profile whose Sync load crashes the app (#2570) would otherwise crash every recovered
+  start too. The pause sticks across starts until Settings › Sync › Resume, which unlocks, loads Sync's saved state and
+  runs one cycle, and clears the pause only once that cycle has finished; a failed unlock or cycle, or a crash during
+  Resume, leaves it paused. The switch is shared (`state/sync/syncPause.ts`), so the Mac's and Linux's guards can set
+  the same flag. On the dashboard, `usage_counts` carries `sync_paused_by_launch_guard`, `sync_resumes` and
+  `sync_resumes_completed`: resumes well below pauses means people don't find Resume, and completed well below resumes
+  means the crash comes back when Sync loads.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens

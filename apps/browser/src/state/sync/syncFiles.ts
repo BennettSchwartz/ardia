@@ -245,7 +245,7 @@ export function syncFiles(current: () => SyncDoc) {
 
   function saveDoc() {
     const { scopes, ...meta } = current();
-    const seqs = Object.fromEntries(Object.entries(scopes).map(([k, s]) => [k, writtenSeq(s)]));
+    const seqs = state.loaded ? Object.fromEntries(Object.entries(scopes).map(([k, s]) => [k, writtenSeq(s)])) : meta.seqs;
     const json = versionedJson({ ...meta, seqs }, DOC_VERSION, "v");
     if (json === docFile.json) return;
     const lasting = versionedJson({ ...meta, lastSyncedAt: null, seqs }, DOC_VERSION, "v");

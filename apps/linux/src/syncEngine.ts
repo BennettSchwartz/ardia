@@ -112,6 +112,7 @@ function dropHeldLogins() {
 function remoteFor(host: ArdiaHost): SyncRemote {
   return {
     syncNow: () => engine.syncNow(),
+    resumeSync: () => engine.resumeSync(),
     turnOnSync: async (folder: string) => {
       let result: Awaited<ReturnType<typeof engine.turnOnSync>>;
       try {
@@ -253,6 +254,15 @@ export async function chooseSyncFolder(): Promise<string | null> {
 
 export async function syncNow() {
   await forward("syncNow", [], INTERACTIVE_CALL_TIMEOUT_MS);
+}
+
+export async function resumeSync() {
+  const consent = consentToken();
+  try {
+    await forward("resumeSync", [], INTERACTIVE_CALL_TIMEOUT_MS);
+  } catch (error) {
+    warnFor(consent, "[ardia linux] sync", error instanceof Error ? error.message : error);
+  }
 }
 
 export async function turnOnSync(folder: string): Promise<{ ok: true } | { error: string }> {

@@ -8,7 +8,8 @@ import { copyRecoveryPhrase, revealSyncFolder, type FolderInfo } from "../../../
 import { syncFolder } from "../../../state/settings/paneData";
 import { useResource } from "../../../state/settings/resources";
 import { useProfiles } from "../../../state/browser/hooks";
-import { chooseSyncFolder, folderInfo, setOpenTabsSynced, setTypeSynced, syncNow, turnOnSync, useSync } from "../../../state/sync/engine";
+import { chooseSyncFolder, folderInfo, resumeSync, setOpenTabsSynced, setTypeSynced, syncNow, turnOnSync, useSync } from "../../../state/sync/engine";
+import { SYNC_PAUSED, SYNC_PAUSED_DETAIL } from "../../../state/sync/syncPause";
 import { DATA_TYPES, type SyncStatus } from "../../../state/sync/syncDoc";
 import { deviceDetail } from "../../../state/sync/devices";
 import { Group, Row, SectionHeader } from "../Form";
@@ -27,6 +28,8 @@ function statusLine(status: SyncStatus, lastSyncedAt: number | null, pending: nu
         return "Updating";
       case "offline":
         return "Offline";
+      case "paused":
+        return since ? `Paused · last synced ${since}` : "Paused";
       case "stalled":
       case "locked":
         return since ? `Not syncing · last synced ${since}` : "Not syncing";
@@ -162,6 +165,13 @@ function SyncOn({ info }: { info: FolderInfo | null }) {
   }, []);
 
   const locked = status === "locked";
+  const [resuming, setResuming] = useState(false);
+  const paused = status === "paused" || resuming;
+  const resume = async () => {
+    setResuming(true);
+    await resumeSync();
+    setResuming(false);
+  };
   const advanced = async () => {
     const choice = await showMenu([
       { id: "kit", title: "Save Recovery Kit…", symbol: "arrow.down.doc", enabled: !locked },
@@ -187,8 +197,10 @@ function SyncOn({ info }: { info: FolderInfo | null }) {
     <>
       <SectionHeader title="Sync" />
       <Group>
-        <Row icon={<SyncIcon on={!locked} />} anchor="general.sync" description={statusLine(status, lastSyncedAt, pending)}>
-          {locked ? (
+        <Row icon={<SyncIcon on={!locked && !paused} />} anchor="general.sync" description={status === "paused" ? `${SYNC_PAUSED} ${SYNC_PAUSED_DETAIL}` : statusLine(status, lastSyncedAt, pending)}>
+          {paused ? (
+            <Button title={resuming ? "Resuming…" : "Resume"} kind="primary" disabled={resuming} onPress={() => void resume()} />
+          ) : locked ? (
             <Button title="Enter Recovery Phrase…" kind="primary" onPress={() => showPhraseEntry(info)} />
           ) : (
             <Button title="Connect Another Device…" onPress={showConnectDevice} />

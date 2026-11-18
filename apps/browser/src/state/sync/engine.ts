@@ -12,8 +12,9 @@ import { settleThemeAdoption, themeChosenHere } from "./syncThemes";
 import { editClock, startEditClock } from "./editClock";
 import { addLinkedProfile, appScopeOf, linkedProfileId, linkProfiles, readyToPair, remoteProfileRecord, sharedDataChain } from "./profileLinks";
 import { summarize } from "./syncSummary";
-import { takeCycleWork, timedCycle } from "./cycleWork";
-import { freezeRemovals, markDeviceRemoved, markRemoved, settleRemovals, takeReturnedDeviceRemovals, takeReturnedProfileRemovals, takeSyncedDeviceRemovals, takeSyncedProfileRemovals } from "./profileRemoval";
+import { timedCycle } from "./cycleWork";
+import { noteSnapshot } from "./snapshotWrites";
+import { freezeRemovals, markDeviceRemoved, markRemoved, settleRemovals } from "./profileRemoval";
 import { profileScope } from "./records";
 import { queueSend, sendTargetsIn } from "./sentTabs";
 import { errorText } from "../../lib/errors";
@@ -23,8 +24,10 @@ import { markOpenTabsSynced, openTabsClosed, recordOpenTabCloses } from "./openT
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
+import { guardResume, pauseAfterRecoveredStart, pausedByGuard } from "./syncPause";
 
 export { onTabsReceived } from "./sentTabs";
+export { takeSnapshotWrites } from "./snapshotWrites";
 export { takeOpenTabSyncCounts } from "../telemetry/openTabSyncCounts";
 
 const CYCLE_MS = 15_000;
@@ -52,18 +55,8 @@ let cycle: Promise<void> | null = null;
 let again = false;
 let forcePasswordsNext = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
-let snapshotWrites = { count: 0, bytes: 0 };
+const paused = () => pausedByGuard(doc);
 const { read, loadState, persistJournal, watchScope, save, startOver, checkpoint } = syncFiles(() => doc);
-
-function noteSnapshot({ snapshotBytes }: { snapshotBytes: number }) {
-  if (snapshotBytes) snapshotWrites = { count: snapshotWrites.count + 1, bytes: snapshotWrites.bytes + snapshotBytes };
-}
-
-export function takeSnapshotWrites() {
-  const taken = { ...snapshotWrites, ...takeCycleWork(), removedProfiles: takeSyncedProfileRemovals(), removedDevices: takeSyncedDeviceRemovals(), removalsReturned: takeReturnedProfileRemovals() + takeReturnedDeviceRemovals() };
-  snapshotWrites = { count: 0, bytes: 0 };
-  return taken;
-}
 
 function load() {
   const loaded = read();
@@ -92,7 +85,7 @@ function watchExtensions() {
 }
 
 function scheduleSync(delay = AFTER_EDIT_MS) {
-  if (!doc.enabled) return;
+  if (!doc.enabled || paused()) return;
   clearTimeout(timer);
   timer = setTimeout(() => void runCycle(), delay);
 }
@@ -103,8 +96,8 @@ export async function syncNow() {
 
 type CycleOptions = { retiring?: boolean; forcePasswords?: boolean };
 
-async function runCycle({ retiring = false, forcePasswords = false }: CycleOptions = {}) {
-  if (!SyncNative || !doc.enabled || !doc.folder || !doc.deviceId || useSync.getState().status === "locked") return;
+async function runCycle({ retiring = false, forcePasswords = false }: CycleOptions = {}, resume = false) {
+  if (!SyncNative || !doc.enabled || !doc.folder || !doc.deviceId || useSync.getState().status === "locked" || (paused() && !resume)) return;
   if (cycle) {
     again = true;
     forcePasswordsNext ||= forcePasswords;
@@ -327,11 +320,11 @@ export function setOpenTabsSynced(profileId: string, on: boolean) {
 }
 
 export function sendTargets(profileId: string): SendTarget[] {
-  return useSync.getState().status === "locked" ? [] : sendTargetsIn(doc, profileId);
+  return useSync.getState().status === "locked" || paused() ? [] : sendTargetsIn(doc, profileId);
 }
 
 export function sendTab(tabId: string, deviceId: string): boolean {
-  if (useSync.getState().status === "locked" || !queueSend(doc, tabId, deviceId)) return false;
+  if (useSync.getState().status === "locked" || paused() || !queueSend(doc, tabId, deviceId)) return false;
   save();
   scheduleSync(0);
   return true;
@@ -352,13 +345,16 @@ export function addRemoteProfile(syncId: string): string | null {
 export const removeRemoteProfile = (syncId: string): boolean => markRemoved(doc, syncId) && (docChanged(), true);
 export const removeSyncedDevice = (id: string): boolean => markDeviceRemoved(doc, id) && (docChanged(), true);
 
+export const resumeSync = guardResume({ doc: () => doc, unlock: async (deviceId) => !!(await SyncNative?.unlock(deviceId)), load: loadSavedState, cycle: () => runCycle({}, true), ui: () => useSync.getState(), publish: publishUi, save, carryOn: () => scheduleSync(CYCLE_MS) });
+
 export function startSync() {
   if (!SyncNative) return;
   load();
-  publishUi({ status: doc.enabled ? "starting" : "off" });
-  watchExtensions();
-  if (doc.enabled && doc.deviceId) {
-    const consent = consentToken();
+  const consent = consentToken();
+  if (pauseAfterRecoveredStart(doc, consent)) save();
+  publishUi(paused() ? { status: "paused", error: null } : { status: doc.enabled ? "starting" : "off" });
+  if (!paused()) watchExtensions();
+  if (doc.enabled && doc.deviceId && !paused()) {
     void SyncNative.unlock(doc.deviceId)
       .then(async (ok) => {
         if (!ok) return publishUi({ status: "locked", error: `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.` });
@@ -371,21 +367,21 @@ export function startSync() {
         publishUi({ status: "stalled", error: errorText(error) });
       });
   }
-  saveBeforeQuit("sync", checkpoint);
+  saveBeforeQuit("sync", () => (paused() ? Promise.resolve() : checkpoint()));
   onProfilesOpened(() => {
-    if (!doc.enabled || !doc.deviceId) return;
+    if (!doc.enabled || !doc.deviceId || paused()) return;
     watchExtensions();
     scheduleSync();
   });
   useBrowser.subscribe((s, prev) => {
-    if (!doc.enabled) return;
+    if (!doc.enabled || paused()) return;
     const closed = !isQuitting() && recordOpenTabCloses(doc, openTabsClosed(s, prev));
     if (closed && !cycle) save();
     if (closed || (!cycle && (s.bookmarks !== prev.bookmarks || s.settings !== prev.settings || s.profiles !== prev.profiles || s.profileOrder !== prev.profileOrder || s.groups !== prev.groups))) scheduleSync();
   });
   if (__DEV__) {
     (globalThis as { acSync?: object }).acSync = {
-      useSync, syncNow, turnOnSync, enterRecoveryPhrase, stopSync, setTypeSynced, setProfileSynced, setOpenTabsSynced, addRemoteProfile, removeRemoteProfile, removeSyncedDevice, setSyncFolder, folderInfo,
+      useSync, syncNow, resumeSync, turnOnSync, enterRecoveryPhrase, stopSync, setTypeSynced, setProfileSynced, setOpenTabsSynced, addRemoteProfile, removeRemoteProfile, removeSyncedDevice, setSyncFolder, folderInfo,
       doc: () => doc,
       native: SyncNative,
       get menu(): typeof import("./menu") {
