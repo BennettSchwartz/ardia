@@ -129,7 +129,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Trackpad gestures, video upscaling, reorder haptics, thin scroll bars | Does nothing; hidden | #1522, #1520 |
 | Keep new-tab links inside a Little Ardia window, zoom with Ctrl and the mouse wheel, offer to save and fill passwords | Does nothing (the engine has no call for them yet); hidden | #1783, #1425 |
 | Warn before quitting | Works (#1796's build 1f4d97db1, run 43631924720): with it on, closing the last window (close button, Alt+F4, Ctrl+Shift+W, a lone Little Ardia's Ctrl+W; Ctrl+W on a window's last tab follows the same rule) asks first with the Mac's words; Cancel keeps the app running, Quit exits, Don't ask again turns it off; a hidden instance never asks | #1782, #1803 |
-| Quitting with a download running | Asks first, like the Mac (unit tests on every close path; not yet seen in a running app) | #2488 |
+| Quitting with a download running | Asks first, like the Mac. Seen in the tour (run 44238038941): Alt+F4 asks, Cancel keeps the window, Quit ends the app; Ctrl+W on the only tab asks "Close 1 tab?", then the downloads question, and Cancel keeps the window and the tab; no download, no question. The update's install sentence is unit-tested only | #2488 |
 | Widevine | Not offered (says so) | |
 | Copy naming the Mac | Works: the walk found three more (a ⌘T, "History › Recently Closed", "File › Close All Tabs"), fixed in #1668's PR | #1522, #1668 |
 
