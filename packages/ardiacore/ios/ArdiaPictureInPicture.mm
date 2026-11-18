@@ -214,14 +214,28 @@ NSString *DevLayerTree(NSWindow *window) {
 
 namespace ardia_pip {
 
+static NSTimeInterval gBackToTabActivationUntil = 0;
+
+void MarkBackToTabActivation() {
+  if (!ardia_host::Background() && !NSApp.isActive) gBackToTabActivationUntil = NSProcessInfo.processInfo.systemUptime + 2;
+}
+
+BOOL ConsumeBackToTabActivation() {
+  const BOOL pending = NSProcessInfo.processInfo.systemUptime <= gBackToTabActivationUntil;
+  gBackToTabActivationUntil = 0;
+  return pending;
+}
+
 void WatchZoom() { InstallZoomMonitor(); }
 
 NSWindow *GrabbedWindow() { return gDragged.window; }
 
 void TabRequestedActivation(ArdiaWebView *view) {
   for (NSWindow *window in NSApp.windows)
-    if ([ArdiaPiPController forWindow:window].view == view && window.visible && !window.hasShadow)
-      return ActivateApp(@"Back to Tab (Chrome's button)");
+    if ([ArdiaPiPController forWindow:window].view == view && window.visible) {
+      MarkBackToTabActivation();
+      if (!window.hasShadow) return ActivateApp(@"Back to Tab (Chrome's button)");
+    }
 }
 
 void VideoEntered(ArdiaWebView *view, NSString *host, ArdiaConsentStamp *stamp) {
@@ -333,6 +347,18 @@ void DocumentEntered(ArdiaWebView *view, ArdiaConsentStamp *stamp) {
   }
   else return @"";
   return @"started";
+}
+
+@end
+
+@implementation ArdiaChromeWindowHost (PictureInPicture)
+
++ (BOOL)isVideoPictureInPictureWindow:(NSWindow *)window {
+  return [ArdiaPiPController forWindow:window] != nil;
+}
+
++ (BOOL)consumePictureInPictureActivation {
+  return ConsumeBackToTabActivation();
 }
 
 @end
