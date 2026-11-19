@@ -105,6 +105,7 @@ export const passwordProviders = {
   hold: null as Promise<void> | null,
   holdNext: null as Promise<void> | null,
   notAppliedNext: 0,
+  bareReplyNext: 0,
   sessions: [] as unknown[],
   rejectNext: 0,
   handlerGate: null as Promise<void> | null,
@@ -122,6 +123,10 @@ const providerFakes = {
     passwordProviders.holdNext = null;
     await once;
     await passwordProviders.hold;
+    if (passwordProviders.bareReplyNext > 0) {
+      passwordProviders.bareReplyNext -= 1;
+      return {} as { applied: boolean };
+    }
     if (passwordProviders.notAppliedNext > 0) {
       passwordProviders.notAppliedNext -= 1;
       return { applied: false };

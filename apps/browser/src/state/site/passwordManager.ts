@@ -1,5 +1,7 @@
 import { setFieldProviders, showSystemPanel, type FieldProviderOpened, type VerificationCodeFound } from "../../platform/passwordProviders";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
+import { warnFor } from "../telemetry/consoleConsent";
+import { consentToken, type ConsentToken } from "../telemetry/choice";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile } from "../browser/model";
 import { usePages } from "../tabs/pageState";
@@ -118,55 +120,66 @@ function unifySharedChoices() {
 
 let generation = 0;
 let pushed: string | null = null;
-let wanted: string | null = null;
-let inFlight: { key: string; done: Promise<void> } | null = null;
+let wanted: { key: string; confirmed: Promise<void>; confirm: () => void } | null = null;
+let inFlight: string | null = null;
 let retry: ReturnType<typeof setTimeout> | undefined;
 let attempts = 0;
+let bareNoted = false;
 const ATTEMPT_MS = 1000;
 const RETRY_FIRST_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
-function retryPush() {
+function retryPush(consent: ConsentToken | null) {
   clearTimeout(retry);
   const delay = Math.min(RETRY_FIRST_MS * 2 ** attempts, RETRY_MAX_MS);
   attempts += 1;
-  retry = setTimeout(() => void pushProviders(currentManagerPlugins(), true), delay);
+  retry = setTimeout(() => void pushProviders(currentManagerPlugins(), consent, true), delay);
 }
 
-function pushProviders(plugins: readonly ManagerPlugin[], again = false): Promise<void> {
+function want(key: string) {
+  if (wanted?.key === key) return wanted;
+  let confirm = () => {};
+  const confirmed = new Promise<void>((resolve) => (confirm = resolve));
+  wanted = { key, confirmed, confirm };
+  attempts = 0;
+  clearTimeout(retry);
+  return wanted;
+}
+
+function pushProviders(plugins: readonly ManagerPlugin[], consent: ConsentToken | null, again = false): Promise<void> {
   const { providers, key } = fieldProviderSet(browser(), plugins);
-  if (!again && key === pushed && !inFlight) return Promise.resolve();
-  if (!again && inFlight?.key === key) return inFlight.done;
-  if (key !== wanted) {
-    wanted = key;
-    attempts = 0;
-    clearTimeout(retry);
-  }
+  if (!again && key === pushed && inFlight === null) return Promise.resolve();
+  const target = want(key);
+  if (!again && inFlight === key) return target.confirmed;
   pushed = null;
+  inFlight = key;
   generation += 1;
   const sent = generation;
   closeVerificationCodePrompts();
   let answered = false;
-  const watchdog = setTimeout(() => !answered && sent === generation && retryPush(), ATTEMPT_MS);
-  const done = setFieldProviders(sent, providers).then(
-    ({ applied }) => {
-      answered = true;
-      clearTimeout(watchdog);
-      if (sent !== generation) return;
-      if (!applied) return retryPush();
-      pushed = key;
-      attempts = 0;
-      clearTimeout(retry);
+  const watchdog = setTimeout(() => !answered && sent === generation && retryPush(consent), ATTEMPT_MS);
+  const settle = (applied: boolean) => {
+    answered = true;
+    clearTimeout(watchdog);
+    if (sent !== generation) return;
+    inFlight = null;
+    if (!applied) return retryPush(consent);
+    pushed = key;
+    attempts = 0;
+    clearTimeout(retry);
+    target.confirm();
+  };
+  void setFieldProviders(sent, providers).then(
+    (reply) => {
+      if (!reply.answered && !bareNoted) {
+        bareNoted = true;
+        warnFor(consent, "[passwords] native answered setFieldProviders without applied; retrying");
+      }
+      settle(reply.applied);
     },
-    () => {
-      answered = true;
-      clearTimeout(watchdog);
-      if (sent === generation) retryPush();
-    },
+    () => settle(false),
   );
-  const flight = { key, done: done.finally(() => void (inFlight === flight && (inFlight = null))) };
-  inFlight = flight;
-  return flight.done;
+  return target.confirmed;
 }
 
 export const providerGeneration = () => generation;
@@ -199,7 +212,7 @@ export function startPasswordManager() {
     const next = engineModes(browser(), current);
     for (const [profile, mode] of next) if (modes.get(profile) !== mode) followMode(profile, mode);
     modes = next;
-    void pushProviders(current);
+    void pushProviders(current, consentToken());
   };
 
   const syncWindows = () => {
@@ -231,10 +244,10 @@ export function startPasswordManager() {
   beforePluginsCommit((next, before) => {
     if (!ready) return;
     for (const name of newlyTurnedOn(next, before)) adoptNeverChosen(name);
-    void pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() }));
+    void pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() }), consentToken());
   });
 
-  beforePluginsWithdraw((next) => (ready ? pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() })) : undefined));
+  beforePluginsWithdraw((next) => (ready ? pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() }), consentToken()) : undefined));
 
   const begin = () => {
     if (ready || !pluginsView().scanned) return;

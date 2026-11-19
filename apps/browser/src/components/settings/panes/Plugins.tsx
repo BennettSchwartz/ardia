@@ -126,7 +126,7 @@ function PluginRow({ name }: { name: string }) {
       {isAlwaysOn(listing) ? (
         active ? null : <Button title="Install…" onPress={() => void installOfficialPlugin(name, { showSheet: false })} />
       ) : (
-        <Toggle value={active} disabled={!m} accessibilityLabel={`Turn on ${m?.title ?? name}`} onChange={(on) => setOn(name, on || (record.enabled && review))} />
+        <Toggle value={active} disabled={!m} asksFirst={!active} accessibilityLabel={`Turn on ${m?.title ?? name}`} onChange={(on) => setOn(name, on || (record.enabled && review))} />
       )}
     </Row>
   );
@@ -177,7 +177,7 @@ function PluginPage({ name }: { name: string }) {
           {isAlwaysOn(listing) ? (
             active ? null : <Button title="Install…" onPress={() => void installOfficialPlugin(name, { showSheet: false })} />
           ) : (
-            <Toggle value={active} disabled={!m} accessibilityLabel={`Turn on ${m?.title ?? name}`} onChange={(on) => setOn(name, on)} />
+            <Toggle value={active} disabled={!m} asksFirst={!active} accessibilityLabel={`Turn on ${m?.title ?? name}`} onChange={(on) => setOn(name, on)} />
           )}
         </Row>
         {m?.process && active ? (

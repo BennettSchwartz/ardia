@@ -42,25 +42,53 @@ function noteNewerRecord(consent: ConsentToken | null) {
 
 let recording: Promise<unknown> = Promise.resolve();
 
+type Intent = { on: boolean; consent: ConsentToken | null };
+const intents = new Map<string, Intent>();
+const owed = new Map<string, ConsentToken | null>();
+
 function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
   const saved = recording.then(async () => {
     const { profiles, writable } = readHeldOff();
     if (!writable) return false;
-    if (profiles.has(profile) === held) return true;
+    const before = JSON.stringify([...profiles].sort());
     if (held) profiles.add(profile);
     else profiles.delete(profile);
-    const contents = versionedJson({ offerToSaveHeldOff: [...profiles].sort() }, HELD_OFF_VERSION);
-    await saveDocument(HELD_OFF_DOCUMENT, contents);
-    return readDocument(HELD_OFF_DOCUMENT) === contents;
+    const carried = [...owed.keys()].filter((p) => p !== profile || held);
+    for (const p of carried) profiles.add(p);
+    const list = [...profiles].sort();
+    if (JSON.stringify(list) !== before) {
+      const contents = versionedJson({ offerToSaveHeldOff: list }, HELD_OFF_VERSION);
+      await saveDocument(HELD_OFF_DOCUMENT, contents);
+      if (readDocument(HELD_OFF_DOCUMENT) !== contents) return false;
+    }
+    for (const p of carried) owed.delete(p);
+    if (!owed.size) settleOwed();
+    return true;
   });
   const landed = saved.catch(() => false);
   recording = landed;
   return landed;
 }
 
-type Intent = { on: boolean; consent: ConsentToken | null };
-const intents = new Map<string, Intent>();
-const owed = new Map<string, ConsentToken | null>();
+export const OWED_RETRY = { firstMs: 30_000, maxMs: 300_000 };
+let owedTimer: ReturnType<typeof setTimeout> | undefined;
+let owedDelay = 0;
+
+function settleOwed() {
+  clearTimeout(owedTimer);
+  owedTimer = undefined;
+  owedDelay = 0;
+}
+
+function retryOwedLater() {
+  if (!owed.size) return settleOwed();
+  if (owedTimer !== undefined) return;
+  owedDelay = owedDelay ? Math.min(owedDelay * 2, OWED_RETRY.maxMs) : OWED_RETRY.firstMs;
+  owedTimer = setTimeout(() => {
+    owedTimer = undefined;
+    for (const profile of [...owed.keys()]) writeOfferToSave(profile);
+  }, owedDelay);
+}
 const draining = new Set<string>();
 
 const stillWanted = (profile: string, intent: Intent) => intents.get(profile) === intent;
@@ -69,9 +97,11 @@ async function payOwed(profile: string, consent: ConsentToken | null): Promise<b
   if (!owed.has(profile)) return true;
   if (!(await recordHeldOff(profile, true))) {
     notePasswordManagerRecordFailed(consent);
+    retryOwedLater();
     return false;
   }
   owed.delete(profile);
+  retryOwedLater();
   return true;
 }
 

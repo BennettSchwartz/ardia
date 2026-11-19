@@ -88,7 +88,7 @@ function OfficialPluginRow({ plugin }: { plugin: OfficialPlugin }) {
       onPress={view.opens ? () => goToSettingsPane("plugins", null, plugin.name) : undefined}
       description={
         view.note === "comingSoon" ? undefined : (
-          <Text selectable={view.failed} lines={view.failed ? undefined : 1} size="caption" tone={view.failed ? "destructive" : "textSecondary"} style={LINE}>
+          <Text selectable={view.failed} lines={view.failed ? undefined : 2} size="caption" tone={view.failed ? "destructive" : "textSecondary"} style={LINE}>
             {view.failed && view.status ? view.status : plugin.blurb}
           </Text>
         )

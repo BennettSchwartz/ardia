@@ -393,13 +393,26 @@ profile picks it. Turning a plugin on never changes a profile that chose.
 when the profile returns to Ardia, unless you had turned it off yourself. `password-manager.json` in the data folder
 records which profiles Ardia turned off, so the give-back survives a relaunch. Both directions are crash-safe: turning
 off writes the record, then the pref; giving back clears the record, then turns the pref on, so a crash in between
-leaves offer to save off and never overrides your own Off.
+leaves offer to save off and never overrides your own Off. A record write that fails while Ardia is taking a profile back is owed: it rides along with the next record
+write that succeeds (so a relaunch keeps it) and is retried every 30 s, doubling to 5 minutes. If no write to
+`password-manager.json` ever succeeds, the debt is lost at quit and offer to save stays off for that profile until you
+turn it on yourself; each failure counts in `password_manager_record_failed`. A record from a newer Ardia (a higher
+`version`) is never overwritten: offer to save is left as it is for that run.
 
 **Withdrawn at once.** Ardia pushes the whole set of profiles with a key (`passwords.setFieldProviders {generation,
 profiles: [{profile, fields, codeSetup}]}`) at launch and whenever it changes. Turning the plugin off, removing it or
 changing its manifest pushes the set without its profiles before the plugin is reported off, so the key leaves every
 live page first. Each push has a new generation; native drops badge clicks, menu requests, code detections and token
 redemptions from an older one, and the verification code prompt closes on every push and on navigation.
+
+**Accepted residual risk (the page script).** In Chromium the page script runs in the page's own JavaScript world, so a
+page can see and fake what it reports. Native is the authority: it opens the panel only when the tab's window is key,
+the page's view is first responder and editing text, the top frame last reported focus on a login or code field (in
+itself or a same-origin frame it can read) after the latest focus change, and the 0.6 s throttle allows it. A page that
+opens the panel without a click gets what Edit › AutoFill gives it: macOS's panel, then Touch ID and a pick by you,
+filled into the page's own focused field. The menu route asks the top frame for a fresh focus report and opens only on
+its answer within 200 ms. Between the page sampling which field has focus and Ardia opening the panel, focus can still
+move inside the page; the panel then fills whatever field macOS sees as focused, as Edit › AutoFill does.
 
 **Edit › AutoFill › Passwords…** in a profile whose manager is a `fill: "system"` plugin opens the macOS panel at the
 focused field (`passwords.showSystemPanel {tab, generation}`, in Chromium and WebKit tabs; a request from an older generation is refused as `stale`); otherwise Chrome's dropdown as before.
