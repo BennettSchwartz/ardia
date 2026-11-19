@@ -161,12 +161,18 @@ const V8_FRAME = /^\s*at (?:(.*?) \((.*?)\)|(.*?))\s*$/;
 const JSC_FRAME = /^\s*(.*?)@(.*?)\s*$/;
 const LOCATION = /^(.*?)(?::(\d+))?(?::(\d+))?$/;
 
+const HEADERLESS_FRAME = /^\s*at |^[^@\n]*@(?:\S+:\d+(?::\d+)?|\[native code\])\s*$/;
+
 export function errorFrames(error: unknown): ExceptionFrame[] {
   if (!error || typeof error !== "object") return [];
   const { stack, name, message } = error as { stack?: unknown; name?: unknown; message?: unknown };
   if (typeof stack !== "string") return [];
-  const header = typeof message === "string" && message ? `${String(name ?? "Error")}: ${message}` : String(name ?? "Error");
-  return parseStack(stack.startsWith(header) ? stack.slice(header.length) : stack);
+  const kind = name === undefined ? "Error" : String(name);
+  const text = typeof message === "string" ? message : "";
+  const headers = [kind && text ? `${kind}: ${text}` : "", text, kind].filter(Boolean);
+  const header = headers.find((h) => stack.startsWith(h) && (stack.length === h.length || stack[h.length] === "\n"));
+  if (header !== undefined) return parseStack(stack.slice(header.length));
+  return HEADERLESS_FRAME.test(stack.split("\n", 1)[0]!) ? parseStack(stack) : [];
 }
 
 export function parseStack(stack: unknown, limit = 50): ExceptionFrame[] {

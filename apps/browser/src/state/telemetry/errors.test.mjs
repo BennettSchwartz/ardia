@@ -86,6 +86,29 @@ test("an error's own message never reaches its frames, even across lines or with
   assert.deepEqual(events[2].properties.$exception_values, ["wrapper of a record"]);
 });
 
+test("frames never carry the message when the header has no name, the message changed after the stack, or a cause only claims to be an Error", () => {
+  const before = queued().length;
+  const nameless = new Error("Failed\n    at Quarterly budget draft (customer.example:2:4)");
+  nameless.name = "";
+  nameless.stack = `${nameless.message}\n    at choose (index.bundle:1:2)`;
+  captureException(nameless, "onerror");
+  const changed = new Error("Failed\n    at Quarterly budget draft (customer.example:2:4)");
+  changed.message = "Changed later";
+  captureException(changed, "onerror");
+  const spoof = { message: "Quarterly budget draft", [Symbol.toStringTag]: "Error" };
+  captureException(new Error("wrapper of a lookalike", { cause: spoof }), "onerror");
+  const jsc = new Error("from Safari");
+  jsc.stack = "choose@index.bundle:1:2\napply@[native code]";
+  captureException(jsc, "onerror");
+  const events = queued().slice(before);
+  assert.equal(events.length, 4);
+  const frames = JSON.stringify(events.map((e) => e.properties.$exception_list.map((x) => x.stacktrace.frames)));
+  for (const secret of ["Quarterly", "customer.example"]) assert.equal(frames.includes(secret), false, secret);
+  assert.deepEqual(events[0].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["choose"]);
+  assert.deepEqual(events[2].properties.$exception_values, ["wrapper of a lookalike"]);
+  assert.deepEqual(events[3].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["apply", "choose"]);
+});
+
 test("a native crash names its exception and the app's images at the top level, never its reason", async () => {
   stub.shellNativeModules.ArdiaApp.crashReports = async () => [
     {

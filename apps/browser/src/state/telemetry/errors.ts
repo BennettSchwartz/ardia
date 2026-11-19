@@ -36,7 +36,7 @@ function entryOf(error: unknown): ExceptionEntry {
 function causeOf(error: unknown): object | null {
   try {
     const cause = error && typeof error === "object" ? (error as { cause?: unknown }).cause : undefined;
-    return cause instanceof Error || Object.prototype.toString.call(cause) === "[object Error]" ? (cause as object) : null;
+    return cause instanceof Error ? cause : null;
   } catch {
     return null;
   }
