@@ -54,8 +54,9 @@ test("setup", async () => {
 });
 
 test("a1: every push carries the same session id, made once for this runtime", async () => {
-  const sessions = native.sessions.filter((x) => x !== undefined);
-  assert.ok(sessions.length > 0 && typeof sessions[0] === "string" && sessions[0].length >= 8, JSON.stringify(native.sessions));
+  const sessions = native.sessions;
+  assert.ok(sessions.length > 0, "pushed at least once");
+  assert.ok(sessions.every((x) => typeof x === "string" && x.length >= 8), JSON.stringify(sessions));
   assert.equal(new Set(sessions).size, 1);
 });
 

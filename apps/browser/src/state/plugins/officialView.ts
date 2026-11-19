@@ -42,7 +42,7 @@ function installedView(plugin: OfficialPlugin, programs: ProgramsState | undefin
 export function officialView(plugin: OfficialPlugin, programs: ProgramsState | undefined, attempt: OfficialAttempt): OfficialView {
   if (plugin.state === "unsupported") return HIDDEN;
   if (plugin.state === "comingSoon") return { ...HIDDEN, shown: true, note: "comingSoon" };
-  if (plugin.state === "installed" && plugin.switchable) return { ...HIDDEN, shown: true, note: "on", toggle: true, opens: true };
+  if (plugin.state === "installed" && plugin.switchable) return { ...installedView(plugin, programs, attempt), note: "on", toggle: true };
   if (plugin.state === "installed") return installedView(plugin, programs, attempt);
   const base = { ...HIDDEN, shown: true, opens: true };
   if (attempt?.state === "asking") return { ...base, busy: true };

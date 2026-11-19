@@ -285,5 +285,7 @@ export async function openSystemPanel(tabId: string): Promise<boolean> {
   return !!result?.shown;
 }
 
-export const passwordManagerSnapshot = (): Record<string, string> =>
-  PLATFORM_FEATURES.systemPasswordManagers && PLATFORM_FEATURES.plugins && pluginsView().scanned ? passwordManagerProfileCounts(browser(), currentManagerPlugins()) : {};
+export function passwordManagerSnapshot(): Record<string, string> | null {
+  if (!PLATFORM_FEATURES.systemPasswordManagers || !PLATFORM_FEATURES.plugins) return {};
+  return pluginsView().scanned ? passwordManagerProfileCounts(browser(), currentManagerPlugins()) : null;
+}

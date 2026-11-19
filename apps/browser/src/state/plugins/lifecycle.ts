@@ -203,7 +203,12 @@ export function disablePlugin(name: string, consent: ConsentToken | null): boole
 export function turnOffPlugin(name: string, consent: ConsentToken | null): Promise<boolean> {
   const before = recordOf(currentPlugins(), name);
   const withdrawing = before.enabled && !isAlwaysOn(currentPlugins().listings[name]) ? withdrawBefore({ listings: currentPlugins().listings, records: { ...currentPlugins().records, [name]: { ...before, enabled: false } } }, consent) : null;
-  return withdrawing ? withdrawing.then(() => disablePlugin(name, consent)) : Promise.resolve(disablePlugin(name, consent));
+  if (!withdrawing) return Promise.resolve(disablePlugin(name, consent));
+  return withdrawing.then(() => {
+    if (disablePlugin(name, consent)) return true;
+    void withdrawBefore({ listings: currentPlugins().listings, records: currentPlugins().records }, consent);
+    return false;
+  });
 }
 
 const removing = new Set<string>();
@@ -212,9 +217,9 @@ export async function removePlugin(name: string): Promise<{ ok: boolean; removed
   if (removing.has(name)) return { ok: false, reason: "It is already being removed." };
   if (currentPlugins().listings[name]?.bundled) return { ok: false, reason: isAlwaysOn(currentPlugins().listings[name]) ? "It's built into Ardia and always on." : "It's built into Ardia: turn it off instead." };
   const consent = consentToken();
-  if (!(await turnOffPlugin(name, consent))) return { ok: false, reason: "It couldn't be turned off, because plugins.json couldn't be saved." };
   removing.add(name);
   try {
+    if (!(await turnOffPlugin(name, consent))) return { ok: false, reason: "It couldn't be turned off, because plugins.json couldn't be saved." };
     if (!(await pluginRecordsSaved(consent))) return { ok: false, reason: "It couldn't be turned off, because plugins.json couldn't be saved." };
     await removePrograms(name, consent);
     const removed = await removePluginFiles(name).catch((error: unknown) => ({ ok: false as const, reason: String(error) }));

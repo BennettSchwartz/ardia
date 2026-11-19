@@ -62,7 +62,7 @@ function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
       if (readDocument(HELD_OFF_DOCUMENT) !== contents) return false;
     }
     for (const p of carried) owed.delete(p);
-    if (!owed.size) settleOwed();
+    if (!owed.size && !intents.size) settleRetry();
     return true;
   });
   const landed = saved.catch(() => false);
@@ -71,23 +71,23 @@ function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
 }
 
 export const OWED_RETRY = { firstMs: 30_000, maxMs: 300_000 };
-let owedTimer: ReturnType<typeof setTimeout> | undefined;
-let owedDelay = 0;
+let retryTimer: ReturnType<typeof setTimeout> | undefined;
+let retryDelay = 0;
 
-function settleOwed() {
-  clearTimeout(owedTimer);
-  owedTimer = undefined;
-  owedDelay = 0;
+function settleRetry() {
+  clearTimeout(retryTimer);
+  retryTimer = undefined;
+  retryDelay = 0;
 }
 
-function retryOwedLater() {
-  if (!owed.size) return settleOwed();
-  if (owedTimer !== undefined) return;
-  owedDelay = owedDelay ? Math.min(owedDelay * 2, OWED_RETRY.maxMs) : OWED_RETRY.firstMs;
-  owedTimer = setTimeout(() => {
-    owedTimer = undefined;
-    for (const profile of [...owed.keys()]) writeOfferToSave(profile);
-  }, owedDelay);
+function retryLater() {
+  if (!owed.size && !intents.size) return settleRetry();
+  if (retryTimer !== undefined) return;
+  retryDelay = retryDelay ? Math.min(retryDelay * 2, OWED_RETRY.maxMs) : OWED_RETRY.firstMs;
+  retryTimer = setTimeout(() => {
+    retryTimer = undefined;
+    for (const profile of new Set([...owed.keys(), ...intents.keys()])) writeOfferToSave(profile);
+  }, retryDelay);
 }
 const draining = new Set<string>();
 
@@ -97,38 +97,46 @@ async function payOwed(profile: string, consent: ConsentToken | null): Promise<b
   if (!owed.has(profile)) return true;
   if (!(await recordHeldOff(profile, true))) {
     notePasswordManagerRecordFailed(consent);
-    retryOwedLater();
+    retryLater();
     return false;
   }
   owed.delete(profile);
-  retryOwedLater();
+  retryLater();
   return true;
 }
 
-async function holdOff(profile: string, intent: Intent) {
-  if (!(await getPasswordAutofill(profile))) return void (await payOwed(profile, intent.consent));
-  if (!stillWanted(profile, intent)) return;
-  if (!(await recordHeldOff(profile, true))) return notePasswordManagerRecordFailed(intent.consent);
+async function holdOff(profile: string, intent: Intent): Promise<boolean> {
+  if (!(await getPasswordAutofill(profile))) return (await payOwed(profile, intent.consent), true);
+  if (!stillWanted(profile, intent)) return true;
+  if (!(await recordHeldOff(profile, true))) return (notePasswordManagerRecordFailed(intent.consent), false);
   owed.delete(profile);
-  if (!stillWanted(profile, intent)) return;
+  if (!stillWanted(profile, intent)) return true;
   await setPasswordAutofill(false, profile);
   storeResource(passwordAutofill, [profile], false);
+  return true;
 }
 
-async function giveBack(profile: string, intent: Intent) {
+async function giveBack(profile: string, intent: Intent): Promise<boolean> {
   const recorded = heldOffProfiles().has(profile);
-  if (!recorded && !owed.has(profile)) return;
+  if (!recorded && !owed.has(profile)) return true;
   await getPasswordAutofill(profile);
-  if (!stillWanted(profile, intent)) return;
-  if (recorded && !(await recordHeldOff(profile, false))) return notePasswordManagerRecordFailed(intent.consent);
+  if (!stillWanted(profile, intent)) return true;
+  if (recorded && !(await recordHeldOff(profile, false))) return (notePasswordManagerRecordFailed(intent.consent), false);
   owed.delete(profile);
   if (!stillWanted(profile, intent)) {
     owed.set(profile, intent.consent);
     await payOwed(profile, intent.consent);
-    return;
+    return true;
   }
-  await setPasswordAutofill(true, profile);
+  try {
+    await setPasswordAutofill(true, profile);
+  } catch {
+    owed.set(profile, intent.consent);
+    await payOwed(profile, intent.consent);
+    return false;
+  }
   storeResource(passwordAutofill, [profile], true);
+  return true;
 }
 
 async function drain(profile: string) {
@@ -141,12 +149,12 @@ async function drain(profile: string) {
       return;
     }
     if (!intent) return void (await payOwed(profile, owed.get(profile) ?? null));
-    try {
-      await (intent.on ? giveBack(profile, intent) : holdOff(profile, intent));
-    } catch {
-      return;
-    }
-    if (stillWanted(profile, intent)) return void intents.delete(profile);
+    const done = await (intent.on ? giveBack(profile, intent) : holdOff(profile, intent)).catch(() => false);
+    if (!stillWanted(profile, intent)) continue;
+    if (!done) return retryLater();
+    intents.delete(profile);
+    if (!owed.size && !intents.size) settleRetry();
+    return;
   }
 }
 
@@ -165,10 +173,12 @@ function offerToSave(profile: string, on: boolean) {
 
 export const followMode = (profile: string, mode: PasswordManagerChoice) => offerToSave(profile, mode === "ardia");
 
-export function forgetPendingOfferToSave(profile: string, consent: ConsentToken | null): Promise<void> {
+export function forgetPendingOfferToSave(profile: string, consent: ConsentToken | null): Promise<boolean> {
   intents.delete(profile);
   owed.delete(profile);
   return recordHeldOff(profile, false).then((landed) => {
-    if (!landed) notePasswordManagerRecordFailed(consent);
+    if (landed || !readHeldOff().writable) return true;
+    notePasswordManagerRecordFailed(consent);
+    return false;
   });
 }

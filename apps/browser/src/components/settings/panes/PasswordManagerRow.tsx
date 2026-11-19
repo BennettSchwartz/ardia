@@ -5,12 +5,17 @@ import { choosePasswordManager, useManagerPlugins, useProfilePasswordManager, us
 import { type Option, PopUp } from "../../ui";
 import { Row } from "../Form";
 
-function managerOptions(plugins: readonly ManagerPlugin[]): Option<PasswordManagerChoice>[] {
-  return [
-    { value: "ardia", title: "Ardia" },
-    ...plugins.map((p) => ({ value: `plugin:${p.name}` as PasswordManagerChoice, title: p.title })),
-    { value: "none", title: "None (an extension handles logins)", separatorBefore: true },
-  ];
+export function managerPopUp(plugins: readonly ManagerPlugin[], stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, storedTitle: string | null): { value: PasswordManagerChoice; options: Option<PasswordManagerChoice>[] } {
+  const offPlugin = stored !== undefined && stored !== effective && choicePlugin(stored) !== null ? stored : null;
+  return {
+    value: offPlugin ?? effective,
+    options: [
+      { value: "ardia", title: "Ardia" },
+      ...plugins.map((p) => ({ value: `plugin:${p.name}` as PasswordManagerChoice, title: p.title })),
+      ...(offPlugin ? [{ value: offPlugin, title: `${storedTitle ?? choicePlugin(offPlugin)} (off)` }] : []),
+      { value: "none", title: "None (an extension handles logins)", separatorBefore: true },
+    ],
+  };
 }
 
 function sharedChoiceNote(names: string[]): string | null {
@@ -19,11 +24,14 @@ function sharedChoiceNote(names: string[]): string | null {
   return `Also applies to ${others}, which ${names.length === 1 ? "shares" : "share"} this profile's browser data.`;
 }
 
-function useUnavailableNote(stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice): string | null {
+const useStoredTitle = (stored: PasswordManagerChoice | undefined) => {
   const name = stored ? choicePlugin(stored) : null;
-  const title = usePlugins((p) => (name ? (p.listings[name]?.manifest?.title ?? name) : null));
-  if (!name || stored === effective) return null;
-  return `${title} is off, so this profile uses Ardia until you turn it back on in Plugins.`;
+  return usePlugins((p) => (name ? (p.listings[name]?.manifest?.title ?? name) : null));
+};
+
+function unavailableNote(stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, title: string | null): string | null {
+  if (!stored || !choicePlugin(stored) || stored === effective) return null;
+  return `${title} is off, so this profile uses Ardia until you turn it back on in Plugins or pick another password manager.`;
 }
 
 export function PasswordManagerRow({ profileId }: { profileId: string }) {
@@ -35,11 +43,13 @@ function PasswordManagerChoiceRow({ profileId }: { profileId: string }) {
   const effective = useProfilePasswordManager(profileId);
   const stored = useStoredPasswordManager(profileId);
   const sharing = useProfilesSharingChoice(profileId);
-  const unavailable = useUnavailableNote(stored, effective);
+  const storedTitle = useStoredTitle(stored);
+  const unavailable = unavailableNote(stored, effective, storedTitle);
+  const popUp = managerPopUp(plugins, stored, effective, storedTitle);
   const description = [unavailable, sharedChoiceNote(sharing)].filter(Boolean).join(" ") || undefined;
   return (
     <Row anchor="profiles.passwordManager" description={description}>
-      <PopUp value={effective} options={managerOptions(plugins)} onChange={(manager) => choosePasswordManager(profileId, manager)} minWidth={210} />
+      <PopUp value={popUp.value} options={popUp.options} onChange={(manager) => choosePasswordManager(profileId, manager)} minWidth={210} />
     </Row>
   );
 }

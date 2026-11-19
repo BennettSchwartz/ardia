@@ -111,6 +111,16 @@ test("a built-in plugin with an off switch offers Turn On, and once on shows On 
   assert.equal(officialView({ ...plugin("installed"), switchable: false }, LINKED, null).note, "installed");
 });
 
+test("a switchable plugin that is on keeps its program-link failure and Try Again next to its switch", () => {
+  const switchable = { ...plugin("installed", "passwords"), switchable: true };
+  const failed = officialView(switchable, { state: "failed", reason: "no bin dir" }, null);
+  assert.deepEqual([failed.note, failed.toggle, failed.failed, failed.action, failed.status], ["on", true, true, "again", "Not on your PATH: no bin dir"]);
+  const refused = officialView(switchable, { ...LINKED, refused: { ardia: "taken" } }, null);
+  assert.deepEqual([refused.note, refused.toggle, refused.failed, refused.action], ["on", true, true, "again"]);
+  const linking = officialView(switchable, { state: "linking" }, null);
+  assert.deepEqual([linking.note, linking.toggle, linking.busy], ["on", true, true]);
+});
+
 test("the seam marks a built-in plugin switchable unless it's always on", async () => {
   const manifest = (name, extra) => JSON.stringify({ manifest: 1, name, title: name, version: "1.0.0", official: true, icon: "key.fill", ...extra });
   const listed = (name, extra) => ({ name, status: "ok", text: manifest(name, extra), folderId: "bundled", bundled: true });

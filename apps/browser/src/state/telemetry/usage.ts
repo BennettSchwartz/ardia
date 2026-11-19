@@ -331,10 +331,10 @@ function emitOmniboxLatency(consent: ConsentToken | null) {
 }
 
 function snapshotSettings(consent: ConsentToken | null) {
-  const today = utcDay(Date.now());
-  if (settingsSnapshotDay() === today) return;
+  const today = utcDay(Date.now()), passwordManagers = passwordManagerSnapshot();
+  if (settingsSnapshotDay() === today || !passwordManagers) return;
   const state = useBrowser.getState();
-  const settings = { ...settingsSnapshot(state.settings), ...customColorProfiles(state.profiles), ...openTabSyncProfiles(state.profiles), ...narrowWindows(state.windows, state.settings.sidebarWidth), ...airTrafficSnapshot(), ...currentThemeFileSnapshot(), ...pluginsSnapshot(), ...passwordManagerSnapshot() };
+  const settings = { ...settingsSnapshot(state.settings), ...customColorProfiles(state.profiles), ...openTabSyncProfiles(state.profiles), ...narrowWindows(state.windows, state.settings.sidebarWidth), ...airTrafficSnapshot(), ...currentThemeFileSnapshot(), ...pluginsSnapshot(), ...passwordManagers };
   void currentAppIcon()
     .catch(() => null)
     .then((icon) => (capture(SETTINGS_SNAPSHOT_EVENT, { ...settings, ...appIconSetting(icon) }, consent), stillValid(consent) && markSettingsSnapshot(today)));
