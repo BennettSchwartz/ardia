@@ -66,16 +66,17 @@ struct ControlOutput {
   mutating func keepOnlyReplies() {
     var kept: [Chunk] = []
     for (index, chunk) in chunks.enumerated() {
-      if chunk.kind == .reply || (index == 0 && headStarted) {
+      if chunk.kind == .reply || (index == 0 && midLine) {
         kept.append(chunk)
         continue
       }
       bytes -= chunk.data.count
       if chunk.kind == .event {
         eventBytes -= chunk.data.count
-        waitingEvents -= 1
+        if !(index == 0 && headStarted) { waitingEvents -= 1 }
       }
     }
+    if !midLine { headStarted = false }
     chunks = kept
     dropped = 0
   }

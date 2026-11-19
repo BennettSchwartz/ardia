@@ -70,7 +70,7 @@ function livePage(params: Record<string, unknown>, act: (tabId: string) => void)
 async function back(params: Record<string, unknown>, call: SocketCall) {
   const t = tabOf(params.tab);
   refuseSyncedLinkChange(t.id, "going back");
-  if (await goBackAsking(t.id, call.serving, askWhereSeen(`Tab ${t.id} stayed on its page`))) return { ok: true };
+  if (await goBackAsking(t.id, call.serving, askWhereSeen(`Tab ${t.id} stayed on its page`, call.serving))) return { ok: true };
   call.stillServing();
   throw new OpError("refused", `Tab ${t.id} stayed on its page: the page has changes that going back may lose, and the user chose to stay (or the page moved on meanwhile).`);
 }

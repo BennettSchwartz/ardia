@@ -8,7 +8,7 @@ export const STOPPED = "Control was turned off before Ardia made the change, so 
 
 export type SocketBody = { result: unknown } | { error: MethodError };
 
-export type SocketCall = { serving: () => boolean; stillServing: () => void };
+export type SocketCall = { connection: number; serving: () => boolean; stillServing: () => void };
 
 export type MethodSpec = {
   name: string;
@@ -181,8 +181,9 @@ export function runSpec(spec: MethodSpec, params: Record<string, unknown>, call:
   }
 }
 
-export function servingWhile(stillOn: () => boolean): SocketCall {
+export function servingWhile(stillOn: () => boolean, connection = 0): SocketCall {
   return {
+    connection,
     serving: stillOn,
     stillServing: () => {
       if (!stillOn()) throw new OpError("failed", STOPPED);

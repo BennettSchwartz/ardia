@@ -87,7 +87,7 @@ function reorder(params: Record<string, unknown>) {
 async function remove(params: Record<string, unknown>, call: SocketCall) {
   const id = profileArg(params.profile);
   if (now().profileOrder.length <= 1) throw new OpError("refused", "That's the only profile.");
-  await deleteProfile(id, shownWindowId(), call.serving, askWhereSeen(`Profile ${id} wasn't deleted`));
+  await deleteProfile(id, shownWindowId(), call.serving, askWhereSeen(`Profile ${id} wasn't deleted`, call.serving));
   const deleted = !now().profiles[id];
   if (!deleted) call.stillServing();
   return { deleted };

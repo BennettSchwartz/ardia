@@ -324,7 +324,7 @@ function removeGroup(results: OpResult[], op: Op): OpResult {
   return { ...named, tabs };
 }
 
-export function runOp(results: OpResult[], op: Op, stillOn: () => boolean = () => true): OpResult | Promise<OpResult> {
+export function runOp(results: OpResult[], op: Op, stillOn: () => boolean = () => true, owner = 0): OpResult | Promise<OpResult> {
   refuseSharedFolderChange(results, op);
   switch (op.op) {
     case "open":
@@ -345,9 +345,9 @@ export function runOp(results: OpResult[], op: Op, stillOn: () => boolean = () =
     case "tab.unmute":
       return mute(results, op, false);
     case "tab.sleep":
-      return sleep(results, op, stillOn);
+      return sleep(results, op, stillOn, owner);
     case "tab.wake":
-      return wake(results, op, stillOn);
+      return wake(results, op, stillOn, owner);
     case "tab.close":
       return closeTabs(results, op);
     case "tab.rename":

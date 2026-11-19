@@ -67,7 +67,7 @@ function switchProfile(params: Record<string, unknown>) {
 
 async function closeWindow(params: Record<string, unknown>, call: SocketCall, kinds: readonly AutomationWindowKind[] = ["normal", "little"]) {
   const w = windowOf(params.window, kinds);
-  const outcome = await closeWindowAsked(w.id, { mayClose: call.serving, ask: askWhereSeen(`Window ${w.id} stayed open`) });
+  const outcome = await closeWindowAsked(w.id, { mayClose: call.serving, ask: askWhereSeen(`Window ${w.id} stayed open`, call.serving) });
   if (outcome === "busy") throw new OpError("refused", `Window ${w.id} is already closing or asking whether to close.`);
   if (outcome === "cancelled") throw new OpError("refused", `Window ${w.id} stayed open: closing it was cancelled.`);
   if (outcome === "stopped") call.stillServing();
