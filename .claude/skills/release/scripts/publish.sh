@@ -29,12 +29,11 @@ feed_name="appcast$engine_suffix.xml"
 dmg="$dist/Ardia-$version$engine_suffix.dmg"
 zip="$dist/Ardia-$version$engine_suffix.zip"
 feed="$dist/$feed_name"
-cli="$dist/ardia-cli-$version-macos-arm64.tar.gz"
 
-assets=("$dmg" "$zip" "$feed")
-[ -z "$engine_suffix" ] && assets+=("$cli" "$cli.sha256")
-for file in "${assets[@]}"; do
+assets=()
+for file in "$dmg" "$zip" "$feed"; do
   [ -f "$file" ] || die "no $file (scripts/release.sh $version first)"
+  assets+=("$file")
 done
 linux="$dist/linux"
 windows="$dist/windows"

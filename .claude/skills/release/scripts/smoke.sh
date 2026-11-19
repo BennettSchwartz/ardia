@@ -193,14 +193,15 @@ logger=""
 kill -KILL "$pid" 2>/dev/null || true
 pid=""
 node "$root/packages/ardiacore/scripts/popup-check.mjs" "$app" "$work/popup-check" || status=1
-cli_tarball="$dist/ardia-cli-$version-macos-arm64.tar.gz"
-if [ -n "$engine_suffix" ]; then
-  echo "      no ardia CLI check: the CLI is arm64 only, and $(basename "$dmg") doesn't carry it"
-elif [ -f "$cli_tarball" ]; then
-  mkdir -p "$work/cli" && tar -xzf "$cli_tarball" -C "$work/cli"
-  ARDIA_CLI_HOME="$work/cli-home" "$root/apps/cli/scripts/token-smoke.sh" "$app" "$(ls "$work"/cli/*/bin/ardia)" || status=1
+built_in_cli="$app/Contents/Resources/Plugins/cli/bin/ardia"
+if [ -x "$built_in_cli" ]; then
+  "$root/scripts/release/cli-bootstrap-smoke.sh" "$app" "$version" || status=1
+  mkdir -p "$work/cli" && ditto "$app/Contents/Resources/Plugins/cli" "$work/cli/built-in"
+  ARDIA_CLI_HOME="$work/cli-home" "$root/scripts/release/token-smoke.sh" "$app" "$work/cli/built-in/bin/ardia" || status=1
+elif [ -n "$engine_suffix" ]; then
+  echo "      no ardia CLI check: $(basename "$dmg") bundles no Command Line plugin (none is pinned for macos-x64)"
 elif [ -z "${SMOKE_APP:-}" ]; then
-  check "the release has $(basename "$cli_tarball")" 0
+  check "the release bundles the pinned Command Line plugin" 0
 fi
 codesign --verify --deep --strict "$app" && echo "PASS  bundle still sealed after running" || { echo "FAIL  running the app changed its bundle"; status=1; }
 "$here/feed.sh" "$version" --before-publish "$app" || status=1
