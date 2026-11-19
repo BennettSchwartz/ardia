@@ -8,7 +8,7 @@ import { bookmarkRoots, ownerOfBookmark } from "../bookmarks/bookmarks";
 import { downloadSession } from "../downloads/downloadsSlice";
 import { awaitsKeep } from "../downloads/status";
 import type { EventSend } from "./storeEvents";
-import { frameBytes } from "./socketWire";
+import { DROPPED_MARKER_ROOM, frameBytes } from "./socketWire";
 
 export const LIBRARY_EVENTS = ["bookmarks.changed", "history.removed", "download.changed", "profile.changed"] as const;
 
@@ -24,7 +24,7 @@ const jsonBytes = (value: unknown) => frameBytes(JSON.stringify(value)) - 1;
 
 export function historyRemoval(profiles: string[], all: boolean, urls: readonly string[]) {
   const envelope = { event: "history.removed", time: 0, data: { profiles, all, count: urls.length, urls: [] as string[], truncated: false } };
-  let bytes = frameBytes(JSON.stringify(envelope)) + TIME_DIGITS_ROOM;
+  let bytes = frameBytes(JSON.stringify(envelope)) + TIME_DIGITS_ROOM + DROPPED_MARKER_ROOM;
   const kept: string[] = [];
   for (const url of urls) {
     const size = jsonBytes(url) + (kept.length ? 1 : 0);
