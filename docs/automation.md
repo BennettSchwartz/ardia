@@ -270,6 +270,10 @@ clipboard writes, internal pages). That is the point of it, and it is opt-in beh
 | `system.sleep`, `system.wake` * | none |
 | `user.idle`, `user.active` * | `idle` (threshold, s) |
 | `page.error` | `windowId`, `tabId`, `profile`, `url`, `status` |
+| `bookmarks.changed` | `profile`, `added`, `changed`, `removed` (bookmark ids, at most 1000 each), `count` |
+| `history.removed` | `profiles` (every profile sharing that history), `all`, `urls` (at most 1000), `count` |
+| `download.changed` | `id`, `change` (`added`/`updated`/`removed`), `state`, `paused`, `dangerous`, `awaitsKeep`, `filename`, `profile` |
+| `profile.changed` | `profile`, `change` (`created`/`updated`/`removed`), `name`, `keys` (what changed, `default` when it became the default); or `change: "reordered"`, `order` |
 
 \* Named-only: `"*"` never includes them; a subscriber names each one. Notification text never goes into a hook's
 environment (no `ARDIA_TITLE`, no `ARDIA_URL`) and the runner never logs it.
@@ -285,6 +289,11 @@ environment (no `ARDIA_TITLE`, no `ARDIA_URL`) and the runner never logs it.
   stale. The web view reports the signal with each navigation update: the last committed URL (`committedUrl`), the
   time of the last document commit (`committedAt`) and the main frame's HTTP status (`httpStatus`); a new
   `committedAt` is a document navigation, a new URL alone is same-document.
+- `bookmarks.changed` is one event per profile per change, for a title, address, folder or order change, never for
+  a favicon or a profile's bookmarks loading. `history.removed` comes from the engine's history, so it covers
+  every way history goes (the History page, Clear Browsing Data, `history.*`, sync, Chrome's own expiry).
+  `download.changed` skips progress: it's sent when a download starts, finishes, fails, pauses, resumes or is
+  removed, or when it turns dangerous or waits to be kept.
 - `page.error` is sent once per committed main-frame document whose status is 400 to 599: never for subframes,
   same-document changes, cancelled or stale commits. Builds whose engine doesn't report `httpStatus` send none.
 - `app.launched` is recorded once per process, after the session is restored and the first window is up, with its

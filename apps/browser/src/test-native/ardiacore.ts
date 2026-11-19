@@ -35,6 +35,7 @@ type ExtensionEngine = {
   install(path: string, profile: string): Promise<string>;
   reload(id: string, profile: string): Promise<void>;
   uninstall(id: string, profile: string): Promise<void>;
+  configure?(id: string, profile: string, options: Record<string, unknown>): Promise<void>; inspect?(path: string): Promise<CallResult<"extensions.inspectUnpacked">>;
 };
 const testGlobals = globalThis as {
   acTestTabStrip?: TabStripHost;
@@ -495,7 +496,8 @@ const fakeModules = {
     setEnabled: async ({ id }) => (await extensionAnswers.change("setEnabled", id), { ok: true }),
     uninstall: async ({ profile, id }) => (await extensionAnswers.change("uninstall", id), await extensionEngine()?.uninstall(id, profile), { ok: true }),
     reload: async ({ profile, id }) => (await extensionAnswers.change("reload", id), await extensionEngine()?.reload(id, profile), { ok: true }),
-    configure: async ({ id }) => (await extensionAnswers.change("configure", id), { ok: true }),
+    configure: async ({ profile, id, options }) => (await extensionAnswers.change("configure", id), await extensionEngine()?.configure?.(id, profile, options), { ok: true }),
+    inspectUnpacked: ({ path }) => extensionEngine()?.inspect?.(path) ?? Promise.reject(Object.assign(new Error("Manifest file is missing or unreadable"), { code: "ERR_EXTENSION_INVALID" })),
     chooseFolder: () => null,
     installCrx: ({ profile, path }) => {
       const failure = crxInstallFailure.next;

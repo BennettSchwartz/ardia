@@ -2,6 +2,7 @@ import { sameValue, checkedSettings } from "../config/configSettings";
 import { isConfigSettingKey } from "../settings/configAllowlist";
 import { DEFAULT_SETTINGS, SETTING_KEYS, SETTING_SPECS, searchEngines, type SettingKey, type Settings } from "../settings/settings";
 import type { MethodSpec } from "./socketCatalog";
+import { checkedByRules, hasSocketRule } from "./socketSettingRules";
 import { id, ids, obj, text } from "./socketSchema";
 import { expect, now } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -11,11 +12,12 @@ const OWN_METHOD: Partial<Record<SettingKey, string>> = {
   customSearchEngines: "search.add, search.update and search.remove",
   cliControl: "nothing: the ardia command can't switch its own control",
   allowJavaScriptFromAppleEvents: "nothing: it would let any AppleScript run script in every page",
+  extensionSearchEngines: "nothing: it mirrors the search engines extensions add, so install, turn off or remove the extension (extensions.*)",
 };
 
 const whyNot = (key: string) => {
   if (!(SETTING_KEYS as readonly string[]).includes(key)) return `${key} isn't a setting`;
-  if (isConfigSettingKey(key)) return null;
+  if (isConfigSettingKey(key) || hasSocketRule(key)) return null;
   const own = OWN_METHOD[key as SettingKey];
   return own ? `${key} is set with ${own}` : `${key} can't be set from the ardia command yet`;
 };
@@ -42,10 +44,13 @@ function apply(values: Record<string, unknown>, label: string) {
   const refused = Object.keys(values).map(whyNot).filter((w): w is string => !!w);
   if (refused.length) throw new OpError("refused", `${refused.join("; ")}.`);
   const settings = now().settings;
-  const { values: checked, problems } = checkedSettings(label, values, settings);
+  const ruled = Object.fromEntries(Object.entries(values).filter(([key]) => hasSocketRule(key)));
+  const { values: checked, problems } = checkedSettings(label, Object.fromEntries(Object.entries(values).filter(([key]) => !hasSocketRule(key))), settings);
+  const fromRules = checkedByRules(ruled, settings);
+  problems.push(...fromRules.problems.map((p) => `${label}: ${p}`));
   if (problems.length) throw new OpError("bad_request", problems.join("; "));
   const patch: Partial<Record<SettingKey, unknown>> = {};
-  for (const [key, value] of Object.entries(checked) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
+  for (const [key, value] of Object.entries({ ...checked, ...fromRules.patch }) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
   if (Object.keys(patch).length) now().updateSettings(patch as Partial<Settings>);
   const after = now().settings;
   const changed = Object.keys(patch).filter((k) => !sameValue(after[k as SettingKey], settings[k as SettingKey]));
