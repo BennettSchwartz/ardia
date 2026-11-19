@@ -324,14 +324,17 @@ or `{installed: true, extensions}` when the profile already has it. Each step af
 is still on and the profile still exists, and answers `failed` or `no_window` without changing anything otherwise;
 that covers the store tab and the already-installed answer.
 
-Installing an unpacked folder from the socket isn't supported, on any platform: a request with `folder` is `refused`
-("installing an unpacked folder from the socket isn't supported; use Settings › Extensions › Load Unpacked") before
-the path is checked or anything is read. Earlier rounds of this change tried to make it safe by copying the folder
-into a private, hashed staging copy and loading that, but Chromium rereads an unpacked extension's manifest from its
-folder whenever it loads (on every start too) and identifies an unkeyed extension by its path, so a copy Ardia
-manages can't guarantee that what the user approved is what Chromium runs. That needs the engine to load from a
-snapshot it owns. Settings › Extensions › Load Unpacked is unchanged: Chromium loads the chosen folder in place, as on
-`main`.
+Installing an unpacked folder from the socket isn't supported, on any platform. A string `folder` is `refused`
+("installing an unpacked folder from the socket isn't supported; use Settings › Extensions › Load Unpacked") before the
+path is checked or anything is read; a `folder` that isn't a string (`null`, a number) fails schema validation first
+and is `bad_request`. Settings › Extensions › Load Unpacked loads the chosen folder in place, as on `main`. Its native
+path differs from `main` in exactly two places: the shared manifest reader (`ReadManifest` in
+`ArdiaExtensionPackage.mm`) also reports `incognitoAllowed` (false only for `"incognito": "not_allowed"`), which
+therefore also appears in Load Unpacked's folder inspection, and `listExtensions` in `ArdiaServices.mm` copies it into
+each list row, as `null` when the installed manifest couldn't be read.
+
+*Removed:* earlier revisions of this change installed socket folders from a private hashed copy; that was dropped,
+since Chromium rereads an unpacked extension's folder by path, so only an engine-owned snapshot could make it sound.
 
 The install sheet that Settings and Web Store prompts show keys each request, so its Add button and Return confirm
 that request only. Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it:
@@ -344,8 +347,11 @@ Scripts (only when the extension uses them); a policy-installed one is `refused`
 anything changes, against a list read from Chromium for the call, never the cached row. Allow in Incognito is
 `refused` ("needs engine support") for an unpacked extension: its manifest on disk can differ from the one Chromium
 loaded, and Chromium's own eligibility flag (`incognito_access.is_enabled`) isn't exported by `ac_extensions_list`.
-For a packed or Web Store extension it is checked against `incognitoAllowed`, read from the installed manifest. Then
-site access, the one change Chromium can
+For a packed or Web Store extension it is checked against `incognitoAllowed`, read from the installed manifest; when
+that field is missing (Linux and Windows rows don't carry it) or `null` (macOS couldn't read the manifest), any
+Incognito change is `refused` ("can't confirm incognito eligibility") before anything is written. If Chromium still
+declines Allow in Incognito or Allow User Scripts after site access was written, the previous site access is written
+back and the call answers `failed`. Then site access, the one change Chromium can
 still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
 and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
 `sites`) as success. The reply reads the list again with a request started after the write, never one that was
@@ -367,10 +373,14 @@ by the native call itself, and the socket also bounds every coordinate to ±100,
 green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
 finished, not when it starts. `FullScreenLifecycle.swift` tracks every window's transitions, whoever starts them (a
 call, the green button, the menu or a keyboard shortcut): `willEnter`/`willExit` opens one and gives it a generation
-number, and `didEnter`, `didExit` or the window closing ends it. Chromium's failure callbacks don't end one (its
-exit-failure callback arrives before `didExit`). A transition with no ending notification is checked against the
-window's real full-screen state from 6 s on, once a second: it ends when two checks agree, whichever side that is,
-and after 30 s it ends regardless and is logged. While a transition is open, a call answers `transition: "busy"` (the
+number, and the window closing ends it. `didEnter` or `didExit` ends it only when the window's real full-screen state
+(`ArdiaChromeWindowHost.windowIsFullScreen`, the style mask, plus the stand-in a background test instance acts out)
+matches that transition's direction; otherwise the notification is stale (a late end of an earlier transition) and is
+ignored and logged. Chromium's failure callbacks don't end one (its exit-failure callback arrives before `didExit`). A
+transition with no ending notification is checked against the same real state from 6 s on, once a second: it ends
+when two checks agree, whichever side that is, and after 30 s it ends regardless and is logged. Either way the
+window's cached full-screen flag is set to that real state (and the store told), so geometry and later calls see
+it. While a transition is open, a call answers `transition: "busy"` (the
 socket's `refused`). A call is settled only by a transition whose generation is newer than the last one when it
 toggled, so a late notification can't answer a newer call. After 6 s a call answers `transition: "timeout"` (the
 socket's `failed`, "Timed out…"), and the window stays busy until that transition ends. The socket runs one full-screen change at a time per window, checks the final geometry
