@@ -392,9 +392,9 @@ static BOOL EditsWebText(NSResponder *responder, NSView *page) {
   return NO;
 }
 
-- (BOOL)showAppleAutoFillFromMenu:(NSString *)kind {
-  const BOOL shown = [self showAppleAutoFill:kind];
-  if ([kind isEqualToString:@"passwords"]) [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown), @"via" : @"menu"}];
+- (BOOL)showAppleAutoFillFromMenu:(NSString *)autoFill {
+  const BOOL shown = [self showAppleAutoFill:autoFill];
+  if ([autoFill isEqualToString:@"passwords"]) [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown), @"via" : @"menu"}];
   return shown;
 }
 
