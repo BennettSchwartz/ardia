@@ -1,3 +1,4 @@
+import { announceNatively, focusViewNatively, screenReaderFocusIsNative } from "@ardia/phone-native";
 import { useEffect, type RefObject } from "react";
 import { AccessibilityInfo, findNodeHandle, Platform, type View, type ViewInstance } from "react-native";
 
@@ -5,28 +6,49 @@ export const ANDROID_FOCUS_DELAY_MS = 250;
 
 type Focusable = Parameters<typeof findNodeHandle>[0];
 
-export function focusForScreenReader(target: () => Focusable | null | undefined, still: () => boolean = () => true) {
+const nativeFocus = () => Platform.OS === "android" && screenReaderFocusIsNative();
+
+export function focusForScreenReader(target: () => Focusable | null | undefined, still: () => boolean = () => true): () => void {
+  let live = true;
+  let frame: number | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const ok = () => live && still();
   void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
-    if (!on || !still()) return;
+    if (!on || !ok()) return;
     const land = () => {
+      timer = null;
+      if (!ok()) return;
       const view = target();
-      const handle = view && still() ? findNodeHandle(view) : null;
-      if (handle) AccessibilityInfo.setAccessibilityFocus(handle);
+      const handle = view ? findNodeHandle(view) : null;
+      if (!handle || !ok()) return;
+      if (nativeFocus()) focusViewNatively(handle);
+      else AccessibilityInfo.setAccessibilityFocus(handle);
     };
-    requestAnimationFrame(() => (Platform.OS === "android" ? setTimeout(land, ANDROID_FOCUS_DELAY_MS) : land()));
+    frame = requestAnimationFrame(() => {
+      frame = null;
+      if (!ok()) return;
+      if (Platform.OS === "android") timer = setTimeout(land, ANDROID_FOCUS_DELAY_MS);
+      else land();
+    });
+  });
+  return () => {
+    live = false;
+    if (frame !== null) cancelAnimationFrame(frame);
+    if (timer !== null) clearTimeout(timer);
+  };
+}
+
+export function announceForScreenReader(text: string, still: () => boolean = () => true) {
+  void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
+    if (!on || !still() || !text) return;
+    if (nativeFocus()) announceNatively(text);
+    else AccessibilityInfo.announceForAccessibility(text);
   });
 }
 
 export function useCoverFocus(target: RefObject<ViewInstance | null>, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
-    let live = true;
-    focusForScreenReader(
-      () => target.current,
-      () => live,
-    );
-    return () => {
-      live = false;
-    };
+    return focusForScreenReader(() => target.current);
   }, [target, enabled]);
 }

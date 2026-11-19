@@ -2,6 +2,7 @@ import { BackHandler, Platform, Pressable, Text } from "react-native";
 import { act } from "react-test-renderer";
 import { renderSurface, unmount } from "../../test/render/harness";
 import { mockNative, resetNativeMenus } from "./nativeMenusMock";
+import { menuMotion } from "../components/ui/motion";
 
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
@@ -160,7 +161,7 @@ test("Back closes the drawn menu, and on a submenu's page goes back to the menu 
   back();
   expect(menuLabels(root)).toEqual(["Copy Link", "Send to Device", "Light", "Dark", "Close Tab"]);
   back();
-  act(() => jest.advanceTimersByTime(menuExitMs(true)));
+  act(() => jest.advanceTimersByTime(Math.max(menuExitMs(true), menuExitMs(false))));
   expect(menuLabels(root)).toEqual([]);
   expect(ran).toEqual([]);
   unmount(root);
@@ -233,7 +234,7 @@ test("without them the trigger opens the drawn menu on tap or long press, and a 
   expect(menuLabels(tapped)).toEqual(["Studio", "Pixel"]);
   pickMenu(tapped, "Studio");
   expect(ran).toEqual(["studio"]);
-  act(() => jest.advanceTimersByTime(menuExitMs(true)));
+  act(() => jest.advanceTimersByTime(Math.max(menuExitMs(true), menuExitMs(false))));
   expect(menuLabels(tapped)).toEqual([]);
   unmount(tapped);
   const held = trigger("longPress");
@@ -366,7 +367,7 @@ test("rows scroll under a tap with the keyboard up, in the menu and in the confi
 
 test("TalkBack moves to the first enabled row once the menu is shown, and back to the control that opened it only when the menu is dismissed without a choice", () => {
   const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
-  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => undefined);
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => () => undefined);
   const hidden = renderSurface(<Menu items={ITEMS} place={{ top: 100, left: 20, width: 250 }} shown={false} onDismiss={() => undefined} />);
   expect(asked).not.toHaveBeenCalled();
   unmount(hidden);
@@ -399,7 +400,8 @@ test("TalkBack moves to the first enabled row once the menu is shown, and back t
 
 test("a TalkBack focus asked for as the menu opens is dropped once the menu starts closing, so it never lands on a closing row", async () => {
   const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
-  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => undefined);
+  const cancelled = jest.fn();
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => cancelled);
   const back = pressBack();
   measuredOverlay({ x: 0, y: 280, width: 393, height: 60 });
   const root = trigger("longPress");
@@ -407,10 +409,9 @@ test("a TalkBack focus asked for as the menu opens is dropped once the menu star
   await act(async () => undefined);
   act(() => rowsOf(root).props.onContentSizeChange(250, 200));
   expect(asked).toHaveBeenCalledTimes(1);
-  const still = asked.mock.calls[0]![1]!;
-  expect(still()).toBe(true);
+  expect(cancelled).not.toHaveBeenCalled();
   back();
-  expect(still()).toBe(false);
+  expect(cancelled).toHaveBeenCalled();
   act(() => jest.advanceTimersByTime(1000));
   unmount(root);
 });
@@ -596,4 +597,141 @@ test("a confirmation's title and message are one TalkBack stop, the one focus la
   expect(heading.props.accessibilityLabel).toBe("Close 3 Tabs? They’ll stay in your Archive.");
   expect(sheet.root.findAll((node) => typeof node.type === "string" && node.props.accessible === true && node.props.accessibilityLabel?.includes?.("Close 3 Tabs?"))).toHaveLength(1);
   unmount(sheet);
+});
+
+test("on Android TalkBack focus goes through the native accessibility-focus action, not RN's focus event, and announcements through the native announcer", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  const { focusForScreenReader, announceForScreenReader, ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
+  const nativeFocus = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => undefined);
+  const nativeAnnounce = jest.spyOn(phoneNative, "announceNatively").mockImplementation(() => undefined);
+  const rnFocus = jest.spyOn(AccessibilityInfo, "setAccessibilityFocus").mockImplementation(() => undefined);
+  focusForScreenReader(() => 42 as never);
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
+  expect(nativeFocus).toHaveBeenCalledWith(42);
+  expect(rnFocus).not.toHaveBeenCalled();
+  announceForScreenReader("Close 3 Tabs? They’ll stay in your Archive.");
+  await act(async () => undefined);
+  expect(nativeAnnounce).toHaveBeenCalledWith("Close 3 Tabs? They’ll stay in your Archive.");
+});
+
+test("on Android the confirmation is announced, title and message, as it opens, and not again as it leaves", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
+  jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => undefined);
+  const nativeAnnounce = jest.spyOn(phoneNative, "announceNatively").mockImplementation(() => undefined);
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
+  await act(async () => undefined);
+  expect(nativeAnnounce).toHaveBeenCalledTimes(1);
+  expect(nativeAnnounce).toHaveBeenCalledWith("Close 3 Tabs? They’ll stay in your Archive.");
+  unmount(sheet);
+});
+
+test("a long press with no touch point, as TalkBack and Switch Access send, places the menu from the pressed control: 16 pt above a small one near the bottom", async () => {
+  measuredOverlay({ x: 16, y: 790, width: 48, height: 48 });
+  const root = trigger("longPress");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress());
+  await act(async () => undefined);
+  const placed = root.root.findAll((node) => node.type === Menu)[0]!.props.placer(300);
+  expect(placed.place.top + placed.maxHeight).toBe(790 - 16);
+  expect(placed.place.left).toBe(16);
+  unmount(root);
+});
+
+describe("giving TalkBack focus back to the trigger after a menu closes without a choice", () => {
+  const OPENER = 77;
+  const settle = async () => {
+    for (let step = 0; step < 4; step++) {
+      await act(async () => undefined);
+      act(() => jest.advanceTimersByTime(400));
+    }
+  };
+  function Harness({ disabled = false, asking = false }: { disabled?: boolean; asking?: boolean }) {
+    const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+    return (
+      <>
+        <MenuTrigger items={ITEMS} trigger="tap" disabled={disabled}>
+          {({ onPress }) => (
+            <Pressable accessibilityLabel="Trigger" onPress={onPress}>
+              <Text>Trigger</Text>
+            </Pressable>
+          )}
+        </MenuTrigger>
+        {asking ? <ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} /> : null}
+      </>
+    );
+  }
+  const setUp = () => {
+    const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+    jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+    const focused = jest.spyOn(AccessibilityInfo, "setAccessibilityFocus").mockImplementation(() => undefined);
+    focused.mockClear();
+    const back = pressBack();
+    const { updateSurface } = require("../../test/render/harness") as typeof import("../../test/render/harness");
+    const root = renderSurface(<Harness />);
+    const open = () => act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: OPENER, nativeEvent: {} }));
+    const restored = () => focused.mock.calls.filter(([handle]) => handle === OPENER).length;
+    return { root, open, back, restored, update: (props: { disabled?: boolean; asking?: boolean }) => updateSurface(root, <Harness {...props} />) };
+  };
+
+  test("lands on the trigger once the menu has closed", async () => {
+    const { root, open, back, restored } = setUp();
+    open();
+    back();
+    await settle();
+    expect(restored()).toBe(1);
+    unmount(root);
+  });
+
+  test("is dropped when the menu is opened again before it lands", async () => {
+    const { root, open, back, restored } = setUp();
+    open();
+    back();
+    act(() => jest.advanceTimersByTime(100));
+    open();
+    await settle();
+    expect(restored()).toBe(0);
+    unmount(root);
+  });
+
+  test("is dropped when the trigger goes away after the restore has started", async () => {
+    const { root, open, back, restored } = setUp();
+    open();
+    back();
+    act(() => jest.advanceTimersByTime(menuMotion.heldClose + 1));
+    await act(async () => undefined);
+    unmount(root);
+    await settle();
+    expect(restored()).toBe(0);
+  });
+
+  test("is dropped when the trigger is turned off", async () => {
+    const { root, open, back, restored, update } = setUp();
+    open();
+    back();
+    update({ disabled: true });
+    await settle();
+    expect(restored()).toBe(0);
+    unmount(root);
+  });
+
+  test("is dropped when a newer overlay has opened over the screen", async () => {
+    const { root, open, back, restored, update } = setUp();
+    open();
+    back();
+    act(() => jest.advanceTimersByTime(menuMotion.heldClose + 1));
+    await act(async () => undefined);
+    update({ asking: true });
+    await settle();
+    expect(restored()).toBe(0);
+    unmount(root);
+  });
 });

@@ -5,7 +5,7 @@ export type WindowRect = { x: number; y: number; width: number; height: number }
 
 type Layer = { id: number; node: ReactNode; leaving: boolean };
 
-type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect> };
+type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect>; covered: () => boolean };
 
 const OverlayContext = createContext<Overlay | null>(null);
 
@@ -24,6 +24,8 @@ const measure = (view: ViewInstance | null): Promise<WindowRect> =>
 export function OverlayHost({ children }: { children: ReactNode }) {
   const root = useRef<ViewInstance>(null);
   const [layers, setLayers] = useState<Layer[]>([]);
+  const coveredNow = useRef(false);
+  coveredNow.current = layers.some((layer) => !layer.leaving);
   const overlay = useMemo<Overlay>(
     () => ({
       show: (id, node) =>
@@ -37,6 +39,7 @@ export function OverlayHost({ children }: { children: ReactNode }) {
         setTimeout(() => setLayers((now) => now.filter((layer) => layer.id !== id || !layer.leaving)), ms);
       },
       frame: () => measure(root.current),
+      covered: () => coveredNow.current,
     }),
     [],
   );
@@ -73,6 +76,11 @@ export function Portal({ exitMs = 0, children }: { exitMs?: number; children: Re
     [overlay, id],
   );
   return overlay ? null : <>{children}</>;
+}
+
+export function useOverlayCovered() {
+  const overlay = useContext(OverlayContext);
+  return overlay ? overlay.covered : () => false;
 }
 
 export function useOverlayFrame() {

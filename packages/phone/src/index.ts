@@ -20,7 +20,7 @@ export { closePage, pageObscuresInsets, pageReportsDrawn, PageView } from "./Pag
 export { pages, type AppRelease, type OffscreenCapture, type LaunchArgumentValue, type LaunchOptions, type SitePermissionGrant, type SitePermissionKind } from "./pages";
 export { keyboard, type KeyboardDidChange, type KeyboardWillChange } from "./keyboard";
 export { CompletingField, completingFieldIsNative, type CompletingFieldHandle, type CompletingFieldProps, type CompletionOffer } from "./completingField";
-export { ScrollActions, type ScrollActionDirection, type ScrollActionsProps } from "./accessibility";
+export { announceNatively, focusViewNatively, screenReaderFocusIsNative, ScrollActions, type ScrollActionDirection, type ScrollActionsProps } from "./accessibility";
 export { FadeView, fadeIsNative, type FadeEdge, type FadeViewProps } from "./fade";
 export { PasteButton, pasteButtonIsNative, type PasteButtonProps } from "./pasteButton";
 export { actionSheet, ContextMenuView, nativeMenusAvailable, type ActionSheetAction, type ActionSheetOptions, type ContextMenuHandle, type ContextMenuProps, type MenuAppearance, type MenuItem } from "./menus";

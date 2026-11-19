@@ -5,6 +5,7 @@ import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
+import { useOverlayCovered } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
@@ -103,22 +104,24 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
 function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, frost: frostHere, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
-  const restore = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (restore.current) clearTimeout(restore.current);
-  }, []);
+  const cancelRestore = useRef<() => void>(() => undefined);
+  const covered = useOverlayCovered();
+  useEffect(() => () => cancelRestore.current(), []);
   const frostAround = useMenuFrost();
   const frost = frostHere === undefined ? frostAround : frostHere;
   const floor = useMenuFloor();
   const [opened, setOpened] = useState<{ at: Point | null } | null>(null);
   useEffect(() => {
-    if (!disabled || !opened) return;
+    if (!disabled) return;
+    cancelRestore.current();
+    if (!opened) return;
     setOpened(null);
     onClose?.();
   }, [disabled]);
   const open = useCallback(
     (event?: GestureResponderEvent) => {
       if (disabled) return;
+      cancelRestore.current();
       haptic?.();
       opener.current = event?.currentTarget ?? null;
       setOpened({ at: trigger === "longPress" ? pressPoint(event) : null });
@@ -130,12 +133,20 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
     (chosen?: boolean) => {
       setOpened(null);
       onClose?.();
+      cancelRestore.current();
       if (chosen) return;
-      if (restore.current) clearTimeout(restore.current);
-      restore.current = setTimeout(() => {
-        restore.current = null;
-        focusForScreenReader(() => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0]);
+      let cancelFocus: () => void = () => undefined;
+      const wait = setTimeout(() => {
+        cancelFocus = focusForScreenReader(
+          () => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0],
+          () => !covered(),
+        );
       }, menuMotion.heldClose);
+      cancelRestore.current = () => {
+        clearTimeout(wait);
+        cancelFocus();
+        cancelRestore.current = () => undefined;
+      };
     },
     [onClose],
   );

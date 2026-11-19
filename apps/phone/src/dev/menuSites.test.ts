@@ -7,29 +7,42 @@ const COMPONENTS = join(import.meta.dirname, "..", "components");
 
 type Over = "frostable" | "page" | "sheet" | "system";
 
-const SITES: Record<string, Over> = {
-  "browsing/BrowsingScreen.tsx": "page",
-  "browsing/PageMenu.tsx": "sheet",
-  "browsing/PageMenuWords.tsx": "sheet",
-  "browsing/PageRequests.tsx": "page",
-  "browsing/ReaderView.tsx": "page",
-  "browsing/tabsMenu.tsx": "page",
-  "column/DeckColumn.tsx": "page",
-  "duo/DuoSidebar.tsx": "page",
-  "library/ExpoLibrary.tsx": "system",
-  "search/SearchTray.tsx": "page",
-  "search/StartScreen.tsx": "frostable",
-  "search/StartSpaces.tsx": "frostable",
-  "settings/SettingsKit.tsx": "sheet",
-  "sync/ExpoSpaces.tsx": "system",
-  "sync/SpacesView.tsx": "sheet",
-  "tabs/ArchiveIntervalCard.tsx": "frostable",
-  "tabs/ArchiveView.tsx": "sheet",
-  "tabs/DeckBottomBar.tsx": "frostable",
-  "tabs/DeckCard.tsx": "frostable",
-  "tabs/DeckHeader.tsx": "frostable",
-  "tabs/ExpoArchive.tsx": "system",
-  "tabs/TabDeck.tsx": "frostable",
+const DEFINITIONS = ["ui/Menu.tsx", "ui/MenuTrigger.tsx"];
+
+const NOT_MENUS = new Set(["MenuIcon", "MenuMaterial", "MenuFrostProvider", "MenuFloorProvider", "MenuSiteSettings", "MenuMain", "ContextMenu.Trigger", "ContextMenu.Items", "PageMenu", "PageMenuWords"]);
+
+const OPAQUE_WRAPPERS = new Set(["TabsMenuTrigger", "PressMenu", "MoreMenu"]);
+
+const SITES: Record<string, Over[]> = {
+  "browsing/BottomBar.tsx": ["page"],
+  "browsing/BrowsingScreen.tsx": ["page", "page"],
+  "browsing/FloatingBar.tsx": ["page"],
+  "browsing/PageMenu.tsx": ["sheet"],
+  "browsing/PageMenuWords.tsx": ["sheet"],
+  "browsing/PageRequests.tsx": ["page"],
+  "browsing/ReaderView.tsx": ["page"],
+  "browsing/tabsMenu.tsx": ["page", "page"],
+  "column/DeckColumn.tsx": ["page", "page"],
+  "column/StartColumn.tsx": ["page"],
+  "duo/DuoBrowsing.tsx": ["page"],
+  "duo/DuoSidebar.tsx": ["page", "page", "page", "page", "page"],
+  "library/ExpoLibrary.tsx": ["system", "system", "system", "system"],
+  "search/SearchTray.tsx": ["page"],
+  "search/StartPage.tsx": ["frostable"],
+  "search/StartScreen.tsx": ["frostable"],
+  "search/StartSpaces.tsx": ["frostable"],
+  "settings/SettingsKit.tsx": ["sheet"],
+  "sync/ExpoSpaces.tsx": ["system", "system"],
+  "sync/SpacesView.tsx": ["sheet"],
+  "tabs/ArchiveIntervalCard.tsx": ["frostable", "frostable"],
+  "tabs/ArchiveView.tsx": ["sheet", "sheet"],
+  "tabs/ContainedDeck.tsx": ["frostable"],
+  "tabs/DeckBottomBar.tsx": ["frostable", "frostable"],
+  "tabs/DeckCard.tsx": ["frostable", "frostable", "frostable"],
+  "tabs/DeckHeader.tsx": ["frostable", "frostable", "frostable"],
+  "tabs/ExpoArchive.tsx": ["system", "system", "system"],
+  "tabs/TabDeck.tsx": ["frostable", "frostable", "frostable", "frostable"],
+  "tabs/TabGrid.tsx": ["frostable"],
 };
 
 function sources(dir: string): string[] {
@@ -40,11 +53,13 @@ function sources(dir: string): string[] {
   });
 }
 
-const opensMenus = (source: string) => /<(MenuTrigger|FloatingMenu|Menu)\b/.test(source);
+type Site = { name: string; tag: string };
 
-function menuTags(source: string): string[] {
-  const tags: string[] = [];
-  for (const start of source.matchAll(/<(MenuTrigger|FloatingMenu|Menu)\b/g)) {
+export function menuSites(source: string): Site[] {
+  const sites: Site[] = [];
+  for (const start of source.matchAll(/(?<![\w.])<([A-Z][\w.]*)/g)) {
+    const name = start[1]!;
+    if (!name.includes("Menu") || NOT_MENUS.has(name)) continue;
     let depth = 0;
     let at = start.index! + start[0].length;
     for (; at < source.length; at++) {
@@ -53,25 +68,39 @@ function menuTags(source: string): string[] {
       else if (char === "}") depth--;
       else if (char === ">" && depth === 0 && source[at - 1] !== "=") break;
     }
-    tags.push(source.slice(start.index!, at + 1));
+    sites.push({ name, tag: source.slice(start.index!, at + 1) });
   }
-  return tags;
+  return sites;
 }
 
-test("every place that opens a menu is listed with what it floats over, so a new one has to choose its material", () => {
-  const found = sources(COMPONENTS)
-    .map((file) => relative(COMPONENTS, file))
-    .filter((file) => !["ui/Menu.tsx", "ui/MenuTrigger.tsx"].includes(file) && opensMenus(readFileSync(join(COMPONENTS, file), "utf8")))
-    .sort();
-  assert.deepEqual(found, Object.keys(SITES).sort());
+const sitesIn = (file: string) => menuSites(readFileSync(join(COMPONENTS, file), "utf8"));
+
+test("every place that opens a menu, each element in each file, is listed with what it floats over, so a new one has to choose its material", () => {
+  const found = Object.fromEntries(
+    sources(COMPONENTS)
+      .map((file) => relative(COMPONENTS, file))
+      .filter((file) => !DEFINITIONS.includes(file))
+      .map((file) => [file, sitesIn(file).length] as const)
+      .filter(([, count]) => count > 0)
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const listed = Object.fromEntries(Object.entries(SITES).map(([file, overs]) => [file, overs.length] as const).sort(([a], [b]) => a.localeCompare(b)));
+  assert.deepEqual(found, listed);
 });
 
 test("every drawn menu over a page or the Reader is opaque, since a WebView can't be frosted and would show sharp through the panel", () => {
-  const frosted = Object.entries(SITES)
-    .filter(([, over]) => over === "page")
-    .filter(([file]) => {
-      return menuTags(readFileSync(join(COMPONENTS, file), "utf8")).some((tag) => !/frost=\{null\}/.test(tag));
-    })
-    .map(([file]) => file);
+  const frosted = Object.entries(SITES).flatMap(([file, overs]) =>
+    sitesIn(file)
+      .filter((site, at) => overs[at] === "page" && !OPAQUE_WRAPPERS.has(site.name) && !/frost=\{null\}/.test(site.tag))
+      .map((site) => `${file}: <${site.name}>`),
+  );
   assert.deepEqual(frosted, []);
+});
+
+test("the inventory counts sites, not files: a second menu in a listed file, or a menu wrapper in a new file, is found", () => {
+  assert.equal(menuSites('<MenuTrigger items={a}>{() => null}</MenuTrigger>\n<MenuTrigger items={b}>{() => null}</MenuTrigger>').length, 2);
+  assert.deepEqual(
+    menuSites('const x = useState<RowMenu | null>(null);\n<PlusMenuButton width={1} onMenu={(open) => setOpen(open)} />').map((site) => site.name),
+    ["PlusMenuButton"],
+  );
 });

@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { BackHandler, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
+import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
-import { useCoverFocus } from "./coverFocus";
+import { announceForScreenReader, useCoverFocus } from "./coverFocus";
 import type { Confirmation } from "./Dialog";
 import { countDrawnMenuOpened, MenuMaterial } from "./Menu";
 import { menuMotion } from "./motion";
@@ -33,6 +33,8 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
   const maxHeight = window.height - insets.top - insets.bottom - 2 * actionSheetLook.screenMargin;
   const card = useRef<ViewInstance>(null);
   const spoken = useRef<ViewInstance>(null);
+  const firstAction = useRef<ViewInstance>(null);
+  const announces = Platform.OS === "android";
   const heading = title && message ? `${title}${/[.?!]$/.test(title) ? "" : "."} ${message}` : title || message || "";
   const leaving = usePortalLeaving();
   const shown = useSharedValue(1);
@@ -40,7 +42,15 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
     if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut });
   }, [leaving]);
   const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
-  useCoverFocus(spoken, !leaving);
+  useCoverFocus(announces || !heading ? firstAction : spoken, !leaving);
+  useEffect(() => {
+    if (!announces || leaving || !heading) return;
+    let live = true;
+    announceForScreenReader(heading, () => live);
+    return () => {
+      live = false;
+    };
+  }, [leaving]);
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
@@ -72,7 +82,7 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
             <View style={[styles.buttons, title || message ? styles.afterText : null]}>
               {actions.map((action, index) => (
                 <Pressable
-                  ref={index === 0 && !heading ? spoken : undefined}
+                  ref={index === 0 ? firstAction : undefined}
                   key={`${index}:${action.title}`}
                   accessibilityRole="button"
                   accessibilityLabel={action.title}

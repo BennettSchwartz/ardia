@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
 import { lookIsNative } from "@ardia/phone-native";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, type MenuAlign, type MenuLimits, type Point, type Rect } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
@@ -79,14 +79,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   }, []);
   useEffect(() => {
     if (!revealed || leaving) return;
-    let live = true;
-    focusForScreenReader(
-      () => firstRow.current,
-      () => live,
-    );
-    return () => {
-      live = false;
-    };
+    return focusForScreenReader(() => firstRow.current);
   }, [revealed, page, leaving]);
   useEffect(() => {
     if (leaving) return;
@@ -116,8 +109,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
       dim.value = withTiming(0, { duration: menuMotion.contentFade });
       return;
     }
-    closed.value = withTiming(1, { duration: closing, easing: Easing.out(Easing.cubic) });
-    glass.value = withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) });
+    closed.value = withTiming(1, { duration: closing, easing: Easing.inOut(Easing.quad) });
+    glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }) : withDelay(closing, withTiming(0, { duration: menuMotion.contentFade }));
     shownContent.value = withTiming(0, { duration: dimmed ? closing : menuMotion.contentFade });
     dim.value = withTiming(0, { duration: menuMotion.heldClose });
   }, [leaving]);
@@ -280,7 +273,7 @@ function fixedPlacer(place: ViewStyle, host: Rect, insets: Insets, width: number
   };
 }
 
-export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close) + menuMotion.contentFade;
+export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close + menuMotion.contentFade) + menuMotion.contentFade;
 
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 
@@ -303,7 +296,9 @@ export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, 
       live = false;
     };
   }, []);
-  const placer = at ? (anchor && !measured ? undefined : pointPlacer(at, screen, insets, width, { control: measured?.row, floor })) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width, align) : fixedPlacer(place, measured.host, insets, width)) : undefined;
+  const heldWithoutPoint = dimmed && !at && measured?.row ? { x: measured.row.x, y: measured.row.y + measured.row.height } : null;
+  const point = at ?? heldWithoutPoint;
+  const placer = point ? (anchor && !measured ? undefined : pointPlacer(point, screen, insets, width, { control: measured?.row, floor })) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width, align) : fixedPlacer(place, measured.host, insets, width)) : undefined;
   return (
     <Portal exitMs={menuExitMs(dimmed)}>
       <Menu items={items} place={{ ...place, width }} placer={placer} shown={placer !== undefined} dimmed={dimmed} privately={privately} frost={frost === undefined ? frostAround : frost} onDismiss={onDismiss} />

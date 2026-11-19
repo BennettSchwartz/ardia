@@ -15,7 +15,21 @@ type NativeProps = Omit<ScrollActionsProps, "onScrollAction"> & {
   onScrollAction: (event: NativeSyntheticEvent<{ direction: ScrollActionDirection }>) => void;
 };
 
-const hasNative = requireOptionalNativeModule("ArdiaPhoneAccessibility") !== null;
+type NativeAccessibility = { focusView?: (tag: number) => Promise<void>; announce?: (text: string) => Promise<void> };
+
+const native = requireOptionalNativeModule<NativeAccessibility>("ArdiaPhoneAccessibility");
+
+const hasNative = native !== null;
+
+export const screenReaderFocusIsNative = () => typeof native?.focusView === "function";
+
+export function focusViewNatively(tag: number) {
+  void native?.focusView?.(tag).catch(() => undefined);
+}
+
+export function announceNatively(text: string) {
+  void native?.announce?.(text).catch(() => undefined);
+}
 
 let nativeView: ComponentType<NativeProps> | undefined;
 const view = () => (nativeView ??= requireNativeViewManager<NativeProps>("ArdiaPhoneAccessibility", "ScrollActions"));
