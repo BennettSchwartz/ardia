@@ -77,22 +77,54 @@ struct PluginSandbox {
     let begin = "-----BEGIN CERTIFICATE-----"
     let end = "-----END CERTIFICATE-----"
     var blocks: [String] = []
-    var rest = Substring(text)
-    while let start = rest.range(of: begin) {
-      let after = rest[start.upperBound...]
-      guard let stop = after.range(of: end) else { break }
-      if let nextBegin = after.range(of: begin), nextBegin.lowerBound < stop.lowerBound {
-        rest = rest[nextBegin.lowerBound...]
+    var body: [Substring]?
+    for raw in text.split(omittingEmptySubsequences: false, whereSeparator: { $0 == "\n" || $0 == "\r\n" }) {
+      let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+      if line.hasPrefix("-----BEGIN ") {
+        body = line == begin ? [] : nil
         continue
       }
-      rest = rest[stop.upperBound...]
-      guard let der = certificateDER(after[..<stop.lowerBound]) else { continue }
-      blocks.append("\(begin)\n\(der.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n\(end)\n")
+      if line.hasPrefix("-----END ") {
+        if line == end, let lines = body, let der = certificateDER(Substring(lines.joined())) {
+          blocks.append("\(begin)\n\(der.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n\(end)\n")
+        }
+        body = nil
+        continue
+      }
+      body?.append(Substring(line))
     }
     return blocks
   }
 
+  struct SourceIdentity: Equatable {
+    let device: Int32
+    let inode: UInt64
+    let modified: timespec
+    let size: off_t
+
+    init(_ info: stat) {
+      device = info.st_dev
+      inode = info.st_ino
+      modified = info.st_mtimespec
+      size = info.st_size
+    }
+
+    static func == (a: SourceIdentity, b: SourceIdentity) -> Bool {
+      a.device == b.device && a.inode == b.inode && a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec && a.size == b.size
+    }
+  }
+
+  static func identity(of path: String) -> SourceIdentity? {
+    var info = stat()
+    guard stat(path, &info) == 0 else { return nil }
+    return SourceIdentity(info)
+  }
+
   static func readSource(_ path: String, limit: Int = certificateSourceLimit) -> Data? {
+    readIdentifiedSource(path, limit: limit)?.data
+  }
+
+  static func readIdentifiedSource(_ path: String, limit: Int = certificateSourceLimit) -> (data: Data, identity: SourceIdentity)? {
     let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
@@ -102,24 +134,75 @@ struct PluginSandbox {
     var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     while data.count <= limit {
       let count = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
-      if count <= 0 { break }
+      if count < 0 { return nil }
+      if count == 0 { break }
       data.append(contentsOf: buffer[0..<count])
     }
-    return data.count <= limit ? data : nil
+    return data.count <= limit ? (data, SourceIdentity(info)) : nil
   }
 
-  static func certificates(from given: [String: String], system: String = systemCertificates) -> Certificates {
-    var extraSources: [String] = []
+  static func extraCertificateSources(from given: [String: String], system: String = systemCertificates) -> [String] {
+    var sources: [String] = []
     for name in certificateEnvironment {
-      if let path = given[name], !path.isEmpty, path != system, !extraSources.contains(path) { extraSources.append(path) }
+      if let path = given[name], !path.isEmpty, path != system, !sources.contains(path) { sources.append(path) }
     }
+    return sources
+  }
+
+  struct LoadedCertificates {
+    let certificates: Certificates
+    let identities: [String: SourceIdentity]
+    let complete: Bool
+  }
+
+  static func loadCertificates(from given: [String: String], system: String = systemCertificates) -> LoadedCertificates {
+    var identities: [String: SourceIdentity] = [:]
+    var complete = true
     func blocks(_ sources: [String]) -> [String] {
-      sources.compactMap { readSource($0) }.flatMap { certificateBlocks(in: String(decoding: $0, as: UTF8.self)) }
+      sources.flatMap { source -> [String] in
+        guard let read = readIdentifiedSource(source) else {
+          complete = false
+          return []
+        }
+        identities[source] = read.identity
+        return certificateBlocks(in: String(decoding: read.data, as: UTF8.self))
+      }
     }
     var seen = Set<String>()
     let systemBlocks = blocks([system]).filter { seen.insert($0).inserted }
-    let extraBlocks = blocks(extraSources).filter { seen.insert($0).inserted }
-    return Certificates(replacement: (systemBlocks + extraBlocks).joined(), extra: extraBlocks.joined())
+    let extraBlocks = blocks(extraCertificateSources(from: given, system: system)).filter { seen.insert($0).inserted }
+    return LoadedCertificates(certificates: Certificates(replacement: (systemBlocks + extraBlocks).joined(), extra: extraBlocks.joined()), identities: identities, complete: complete)
+  }
+
+  static func certificates(from given: [String: String], system: String = systemCertificates) -> Certificates {
+    loadCertificates(from: given, system: system).certificates
+  }
+
+  enum PreparedCertificates: Equatable {
+    case offline, notConfigured, timedOut
+    case ready(Certificates)
+  }
+
+  static func stage(_ prepared: PreparedCertificates, in directory: Int32) -> Certificates? {
+    switch prepared {
+    case .offline, .timedOut:
+      return nil
+    case .notConfigured:
+      unlinkat(directory, certificateBundleName, 0)
+      unlinkat(directory, extraCertificateBundleName, 0)
+      return nil
+    case .ready(let ready):
+      guard !ready.replacement.isEmpty, writeAtomically(in: directory, name: certificateBundleName, contents: ready.replacement) else {
+        unlinkat(directory, certificateBundleName, 0)
+        unlinkat(directory, extraCertificateBundleName, 0)
+        return nil
+      }
+      guard !ready.extra.isEmpty, writeAtomically(in: directory, name: extraCertificateBundleName, contents: ready.extra) else {
+        unlinkat(directory, extraCertificateBundleName, 0)
+        return Certificates(replacement: ready.replacement, extra: "")
+      }
+      return ready
+    }
   }
 
   static func certificateVariables(dataFolder: String, staged: Certificates?) -> [String] {
@@ -128,6 +211,24 @@ struct PluginSandbox {
     var variables = ["SSL_CERT_FILE=\(replacement)", "GIT_SSL_CAINFO=\(replacement)"]
     if !staged.extra.isEmpty { variables.append("NODE_EXTRA_CA_CERTS=\((dataFolder as NSString).appendingPathComponent(extraCertificateBundleName))") }
     return variables
+  }
+
+  static func helperEnvironment(
+    name: String, data: OpenedFolder, channelFd: Int32, network: Bool, given: [String: String], certificates: PreparedCertificates
+  ) -> NetworkEnvironment {
+    let carried = networkEnvironment(from: given, network: network)
+    let roots = network ? certificateVariables(dataFolder: data.path, staged: stage(certificates, in: data.fd)) : []
+    let folder = data.path as NSString
+    let base = [
+      "PATH=" + searchPath.joined(separator: ":"),
+      "HOME=" + folder.appendingPathComponent("home"),
+      "TMPDIR=" + folder.appendingPathComponent("tmp") + "/",
+      "LANG=en_US.UTF-8",
+      "ARDIA_PLUGIN_NAME=" + name,
+      "ARDIA_PLUGIN_FD=\(channelFd)",
+      "ARDIA_PLUGIN_PROTOCOL=1",
+    ]
+    return NetworkEnvironment(variables: base + carried.variables + roots, droppedProxies: carried.droppedProxies)
   }
 
   static func networkEnvironment(from given: [String: String], network: Bool) -> NetworkEnvironment {

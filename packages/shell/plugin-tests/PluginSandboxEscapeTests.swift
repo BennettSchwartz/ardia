@@ -618,15 +618,144 @@ final class PluginSandboxEscapeTests: XCTestCase {
     let a = try makeCertificate("Ardia Cache")
     let system = "\(root)/cache.pem"
     try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let lifecycle = DispatchQueue(label: "test.lifecycle")
     let cache = PluginCertificateCache(system: system)
-    XCTAssertNil(cache.current(for: [:]), "the first ask returns at once and reads on a background queue")
-    var ready: PluginSandbox.Certificates?
-    let deadline = Date().addingTimeInterval(5)
-    while ready == nil && Date() < deadline {
-      ready = cache.current(for: [:])
-      if ready == nil { Thread.sleep(forTimeInterval: 0.05) }
+    var answered: PluginSandbox.PreparedCertificates?
+    let preparing = Date()
+    lifecycle.sync { cache.prepare(for: ["NODE_EXTRA_CA_CERTS": fifo], deliverOn: lifecycle) { answered = $0 } }
+    XCTAssertNil(answered, "preparing returns at once and answers later on the lifecycle queue")
+    guard case .ready(let ready) = prepared(cache, ["NODE_EXTRA_CA_CERTS": fifo], on: lifecycle) else { return XCTFail("a FIFO source still lets preparation answer") }
+    XCTAssertEqual(names(ready.replacement), ["Ardia Cache"])
+    XCTAssertEqual(ready.extra, "")
+    XCTAssertLessThan(Date().timeIntervalSince(preparing), 2)
+  }
+
+  func prepared(_ cache: PluginCertificateCache, _ given: [String: String], on queue: DispatchQueue = DispatchQueue(label: "test.prepare"), within limit: TimeInterval = PluginCertificateCache.preparationLimit) -> PluginSandbox.PreparedCertificates {
+    let done = DispatchSemaphore(value: 0)
+    var answer = PluginSandbox.PreparedCertificates.timedOut
+    cache.prepare(for: given, within: limit, deliverOn: queue) {
+      answer = $0
+      done.signal()
     }
-    XCTAssertEqual(ready.map { PluginSandbox.certificateBlocks(in: $0.replacement).count }, 1)
+    XCTAssertEqual(done.wait(timeout: .now() + 10), .success)
+    return answer
+  }
+
+  func names(_ bundle: String) -> [String] {
+    PluginSandbox.certificateBlocks(in: bundle).map { block -> String in
+      let certificate = SecCertificateCreateWithData(nil, Data(base64Encoded: Self.body(block))! as CFData)!
+      return SecCertificateCopySubjectSummary(certificate) as String? ?? "?"
+    }
+  }
+
+  func testTheCertificateCacheRereadsChangedSourcesForgetsRemovedRootsAndNeverCachesAFailure() throws {
+    let a = try makeCertificate("Ardia Root A")
+    let b = try makeCertificate("Ardia Root B")
+    let c = try makeCertificate("Ardia Root C")
+    let system = "\(root)/system.pem"
+    try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let corporate = "\(root)/corp.pem"
+    let given = ["NODE_EXTRA_CA_CERTS": corporate]
+    let cache = PluginCertificateCache(system: system)
+    let folder = open(pluginData, O_RDONLY | O_DIRECTORY)
+    XCTAssertGreaterThanOrEqual(folder, 0)
+    defer { close(folder) }
+    func extras() -> [String] {
+      guard case .ready(let ready) = prepared(cache, given) else { XCTFail("not ready"); return [] }
+      _ = PluginSandbox.stage(.ready(ready), in: folder)
+      return names(ready.extra)
+    }
+    let extraBundle = "\(pluginData)/extra-certificates.pem"
+    XCTAssertEqual(extras(), [], "a source that can't be read yet adds nothing")
+    try b.pem.write(toFile: corporate, atomically: true, encoding: .utf8)
+    XCTAssertEqual(extras(), ["Ardia Root B"], "a failed read isn't cached: the file is read once it exists")
+    XCTAssertEqual(names(try String(contentsOfFile: extraBundle, encoding: .utf8)), ["Ardia Root B"])
+    try c.pem.write(toFile: corporate, atomically: true, encoding: .utf8)
+    XCTAssertEqual(extras(), ["Ardia Root C"], "a file replaced at the same path is read again, and the old root is gone")
+    let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: corporate))
+    try handle.truncate(atOffset: 0)
+    try handle.write(contentsOf: Data(b.pem.utf8))
+    try handle.close()
+    XCTAssertEqual(extras(), ["Ardia Root B"], "a file rewritten in place is read again")
+    try FileManager.default.removeItem(atPath: corporate)
+    XCTAssertEqual(extras(), [], "a deleted file's roots disappear")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: extraBundle), "and so does the staged bundle that held them")
+    XCTAssertEqual(names(try String(contentsOfFile: "\(pluginData)/certificates.pem", encoding: .utf8)), ["Ardia Root A"])
+    XCTAssertEqual(prepared(cache, [:]), .notConfigured)
+    _ = PluginSandbox.stage(.notConfigured, in: folder)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: "\(pluginData)/certificates.pem"), "with no extra roots configured, nothing staged is left")
+  }
+
+  func testAColdOnlineLaunchWaitsForTheCorporateRootsAndAnOfflineOneDoesNot() throws {
+    let a = try makeCertificate("Ardia Cold A")
+    let b = try makeCertificate("Ardia Cold B")
+    let system = "\(root)/system.pem"
+    try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let corporate = "\(root)/corp.pem"
+    try b.pem.write(toFile: corporate, atomically: true, encoding: .utf8)
+    let given = ["NODE_EXTRA_CA_CERTS": corporate, "PATH": "/usr/bin:/bin"]
+    let lifecycle = DispatchQueue(label: "test.lifecycle")
+    let folder = open(pluginData, O_RDONLY | O_DIRECTORY)
+    XCTAssertGreaterThanOrEqual(folder, 0)
+    defer { close(folder) }
+    let opened = OpenedFolder(fd: folder, path: pluginData, id: "test")
+    func launch(network: Bool, cache: PluginCertificateCache, limit: TimeInterval = PluginCertificateCache.preparationLimit) throws -> (prepared: PluginSandbox.PreparedCertificates, output: String) {
+      let done = DispatchSemaphore(value: 0)
+      var environment: [String] = []
+      var answer = PluginSandbox.PreparedCertificates.timedOut
+      lifecycle.async {
+        let deliver = { (certificates: PluginSandbox.PreparedCertificates) in
+          dispatchPrecondition(condition: .onQueue(lifecycle))
+          answer = certificates
+          environment = PluginSandbox.helperEnvironment(name: "example", data: opened, channelFd: 3, network: network, given: given, certificates: certificates).variables
+          done.signal()
+        }
+        if network { cache.prepare(for: given, within: limit, deliverOn: lifecycle, then: deliver) } else { deliver(.offline) }
+      }
+      XCTAssertEqual(done.wait(timeout: .now() + 10), .success)
+      let box = PluginSandbox(home: home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: "/bin/sh", network: network)
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
+      process.arguments = try box.arguments() + ["/bin/sh", "-c", "echo \"roots=$NODE_EXTRA_CA_CERTS\"; [ -n \"$NODE_EXTRA_CA_CERTS\" ] && /bin/cat \"$NODE_EXTRA_CA_CERTS\"; echo \"replace=$SSL_CERT_FILE\""]
+      process.environment = Dictionary(uniqueKeysWithValues: environment.map { line -> (String, String) in
+        let parts = line.split(separator: "=", maxSplits: 1)
+        return (String(parts[0]), parts.count > 1 ? String(parts[1]) : "")
+      })
+      process.currentDirectoryURL = URL(fileURLWithPath: plugin)
+      let pipe = Pipe()
+      process.standardOutput = pipe
+      process.standardError = pipe
+      try process.run()
+      let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      process.waitUntilExit()
+      return (answer, output)
+    }
+    let cold = try launch(network: true, cache: PluginCertificateCache(system: system))
+    guard case .ready = cold.prepared else { return XCTFail("a cold cache still answers before the deadline: \(cold.prepared)") }
+    XCTAssertTrue(cold.output.contains("roots=\(pluginData)/extra-certificates.pem"), cold.output)
+    XCTAssertEqual(names(cold.output), ["Ardia Cold B"], "the first online helper already has the corporate root: \(cold.output)")
+    XCTAssertTrue(cold.output.contains("replace=\(pluginData)/certificates.pem"), cold.output)
+    let late = try launch(network: true, cache: PluginCertificateCache(system: system), limit: 0)
+    XCTAssertEqual(late.prepared, .timedOut)
+    XCTAssertTrue(late.output.contains("replace=/etc/ssl/cert.pem"), "past the deadline it starts with the system roots: \(late.output)")
+    let offline = try launch(network: false, cache: PluginCertificateCache(system: system))
+    XCTAssertEqual(offline.prepared, .offline)
+    XCTAssertTrue(offline.output.contains("roots=\n"), offline.output)
+  }
+
+  func testThePEMScanIsLinearHandlesCRLFAndKeepsOnlyCertificateBlocks() throws {
+    let a = try makeCertificate("Ardia PEM A")
+    let b = try makeCertificate("Ardia PEM B")
+    let crlf = a.pem.replacingOccurrences(of: "\n", with: "\r\n")
+    XCTAssertEqual(names(PluginSandbox.certificateBlocks(in: crlf).joined()), ["Ardia PEM A"], "CRLF line ends")
+    let trusted = b.pem.replacingOccurrences(of: "BEGIN CERTIFICATE", with: "BEGIN TRUSTED CERTIFICATE").replacingOccurrences(of: "END CERTIFICATE", with: "END TRUSTED CERTIFICATE")
+    XCTAssertEqual(names(PluginSandbox.certificateBlocks(in: trusted + a.pem).joined()), ["Ardia PEM A"], "TRUSTED CERTIFICATE blocks are skipped")
+    let unended = String(repeating: "-----BEGIN CERTIFICATE-----\nAAAA\n", count: 200_000)
+    let started = Date()
+    XCTAssertEqual(names(PluginSandbox.certificateBlocks(in: unended + b.pem).joined()), ["Ardia PEM B"])
+    XCTAssertLessThan(Date().timeIntervalSince(started), 3, "unmatched BEGIN lines are scanned once")
+    let malformed = ["-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "-----END PRIVATE KEY-----", Self.body(a.pem), "-----END CERTIFICATE-----", "-----BEGIN CERTIFICATE-----", "@@@", "-----END CERTIFICATE-----", b.pem].joined(separator: "\n")
+    XCTAssertEqual(names(PluginSandbox.certificateBlocks(in: malformed).joined()), ["Ardia PEM B"], "a stray END, a foreign END inside a block and a bad body each drop only their block")
   }
 
   func testTheCertificateBundleIsWrittenAtomicallyInsideTheDataFolder() throws {
@@ -778,11 +907,8 @@ final class PluginSandboxEscapeTests: XCTestCase {
 #include <CoreServices/CoreServices.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
 
 static const char *needle;
-static const char *own;
-static int sawOwn = 0;
 static int leaked = 0;
 static int events = 0;
 
@@ -790,7 +916,6 @@ static void callback(ConstFSEventStreamRef stream, void *info, size_t count, voi
   char **list = paths;
   for (size_t i = 0; i < count; i++) {
     events++;
-    if (own && strstr(list[i], own)) sawOwn = 1;
     if (needle && strstr(list[i], needle)) {
       leaked = 1;
       printf("leak %s\n", list[i]);
@@ -799,22 +924,24 @@ static void callback(ConstFSEventStreamRef stream, void *info, size_t count, voi
 }
 
 int main(int argc, char **argv) {
-  if (argc < 5) return 98;
+  if (argc < 8) return 98;
   const char *root = argv[1];
-  own = argv[2];
-  needle = argv[3];
-  FSEventStreamEventId since = strcmp(argv[4], "now") == 0 ? kFSEventStreamEventIdSinceNow : strtoull(argv[4], NULL, 10);
-  struct stat st;
-  stat("/", &st);
+  needle = argv[2];
+  FSEventStreamEventId since = strcmp(argv[3], "now") == 0 ? kFSEventStreamEventIdSinceNow : strtoull(argv[3], NULL, 10);
+  double seconds = atof(argv[4]);
+  int perDevice = strcmp(argv[5], "device") == 0;
+  dev_t device = (dev_t)strtol(argv[6], NULL, 10);
+  const char *watched = perDevice ? argv[7] : root;
   printf("currentEventId %llu\n", (unsigned long long)FSEventsGetCurrentEventId());
-  CFUUIDRef uuid = FSEventsCopyUUIDForDevice(st.st_dev);
+  CFUUIDRef uuid = FSEventsCopyUUIDForDevice(device);
   printf("uuid %s\n", uuid ? "returned" : "refused");
   if (uuid) CFRelease(uuid);
-  FSEventStreamEventId before = FSEventsGetLastEventIdForDeviceBeforeTime(st.st_dev, CFAbsoluteTimeGetCurrent() - 60);
-  printf("lastBeforeTime %llu\n", (unsigned long long)before);
-  CFStringRef path = CFStringCreateWithCString(NULL, root, kCFStringEncodingUTF8);
+  printf("lastBeforeTime %llu\n", (unsigned long long)FSEventsGetLastEventIdForDeviceBeforeTime(device, CFAbsoluteTimeGetCurrent() - 1));
+  fflush(stdout);
+  CFStringRef path = CFStringCreateWithCString(NULL, watched, kCFStringEncodingUTF8);
   CFArrayRef paths = CFArrayCreate(NULL, (const void **)&path, 1, &kCFTypeArrayCallBacks);
-  FSEventStreamRef stream = FSEventStreamCreate(NULL, callback, NULL, paths, since, 0.1, kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
+  FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer;
+  FSEventStreamRef stream = perDevice ? FSEventStreamCreateRelativeToDevice(NULL, callback, NULL, device, paths, since, 0.1, flags) : FSEventStreamCreate(NULL, callback, NULL, paths, since, 0.1, flags);
   if (!stream) {
     printf("stream refused\n");
     return 90;
@@ -827,10 +954,10 @@ int main(int argc, char **argv) {
   }
   printf("started\n");
   fflush(stdout);
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, atof(argc > 5 ? argv[5] : "3"), false);
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
   FSEventStreamStop(stream);
   FSEventStreamInvalidate(stream);
-  printf("events %d own %d leaked %d\n", events, sawOwn, leaked);
+  printf("events %d leaked %d\n", events, leaked);
   return 0;
 }
 """#
@@ -840,40 +967,65 @@ int main(int argc, char **argv) {
     let watcher = "\(plugin)/fse"
     let built = try Self.run("/usr/bin/xcrun", ["clang", "-O", "-framework", "CoreServices", "-o", watcher, "\(root)/fse.c"])
     XCTAssertEqual(built.status, 0, built.output)
-    let secret = "fse-secret-\(Self.short())"
-    func run(inside: Bool, network: Bool) throws -> String {
-      let realHome = PluginSandbox.resolved(NSHomeDirectory())!
-      let written = NSLock()
-      var writes = 0
-      let writer = Thread {
-        for _ in 0..<8 {
-          Thread.sleep(forTimeInterval: 0.25)
-          if (try? "x".write(toFile: "\(realHome)/\(secret)", atomically: false, encoding: .utf8)) != nil {
-            written.lock()
-            writes += 1
-            written.unlock()
+    let realHome = PluginSandbox.resolved(NSHomeDirectory())!
+    func eventId(_ output: String, _ label: String) -> UInt64? {
+      output.split(separator: "\n").first { $0.hasPrefix("\(label) ") }.flatMap { UInt64($0.dropFirst(label.count + 1)) }
+    }
+    var info = stat()
+    XCTAssertEqual(stat(realHome, &info), 0)
+    var volume = statfs()
+    XCTAssertEqual(statfs(realHome, &volume), 0)
+    let mountPoint = withUnsafeBytes(of: volume.f_mntonname) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+    let relative = (realHome.hasPrefix(mountPoint) ? String(realHome.dropFirst(mountPoint.count)) : realHome).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    func watch(inside: Bool, network: Bool = true, mode: String, since: String, writing marker: String?, looking needle: String) throws -> Outcome {
+      let finished = DispatchSemaphore(value: 0)
+      if let marker {
+        Thread {
+          for _ in 0..<8 {
+            Thread.sleep(forTimeInterval: 0.25)
+            try? "x".write(toFile: "\(realHome)/\(marker)", atomically: false, encoding: .utf8)
+            try? FileManager.default.removeItem(atPath: "\(realHome)/\(marker)")
           }
-          try? FileManager.default.removeItem(atPath: "\(realHome)/\(secret)")
+          finished.signal()
+        }.start()
+      } else {
+        finished.signal()
+      }
+      let arguments = [realHome, needle, since, "4", mode, String(info.st_dev), relative]
+      let outcome = inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)
+      XCTAssertEqual(finished.wait(timeout: .now() + 10), .success, "the writer finished")
+      return outcome
+    }
+    var control = Outcome(status: -1, output: "")
+    var marker = ""
+    for _ in 0..<3 where !control.output.contains("leak ") {
+      marker = "fse-secret-\(Self.short())"
+      control = try watch(inside: false, mode: "device", since: "now", writing: marker, looking: marker)
+    }
+    XCTAssertEqual(control.status, 0, control.output)
+    XCTAssertTrue(control.output.contains("started"), "control: a stream must start outside, or this test proves nothing: \(control.output)")
+    XCTAssertTrue(control.output.contains("uuid returned"), "control: outside, the device's UUID is returned: \(control.output)")
+    XCTAssertGreaterThan(eventId(control.output, "currentEventId") ?? 0, 0, "control: outside, the current event id is real")
+    XCTAssertTrue(control.output.contains("leak "), "control: outside, a stream on the home folder's device shows the write: \(control.output)")
+    let since = String(eventId(control.output, "currentEventId") ?? 0)
+    for mode in ["path", "device"] {
+      let replay = try watch(inside: false, mode: mode, since: since, writing: nil, looking: marker)
+      XCTAssertTrue(replay.output.contains("leak "), "control: outside, replay from an earlier event id shows the write (\(mode)): \(replay.output)")
+    }
+    for network in [true, false] {
+      for mode in ["path", "device"] {
+        for start in ["now", since] {
+          let probe = start == "now" ? "fse-secret-\(Self.short())" : nil
+          let inside = try watch(inside: true, network: network, mode: mode, since: start, writing: probe, looking: probe ?? marker)
+          let label = "network \(network), \(mode), since \(start)"
+          XCTAssertTrue([89, 90].contains(inside.status), "the stream is refused, not run (\(label)): status \(inside.status) \(inside.output)")
+          XCTAssertTrue(inside.output.contains("uuid refused"), "the device's event UUID is refused (\(label)): \(inside.output)")
+          XCTAssertEqual(eventId(inside.output, "currentEventId"), 0, "no current event id (\(label))")
+          XCTAssertEqual(eventId(inside.output, "lastBeforeTime"), 0, "no per-device event id (\(label))")
+          XCTAssertFalse(inside.output.contains("leak "), "nothing leaks (\(label))")
+          XCTAssertFalse(inside.output.contains(marker), "the control's write doesn't replay (\(label))")
         }
       }
-      writer.start()
-      let arguments = [inside ? "/" : realHome, "none", secret, "now", "4"]
-      let output = (inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)).output
-      written.lock()
-      defer { written.unlock() }
-      return output + "writes \(writes) to \(realHome)\n"
-    }
-    var outside = try run(inside: false, network: true)
-    for _ in 0..<2 where !outside.contains("leak ") {
-      outside = try run(inside: false, network: true)
-    }
-    XCTAssertTrue(outside.contains("started"), "control: a stream on the home folder must start outside, or this test proves nothing: \(outside)")
-    XCTAssertTrue(outside.contains("leak "), "control: outside, the stream shows the write in the home folder: \(outside)")
-    for network in [true, false] {
-      let inside = try run(inside: true, network: network)
-      XCTAssertTrue(inside.contains("uuid refused"), "the device's event UUID is refused (network \(network)): \(inside)")
-      XCTAssertTrue(inside.contains("stream start refused") || inside.contains("stream refused"), "a stream can't start (network \(network)): \(inside)")
-      XCTAssertFalse(inside.contains("leak "), "nothing leaks (network \(network))")
     }
   }
 }

@@ -62,36 +62,22 @@ final class PluginProcess: PluginRun {
 
   static let certificateCache = PluginCertificateCache()
 
-  static func stagedCertificates(in data: OpenedFolder, from given: [String: String]) -> PluginSandbox.Certificates? {
-    guard let ready = certificateCache.current(for: given), !ready.replacement.isEmpty else { return nil }
-    guard PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.certificateBundleName, contents: ready.replacement) else { return nil }
-    if !ready.extra.isEmpty, !PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.extraCertificateBundleName, contents: ready.extra) {
-      return PluginSandbox.Certificates(replacement: ready.replacement, extra: "")
-    }
-    return ready
+  static func prepareCertificates(for spec: Spec, deliverOn queue: DispatchQueue, then: @escaping (PluginSandbox.PreparedCertificates) -> Void) {
+    guard spec.network else { return then(.offline) }
+    certificateCache.prepare(for: ProcessInfo.processInfo.environment, deliverOn: queue, then: then)
   }
 
-  static func environment(name: String, data: OpenedFolder, network: Bool = false) -> [String] {
-    let given = ProcessInfo.processInfo.environment
-    let carried = PluginSandbox.networkEnvironment(from: given, network: network)
-    if !carried.droppedProxies.isEmpty {
-      NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, carried.droppedProxies.joined(separator: ", "))
+  static func environment(name: String, data: OpenedFolder, network: Bool, certificates: PluginSandbox.PreparedCertificates) -> [String] {
+    let built = PluginSandbox.helperEnvironment(
+      name: name, data: data, channelFd: channelFd, network: network, given: ProcessInfo.processInfo.environment, certificates: certificates)
+    if !built.droppedProxies.isEmpty {
+      NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, built.droppedProxies.joined(separator: ", "))
     }
-    let certificates = network ? PluginSandbox.certificateVariables(dataFolder: data.path, staged: stagedCertificates(in: data, from: given)) : []
-    let folder = data.path as NSString
-    return [
-      "PATH=" + PluginSandbox.searchPath.joined(separator: ":"),
-      "HOME=" + folder.appendingPathComponent("home"),
-      "TMPDIR=" + folder.appendingPathComponent("tmp") + "/",
-      "LANG=en_US.UTF-8",
-      "ARDIA_PLUGIN_NAME=" + name,
-      "ARDIA_PLUGIN_FD=\(channelFd)",
-      "ARDIA_PLUGIN_PROTOCOL=1",
-    ] + carried.variables + certificates
+    return built.variables
   }
 
   static func spawn(
-    _ spec: Spec, run: Int, folders: PluginFolders, queue: DispatchQueue,
+    _ spec: Spec, run: Int, folders: PluginFolders, queue: DispatchQueue, certificates: PluginSandbox.PreparedCertificates,
     onLine: @escaping (PluginProcess, String) -> Void, onExit: @escaping (PluginProcess, Int32?, Int32?, Bool) -> Void
   ) -> Result<PluginProcess, Failure> {
     let folder: OpenedFolder
@@ -169,7 +155,7 @@ final class PluginProcess: PluginRun {
       NSLog("[plugins] %@: macOS's responsibility calls aren't available, so its processes are tracked by group and descendants only", spec.name)
     }
     let argv = ["/usr/bin/sandbox-exec"] + sandboxArguments + [launched] + spec.run.dropFirst()
-    let env = environment(name: spec.name, data: dataFolder, network: spec.network)
+    let env = environment(name: spec.name, data: dataFolder, network: spec.network, certificates: certificates)
     var pid: pid_t = 0
     let result = withCStrings(argv) { cArgv in withCStrings(env) { cEnv in posix_spawn(&pid, "/usr/bin/sandbox-exec", &actions, &attributes, cArgv, cEnv) } }
     guard result == 0 else {

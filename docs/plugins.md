@@ -440,11 +440,16 @@ settings only once it is saved, so a failed save changes nothing.
   meaning: `SSL_CERT_FILE` and `GIT_SSL_CAINFO` replace a tool's roots, so they point at
   `PluginData/<name>/certificates.pem` (the system roots plus the extra ones); `NODE_EXTRA_CA_CERTS` adds to node's
   roots, so it points at `PluginData/<name>/extra-certificates.pem` (the extra ones only, and only when there are any).
-  The extra roots come from the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name. Only `CERTIFICATE`
-  blocks that are each exactly one X.509 certificate are kept (a key labelled `CERTIFICATE`, trailing bytes or a block
-  that never ends is skipped), from regular files of at most 4 MB opened without blocking (a FIFO is refused). They are
-  read on a background queue and cached; a helper that starts before the cache is ready gets the system roots
-  (`/etc/ssl/cert.pem`) directly. The bundles are written through the already-open data folder, to a private file
+  The extra roots come from the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name. The format is PEM
+  with LF or CRLF line ends: only `-----BEGIN CERTIFICATE-----` blocks on lines of their own that each hold exactly one
+  X.509 certificate are kept (`TRUSTED CERTIFICATE` blocks, a key labelled `CERTIFICATE`, trailing bytes, a block
+  another marker interrupts or one that never ends is skipped), from regular files of at most 4 MB opened without
+  blocking (a FIFO is refused), scanned line by line once. They are read on a background queue; before each start of a
+  helper with `network`, each file's device, inode, modification time and size are checked there, and a file that
+  changed, was replaced or was deleted is read again (a failed read is never kept, and a root whose file is gone
+  disappears, together with `extra-certificates.pem` when no extra roots are left). The start waits for that, up to
+  3 s, then goes on on Ardia's plugin queue; past that it gets the system roots (`/etc/ssl/cert.pem`) directly. With no
+  extra roots configured it gets them directly as well, and staged bundles are removed. The bundles are written through the already-open data folder, to a private file
   renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain
   isn't trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the
   default because it is the one system-wide root list every runtime can read. Never a token. A sandbox Ardia can't set up means the helper
@@ -475,14 +480,17 @@ settings only once it is saved, so a failed save changes nothing.
   of its own, and nothing outside the plugins folder can.
 - **What else it refuses.** Launching apps or opening URLs (`lsopen`), Apple Events, creating launchd jobs, posting
   distributed or Darwin notifications, writing any preferences or reading any but the global domain, opening IOKit
-  user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments, and looking up any
+  user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments (`apple.cfprefs.*`) and the
+  notification center's (`apple.shm.notification_center`), and looking up any
   system service off a short list: user and group lookups, logging, per-user temp folders, preference reads, and,
   with `network` only, the resolver, network settings and TLS trust (trustd fetches
   issuers over the network on a helper's behalf) (`PluginSandbox.machAllowed`, `machAllowedOnline`). Nothing it runs follows
   live changes to your locale or other global preferences: notification posts and lookups are refused, and nothing
   measured needed them. File events are refused too: fseventsd doesn't filter by the client's sandbox (a stream on `/`
-  from inside showed writes in the home folder, live and in history replay, and gave out the device's event UUID), so
-  `fs.watch` fails inside and a runtime that needs it polls (the AI runtime's file watches do). It can't inspect or
+  from inside showed writes in the home folder, live and in history replay, and gave out the device's event UUID;
+  outside, streams on the home folder and relative to its device show them), so inside the UUID, the current and
+  per-device event ids and every stream are refused,
+  `fs.watch` fails and a runtime that needs it polls (the AI runtime's file watches do). It can't inspect or
   signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal next to a control
   outside the sandbox. Two controls are weaker: Apple Events only check that Finder runs (a real send would raise a
   privacy prompt), and sysctl writes are checked through the sandbox's own decision (`sandbox_check`), since the

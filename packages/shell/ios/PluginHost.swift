@@ -44,18 +44,20 @@ final class PluginHost {
     queue.async { [self] in
       lifecycle.enqueue(spec.name, .start, cancelled: { done(["ok": false, "reason": "a later stop or removal replaced this start"]) }) { [self] complete in
         runs.stopAll(spec.name, graceMs: 0) { [self] in
-          spawn(spec, done: done)
-          complete()
+          PluginProcess.prepareCertificates(for: spec, deliverOn: queue) { [self] certificates in
+            spawn(spec, certificates: certificates, done: done)
+            complete()
+          }
         }
       }
     }
   }
 
-  private func spawn(_ spec: PluginProcess.Spec, done: @escaping ([String: Any]) -> Void) {
+  private func spawn(_ spec: PluginProcess.Spec, certificates: PluginSandbox.PreparedCertificates, done: @escaping ([String: Any]) -> Void) {
     guard let folders = PluginFolders.current() else { return done(["ok": false, "reason": "Ardia has no data folder"]) }
     nextRun += 1
     let result = PluginProcess.spawn(
-      spec, run: nextRun, folders: folders, queue: queue,
+      spec, run: nextRun, folders: folders, queue: queue, certificates: certificates,
       onLine: { [weak self] process, line in
         self?.sink?.send("onLine", ["name": process.name, "run": process.run, "launch": process.launch, "line": line])
       },
