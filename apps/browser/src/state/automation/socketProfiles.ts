@@ -8,6 +8,7 @@ import { setOpenTabsSynced } from "../sync/engine";
 import { bool, id, ids, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { expect, now, profileArg } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
+import { askWhereSeen, shownWindowId } from "./socketAsk";
 
 const COLORS = ["plum", "blue", "purple", "pink", "red", "orange", "yellow", "green", "neutral"] as const;
 
@@ -86,7 +87,7 @@ function reorder(params: Record<string, unknown>) {
 async function remove(params: Record<string, unknown>, call: SocketCall) {
   const id = profileArg(params.profile);
   if (now().profileOrder.length <= 1) throw new OpError("refused", "That's the only profile.");
-  await deleteProfile(id, undefined, call.serving);
+  await deleteProfile(id, shownWindowId(), call.serving, askWhereSeen(`Profile ${id} wasn't deleted`));
   const deleted = !now().profiles[id];
   if (!deleted) call.stillServing();
   return { deleted };

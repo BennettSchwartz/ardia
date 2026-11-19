@@ -43,8 +43,9 @@ default applies at once.
 
 Newline-delimited JSON, UTF-8, one object per line, `\n` terminated.
 
-- Requests: `{"id": 1, "method": "…", "params": {…}}`. `id` is a safe integer or a string, echoed in the reply;
-  `params` is optional.
+- Requests: `{"id": 1, "method": "…", "params": {…}}`. `id` is a safe integer or a string of at most 256 UTF-8 bytes,
+  echoed in the reply; a longer id is refused with `bad_request` and `"id": null`, so no reply grows past the line limit
+  because of its id. `params` is optional.
 - Replies: `{"id": 1, "result": …}` or `{"id": 1, "error": {"code": "…", "message": "…"}}`. A line that isn't a JSON
   object, or has no usable `id`, gets an error with `"id": null` and the connection stays open.
 - Events: `{"event": "tab.opened", "time": 1730400000000, "data": {…}}`, in the order the store changed. Subscribing
@@ -83,6 +84,10 @@ bookmark searches) and their fixed page title.
 - `commands` → `[{"id", "title", "scope", "variants": [ids] | null}]`: the automatable commands. `title` is the menu
   title (else the command bar's, else the id), `scope` is `"page"`, `"window"` or `null`.
 - `run` `{"command", "arg"?, "window"?, "tab"?}` → `{"ok": true}` once the command was dispatched (not necessarily finished).
+  A command that would ask the user first (`closeTab` on a window's last tab with **Ask before closing the last tab**,
+  `closeTabGroup` with its warning on or on a shared folder, `back` across page engines) answers `refused` in a
+  background instance, where nobody could answer, and doesn't run; elsewhere its question shows in its window and the
+  reply still comes at dispatch, as for a click on the menu.
   `command` is a catalog id, `arg` one of its variant ids. It runs through `runCommand`, exactly as the menu or a
   shortcut would. `window` must be an eligible window id, else `no_window` (no fallback to another window); without
   it, the last focused eligible window (windows never focused come after, in window order); with no browser window
@@ -194,8 +199,8 @@ profile goes where the store puts moved tabs.
 | `tab.pin` / `tab.unpin` | `tabs`, `as`? (`tile`/`row`) | `pinTabs`; unpinning a tab of a pinned group takes it out (`placeTabs`), as Unpin does. A split's panes pin together, as rows: `as: "tile"` on one is `bad_request` |
 | `tab.activate` | `tab` | `activate` |
 | `tab.mute` / `tab.unmute` | `tabs` | `setMuted`; unmute also unmutes the site, as the menu does |
-| `tab.sleep` | `tabs` | Pinned tabs unload (`closeTabs`, as their ✕); others are discarded by Chrome. A tab is left alone (`shown`) when it, a pinned copy sharing its page, or a pane of its split is shown in any window. `outcomes`: `asleep`, `already`, `shown`, `refused`, `unsupported` |
-| `tab.wake` | `tabs` | Loads a sleeping tab in the background (`updateTab` with its woken page, or a reload for a discarded one). `outcomes`: `awake`, `already`, `failed` |
+| `tab.sleep` | `tabs` | Pinned tabs unload (`closeTabs`, as their ✕); others are discarded by Chrome. A tab is left alone (`shown`) when it, a pinned copy sharing its page, or a pane of its split is shown in any window. `outcomes`: `asleep`, `already`, `shown`, `refused`, `unsupported`. Each tab's discard has 10 s: past that the op fails (`failed`, naming the tab; the tabs before it are in `changed`) and the batch stops there, so a stuck engine call never holds up other clients' batches |
+| `tab.wake` | `tabs` | Loads a sleeping tab in the background (`updateTab` with its woken page, or a reload for a discarded one). `outcomes`: `awake`, `already`, `failed`. A reload has 10 s, as `tab.sleep`'s discard does |
 | `tab.close` | `tabs` | `closeTabs`: as ✕, so pinned tabs unload; never closes a window (a window left empty gets a New Tab) |
 | `tab.rename` / `tab.icon` | `tab`, `title` / `icon` (null resets) | `updateTab` `customTitle` / `customIcon`, as Rename… and Change Icon… |
 | `group.create` | `tabs`?, `urls`?, `window`?, `profile`?, `parent`?, `pinned`? (default true, like New Group with Tab), `name`?, `icon`?, `color`?, `collapsed`?, `before`?/`after`? | Opens `urls`, else one New Tab when no `tabs`; places them (out of their old groups, into the parent), `groupTabs`, then `updateGroup`. With no anchor and no parent, a group made from tabs of another group goes just above that group's outermost group (its first tab left), so groups made one after another from one group keep their creation order and the group, with the tabs left in it, stays below them; `group.ungroup` of it then leaves those tabs where they are, as the sidebar's Ungroup does. A group made from loose tabs goes where its first tab was. An anchor decides where the group goes, by the rule above: next to a pinned row or a top-level pinned group it is a pinned group there; next to a tab or group inside group P it is nested in P; next to a Top Apps tile it is refused; a `pinned` or `parent` that contradicts that is `bad_request`, before anything opens. Top Apps tiles in `tabs` are refused. The post-check covers its parent, pinned state and side of the anchor; if it fails, or a URL doesn't open (a `tab.opening` rule cancelled it: `refused`), the tabs it opened are closed again and the tabs it was given stay where they were moved (`error.changed`) |

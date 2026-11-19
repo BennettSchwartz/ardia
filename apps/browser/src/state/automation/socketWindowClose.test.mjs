@@ -99,23 +99,3 @@ test("littleArdia.close answers only once its quit prompt is answered, and refus
     dialogs.confirm = originalConfirm;
   }
 });
-
-test("turning control off during the close animation leaves the window open", async () => {
-  const { windowId } = await freshWindow();
-  S().createWindow({ url: "https://other.example/" });
-  S().updateSettings({ warnBeforeClosingWindow: false });
-  const animate = shellNativeModules.ArdiaAppWindows.animateWindowClose;
-  const finishing = [];
-  shellNativeModules.ArdiaAppWindows.animateWindowClose = () => new Promise((resolve) => finishing.push(resolve));
-  try {
-    const closing = fire("windows.close", { window: windowId });
-    for (let i = 0; i < 20 && !finishing.length; i++) await tick();
-    assert.equal(finishing.length, 1, "the close animation started");
-    S().updateSettings({ cliControl: false });
-    finishing[0]();
-    assert.equal((await closing).error?.code, "failed");
-    assert.ok(S().windows[windowId], "the window stayed open");
-  } finally {
-    shellNativeModules.ArdiaAppWindows.animateWindowClose = animate;
-  }
-});

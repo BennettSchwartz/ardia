@@ -31,24 +31,31 @@ UI update still happens.
   `stillServing()` first, as `apply` does between ops. Turning control off mid-call answers `failed` "Control was
   turned off before Ardia made the change, so nothing changed." The check also runs inside the shared actions the
   socket calls, through a `may…` callback they take: after `profiles.delete`'s and `extensions.uninstall`'s
-  confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes, before the close
-  starts, and again when the close animation commits; in Little Ardia's close after its quit prompt; in `tabs.reload`,
+  confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes and before the close starts (once the
+  window's native close has started, AppKit has already ordered the window out, so the store close always finishes and
+  the reply says it closed, whatever happens to control meanwhile); in Little Ardia's close after its quit prompt; in `tabs.reload`,
   `tabs.back` and `tabs.forward` after a shared page is handed over, and in cross-engine back after its unsaved-work
   check; in `downloads.open` before it reveals an opened archive; in `history.clear` before the cache write (the engine
   clear already ran, and the cache reconciles from the engine's own events); in `offscreen` after its ownership read;
-  and in `plugins.remove` after the plugin is saved as off and before its files go. A write that already happened is
-  reported as done, never as "nothing changed". Left as they are: `apply` checks between ops, not between one op's sleep
-  and wake steps, which are synchronous store calls; `run` checks once, as a menu command's own async work (a prompt it
-  shows) belongs to the UI it runs; and an `answer` to a decide hook is checked when it arrives, and Ardia acts on it at
+  and in `plugins.remove` after the plugin is saved as off and again after its programs are unlinked, before its files go. A write that already happened is
+  reported as done, never as "nothing changed". `apply` checks between ops and after each engine call inside `tab.sleep` and
+  `tab.wake` (each has 10 s before its op fails with `failed`, so one stuck engine call never stalls the batches every
+  client's `apply` queues behind it). Left as they are: `run` checks once, as a menu command's own async work belongs
+  to the UI it runs (a command that would ask is refused up front in a background instance, see below); and an `answer` to a decide hook is checked when it arrives, and Ardia acts on it at
   once.
 - **The UI's path, not a shortcut.** Where the UI does more than one store call, the socket does the same:
   `windows.close` goes through the window close guard (it asks first when the user set **Ask before closing a window
   with multiple tabs**, answers `refused` if they cancel, and keeps the last window to reopen). It shares the UI's
   one-close-per-window guard (a second close of a window that is already asking or closing answers `refused`), and
   decides whether a window is the last one at the moment its close commits, so two closes at once keep exactly one
-  window to reopen. When Ardia would have to ask and nobody could see the question (the window isn't visible, or Ardia
-  runs as a background instance), it answers `refused` instead of waiting on a dialog nobody can answer
-  (`confirm({onlyIfShown})`, `DialogsModule.swift`); it never falls back to an app-modal alert. Linux and Windows
+  window to reopen. Every confirmation the socket can cause (`windows.close`, `profiles.delete`, `extensions.uninstall`, `tabs.back`
+  across page engines) is asked with `confirm({onlyIfShown})` (`socketAsk.ts`, `DialogsModule.swift`): when Ardia would
+  have to ask and nobody could see the question (no window of it is visible, or Ardia runs as a background instance), it
+  answers `refused` instead of waiting on a dialog nobody can answer, and it never falls back to an app-modal alert. The
+  reply comes only after the user answers. `run` keeps its contract (the reply comes at dispatch, and a prompt the
+  command shows belongs to the UI it runs), so in a background instance it refuses, before running, the commands that
+  would ask (`closeTab` on a window's last tab with its warning on, `closeTabGroup` with its warning on or on a shared
+  folder, `back` across page engines; `runAsks.ts`). Linux and Windows
   ignore `onlyIfShown` for now and ask as before. `littleArdia.close` and `windows.close` on a Little Ardia reply
   only once the window is closed, so a Cancel on its quit prompt answers `refused`, `profiles.update
   {syncTabs: false}` retires the open-tab records as the Settings switch does (`setOpenTabsSynced`), `settings.set
@@ -58,7 +65,8 @@ UI update still happens.
 - **Store actions only.** Writes call the domain's own actions (`storeAction(…)` on `useBrowser`, or the domain's
   exported functions for the stores outside it). Nothing calls `setState` on another domain's store.
 - **Irreversible data loss asks the user.** `profiles.delete` and `extensions.uninstall` call the same actions the UI
-  does, which show Ardia's confirmation; the reply waits for the answer (`{deleted}` / `{removed}`).
+  does, which show Ardia's confirmation on the last focused window; the reply waits for the answer (`{deleted}` /
+  `{removed}`), and is `refused` when nobody can see the question.
 - **Private stays private.** Private windows, incognito profiles and Peek's own tabs are invisible and untouchable, as
   in `windows` and `workspace` (`eligibleKind`, `isEligibleTab`).
 - **Ids, not indexes.** Tabs, windows, groups, splits, bookmarks, downloads and profiles are named by the app's ids
@@ -66,16 +74,23 @@ UI update still happens.
 - **Errors** come from `automationMethods.ts`: `bad_request` (params don't match the schema, or a value is wrong),
   `unknown_method`, `no_window` (no such window, tab, profile, group, split, bookmark or download the command may use),
   `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen). A new code needs a new
-  protocol number; none was needed for this work.
+  protocol number; none was needed for this work. A request `id` is a safe integer or a string of at most 256 UTF-8
+  bytes; a longer one is refused up front with `bad_request` and `"id": null` (`automationMethods.ts`, and the native
+  fallback in `ControlOutput.swift` keeps the same 256), so no reply can overflow a line because of its id.
 - **Big lists page, and the bound comes first.** `history.search`, `bookmarks.search` and `downloads.list` take `limit`
   (default 100, at most 1000) and `offset`, and answer `{ items, total, nextOffset }`; only the page is built. A page
   also stops once it reaches 512 KiB, with `nextOffset` where it stopped, and a string field over 32,768 characters is
-  cut there and named in the row's `clipped` list, so any page fits on one line.
+  cut there and named in the row's `clipped` list, so any page fits on one line. A clipped value is never a key:
+  `history.search` rows carry an `id` (`h…`, minted per page and profile, the same cold or warm, good while Ardia runs
+  for the newest 20,000 ids handed out; `historyKeys.ts`), and `history.remove` takes `ids`, or `urls` only when every
+  URL is shorter than 32,768 characters; a longer one may be a clipped row whose text equals another page's URL, so it's
+  refused with `bad_request`.
   `bookmarks.tree` stops at 5,000 items or about 1 MiB, leaves the folders it didn't open as a child count and says
   `truncated: true`; ask for a `folder` or a lower `depth` to see more.
 - **History reads the newest 20,000 pages, cold or warm.** `history.search` works on one window: the newest 20,000
   pages by last visit, read from the engine, or from the app's history cache when that has loaded, with the same
-  answer either way. Without a query or time range it reads only `offset + limit + 1` pages; with one it reads the
+  answer either way: both count only http, https and file pages, as the cache keeps (the engine read asks for more rows
+  when other schemes fill its page, up to the cache's 100,000). Without a query or time range it reads only `offset + limit + 1` pages; with one it reads the
   window and filters it. `truncated: true` means history goes past the window (pages older than the newest 20,000
   aren't searched or paged to: an `offset` past it returns no items). `total` is exact only when Ardia read all of
   history: `null` when it read just enough for this page and one more, or when the window was cut off. `nextOffset`
@@ -87,8 +102,10 @@ UI update still happens.
   command's `control.py` and `control.rs`; a longer line drops the connection) (`socketWire.ts`):
   - a read whose reply wouldn't fit answers `failed` "The reply would be over 1 MiB, the most a line can carry; ask for
     less (a smaller limit, a later offset, a folder, a window or a lower depth)";
-  - a write (`mutates: true`) whose result wouldn't fit answers `{ok: true, oversized: true, …}` with its scalar fields
-    and each list as `{count}`, and a hint to read it back, so the size never hides whether the write happened;
+  - a write (`mutates: true`) whose result wouldn't fit answers `{ok, oversized: true, …}` with its scalar fields and
+    each list as `{count}`, and a hint to read it back, so the size never hides whether the write happened. A partial
+    `apply` keeps `ok: false`, `applied` and its `error`'s `index`, `code` and `message` (cut to 1,024 characters) and
+    `changed` (as counts if the ids don't fit);
   - an event keeps 64 bytes free for the `dropped` marker; one that wouldn't fit goes out with its scalar fields, each
     list as `{count}` and `truncated: true`;
   - a decide request that wouldn't fit isn't sent: Ardia goes on as if nobody answered (its default);
@@ -103,9 +120,14 @@ UI update still happens.
   - The queue checks the line limit again: an event over 1 MiB is dropped and counted, and a reply over it is replaced
     with a `failed` error for the same id.
   - A connection is closed only when its own unread replies and decide messages fill the 34 MiB, it sends more than 32
-    requests without reading, a request line passes 1 MiB or stalls for 30 s, or control is turned off. It is never
-    closed in the middle of a line: Ardia drops what was queued after that line (the replies are reported unwritten),
-    stops reading, finishes the line within 5 s and then closes. A write error or a reader that hung up closes at once.
+    requests without reading, a request line passes 1 MiB or stalls for 30 s, or control is turned off. Ardia doesn't
+    close it in the middle of a line by choice: it drops what was queued after that line (the replies are reported
+    unwritten), stops reading, finishes the line within 5 s and then closes. A peer that reads nothing for those 5 s
+    can see a cut line before the end of the stream; every shipped command reads an end of stream in the middle of a
+    line as a dropped connection whose outcome is unknown, which is what it is. A write error closes at once.
+  - A peer that closes only its writing side (it sent its requests and waits) still gets its replies: Ardia stops
+    reading, sends no more events, and keeps writing the replies queued and the ones still being worked out until all
+    are written or 5 s pass, then closes.
   - `cli_socket_lines_shrunk` counts replies, events and decide requests that went out shortened.
   - Linux has its own queue in `engine/ardiacore-linux` and doesn't have these rules yet; that's an engine change.
 - **Telemetry.** Each call counts once in its method family (`cli_socket_calls_<family>`) and once in
@@ -189,7 +211,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | peek | `peek.list` | `peek.open {tab, url}`, `peek.close {tab}`, `peek.toTab {window}` |
 | littleArdia | (in `windows`) | `littleArdia.open {url?, profile?}`, `littleArdia.close`, `littleArdia.toMain` |
 | bookmarks | `bookmarks.tree {profile?, folder?, depth?}`, `bookmarks.search {profile?, query, limit?, offset?}`, `bookmarks.get {id}` | `bookmarks.add`, `bookmarks.addFolder`, `bookmarks.update`, `bookmarks.move {ids, parent, index?}`, `bookmarks.remove {ids}` |
-| history | `history.search {profile?, query?, since?, until?, limit?, offset?}` | `history.remove {profile?, urls}`, `history.clear {profile?, since?}` |
+| history | `history.search {profile?, query?, since?, until?, limit?, offset?}` (rows `{id, url, title, visits, lastVisit, clipped?}`) | `history.remove {profile?, ids \| urls}`, `history.clear {profile?, since?}` |
 | downloads | `downloads.list {profile?, state?, limit?, offset?}` (live progress for running downloads), `downloads.settings {profile?}` | `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.keep`, `downloads.open`, `downloads.reveal`, `downloads.remove`, `downloads.clear`, `downloads.setSettings` |
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
 | search | `search.engines` (`default` is the engine searches use, an extension's when one controls it, with `controlledBy`) | `search.setDefault {id}` (`refused` while an extension controls it, as Settings disables the picker; so is `settings.set {searchEngine}`), `search.add`, `search.update`, `search.remove` |
