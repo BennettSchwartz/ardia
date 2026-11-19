@@ -13,6 +13,8 @@ import { useBrowser } from "../browser/store";
 import { patchPage, pageOf, usePages } from "../tabs/pageState";
 import { startDeviceChoosers } from "./deviceChoosers";
 import { originForSecurityDisplay } from "../../lib/url";
+import { getSiteSettings, type SiteSettingType } from "../../platform/siteSettings";
+import { currentEngineProfile } from "../browser/current";
 import { permissionGate } from "./permissionGate";
 import { noteNotificationRequestAutoDenied } from "../telemetry/notificationRequestCounts";
 
@@ -100,14 +102,53 @@ export function answerPermission(tabId: string, requestId: string, result: Permi
   answered(tabId, request, result);
 }
 
-export async function answerPermissionConfirmed(tabId: string, requestId: string, result: PermissionResult, remember: boolean): Promise<"answered" | "gone"> {
+const READBACK: Partial<Record<PermissionKind, SiteSettingType>> = {
+  camera: "camera",
+  microphone: "microphone",
+  cameraPanTiltZoom: "cameraPanTiltZoom",
+  location: "location",
+  notifications: "notifications",
+  clipboard: "clipboard",
+  midi: "midi",
+  sensors: "sensors",
+  windowManagement: "windowManagement",
+  localFonts: "localFonts",
+  idleDetection: "idleDetection",
+  storageAccess: "storageAccess",
+  fileSystem: "fileSystem",
+  keyboardLock: "keyboardLock",
+  pointerLock: "pointerLock",
+  multipleDownloads: "automaticDownloads",
+};
+
+export const READBACK_WAIT_MS = 5000;
+
+export const confirmableKinds = (kinds: readonly PermissionKind[]) => kinds.length > 0 && kinds.every((kind) => READBACK[kind]);
+
+async function readsBack(tabId: string, request: PermissionRequest, value: "allow" | "block", deadline: number) {
+  const tab = useBrowser.getState().tabs[tabId];
+  if (!tab) return false;
+  const engine = request.id.startsWith("wk-") ? "webkit" : "chromium";
+  const types = request.permissions.map((kind) => READBACK[kind]!);
+  for (;;) {
+    const settings = await getSiteSettings(currentEngineProfile(tab.profileId), new URL(request.origin).origin, engine).catch(() => null);
+    if (settings && types.every((type) => settings[type]?.value === value)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+export async function answerPermissionConfirmed(tabId: string, requestId: string, result: "accept" | "deny"): Promise<"confirmed" | "gone" | "unknown"> {
   const request = pageOf(tabId).permission;
   if (!request || request.id !== requestId) return "gone";
-  const accepted = await answerPermissionIfPending(request.id, result, remember);
-  if (pageOf(tabId).permission?.id !== request.id) return accepted ? "answered" : "gone";
-  if (accepted) answered(tabId, request, result);
-  else next(tabId);
-  return accepted ? "answered" : "gone";
+  const deadline = Date.now() + READBACK_WAIT_MS;
+  if (!(await answerPermissionIfPending(request.id, result, true))) {
+    if (pageOf(tabId).permission?.id === request.id) next(tabId);
+    return "gone";
+  }
+  if (!(await readsBack(tabId, request, result === "accept" ? "allow" : "block", deadline))) return "unknown";
+  if (pageOf(tabId).permission?.id === request.id) answered(tabId, request, result);
+  return "confirmed";
 }
 
 export const queuedPermissions = (tabId: string) => queues.get(tabId)?.length ?? 0;

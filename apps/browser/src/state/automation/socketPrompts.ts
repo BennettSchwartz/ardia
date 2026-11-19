@@ -1,5 +1,5 @@
 import { usePages, pageOf, type PageState } from "../tabs/pageState";
-import { answerPermissionConfirmed, answersJustOnce, queuedPermissions } from "../site/permissions";
+import { answerPermissionConfirmed, answersJustOnce, confirmableKinds, queuedPermissions } from "../site/permissions";
 import { answerAutofillPromptConfirmed, answerPasswordPromptConfirmed, passwordPromptId, type ConfirmedAnswer } from "../site/prompts";
 import type { AutofillPrompt } from "../tabs/pageState";
 import { useBrowser, type BrowserState } from "../browser/store";
@@ -45,6 +45,8 @@ function permissionTab(id: string) {
   return shown;
 }
 
+export const UNCONFIRMED = "Ardia can't confirm that answer until the engine reports a permission's result, so the ardia command doesn't give it; answer allow or block, or leave it to the prompt on screen.";
+
 async function respondPermission(params: Record<string, unknown>, call: SocketCall) {
   const { tab, page } = permissionTab(params.id as string);
   const request = page.permission!;
@@ -52,14 +54,24 @@ async function respondPermission(params: Record<string, unknown>, call: SocketCa
   if (decision === "allowOnce" && !answersJustOnce(request.permissions)) {
     throw new OpError("refused", "Only camera, microphone and location can be allowed just this once; answer allow or block.");
   }
-  const result = decision === "allow" || decision === "allowOnce" ? "accept" : decision === "block" ? "deny" : "dismiss";
+  if (decision === "allowOnce" || decision === "dismiss") throw new OpError("refused", UNCONFIRMED);
+  if (!confirmableKinds(request.permissions)) throw new OpError("refused", `Ardia can't read back an answer for ${request.permissions.join(", ") || "this prompt"}, so the ardia command doesn't give it; leave it to the prompt on screen.`);
   call.stillServing();
-  const outcome = await answerPermissionConfirmed(tab, request.id, result, decision === "allow" || decision === "block");
+  const outcome = await answerPermissionConfirmed(tab, request.id, decision === "allow" ? "accept" : "deny");
   if (outcome === "gone") throw new OpError("failed", CLOSED);
+  if (outcome === "unknown") throw new OpError("failed", "The answer went to the engine but its outcome is unknown: the site's setting didn't show it within 5 s.");
   return { ok: true, id: request.id, decision };
 }
 
-const usernameList = (usernames: string[]) => ({ usernames: usernames.slice(0, LISTED_USERNAMES).map((u) => u.slice(0, USERNAME_CHARS)), usernameCount: usernames.length });
+const usernameList = (usernames: string[]) => ({
+  usernames: usernames.slice(0, LISTED_USERNAMES).map((name, index) => ({ id: `u${index}`, name: name.slice(0, USERNAME_CHARS) })),
+  usernameCount: usernames.length,
+});
+
+const usernameAt = (usernames: string[], usernameId: unknown) => {
+  const match = typeof usernameId === "string" ? /^u(\d{1,4})$/.exec(usernameId) : null;
+  return match ? usernames[Number(match[1])] : undefined;
+};
 
 const passwordRow = ({ tab, window, page }: Shown) => {
   const p = page.passwordPrompt!;
@@ -74,9 +86,9 @@ async function respondPassword(params: Record<string, unknown>, call: SocketCall
   const update = prompt.state === "update";
   const fits = update ? decision === "update" || decision === "notNow" || decision === "dismiss" : decision === "save" || decision === "never" || decision === "notNow" || decision === "dismiss";
   if (!fits) throw new OpError("bad_request", `The prompt asks to ${update ? "update" : "save"} a password; ${decision} isn't one of its buttons.`);
-  const username = params.username as string | undefined;
-  if (username !== undefined && !(update && prompt.usernames.length > 1 && prompt.usernames.includes(username))) {
-    throw new OpError("bad_request", "username picks one of the prompt's usernames, and only when it offers a choice.");
+  const username = params.usernameId === undefined ? undefined : usernameAt(prompt.usernames, params.usernameId);
+  if (params.usernameId !== undefined && !(update && prompt.usernames.length > 1 && username !== undefined)) {
+    throw new OpError("bad_request", "usernameId picks one of the prompt's usernames by its id, and only when it offers a choice.");
   }
   const action = decision === "notNow" ? (update ? "nope" : "dismiss") : decision;
   call.stillServing();
@@ -119,7 +131,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
   {
     name: "permissions.respond",
     mutates: true,
-    description: "Answer a permission prompt on screen, as its buttons do: allow and block are remembered, allowOnce lasts this visit (camera, microphone and location only), dismiss closes it",
+    description: "Answer a permission prompt on screen with allow or block, remembered as the buttons do; the reply waits until the site's setting shows the answer. allowOnce and dismiss are refused until the engine reports their outcome",
     params: obj({ id: text("A prompt id from permissions.prompts"), decision: oneOf(PERMISSION_DECISIONS, "The answer") }, ["id", "decision"]),
     result: "{ok, id, decision}",
     run: respondPermission,
@@ -127,7 +139,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
   {
     name: "passwords.prompts",
     mutates: false,
-    description: `Save and update password prompts on screen: the site and username, never the password. usernames lists at most ${LISTED_USERNAMES}; usernameCount says how many there are`,
+    description: `Save and update password prompts on screen: the site and username, never the password. usernames lists at most ${LISTED_USERNAMES} as {id, name}, name cut to ${USERNAME_CHARS} characters; usernameCount says how many there are`,
     params: obj({}),
     result: "[{id, tab, window, origin, state, username, usernames, usernameCount, federation}]",
     run: () => shownPrompts((p) => p.passwordPrompt).map(passwordRow),
@@ -141,7 +153,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
         tab: TAB,
         id: id("The prompt's id from passwords.prompts"),
         decision: oneOf(PASSWORD_DECISIONS, "save or never for a save prompt, update for an update prompt; notNow and dismiss for both"),
-        username: text("For an update prompt that offers several usernames, the one to update"),
+        usernameId: id("For an update prompt that offers several usernames, the id of the one to update, from usernames"),
       },
       ["tab", "id", "decision"],
     ),
