@@ -257,8 +257,8 @@ Events. No protocol change: an older command never names them.
 
 Every URL an event carries, `url` or the `urls` of `history.removed`, is cut to origin and path for a socket
 connection or plugin without `fullUrls` (`eventRedaction.ts`, used by both delivery paths). `history.removed` keeps
-its whole line, escaped JSON, envelope and newline included (measured with `socketWire.ts`'s `frameBytes`), under 256
-KB: `urls` stops at 1000 entries or where the next one would pass that, `count` stays the full number, and
+its whole line, escaped JSON, envelope and newline included (measured with `socketWire.ts`'s `frameBytes`), plus
+the room `socketWire.ts` keeps for a `dropped` marker (`DROPPED_MARKER_ROOM`), under 256 KB: `urls` stops at 1000 entries or where the next one would pass that, `count` stays the full number, and
 `truncated: true` says some were left out. The 1 MiB line limit, the output budgets and the `dropped` marker are the
 socket's own (`socketWire.ts`, `ControlOutput.swift`), the same for every event.
 
@@ -284,28 +284,49 @@ that profile, where the user adds it, and answers `{waiting: true, id}` (or `{in
 there); `folder` (an absolute path, as Load Unpacked Extension… picks) shows Ardia's install sheet in a window of
 that profile and answers when the user decides: `{installed, extensions}`, naming the extension this request added
 (a reinstall of the same id counts), or `{installed: false}` when the user cancels or another sheet replaces it.
-Nothing installs without the user's click.
+Nothing installs without the user's click. A `folder` request on a platform that can't make Ardia's own copy (Linux
+and Windows today, `PLATFORM_FEATURES.stagesUnpackedFolders`) is `refused` before the path is checked or read.
 
 The folder path is refused before anything is read when it isn't absolute, holds `.` or `..`, or is a system root
-or a home folder. macOS then resolves it (`realpath`) and, off the main thread, copies it once into a private staging
-folder (`ArdiaExtensionStaging.mm`): one walk reads every file a single time, hashes exactly the bytes it writes into
-the copy, and refuses the whole folder when any entry can't be read, any file is over 4 MB, it holds more than 20,000
-files or 1 GB, or a link points outside it or at a folder (a link to a file inside is copied as that file). Hidden
-entries (names starting with `.`, such as `.git`) and a top-level `_metadata` (Chromium's own) are left out of both the
-copy and the digest. The sheet's name, permissions, locales and icons are then read from that copy only, so they and
-the `digest` describe the same bytes. One sheet shows at a time: a second `folder` request while any install sheet is
-up is `refused`. Each sheet carries its request's key, so its Add button and Return confirm that request only.
+or a home folder. macOS then resolves it (`realpath`), opens it once, and from then on reads only relative to
+descriptors it opened (`ArdiaExtensionWalk.mm`): every entry is checked with `fstatat` and opened with `openat` and
+`O_NOFOLLOW | O_NONBLOCK`, and each opened descriptor must be the same file or folder `fstatat` saw, so swapping a
+folder for a link mid-walk can't point the read anywhere else. Only regular files and folders are accepted: a link
+anywhere in the folder, a FIFO, a device or a socket refuses it, as does any entry that can't be read. Hardlinks are
+allowed; the copy and its digest are of what was read. One walk streams every file into the copy and hashes the same
+bytes, up to 50,000 entries and 512 MB in all, with no limit per file. Only `.git`, `.hg`, `.svn`, `.DS_Store` and a
+top-level `_metadata` (Chromium's own) are left out of both the copy and the digest. The manifest, locales and icons are
+then read from the copy, each through a descriptor and at most 4 MB, and `default_locale` must name a folder in
+`_locales`. So the sheet, the `digest` and what Chromium loads are the same bytes. One sheet shows at a time: a second
+`folder` request while any install sheet is up is `refused`. Each sheet carries its request's key, so its Add button
+and Return confirm that request only.
 
-Confirming hashes the copy again and installs the copy, never the source folder: editing the source after the sheet
-showed changes nothing about what's added. Copies live in `<data dir>/Ardia Unpacked Extensions/<key>`, where the
-key comes from the source folder's canonical path, so an extension without a `key` keeps the same id each time the
-same folder is loaded. Reinstall policy: loading the same folder again shows a new sheet, and only Add replaces the
-earlier copy, atomically (the new copy is staged beside it and swapped in with `rename`), after which Chromium reloads
-it; Reload on the extension's page reloads Ardia's copy, so picking up edits to the source means loading the folder
-again. Cancel, a replaced sheet or a closed window deletes the staged copy, and staged copies left over for a day
-are swept. The copy stays writable for Chromium's own files under `_metadata` (indexed rulesets). Load Unpacked
-Extension… in Settings goes through the same copy. Where the platform can't stage the folder (Linux and Windows
-today) a socket `folder` install is `refused`.
+Ardia's copies live in `<data dir>/Ardia Unpacked Extensions/p-<profile hash>/<source hash>/` (`ArdiaExtensionStaging.mm`),
+one folder per profile, so approving a newer copy in one profile never touches the files another profile runs. The
+root is created 0700 and checked (a folder, not a link, owned by the user, private) before every use. Inspection
+stages into `<time>-<uuid>.stage` beside the installed copy, `live`. Add hashes the stage again with the same rules
+and swaps it into `live` (`renamex_np` with `RENAME_SWAP`, so the previous copy moves aside intact), and only then asks
+Chromium to load `live`. When Chromium accepts, the previous copy is deleted and `source.json` records the source
+folder and the digest; when it refuses, the previous copy is swapped back untouched and the new one deleted. The
+installed path stays `…/live` across reinstalls because Chromium derives an unkeyed extension's id from its path:
+a per-install path would give the extension a new id, and lose its data, each time.
+
+Identity is checked apart from that storage key. Inspection also answers `installId`, the id Chromium will assign
+(from the manifest's `key`, or from the `live` path, as Chromium hashes it), and `installPath`. When the profile
+already has that id from a different place, the sheet says which extension it replaces and where it came from, and a
+socket `folder` request needs `replace: true` or it is `refused` (its copy deleted). An extension added before this
+change was loaded straight from its folder, so its id came from that path: loading the same folder now adds Ardia's
+copy under a new id beside it, and the sheet says the old one stays and the copy starts without its data.
+
+Reinstall policy: a socket-approved install, like one from Settings, runs Ardia's copy, and Reload on the extension's
+page reloads that copy. Settings adds **Reload from Source** for these: it stages the source folder again and, when
+the digest matches `source.json`, deletes that stage and reloads quietly; when anything changed, it shows a fresh
+review sheet, and only Add replaces the copy (counted as `unpacked_source_reloads_unchanged` and
+`unpacked_source_reloads_changed`). Removing the extension deletes its copy for that profile once nothing is being
+added or staged there; the source folder is never touched. Every staged copy is tracked while its sheet lives and is
+deleted on every way the sheet ends: Cancel, a replaced sheet, its browser window closing, Settings' sheet unmounting,
+or a failed Add (deleted before the error is dismissed). A sweep at each inspection deletes only stages that match the
+exact generated name, aren't tracked, and are over a day old.
 
 Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it: a Web Store prompt
 that arrives meanwhile waits and shows after. A socket request settles only on Chromium's answer from then on, even
@@ -318,11 +339,14 @@ profile; otherwise nothing installs and the request answers `failed`. Closing th
 `extensions.configure` sets what an extension's page in Settings offers: site access (only for an extension that
 asks for sites), Allow in Incognito (not for one whose manifest says `"incognito": "not_allowed"`), and Allow User
 Scripts (only when the extension uses them); a policy-installed one is `refused`. The whole call is checked before
-anything changes, then site access, the one change Chromium can
+anything changes, against a list read from Chromium for the call, never the cached row: Incognito against
+`incognitoAllowed`, which the list reads from the loaded extension's own manifest (Chromium's own eligibility flag,
+`incognito_access.is_enabled`, isn't exported by `ac_extensions_list`; reading it needs an `engine/` change). Then site
+access, the one change Chromium can
 still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
 and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
 `sites`) as success. The reply reads the list again with a request started after the write, never one that was
-already running. Changing several fields in one engine call atomically would need `ac_extensions.cc`
+already running; if that read fails the call answers `failed`, never the cached row. Changing several fields in one engine call atomically would need `ac_extensions.cc`
 (`engine/`) to validate before it applies anything.
 
 ### Window geometry
@@ -338,12 +362,15 @@ bottom-left of the main display, the same as `frame` in `windows`. A frame is ke
 least the window's smallest size; a frame that overlaps no display, or isn't finite with a positive size, is refused
 by the native call itself, and the socket also bounds every coordinate to ±100,000 points. Zoom is macOS's (the
 green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
-finished (`didEnter`/`didExit` for the direction asked, or the window closing), not when it starts. Each call owns the
-window's transition natively until one of those notifications arrives; only its own notifications settle it, so an
-earlier transition's late notification can't answer a later request. After 6 s it answers with `transition:
-"timeout"` (the socket's `failed`, "Timed out…") but keeps the ownership, and a call made while another owns the
-window answers `transition: "busy"` (the socket's `refused`). If AppKit never ends a transition, a call 30 s after it
-began takes the window over. The socket runs one full-screen change at a time per window, checks the final geometry
+finished, not when it starts. `FullScreenLifecycle.swift` tracks every window's transitions, whoever starts them (a
+call, the green button, the menu or a keyboard shortcut): `willEnter`/`willExit` opens one and gives it a generation
+number, and `didEnter`, `didExit`, the window closing, or a failure ends it. AppKit reports failures only to the
+window's delegate, so Ardia forwards Chromium's delegate's `windowDidFailToEnterFullScreen:` and
+`windowDidFailToExitFullScreen:` as notifications. While a transition is open, a call answers `transition: "busy"`
+(the socket's `refused`), with no takeover after any time. A call is settled only by a transition whose generation is
+newer than the last one when it toggled, so a late notification can't answer a newer call. After 6 s it answers
+`transition: "timeout"` (the socket's `failed`, "Timed out…"), and the window stays busy until AppKit ends that
+transition. The socket runs one full-screen change at a time per window, checks the final geometry
 against the request, waits for the store to follow (`failed` if it doesn't within 4 s), and answers `refused` while a
 page is full screen in the window, `failed` if the window didn't get there. None of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
 window events they already listen to. `PLATFORM_FEATURES.windowGeometry` is on for macOS only: Linux needs the same
