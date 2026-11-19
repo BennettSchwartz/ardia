@@ -76,7 +76,9 @@ dir.onclick = () => report(showDirectoryPicker().then(async (d) => { window.dirH
 let port = 0;
 const server = createServer((req, res) => {
   res.setHeader("content-type", "text/html");
-  if (req.url === "/child") return res.end(`<!doctype html><title>child</title><p id=childp>child</p>`);
+  if (req.url === "/child") return res.end(`<!doctype html><title>child</title><p id=childp>child</p><h1 style="position:fixed;left:100px;top:0;margin:0;font-size:12px">ardia child heading</h1>
+<div id=drag draggable=true style="position:fixed;left:10px;top:5px;width:80px;height:25px;background:#ccc">drag</div>
+<div id=drop style="position:fixed;left:10px;top:45px;width:80px;height:25px;background:#eee">drop</div><script>${DRAG_LOG}</script>`);
   if (req.url === "/xchild") return res.end(XCHILD);
   const frames = req.url === "/one" ? `<iframe id=child src="/child" style="position:fixed;left:460px;top:40px;width:160px;height:80px"></iframe><iframe id=xsite src="http://localhost:${port}/xchild" style="position:fixed;left:460px;top:140px;width:160px;height:120px"></iframe>` : "";
   const answer = () => res.end(`<!doctype html><title>${req.url.slice(1)}</title><input type=file id=f>${PICKERS}${frames}`);
@@ -92,7 +94,7 @@ const certPem = readFileSync(join(certDir, "cert.pem"));
 const spki = createHash("sha256").update(new X509Certificate(certPem).publicKey.export({ type: "spki", format: "der" })).digest("base64");
 const secure = createSecureServer({ key: readFileSync(join(certDir, "key.pem")), cert: certPem }, (req, res) => {
   res.setHeader("content-type", "text/html");
-  res.end(`<!doctype html><title>secure</title><p>secure</p>`);
+  res.end(`<!doctype html><title>secure</title><p id=secure>ardia secure fixture</p>`);
 });
 await new Promise((r) => secure.listen(0, "127.0.0.1", r));
 const secureOrigin = `https://127.0.0.1:${secure.address().port}`;
@@ -311,10 +313,13 @@ try {
     return replies;
   };
   const logOf = async (session) => (await cli.send("Runtime.evaluate", { expression: "(() => { const log = window.dragLog.join(','); window.dragLog = []; return log; })()", returnByValue: true }, session)).result?.result?.value;
+  const dragsRefused = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefused ?? -1;
   await logOf(csOne);
+  const refusedBeforeMain = await dragsRefused();
   const pluginDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
   const pluginLog = await logOf(csOne);
-  check("plugin: a drag from its press in the main frame shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart,dragend" && pluginDrag.every((r) => !refused(r)), `${pluginLog}; ${pluginDrag.map(text).join(" | ")}`);
+  const refusedAfterMain = await dragsRefused();
+  check("plugin: a drag from its press in the main frame is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart,dragend" && refusedBeforeMain >= 0 && refusedAfterMain - refusedBeforeMain === 1 && pluginDrag.every((r) => !refused(r)), `${pluginLog}; refused ${refusedBeforeMain} -> ${refusedAfterMain}; ${pluginDrag.map(text).join(" | ")}`);
   const clicksOf = async () => (await cli.send("Runtime.evaluate", { expression: "window.clicks", returnByValue: true }, csOne)).result?.result?.value;
   const clicksBefore = await clicksOf();
   for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
@@ -329,18 +334,33 @@ try {
   const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));
   const cliXsite = xsiteTarget && (await cli.send("Target.attachToTarget", { targetId: xsiteTarget.targetId, flatten: true })).result?.sessionId;
   if (cliXsite) await logOf(cliXsite);
+  const refusedBeforeXsite = await dragsRefused();
   const xsiteDrag = xsite ? await dragWith(plugin, xsite.params.sessionId, dragPath(50, 25, 75)) : [];
   const xsiteLog = cliXsite ? await logOf(cliXsite) : null;
-  check("plugin: a drag from its press in a cross-site frame (its own frame session) shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart,dragend" && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; ${xsiteDrag.map(text).join(" | ")}`);
+  const refusedAfterXsite = await dragsRefused();
+  check("plugin: a drag from its press in a cross-site frame (its own frame session) is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart,dragend" && refusedAfterXsite - refusedBeforeXsite === 1 && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; refused ${refusedBeforeXsite} -> ${refusedAfterXsite}; ${xsiteDrag.map(text).join(" | ")}`);
   if (cliXsite) {
-    await dragWith(cli, cliXsite, dragPath(50, 25, 75));
+    const refusedBeforeOwner = await dragsRefused();
+    await dragWith(cli, csOne, dragPath(510, 165, 215));
     const ownerXsite = await logOf(cliXsite);
-    check("cli: the owner's drag in the cross-site frame still drops", /drop/.test(ownerXsite ?? ""), ownerXsite);
+    check("cli: the owner's drag through the top-level session, aimed at the cross-site frame, still drops there and isn't refused", /^dragstart,.*drop.*dragend$/.test(ownerXsite ?? "") && (await dragsRefused()) === refusedBeforeOwner, ownerXsite);
   }
+  const childTarget = (await cli.send("Page.getFrameTree", {}, csOne)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
+  const childLogOf = async () => (await cli.send("Runtime.evaluate", { expression: "(() => { const w = document.getElementById('child').contentWindow; const log = w.dragLog.join(','); w.dragLog = []; return log; })()", returnByValue: true }, csOne)).result?.result?.value;
+  await childLogOf();
+  const refusedBeforeChild = await dragsRefused();
+  await dragWith(plugin, ps, dragPath(510, 57, 97));
+  const childLog = await childLogOf();
+  const clicksBeforeChild = await clicksOf();
+  for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
+  await sleep(300);
+  check("plugin: a drag from its press in a same-process child frame is refused, its dragend reaches that child frame, and the next click is delivered", !!childTarget && childLog === "dragstart,dragend" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
   const childFrame = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childAx = childFrame && (await plugin.send("Accessibility.getFullAXTree", { frameId: childFrame }, ps));
+  const childNodes = childAx?.result?.nodes ?? [];
+  const childFrameIds = childNodes.map((n) => n.frameId).filter(Boolean);
   const pierced = JSON.stringify((await plugin.send("DOM.getDocument", { depth: -1, pierce: true }, ps)).result ?? {});
-  check("plugin: an in-scope child frame is traversed (frame tree, accessibility tree and pierced DOM)", !!childFrame && !refused(childAx) && JSON.stringify(childAx.result?.nodes ?? []).includes("child") && pierced.includes("childp"), childAx ? text(childAx) : "no child frame");
+  check("plugin: an in-scope child frame is traversed (frame tree, its accessibility tree by name and frame id, and pierced DOM)", !!childFrame && !refused(childAx) && childNodes.some((n) => n.role?.value === "heading" && n.name?.value === "ardia child heading") && childFrameIds.every((id) => id === childFrame) && pierced.includes("childp"), childAx ? `${childNodes.length} nodes, frame ids ${[...new Set(childFrameIds)].join(",") || "none"}` : "no child frame");
   const runtimeEvents = plugin.events.filter((e) => e.method?.startsWith("Runtime."));
   check("plugin: no Runtime event reaches it", runtimeEvents.length === 0, runtimeEvents.map((e) => e.method).join(" "));
   const activeIs = async (id) => (await cli.send("Runtime.evaluate", { expression: `document.activeElement?.id === ${JSON.stringify(id)}`, returnByValue: true }, csOne)).result?.result?.value === true;
@@ -484,14 +504,15 @@ try {
   check("plugin: frame traversal stays in its own page (another tab's frame is refused and never listed)", !!popupFrameId && refused(foreignAx) && !ownFrames.includes(popupFrameId) && !ownTree.includes(popupFrameId), `${text(foreignAx)}`);
   const findNode = (node, test) => test(node) ? node : [...(node.children ?? []), ...(node.templateContent ? [node.templateContent] : []), ...(node.contentDocument ? [node.contentDocument] : [])].map((c) => findNode(c, test)).find(Boolean);
   const mapped = (await plugin.send("DOM.getDocument", { depth: -1 }, ps)).result?.root;
-  const tplNode = mapped && findNode(mapped, (n) => n.nodeName === "P" && (n.attributes ?? []).includes("tplp"))?.nodeId;
-  const beforeAdoption = await plugin.send("DOM.describeNode", { nodeId: tplNode }, ps);
+  const tplContent = mapped && findNode(mapped, (n) => n.nodeName === "TEMPLATE" && (n.attributes ?? []).includes("tpl"))?.templateContent?.nodeId;
+  const tplNode = tplContent && (await plugin.send("DOM.querySelector", { nodeId: tplContent, selector: "#tplp" }, ps)).result?.nodeId;
+  const beforeAdoption = await plugin.send("DOM.getOuterHTML", { nodeId: tplNode }, ps);
   const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const t = window.opener?.document.getElementById('tpl'); if (!t) return false; document.body.append(document.adoptNode(t)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
   const adoptedReads = [];
   for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["DOM.focus", { nodeId: tplNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
     adoptedReads.push([method, await plugin.send(method, params, ps)]);
   }
-  check("plugin: a template node it mapped stays mapped when the page adopts the template into a window-2 document, and every read, focus and scroll by that nodeId is refused as not in this page", !!tplNode && !refused(beforeAdoption) && adopted === true && adoptedReads.every(([, r]) => /that nodeId isn't in this page/.test(r.error?.message ?? "")), `before: ${text(beforeAdoption)}; ` + adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
+  check("plugin: a template node it mapped stays mapped when the page adopts the template into a window-2 document, and every read, focus and scroll by that nodeId is refused as not in this page", !!tplNode && /tplp/.test(beforeAdoption.result?.outerHTML ?? "") && adopted === true && adoptedReads.every(([, r]) => /that nodeId isn't in this page/.test(r.error?.message ?? "")), `before: ${text(beforeAdoption)}; ` + adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
   await cli.send("Runtime.evaluate", { expression: "(() => { const s = document.createElement('section'); s.id = 'axroot'; s.innerHTML = '<button>ax</button>'; document.body.append(s); return true })()" }, csOne);
   const axRoot = (await plugin.send("DOM.querySelector", { nodeId: await pluginRoot(), selector: "#axroot" }, ps)).result?.nodeId;
   await cli.send("Debugger.enable", {}, csOne);
@@ -500,12 +521,13 @@ try {
   const paused = await until("the debugger pause", async () => cli.events.slice(pauseMark).some((e) => e.method === "Debugger.paused") || null, 8000).catch(() => false);
   const queryMark = plugin.replies.length;
   plugin.raw(556002, "Accessibility.queryAXTree", { nodeId: axRoot, role: "button" }, ps);
-  await sleep(500);
-  const answeredWhilePaused = plugin.replies.slice(queryMark).some((m) => m.id === 556002);
+  const queued = await plugin.send("DOM.describeNode", { nodeId: axRoot }, ps);
+  const answeredWhileQueued = plugin.replies.slice(queryMark).some((m) => m.id === 556002);
   await cli.send("Debugger.resume", {}, csOne);
+  const adoption = (await cli.repliesTo(556001, 0, 2000))[0];
   const pending = (await plugin.repliesTo(556002, queryMark, 3000))[0];
   await cli.send("Debugger.disable", {}, csOne);
-  check("plugin: a queryAXTree pending while its root moved to a window-2 document is refused when it resumes", !!axRoot && paused === true && !answeredWhilePaused && /left this page while the query was pending/.test(pending?.error?.message ?? ""), `paused ${paused}, answered while paused ${answeredWhilePaused}, ${pending ? text(pending) : "no reply"}`);
+  check("plugin: a queryAXTree queued while its root moved to a window-2 document is refused when it resumes", !!axRoot && paused === true && !refused(queued) && !answeredWhileQueued && adoption?.result?.result?.value === true && /left this page while the query was pending/.test(pending?.error?.message ?? ""), `paused ${paused}, queued ${text(queued)}, answered early ${answeredWhileQueued}, adoption ${adoption ? text(adoption) : "no reply"}, ${pending ? text(pending) : "no reply"}`);
 
   const folder = join(work, "picked");
   mkdirSync(folder);
@@ -556,6 +578,15 @@ try {
     const reply = await plugin.send("Page.navigate", { url }, s3);
     const refusedByPolicy = refused(reply) && /isn't allowed for a plugin/.test(reply.error?.message ?? "");
     check(`plugin: Page.navigate to ${url.split(":")[0]}: is ${allowedScheme ? "allowed and loads" : "refused"}`, allowedScheme ? !refused(reply) && !reply.result?.errorText && !!reply.result?.frameId : refusedByPolicy, text(reply));
+    if (url.startsWith(secureOrigin)) {
+      const committed = (await plugin.send("Page.getFrameTree", {}, s3)).result?.frameTree?.frame?.url;
+      const content = await until("the secure fixture's content", async () => {
+        const root = (await plugin.send("DOM.getDocument", {}, s3)).result?.root?.nodeId;
+        const node = root && (await plugin.send("DOM.querySelector", { nodeId: root, selector: "#secure" }, s3)).result?.nodeId;
+        return node ? (await plugin.send("DOM.getOuterHTML", { nodeId: node }, s3)).result?.outerHTML : null;
+      }, 8000).catch(() => null);
+      check("plugin: the HTTPS navigation committed the fixture's URL and shows its content", committed === `${secureOrigin}/secure` && /ardia secure fixture/.test(content ?? ""), `${committed} ${content}`);
+    }
   }
   const navigatedPlain = await plugin.send("Page.navigate", { url: `${origin}/three` }, s3);
   check("plugin: Page.navigate with only a web url answers", !refused(navigatedPlain), text(navigatedPlain));

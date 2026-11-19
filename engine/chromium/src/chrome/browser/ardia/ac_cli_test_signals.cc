@@ -2,6 +2,8 @@
 
 #include "chrome/browser/ardia/ac_cli_test_signals.h"
 
+#include "ardia/core/ac_content_hooks.h"
+
 namespace ardia {
 namespace {
 
@@ -36,6 +38,7 @@ void AddCliTestSignals(base::DictValue& status) {
   status.Set("pluginInputHold", g_plugin_input_hold);
   status.Set("pluginDeliveriesRefusedDeparted",
              g_plugin_deliveries_refused_departed);
+  status.Set("pluginDragsRefused", g_ardia_plugin_drags_refused);
 }
 
 }

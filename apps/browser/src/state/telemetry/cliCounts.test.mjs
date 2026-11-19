@@ -44,6 +44,16 @@ test("plugin credential totals from the engine turn into counts since the last t
   assert.deepEqual([counts.cli_plugin_credentials_minted, counts.cli_plugin_credentials_revoked, counts.cli_plugin_commands_refused], [3, 1, 4]);
 });
 
+test("plugin drags the engine refused turn into counts since the last take", () => {
+  takeCliCounts();
+  noteCliEngineTotals({ pluginDragsRefused: 0 }, "drags");
+  noteCliEngineTotals({ pluginDragsRefused: 2 }, "drags");
+  noteCliEngineTotals({ pluginDragsRefused: 1 }, "drags");
+  noteCliEngineTotals({ pluginDragsRefused: 3 }, "drags");
+  assert.equal(takeCliCounts().cli_plugin_drags_refused, 3);
+  assert.equal(takeCliCounts().cli_plugin_drags_refused, 0);
+});
+
 test("file picker answers the engine counts turn into counts since the last take", () => {
   takeCliCounts();
   noteCliEngineTotals({ filePickerAnswers: { armed: 0, used: 0 } }, "pickers");
