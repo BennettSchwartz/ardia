@@ -290,16 +290,16 @@ counts in `cli_socket_calls_permissions`, `cli_socket_calls_menus` or `cli_socke
 | Method | Mutates | What it does, and the path it takes |
 | --- | --- | --- |
 | `permissions.prompts` | no | The prompt each tab shows (`{id, window, tab, origin, permissions, queued}`); `queued` counts the prompts waiting behind it |
-| `permissions.respond {id, decision}` | yes | `allow` and `block` as the Allow and Don't Allow buttons (remembered), `dismiss` as the close button, `allowOnce` for this visit only. `allowOnce` is refused unless the prompt names its kinds and every one is camera, microphone, camera pan-tilt-zoom or location, since the engine turns a one-time grant of anything else into a lasting one. The reply waits for the app's native layer to accept the answer (`permissions.answer`, which checks the request is still pending, as tracked from the engine's request and dismiss callbacks) and is `failed` when it isn't; only then does the next queued prompt show. Notifications and location still ask macOS, and Chrome records the decision as a click would |
-| `passwords.prompts` | no | Save and update password prompts: `id` (Ardia's own, new for every prompt a tab shows), origin, state, username, at most 20 of the usernames an update offers (each cut to 256 characters) and `usernameCount`; never the password or its length |
-| `passwords.respond {tab, id, decision, username?}` | yes | `save`, `never`, `update`, `notNow`, `dismiss`, only the buttons that prompt shows. `no_window` when the tab now shows another prompt than `id`. The native layer then checks the engine's prompt still has the state, origin and username that were listed, and that the answer is one of that state's buttons, before it answers; otherwise `failed` |
+| `permissions.respond {id, decision}` | yes | `allow` and `block`, remembered as the Allow and Don't Allow buttons do. The engine reports nothing after an answered prompt (`~ACPermissionPrompt` posts a dismissal only when it went unanswered), so the reply waits until the site's own setting reads the answer back (`sites.settings`, every kind of the prompt `allow` or `block`), for at most 5 s; then `ok` and the next queued prompt shows. Otherwise `failed`, "outcome unknown", and the queue doesn't move. `permissions.answer` first checks natively that the request is still pending (tracked from the engine's request and dismissal callbacks); if not, `failed`. `allowOnce` and `dismiss` leave nothing to read back, so they're refused, as is a prompt with a kind that has no readable setting (screen, protected media, …) or no kinds at all; the on-screen prompt still answers them |
+| `passwords.prompts` | no | Save and update password prompts: `id`, origin, state, username, at most 20 of the usernames an update offers as `{id, name}` (`name` cut to 256 characters) and `usernameCount`; never the password or its length. The `id` is bound to the offer: the app numbers every offer the engine delivers (`WithPasswordOffer` in `ArdiaPopupWindow.mm`, in both `window:passwordPrompt:forTab:` callbacks) and the listing carries that number |
+| `passwords.respond {tab, id, decision, usernameId?}` | yes | `save`, `never`, `update`, `notNow`, `dismiss`, only the buttons that prompt shows; `usernameId` picks one of `usernames`. `no_window` when the tab now shows another prompt. Then, in one main-queue turn, the native layer refuses unless the view's latest offer is still the one listed (so a replacement the engine delivered before JS saw it is refused), the engine's prompt still has the listed state, origin and username, and the answer is one of that state's buttons; otherwise `failed`. An offer with no number (WebKit, Windows) is refused |
 | `autofill.prompts` | no | Save address, update address and save card prompts: the engine's `id`, origin, `kind`, `fields` (for an update: which of name, address, email, phone, other change) and a `description` Ardia writes from those. Never the engine's text (an update's summary holds the name and street), the address lines or the card |
 | `autofill.respond {tab, id, decision}` | yes | `accept`, `decline`, `dismiss`. `no_window` when the tab now shows another prompt or its page is gone; `failed` when the engine's prompt id no longer matches or it stays open after the answer |
 | `menus.open` | no | Open menus with their owner (`window`, and `tab` for a page's menu) and items (`path`, `ref`, `title`, `enabled`, `checked`, `separator`, `submenu`): `kind` is `select` (a page's `<select>` popup), `page` (a page's context menu), `app` (an Ardia menu), `menuBar`. A menu whose window isn't one the ardia command may use (private, unknown, closed) isn't listed, nor a page menu without a known tab in that window |
-| `menus.choose {menu, path, ref?}` | yes | A page's `<select>` popup or context menu: the item's own action, as a click (trusted `input` and `change` for a `<select>`). The menu bar while it tracks: needs `ref` and goes through exactly the `menus.runBar` rules, then the menu closes. Ardia's own menus (`app`) and anything else are refused: their callbacks (an engine switch, copying the sync recovery code) aren't commands `run` allows |
+| `menus.choose {menu, path, ref?}` | yes | A page's `<select>` popup or context menu: the item's own action, as a click (trusted `input` and `change` for a `<select>`). The menu bar while it tracks: needs `ref`, the path must name an item of that tracked menu (never another top-level menu), and it goes through exactly the `menus.runBar` rules, then the menu closes. The menu must still be open and control still on after every wait, including just before `run`. Ardia's own menus (`app`) and anything else are refused: their callbacks (an engine switch, copying the sync recovery code) aren't commands `run` allows |
 | `menus.dismiss {menu}` | yes | Closes a menu without choosing |
-| `menus.bar` | no | The menu bar as shown now: every item's path, title, enabled, checked, shortcut, and its `command` and `arg` when `run` takes it, or its AppKit `action` |
-| `menus.runBar {path, ref, window?}` | yes | An Ardia command goes through `run`, so the automation policy (`automationCommands.ts`: no Quit, no engine switch, no Allow JavaScript from Apple Events, the settings `config.json` can't set) still applies; an editing or window item (Undo, Copy, Paste, Select All, Minimize, Zoom) goes through the allowlist in `MenuBarAction` and is sent to the responder chain of the named eligible window, only when it is the key window, never to whatever happens to be first responder. Everything else (Quit, Hide, Close Window, Check for Updates, system input, Check Document Now, Show Substitutions…) is refused. `ref` is the item's command or selector plus its title path; the native side checks it at `path` before acting, so a menu rebuilt since `menus.bar` can't run another item |
+| `menus.bar` | no | The menu bar as shown now: every item's path, `ref`, title, enabled, checked, shortcut, and its `command` and `arg` when `run` takes it, or its AppKit `action`. Rows bound to a window (AppKit's Window-menu rows, whose target is the window, and commands such as Move Tab to Window whose argument is a window) carry `boundWindow` and are left out unless that window is one the ardia command may use, so a private window's row never reaches the socket; the on-screen menu is unchanged |
+| `menus.runBar {path, ref, window?}` | yes | An Ardia command goes through `run`, so the automation policy (`automationCommands.ts`: no Quit, no engine switch, no Allow JavaScript from Apple Events, the settings `config.json` can't set) still applies; an editing or window item (Undo, Copy, Paste, Select All, Minimize, Zoom) goes through the allowlist in `MenuBarAction` and is sent to the responder chain of the named eligible window (the last focused one when left out), only when it is the key window or no window is key, never to whatever happens to be first responder. Minimize All and Arrange in Front act on every window and are refused while a private window is open. Everything else (Quit, Hide, Close Window, Check for Updates, system input, Check Document Now, Show Substitutions…) is refused. `ref` is the item's command or selector plus its title path; the native side checks it at `path` before acting, so a menu rebuilt since `menus.bar` can't run another item |
 
 **Events:** `permission.prompted` (`{id, windowId, tabId, origin, permissions, queued}`), `password.prompted`
 (`{id, windowId, tabId, origin, state, username, usernames, usernameCount}`, the same capped list; named only, not in `"*"`), `menu.opened` (`{id, kind, windowId, tabId, items}`, `items` being a count), `menu.closed`. None of
@@ -330,29 +330,50 @@ URL, the items) and returns at once, so the engine closes its menu as before. `m
 the item's command for that tab: `+[ArdiaWebView runCapturedMenuCommand:tab:documents:url:]` refuses when the tab
 closed, its document count or URL changed, and otherwise sends the editing items (Undo, Redo, Cut, Copy, Paste, Paste
 and Match Style, Delete, Select All, Chromium's `IDC_CONTENT_CONTEXT_*` 50150–50157) to the page's
-`RenderWidgetHostViewCocoa`, which hands them to the focused frame, the frame the right click focused. A captured menu
+`RenderWidgetHostViewCocoa`, which hands them to the focused frame, the frame the right click focused. Captured edits go to the page's focused frame, and the engine's menu says nothing of which frame it came from, so
+they run only for the main frame: when the menu opens the app reads, in the main frame, whether focus is inside a
+frame (`document.activeElement`, through shadow roots, is an `<iframe>`, `<frame>`, `<object>` or `<embed>`), and
+reads it again at pick time. A menu that opened with a subframe focused, or one whose page moved focus into a subframe
+since, is refused with `refused` ("editing a subframe from a captured menu needs engine support"); a subframe that
+only navigated leaves a main-frame edit alone. A captured menu
 lasts 60 s, is replaced by the next one, is used once, and is dropped when control turns off or the menus module goes
 away. Other items are refused until the engine can run them (below). Without a serving socket the menu is logged as
 before. A `<select>` popup is a real AppKit menu in either mode.
 
-**Needs engine code (joins #2808's build or a later key).** These change `engine/ardiacore/src/ardia/core`, so they
-move the engine key; until then the app-side checks above stand in.
-- *Captured context-menu commands.* `ACContextMenu::ShowThroughHost` keeps, per tab, the menu's `ContextMenuParams`, the
-  `GlobalRenderFrameHostId` it was built for and that frame's document token, for 60 s. A new
+**Needs engine code (joins the engine/next build or a later key).** These change `engine/ardiacore/src/ardia/core`,
+which is frozen outside the engine/next build (#2328, #2808), so they move the engine key and aren't in this change.
+Until they land, the app-side refusals and readbacks above stand in.
+
+Needed for the full guarantee:
+- *Password offer identity* (`ac_password_prompt.mm`). `PasswordPrompt(contents)` adds `@"offer"`, a number the
+  engine increments each time `ManagePasswordsUIController` enters `PENDING_PASSWORD_STATE` or
+  `PENDING_PASSWORD_UPDATE_STATE` (kept on the `PasswordsModelDelegate`'s `WebContents` as user data), and
+  `ResolvePasswordPrompt(contents, action, username, password, offer)` returns `bool`: false when `offer` isn't the
+  current one or `action` isn't one of the current state's buttons (`save`/`never` pending, `update`/`nope` pending
+  update). `-[ArdiaCoreTab resolvePasswordPrompt:username:password:offer:]` returns that `BOOL`. Stands in until then:
+  the app numbers the offers it is handed (`WithPasswordOffer`) and checks state, origin and username, which can't
+  tell apart two offers the engine replaced before calling the app.
+- *A permission result* (`ac_permissions.mm`). `ACPermissionPrompt::Resolve(result, remember)` returns what it did
+  (`kAccepted`, `kAcceptedOnce`, `kDenied`, `kDismissed`, or `kNotCurrent` when `!Current()` or already answered),
+  `ResolvePermission(request_id, result, remember)` passes it out, and `+[ArdiaCoreEngine resolvePermission:result:
+  remember:]` returns it as a string. `Apply` takes an explicit `acceptOnce` that refuses (returns `kNotCurrent`)
+  unless every request `DoesSupportTemporaryGrants`, instead of falling back to a lasting `Accept`, and `AskHost`
+  names an unknown kind `other` rather than leaving it out. Stands in until then: `allow` and `block` wait for the
+  site setting to read back; `allowOnce`, `dismiss` and kinds with no setting are refused.
+- *Frame-bound captured edits* (`ac_context_menu.mm`). `ACContextMenu::ShowThroughHost` keeps, per tab, the menu's
+  `ContextMenuParams`, the `GlobalRenderFrameHostId` it was built for and that frame's `document_token`, for 60 s,
+  and passes a token for it in the `runContextMenu:` dictionary (`@"menu"`). A new
   `-[ArdiaCoreTab runContextMenuCommand:(int)command menu:(NSString *)token flags:(int)flags]` rebuilds an
   `ACContextMenu` for that frame with those params and calls `ExecuteCommand` when `IsCommandIdEnabled`, returning NO
-  when the frame is gone, its document changed, the token was replaced or the time ran out. The app then drops its
-  editing-item mapping and runs every item (Open Link in New Tab, Copy Link, Save Image As…) for its own frame.
-- *Password prompts.* `PasswordPrompt()` in `ac_password_prompt.mm` adds an `id` that changes whenever
-  `PasswordsModelDelegate` enters a pending state, and `-resolvePasswordPrompt:id:username:password:` returns BOOL:
-  NO when the id differs or the action isn't one of the current state's (`save`/`never` for pending, `update`/`nope`
-  for pending update). The app then lists the engine's id instead of its own.
-- *Autofill prompts.* `ResolveAutofillPrompt` returns whether a prompt with that id was answered, so the app needn't
-  read `autofillPrompt` again afterwards.
-- *Permissions.* `+[ArdiaCoreEngine resolvePermission:]` returns BOOL (the prompt was found and was current), and
-  `ACPermissionPrompt::Apply` takes an explicit `acceptOnce`: it refuses (dismisses nothing, returns NO) unless every
-  request supports temporary grants, instead of falling back to a lasting `Accept`. `AskHost` lists a kind it doesn't
-  name as `other` rather than leaving it out, so a prompt's kinds are never silently shorter than its requests.
+  when the frame is gone, its document changed, the token was replaced or the time ran out. Stands in until then:
+  editing items only, main frame only, focus checked at capture and at pick.
+
+Can wait:
+- *An explicit autofill result* (`ac_autofill_prompt.mm`). `ResolveAutofillPrompt(contents, prompt_id, action)` returns
+  whether that prompt was answered; today the app reads `autofillPrompt` again and treats a closed or replaced prompt
+  as answered.
+- *More captured commands.* With the frame-bound command above, every item of a captured menu (Open Link in New Tab,
+  Copy Link, Save Image As…) runs for its own frame, and the app drops its editing-item mapping.
 
 **The color picker is Blink's, not AppKit's.** The issue's row 14 expected `NSColorPanel`, but in this Chromium a web
 page never reaches it on desktop: `WebContentsDelegate::OpenColorChooser` is compiled only for Android and iOS
