@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 const { forgetSettingsScroll, goToSettingsPane, noteSettingsScrollOffset, replaceSettingsPlace, settingsBack, settingsForward, useSettingsNav } = await import("./settingsWindows.ts");
-const { holdAfterScroll, holdTarget, startScrollHold } = await import("./scrollHold.ts");
+const { settingsScrollFor } = await import("./settingsWindows.ts");
+const { paneScroll } = await import("./paneScroll.ts");
+const mount = () => paneScroll(nav().visit, settingsScrollFor(nav().visit));
 
 const nav = () => useSettingsNav.getState();
 const scrollShown = (y) => noteSettingsScrollOffset(nav().visit, y);
@@ -125,23 +127,77 @@ test("closing Settings forgets every entry's position", () => {
   assert.equal(nav().scroll, 0);
 });
 
-test("the restore hold keeps a growing page at its saved offset until it gets there", () => {
-  const hold = startScrollHold(800, 0);
-  assert.equal(holdTarget(hold, 100), 800);
-  const clamped = holdAfterScroll(hold, 300, 300, 100);
-  assert.equal(holdTarget(clamped, 200), 800);
-  assert.equal(holdAfterScroll(clamped, 800, 1500, 300), null);
-  assert.equal(startScrollHold(0, 0), null);
+function returnToSaved(y) {
+  fresh();
+  goToSettingsPane("profiles", "default", "passwords");
+  scrollShown(y);
+  goToSettingsPane("general");
+  settingsBack();
+}
+
+test("the saved offset is restored when the page first lays out tall enough to reach it", () => {
+  returnToSaved(800);
+  const pane = mount();
+  assert.equal(pane.firstLayout(600, 1400), 800);
+  assert.equal(pane.firstLayout(600, 3000), null);
+  settingsForward();
+  settingsBack();
+  assert.equal(nav().scroll, 800);
 });
 
-test("any scroll away from the clamped bottom ends the hold at once", () => {
-  const hold = startScrollHold(800, 0);
-  assert.equal(holdAfterScroll(hold, 120, 300, 100), null);
-  assert.equal(holdAfterScroll(hold, 450, 900, 100), null);
+test("a page too short for its saved offset at first layout stays at the top and never jumps later", () => {
+  returnToSaved(2400);
+  const pane = mount();
+  assert.equal(pane.firstLayout(600, 900), 0);
+  assert.equal(pane.firstLayout(600, 5000), null);
 });
 
-test("the hold expires, and a page shorter than its saved offset is not held forever", () => {
-  const hold = startScrollHold(800, 0);
-  assert.equal(holdTarget(hold, 5000), null);
-  assert.equal(holdAfterScroll(hold, 300, 300, 5000), null);
+test("(a) leaving a page that never reached its saved offset saves where it really was", () => {
+  returnToSaved(2400);
+  const pane = mount();
+  pane.firstLayout(600, 900);
+  settingsForward();
+  settingsBack();
+  assert.equal(nav().scroll, 0);
+});
+
+test("(b) a user scroll after first layout is simply recorded: nothing is waiting to pull it back", () => {
+  returnToSaved(2400);
+  const pane = mount();
+  pane.firstLayout(600, 900);
+  pane.scrolled(300);
+  assert.equal(pane.firstLayout(600, 5000), null);
+  settingsForward();
+  settingsBack();
+  assert.equal(nav().scroll, 300);
+});
+
+test("(c) a queued scroll event from the page being left is never credited to the destination", () => {
+  fresh();
+  goToSettingsPane("tabs");
+  const left = mount();
+  left.firstLayout(600, 3000);
+  left.scrolled(500);
+  goToSettingsPane("advanced");
+  const shown = mount();
+  shown.scrolled(500);
+  left.scrolled(650);
+  shown.firstLayout(600, 3000);
+  shown.scrolled(120);
+  left.scrolled(700);
+  settingsBack();
+  assert.equal(nav().pane, "tabs");
+  assert.equal(nav().scroll, 500);
+  settingsForward();
+  assert.equal(nav().scroll, 120);
+});
+
+test("scroll events before the destination's first layout are ignored", () => {
+  fresh();
+  goToSettingsPane("tabs");
+  const pane = mount();
+  pane.scrolled(900);
+  goToSettingsPane("general");
+  settingsBack();
+  assert.equal(nav().scroll, 0);
 });
