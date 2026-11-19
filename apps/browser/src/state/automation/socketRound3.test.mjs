@@ -74,7 +74,7 @@ test("cold history counts only the pages the warm cache keeps (http, https and f
   visited(rows);
   const coldPage = await ok("history.search", { offset: 2, limit: 2 });
   const web = rows.map((url, i) => ({ url, title: `Page ${i}`, favicon: null, visits: 1, lastVisit: 1_000_000 - i })).filter((h) => !h.url.startsWith("chrome:"));
-  useBrowser.setState((s) => ({ history: { ...s.history, "": { list: web, floor: 0, ready: true } } }));
+  useBrowser.setState((s) => ({ history: { ...s.history, "": { list: web, floor: -Infinity, ready: true } } }));
   const warmPage = await ok("history.search", { offset: 2, limit: 2 });
   assert.deepEqual(coldPage, warmPage);
   assert.deepEqual(coldPage.items.map((h) => h.url), ["https://p4.example/", "https://p6.example/"]);

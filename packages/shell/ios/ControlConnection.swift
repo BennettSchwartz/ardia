@@ -16,6 +16,7 @@ final class ControlConnection {
   private let onLine: (ControlConnection, String) -> Void
   private let onClose: (ControlConnection) -> Void
   private let onWritten: ([Int]) -> Void
+  private let onPeerFinished: (ControlConnection) -> Void
   private var readSource: DispatchSourceRead?
   private var writeSource: DispatchSourceWrite?
   private var writeArmed = false
@@ -32,7 +33,8 @@ final class ControlConnection {
 
   init(
     id: Int, fd: Int32, queue: DispatchQueue, onLine: @escaping (ControlConnection, String) -> Void,
-    onClose: @escaping (ControlConnection) -> Void, onWritten: @escaping ([Int]) -> Void
+    onClose: @escaping (ControlConnection) -> Void, onWritten: @escaping ([Int]) -> Void,
+    onPeerFinished: @escaping (ControlConnection) -> Void = { _ in }
   ) {
     self.id = id
     self.fd = fd
@@ -40,6 +42,7 @@ final class ControlConnection {
     self.onLine = onLine
     self.onClose = onClose
     self.onWritten = onWritten
+    self.onPeerFinished = onPeerFinished
   }
 
   func open() {
@@ -187,6 +190,7 @@ final class ControlConnection {
 
   private func drainAfterPeerClosed() {
     draining = true
+    onPeerFinished(self)
     output.keepOnlyReplies()
     if !readSuspended {
       readSuspended = true

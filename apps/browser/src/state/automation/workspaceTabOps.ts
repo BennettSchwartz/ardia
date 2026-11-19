@@ -6,6 +6,7 @@ import { needsPage, wokenPage } from "../tabs/pageSession";
 import { sleepTab } from "../tabs/manualSleep";
 import { isSleeping } from "../tabs/sleepingTabs";
 import { webviews } from "../../platform/webviews";
+import type { WebViewHandle } from "../../platform/tabs";
 import { withDeadline } from "../../lib/deadline";
 import { awaitLate } from "./tabCalls";
 import type { IconValue, Op } from "./workspaceOps";
@@ -62,6 +63,27 @@ export async function sleep(results: OpResult[], op: Op, stillOn: () => boolean 
   return { tabs: ids, outcomes };
 }
 
+async function attachment(view: WebViewHandle): Promise<boolean | null> {
+  try {
+    const known = await view.isAttached?.();
+    return typeof known === "boolean" ? known : null;
+  } catch {
+    return null;
+  }
+}
+
+async function reloadChecked(view: WebViewHandle): Promise<string> {
+  if ((await attachment(view)) === false) return "no_view";
+  const reloaded = await view.reload().then(
+    () => true,
+    () => false,
+  );
+  const after = await attachment(view);
+  if (after === false) return "no_view";
+  if (!reloaded) return "failed";
+  return after === true ? "awake" : "reload_unverified";
+}
+
 export async function wake(results: OpResult[], op: Op, stillOn: () => boolean = () => true, owner = 0): Promise<OpResult> {
   const ids = tabRefs(results, op.tabs as string[]);
   const outcomes: Record<string, string> = {};
@@ -70,17 +92,9 @@ export async function wake(results: OpResult[], op: Op, stillOn: () => boolean =
     goingOn(stillOn, done);
     const t = store().tabs[id];
     if (!t) outcomes[id] = "gone";
-    else if (isSleeping(id) && webviews.get(id)) {
-      const view = webviews.get(id)!;
-      const attached = () => view.isAttached?.() !== false;
-      const reload = attached()
-        ? view.reload().then(
-            () => (attached() ? "awake" : "no_view"),
-            () => "failed",
-          )
-        : Promise.resolve("no_view");
-      outcomes[id] = await settled(reload, id, "waking", done, stillOn, owner);
-    } else if (needsPage(t)) {
+    else if (isSleeping(id) && !webviews.get(id)) outcomes[id] = "no_view";
+    else if (isSleeping(id)) outcomes[id] = await settled(reloadChecked(webviews.get(id)!), id, "waking", done, stillOn, owner);
+    else if (needsPage(t)) {
       store().updateTab(id, { page: wokenPage(t) });
       outcomes[id] = "loading";
     } else outcomes[id] = "already";
