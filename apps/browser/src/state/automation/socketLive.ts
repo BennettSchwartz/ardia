@@ -1,13 +1,13 @@
 import { TAB_GROUP_COLORS } from "@ardia/core";
 import { isIncognitoProfile } from "../browser/model";
 import type { GroupColor } from "../browser/types";
-import { deleteLiveFolder, manualRefresh, newProfileLiveFolder, openLiveItem, refreshFolder } from "../live/engine";
+import { connectedSourcesOf, deleteLiveFolder, manualRefresh, newProfileLiveFolder, openLiveItem, refreshFolderWhile } from "../live/engine";
 import { hideItems, live, markRead, setRepoHidden, unhide, updateFolder } from "../live/store";
 import type { LiveFolder, LiveFolderKind, LiveSourceId } from "../live/types";
 import { ownEntry } from "./automationWindows";
-import type { MethodSpec } from "./socketCatalog";
-import { bool, id, ids, obj, oneOf, PROFILE, text, WINDOW } from "./socketSchema";
-import { expect, now, profileArg, windowOrFocused } from "./socketTargets";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
+import { bool, id, ids, obj, oneOf, PAGE, PROFILE, text, WINDOW } from "./socketSchema";
+import { expect, now, page, profileArg, windowOrFocused } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
 
 const KINDS = ["pullRequests", "documents"] as const satisfies readonly LiveFolderKind[];
@@ -60,11 +60,21 @@ function list(params: Record<string, unknown>) {
 function items(params: Record<string, unknown>) {
   const folder = folderOf(params.folder);
   const l = live();
-  return { items: l.items[folder.id] ?? [], unread: l.unread[folder.id] ?? [], hidden: l.hidden[folder.id] ?? [], completed: l.completed[folder.id] ?? [] };
+  const unread = new Set(l.unread[folder.id] ?? []);
+  const rows = [
+    ...(l.items[folder.id] ?? []).map((item) => ({ item, shown: "listed" as const, unread: unread.has(item.id), completed: null })),
+    ...(l.hidden[folder.id] ?? []).map((item) => ({ item, shown: "hidden" as const, unread: unread.has(item.id), completed: null })),
+    ...(l.completed[folder.id] ?? []).map((c) => ({ item: c.item, shown: "completed" as const, unread: unread.has(c.item.id), completed: { state: c.state, at: c.at } })),
+  ];
+  return page(rows, params);
 }
 
-function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] | undefined {
-  if (given === undefined) return undefined;
+function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] {
+  if (given === undefined) {
+    const connected = connectedSourcesOf(kind);
+    if (!connected.length) throw new OpError("refused", `No ${SOURCES_OF[kind].join(" or ")} account is connected; connect one in Settings › Automations first.`);
+    return connected;
+  }
   const sources = [...new Set(given as LiveSourceId[])];
   const wrong = sources.filter((s) => !SOURCES_OF[kind].includes(s));
   if (wrong.length) throw new OpError("bad_request", `A ${kind} folder takes ${SOURCES_OF[kind].join(", ")}, not ${wrong.join(", ")}.`);
@@ -73,12 +83,13 @@ function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] | unde
   return sources;
 }
 
-function create(params: Record<string, unknown>) {
+function create(params: Record<string, unknown>, call: SocketCall) {
   const profile = profileArg(params.profile);
   const kind = params.kind as LiveFolderKind;
-  const folderId = newProfileLiveFolder(profile, kind, sourcesFor(kind, params.sources));
+  const name = params.name !== undefined ? nameOf(params.name) : undefined;
+  const sources = sourcesFor(kind, params.sources);
+  const folderId = newProfileLiveFolder(profile, kind, sources, { name, allowed: call.serving });
   expect(!!live().folders[folderId], "the live folder wasn't made.");
-  if (params.name !== undefined) updateFolder(folderId, { name: nameOf(params.name) });
   return folderRow(live().folders[folderId]!);
 }
 
@@ -90,7 +101,7 @@ function nameOf(value: unknown): string {
 
 const PATCHABLE = ["collapsed", "groupStacks", "showCompleted", "icon"] as const;
 
-function update(params: Record<string, unknown>) {
+function update(params: Record<string, unknown>, call: SocketCall) {
   const folder = folderOf(params.folder);
   const patch: Partial<LiveFolder> = {};
   for (const key of PATCHABLE) if (params[key] !== undefined) Object.assign(patch, { [key]: params[key] });
@@ -100,13 +111,14 @@ function update(params: Record<string, unknown>) {
   if (params.sources !== undefined) patch.sources = sourcesFor(folder.kind, params.sources);
   if (!Object.keys(patch).length) throw new OpError("bad_request", "live.update needs something to change.");
   updateFolder(folder.id, patch);
-  if (patch.filters || patch.sources) void refreshFolder(folder.id);
+  if (patch.filters || patch.sources) void refreshFolderWhile(folder.id, false, call.serving);
   return folderRow(live().folders[folder.id]!);
 }
 
-async function refresh(params: Record<string, unknown>) {
+async function refresh(params: Record<string, unknown>, call: SocketCall) {
   const folder = folderOf(params.folder);
-  await manualRefresh(folder.id);
+  await manualRefresh(folder.id, call.serving);
+  call.stillServing();
   return folderRow(live().folders[folder.id] ?? folder);
 }
 
@@ -120,12 +132,12 @@ function hide(params: Record<string, unknown>) {
   return folderRow(live().folders[folder.id]!);
 }
 
-function setRepo(params: Record<string, unknown>) {
+function setRepo(params: Record<string, unknown>, call: SocketCall) {
   const folder = folderOf(params.folder);
   if (folder.kind !== "pullRequests") throw new OpError("bad_request", "Only pull request folders filter by repository.");
   if (!/^[a-z]+:[^\s]+$/.test(params.repo as string)) throw new OpError("bad_request", "repo is source:owner/name, like github:ardia-browser/ardia.");
   setRepoHidden(folder.id, params.repo as string, params.hidden as boolean);
-  if (!params.hidden) void refreshFolder(folder.id);
+  if (!params.hidden) void refreshFolderWhile(folder.id, false, call.serving);
   return folderRow(live().folders[folder.id]!);
 }
 
@@ -151,12 +163,19 @@ const withFolder = (run: (folderId: string) => void) => (params: Record<string, 
 
 export const LIVE_METHODS: MethodSpec[] = [
   { name: "live.list", mutates: false, description: "Live folders (pull requests, documents) with their status and counts, and the connected accounts", params: obj({ profile: { ...PROFILE, description: "Only this profile's folders; every profile's when left out" } }), result: `{folders: [${ROW}], accounts}`, run: list },
-  { name: "live.items", mutates: false, description: "A live folder's items, which are unread, hidden and recently completed", params: obj({ folder: FOLDER }, ["folder"]), result: "{items, unread, hidden, completed}", run: items },
+  {
+    name: "live.items",
+    mutates: false,
+    description: "A live folder's items, a page at a time: listed, then hidden, then recently completed, each with whether it's unread",
+    params: obj({ folder: FOLDER, ...PAGE }, ["folder"]),
+    result: "{items: [{item, shown, unread, completed}], total, nextOffset}",
+    run: items,
+  },
   {
     name: "live.create",
     mutates: true,
     description: "Make a live folder in a profile's sidebar; it fetches at once",
-    params: obj({ profile: PROFILE, kind: oneOf(KINDS, "pullRequests or documents"), sources: { type: "array", items: oneOf(ALL_SOURCES, "A connected source"), minItems: 1, maxItems: 3, description: "Connected sources; all connected ones of its kind when left out" }, name: text("Its name") }, ["kind"]),
+    params: obj({ profile: PROFILE, kind: oneOf(KINDS, "pullRequests or documents"), sources: { type: "array", items: oneOf(ALL_SOURCES, "A connected source"), minItems: 1, maxItems: 3, description: "Connected sources; all connected ones of its kind when left out, refused when none is" }, name: text("Its name") }, ["kind"]),
     result: ROW,
     run: create,
   },

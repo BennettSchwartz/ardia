@@ -3,7 +3,7 @@ import { test } from "node:test";
 const { useBrowser } = await import("../browser/store.ts");
 const { startAutomation } = await import("./controlSocket.ts");
 const { SOURCES } = await import("../live/sources.ts");
-const { live, setAccount } = await import("../live/store.ts");
+const { live, setAccount, hideItems } = await import("../live/store.ts");
 const { resetAirTrafficForTests } = await import("../airTraffic/store.ts");
 const stub = await import("../../test-native/index.ts");
 
@@ -56,7 +56,7 @@ test("live folders: make one, fetch, hide and show items, mark read, open one, r
     const listed = await ok("live.list");
     assert.equal(listed.folders.find((f) => f.id === made.id)?.name, "Mine");
     assert.equal(listed.accounts.github.login, "me");
-    assert.deepEqual((await ok("live.items", { folder: made.id })).items.map((it) => it.id).sort(), ["one", "two"]);
+    assert.deepEqual((await ok("live.items", { folder: made.id })).items.map((r) => r.item.id).sort(), ["one", "two"]);
     const hidden = await ok("live.hide", { folder: made.id, items: ["two"] });
     assert.equal(hidden.items, 1);
     assert.equal(hidden.hidden, 1);
@@ -158,5 +158,118 @@ test("air traffic: an inherited name isn't a profile", async () => {
     assert.equal(await code("airTraffic.setFallback", { open: "tab", profile }), "no_window", profile);
   }
   assert.deepEqual((await ok("airTraffic.rules")).rules, []);
+});
+
+function send(method, params) {
+  const id = ++nextId;
+  const before = stub.controlSocket.replies.length;
+  stub.emitControlRequest({ connection: 19, generation: stub.controlSocket.generation, line: JSON.stringify({ id, method, params }) });
+  return (async () => {
+    for (let i = 0; i < 400; i++) {
+      const reply = stub.controlSocket.replies.slice(before).map((r) => JSON.parse(r.line)).find((r) => r.id === id);
+      if (reply) return reply;
+      await tick();
+    }
+    throw new Error(`no reply to ${method}`);
+  })();
+}
+
+const gated = () => {
+  let open;
+  const gate = new Promise((resolve) => (open = resolve));
+  return { gate, open: () => open() };
+};
+const until = async (check) => {
+  for (let i = 0; i < 400 && !check(); i++) await tick();
+  assert.ok(check(), "it settled");
+};
+
+test("live.create checks its name and sources before making anything, and refuses when nothing is connected", async () => {
+  await setup();
+  const before = Object.keys(live().folders).length;
+  assert.equal(await code("live.create", { kind: "pullRequests" }), "refused", "no source connected");
+  setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
+  try {
+    assert.equal(await code("live.create", { kind: "pullRequests", name: "   " }), "bad_request");
+    assert.equal(await code("live.create", { kind: "pullRequests", name: "x".repeat(201) }), "bad_request");
+    assert.equal(Object.keys(live().folders).length, before, "no folder saved");
+  } finally {
+    setAccount("github", null);
+  }
+});
+
+test("live.items pages listed, hidden and completed items in one list", async () => {
+  await setup();
+  const { fetch } = SOURCES.github;
+  SOURCES.github.fetch = async () => [pr("a", 3), pr("b", 2), pr("c", 1)];
+  setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
+  try {
+    const made = await ok("live.create", { kind: "pullRequests" });
+    await ok("live.refresh", { folder: made.id });
+    hideItems(made.id, live().items[made.id].filter((it) => it.id === "c"));
+    const first = await ok("live.items", { folder: made.id, limit: 2 });
+    assert.deepEqual([first.items.length, first.total, first.nextOffset], [2, 3, 2]);
+    const rest = await ok("live.items", { folder: made.id, limit: 2, offset: 2 });
+    assert.deepEqual(rest.items.map((r) => [r.item.id, r.shown]), [["c", "hidden"]]);
+    assert.equal(rest.nextOffset, null);
+    assert.equal(await code("live.items", { folder: made.id, limit: 5000 }), "bad_request");
+    await ok("live.remove", { folder: made.id });
+  } finally {
+    SOURCES.github.fetch = fetch;
+    setAccount("github", null);
+  }
+});
+
+test("changing a live folder's filters during a refresh fetches again and never applies the old results", async () => {
+  await setup();
+  const { fetch } = SOURCES.github;
+  const asked = [];
+  const first = gated();
+  SOURCES.github.fetch = async (folder) => {
+    asked.push(folder.filters.authored);
+    if (asked.length === 2) await first.gate;
+    return folder.filters.authored ? [pr("old", 1)] : [pr("new", 2)];
+  };
+  setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
+  try {
+    const made = await ok("live.create", { kind: "pullRequests" });
+    await until(() => live().status[made.id]?.state !== "initializing" && live().status[made.id]?.state !== "updating");
+    const refreshing = send("live.refresh", { folder: made.id });
+    await until(() => asked.length === 2);
+    assert.ok(!(await send("live.update", { folder: made.id, filters: { authored: false } })).error);
+    first.open();
+    await refreshing;
+    await until(() => asked.length === 3 && live().status[made.id]?.state !== "updating");
+    assert.deepEqual(asked.slice(1), [true, false]);
+    assert.deepEqual(live().items[made.id].map((it) => it.id), ["new"], "the old filters' results were dropped");
+    await ok("live.remove", { folder: made.id });
+  } finally {
+    SOURCES.github.fetch = fetch;
+    setAccount("github", null);
+  }
+});
+
+test("a socket refresh whose control is switched off applies nothing", async () => {
+  await setup();
+  const { fetch } = SOURCES.github;
+  let calls = 0;
+  const held = gated();
+  SOURCES.github.fetch = async () => (++calls === 2 ? (await held.gate, [pr("late", 9)]) : [pr("early", 1)]);
+  setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
+  try {
+    const made = await ok("live.create", { kind: "pullRequests" });
+    await until(() => live().items[made.id]?.length === 1);
+    const pending = send("live.refresh", { folder: made.id });
+    await until(() => calls === 2);
+    S().updateSettings({ cliControl: false });
+    held.open();
+    assert.equal((await pending).error?.code, "failed");
+    await until(() => live().status[made.id]?.state === "idle" || live().status[made.id]?.state === "ready");
+    assert.deepEqual(live().items[made.id].map((it) => it.id), ["early"]);
+  } finally {
+    S().updateSettings({ cliControl: true });
+    SOURCES.github.fetch = fetch;
+    setAccount("github", null);
+  }
 });
 
