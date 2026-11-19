@@ -310,8 +310,8 @@ the user's live sessions on every site. Both are a different consent than "contr
 Designed, not built in this round, each in its own file under `state/automation/socket<Area>.ts`:
 
 - **Shared folder writes:** `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`,
-  `sharedFolders.sync {group}` and `sharedFolders.stop {group}`, in the follow-up to this round
-  (`full-control/app-socket-2a-shared`). They wait for the shared-folder sync engine and its native layer to hold up
+  `sharedFolders.sync {group}` and `sharedFolders.stop {group}`, in the follow-up to this round,
+  #2836 (`full-control/app-socket-2a-shared`). They wait for the shared-folder sync engine and its native layer to hold up
   under a writer outside the sidebar: control checks after every await, no store-triggered round outliving its guard,
   no sync without a folder identity, sanitized names, one Add per folder identity, refusal by device and inode, and
   identity-checked renames, removals and creates.
