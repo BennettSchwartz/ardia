@@ -12,7 +12,7 @@ browser's window tree host now asks X11 for the insets once more through X11Exte
 a window manager that honours the property sees none. Wayland has no X11 extension and is unchanged.
 --- a/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.cc
 +++ b/chrome/browser/ui/views/frame/browser_frame_view_layout_linux.cc
-@@ -10,6 +10,10 @@
+@@ -12,6 +12,10 @@
  #include "ui/gfx/geometry/insets.h"
  #include "ui/views/window/frame_view_utils_linux.h"
  
@@ -23,7 +23,7 @@ a window manager that honours the property sees none. Wayland has no X11 extensi
  namespace {
  
  // This is the same thickness as the resize border on ChromeOS.
-@@ -35,6 +39,9 @@
+@@ -39,6 +43,9 @@
  }
  
  gfx::Insets BrowserFrameViewLayoutLinux::GetInputInsets() const {
@@ -33,7 +33,7 @@ a window manager that honours the property sees none. Wayland has no X11 extensi
    bool showing_shadow = delegate_->ShouldDrawRestoredFrameShadow() &&
                          !delegate_->IsFrameCondensed();
    return gfx::Insets(showing_shadow ? kResizeBorder : 0);
-@@ -46,6 +53,10 @@
+@@ -50,6 +57,10 @@
  }
  
  gfx::Insets BrowserFrameViewLayoutLinux::RestoredFrameBorderInsets() const {
@@ -44,8 +44,8 @@ a window manager that honours the property sees none. Wayland has no X11 extensi
    // Unframed mode only has a minimal frame so it is resizable from the borders.
    if (delegate_->GetUnframedModeEnabled()) {
      return gfx::Insets(
-@@ -74,3 +85,7 @@
- int BrowserFrameViewLayoutLinux::NonClientExtraTopThickness() const {
+@@ -81,3 +92,7 @@
+   }
    return delegate_->IsTabStripVisible() ? 0 : kExtraTopBorder;
  }
 +
