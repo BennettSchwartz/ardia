@@ -82,21 +82,32 @@ UI update still happens.
   is `null` at the end of the results or of the window. The engine's query takes a page cap but still loads every
   visit before applying it (`ac_history.cc`); pushing the cap into the query is an `engine/` change, due with the next
   engine build.
-- **The 1 MiB line.** Every line Ardia writes on the socket is at most 1 MiB (1,048,576 bytes before the newline),
-  the limit every shipped command reads (`MAX_LINE` in the command's `control.py` and `control.rs`; a longer line
-  drops the connection) (`socketWire.ts`):
+- **The 1 MiB line.** Every line Ardia writes on the socket is at most 1 MiB (1,048,576 bytes), measured as sent: the
+  escaped JSON, its envelope and the newline. That is the limit every shipped command reads (`MAX_LINE` in the
+  command's `control.py` and `control.rs`; a longer line drops the connection) (`socketWire.ts`):
   - a read whose reply wouldn't fit answers `failed` "The reply would be over 1 MiB, the most a line can carry; ask for
     less (a smaller limit, a later offset, a folder, a window or a lower depth)";
   - a write (`mutates: true`) whose result wouldn't fit answers `{ok: true, oversized: true, …}` with its scalar fields
     and each list as `{count}`, and a hint to read it back, so the size never hides whether the write happened;
-  - an event that wouldn't fit goes out with its scalar fields, each list as `{count}` and `truncated: true`;
+  - an event keeps 64 bytes free for the `dropped` marker; one that wouldn't fit goes out with its scalar fields, each
+    list as `{count}` and `truncated: true`;
   - a decide request that wouldn't fit isn't sent: Ardia goes on as if nobody answered (its default);
   - an error message is cut to 4 KiB.
-  The native queue (`ControlOutput.swift`) keeps up to 4 MiB of unsent events per connection: past that, or past
-  1,000 waiting events, it drops the oldest waiting ones, and the next event it writes starts with `"dropped": <n>`.
-  Events never close a connection. Replies have their own 34 MiB (32 pending requests of 1 MiB each, and room); only a
-  connection that leaves that much of its own replies unread is closed. `cli_socket_lines_shrunk` counts replies,
-  events and decide requests that went out shortened.
+- **The native queue** (`ControlOutput.swift`, `ControlConnection.swift`) holds three kinds of line per connection:
+  - replies, and decide messages (requests and cancels, any line starting `{"decide":`): never dropped;
+  - events: evicted oldest first when a reader falls behind (past 4 MiB or 1,000 waiting events, or to make room for a
+    reply or decide message). The next event written starts with `"dropped": <n>`. If adding the marker would push
+    that event over 1 MiB, it goes out unmarked and the count moves to the next event.
+  - Everything waiting shares 34 MiB (32 pending requests of 1 MiB each, and room), less 64 bytes kept for the marker,
+    which no reply uses.
+  - The queue checks the line limit again: an event over 1 MiB is dropped and counted, and a reply over it is replaced
+    with a `failed` error for the same id.
+  - A connection is closed only when its own unread replies and decide messages fill the 34 MiB, it sends more than 32
+    requests without reading, a request line passes 1 MiB or stalls for 30 s, or control is turned off. It is never
+    closed in the middle of a line: Ardia drops what was queued after that line (the replies are reported unwritten),
+    stops reading, finishes the line within 5 s and then closes. A write error or a reader that hung up closes at once.
+  - `cli_socket_lines_shrunk` counts replies, events and decide requests that went out shortened.
+  - Linux has its own queue in `engine/ardiacore-linux` and doesn't have these rules yet; that's an engine change.
 - **Telemetry.** Each call counts once in its method family (`cli_socket_calls_<family>`) and once in
   `cli_socket_call_failures` when it answers an error: counts only, never which method's params
   (`state/telemetry/cliCounts.ts`).

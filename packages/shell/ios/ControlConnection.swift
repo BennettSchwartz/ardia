@@ -5,6 +5,8 @@ final class ControlConnection {
   static let maxLine = 1_048_576
   static let maxPendingRequests = 32
   static let lineDeadline: TimeInterval = 30
+  static let retireDeadline: TimeInterval = 5
+  private static var retiring: [ObjectIdentifier: ControlConnection] = [:]
   private static let readSize = 65536
 
   let id: Int
@@ -22,6 +24,8 @@ final class ControlConnection {
   private var pendingRequests = 0
   private var deadline: DispatchWorkItem?
   private(set) var closed = false
+  private var finishingLine = false
+  private var announced = false
 
   init(
     id: Int, fd: Int32, queue: DispatchQueue, onLine: @escaping (ControlConnection, String) -> Void,
@@ -44,24 +48,48 @@ final class ControlConnection {
   }
 
   func reply(_ data: Data, ticket: Int) {
-    guard !closed else { return report(ticket > 0 ? [ticket] : []) }
+    guard !closed, !finishingLine else { return report(ticket > 0 ? [ticket] : []) }
     pendingRequests = max(0, pendingRequests - 1)
     guard output.addReply(data, ticket: ticket) else {
       report(ticket > 0 ? [ticket] : [])
-      return close()
+      return retire()
     }
     if !writeArmed { flush() }
   }
 
   func send(_ data: Data) {
-    guard !closed else { return }
-    guard output.addReply(data, ticket: 0) else { return close() }
+    guard !closed, !finishingLine else { return }
+    guard output.addKept(data) else { return retire() }
     if !writeArmed { flush() }
   }
 
   func event(_ data: Data) {
-    guard !closed else { return }
+    guard !closed, !finishingLine else { return }
     enqueue(output.addEvent(data))
+  }
+
+  func retire() {
+    guard !closed, !finishingLine else { return }
+    guard output.midLine else { return close() }
+    finishingLine = true
+    deadline?.cancel()
+    input = []
+    report(output.keepOnlyHead())
+    announce()
+    Self.retiring[ObjectIdentifier(self)] = self
+    let item = DispatchWorkItem { [weak self] in self?.close() }
+    deadline = item
+    queue.asyncAfter(deadline: .now() + Self.retireDeadline, execute: item)
+    flush()
+    guard !closed else { return }
+    readSource?.cancel()
+    readSource = nil
+  }
+
+  private func announce() {
+    guard !announced else { return }
+    announced = true
+    onClose(self)
   }
 
   func close() {
@@ -77,8 +105,9 @@ final class ControlConnection {
     let unwritten = output.takeFinishedTickets() + output.waitingTickets
     output = ControlOutput()
     input = []
-    onClose(self)
+    announce()
     report(unwritten)
+    Self.retiring.removeValue(forKey: ObjectIdentifier(self))
   }
 
   private func report(_ tickets: [Int]) {
@@ -94,7 +123,7 @@ final class ControlConnection {
   }
 
   private func enqueue(_ accepted: Bool) {
-    guard accepted else { return close() }
+    guard accepted else { return retire() }
     if !writeArmed { flush() }
   }
 
@@ -103,6 +132,7 @@ final class ControlConnection {
     report(output.takeFinishedTickets())
     switch result {
     case .drained:
+      if finishingLine { return close() }
       disarmWrite()
     case .blocked:
       armWrite()
@@ -132,7 +162,7 @@ final class ControlConnection {
   }
 
   private func readAvailable() {
-    guard !closed else { return }
+    guard !closed, !finishingLine else { return }
     var buffer = [UInt8](repeating: 0, count: Self.readSize)
     let count = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, Self.readSize) }
     if count > 0 { return take(buffer[0..<count]) }
@@ -148,9 +178,9 @@ final class ControlConnection {
     var consumed = false
     while let newline = input[index...].firstIndex(of: 10) {
       let length = newline - lineStart
-      guard length <= Self.maxLine else { return close() }
+      guard length <= Self.maxLine else { return retire() }
       pendingRequests += 1
-      guard pendingRequests <= Self.maxPendingRequests else { return close() }
+      guard pendingRequests <= Self.maxPendingRequests else { return retire() }
       onLine(self, String(decoding: input[lineStart..<newline], as: UTF8.self))
       if closed { return }
       lineStart = newline + 1
@@ -158,7 +188,7 @@ final class ControlConnection {
       consumed = true
     }
     if lineStart > 0 { input.removeFirst(lineStart) }
-    guard input.count <= Self.maxLine else { return close() }
+    guard input.count <= Self.maxLine else { return retire() }
     if input.isEmpty || consumed {
       deadline?.cancel()
       deadline = nil
@@ -169,7 +199,7 @@ final class ControlConnection {
   private func armDeadline() {
     let item = DispatchWorkItem { [weak self] in
       guard let self, !self.closed, !self.input.isEmpty else { return }
-      self.close()
+      self.retire()
     }
     deadline = item
     queue.asyncAfter(deadline: .now() + Self.lineDeadline, execute: item)
