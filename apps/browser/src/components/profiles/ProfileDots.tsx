@@ -85,7 +85,7 @@ function Dot({ id, windowId, icon, row, page, pos }: { id: string; windowId: str
             {holding ? (
               <View
                 pointerEvents="none"
-                style={{ position: "absolute", width: icon ? cell : holdPlate.dot, height: icon ? holdPlate.icon : holdPlate.dot, borderRadius: icon ? holdPlate.radius : holdPlate.dot / 2, backgroundColor: tokens.multiSelected }}
+                style={{ position: "absolute", width: row.icons ? cell : holdPlate.dot, height: row.icons ? holdPlate.icon : holdPlate.dot, borderRadius: row.icons ? holdPlate.radius : holdPlate.dot / 2, backgroundColor: tokens.multiSelected }}
               />
             ) : null}
             <Animated.View style={[{ opacity }, pressMotion.scale ? { transform: [{ scale: pressMotion.scale }] } : null]}>
