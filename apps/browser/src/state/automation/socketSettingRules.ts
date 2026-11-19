@@ -4,7 +4,7 @@ import { siteOf } from "../engines/engines";
 import { customNewTabUrl, DEFAULT_SETTINGS, searchEngines, validSettingValue, type SettingKey, type Settings } from "../settings/settings";
 
 type Checked = { patch: Partial<Settings> } | { problem: string };
-type Rule = (value: unknown, settings: Settings) => Checked;
+type Rule = (value: unknown, settings: Settings, requested: Record<string, unknown>) => Checked;
 
 const SCHEME = /^[a-z][\w+.-]*:\/\//i;
 const NO_WEBKIT = "WebKit isn't part of Ardia on this platform, so pages always open in Chromium";
@@ -31,9 +31,13 @@ function newTabUrl(value: unknown): Checked {
   return { patch: { newTabUrl: url } };
 }
 
-function customSearchUrl(value: unknown, settings: Settings): Checked {
+function customSearchUrl(value: unknown, settings: Settings, requested: Record<string, unknown>): Checked {
   const url = (value as string).trim();
-  if (!url) return { patch: { customSearchUrl: "", ...(settings.searchEngine === "custom" ? { searchEngine: DEFAULT_SETTINGS.searchEngine } : {}) } };
+  if (!url) {
+    if (requested.searchEngine === "custom") return { problem: "customSearchUrl: the Custom engine can't be the default without its URL" };
+    const fallBack = settings.searchEngine === "custom" && !Object.hasOwn(requested, "searchEngine");
+    return { patch: { customSearchUrl: "", ...(fallBack ? { searchEngine: DEFAULT_SETTINGS.searchEngine } : {}) } };
+  }
   if (!/^https?:\/\/[^/?#\s]+/i.test(url)) return { problem: "customSearchUrl: enter a URL that starts with http:// or https://" };
   if (!url.includes("%s")) return { problem: "customSearchUrl: the URL must contain %s where the search terms go" };
   if (searchEngines(settings).some((e) => e.id !== "custom" && e.keyword.toLowerCase() === "custom")) return { problem: "customSearchUrl: “custom” is already used by another search engine" };
@@ -45,18 +49,23 @@ export const SOCKET_SETTING_RULES: Partial<Record<SettingKey, Rule>> = {
   websiteEngines: (value) => needsWebKit("websiteEngines", value, () => websiteEngines(value)),
   protectedVideoInWebKit: (value) => needsWebKit("protectedVideoInWebKit", value, () => ({ patch: { protectedVideoInWebKit: value as boolean } })),
   newTabUrl: (value) => shaped("newTabUrl", value, () => newTabUrl(value)),
-  customSearchUrl: (value, settings) => shaped("customSearchUrl", value, () => customSearchUrl(value, settings)),
+  customSearchUrl: (value, settings, requested) => shaped("customSearchUrl", value, () => customSearchUrl(value, settings, requested)),
 };
 
 export const hasSocketRule = (key: string): key is SettingKey => Object.hasOwn(SOCKET_SETTING_RULES, key);
 
-export function checkedByRules(values: Record<string, unknown>, settings: Settings) {
+export function checkedByRules(values: Record<string, unknown>, settings: Settings, requested: Record<string, unknown> = values) {
   const problems: string[] = [];
   let patch: Partial<Settings> = {};
   for (const [key, value] of Object.entries(values)) {
-    const checked = SOCKET_SETTING_RULES[key as SettingKey]!(value, settings);
+    const checked = SOCKET_SETTING_RULES[key as SettingKey]!(value, settings, requested);
     if ("problem" in checked) problems.push(checked.problem);
     else patch = { ...patch, ...checked.patch };
   }
   return { patch, problems };
+}
+
+export function searchProblem(before: Settings, after: Settings): string | null {
+  if (before.searchEngine === after.searchEngine && before.customSearchUrl === after.customSearchUrl) return null;
+  return searchEngines(after).some((e) => e.id === after.searchEngine) ? null : `searchEngine ${after.searchEngine} wouldn't exist after this change`;
 }
