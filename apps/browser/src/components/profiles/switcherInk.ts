@@ -55,9 +55,8 @@ export type SwitcherFit = { scale: number; dx: number; dy: number };
 const UNMEASURED: SwitcherFit = { scale: 1, dx: 0, dy: 0 };
 
 export function switcherFit(symbol: string): SwitcherFit {
-  const ink = SWITCHER_INK[symbol];
-  if (!ink) return UNMEASURED;
-  const [width, height, centreX, centreY] = ink;
+  if (!Object.hasOwn(SWITCHER_INK, symbol)) return UNMEASURED;
+  const [width, height, centreX, centreY] = SWITCHER_INK[symbol]!;
   const scale = Math.min(profileSwitcher.ink / width, profileSwitcher.ink / height);
   return { scale, dx: -centreX * scale, dy: -centreY * scale };
 }

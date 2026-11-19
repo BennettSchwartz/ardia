@@ -60,3 +60,9 @@ test("a symbol with no measurement and an emoji are drawn as they were", () => {
   assert.deepEqual(switcherFit("not.a.symbol"), { scale: 1, dx: 0, dy: 0 });
   assert.deepEqual(switcherFit("🙂"), { scale: 1, dx: 0, dy: 0 });
 });
+
+test("a symbol named like a property every object inherits is unmeasured, not a crash", () => {
+  for (const name of ["toString", "constructor", "valueOf", "hasOwnProperty", "__proto__"]) {
+    assert.deepEqual(switcherFit(name), { scale: 1, dx: 0, dy: 0 }, name);
+  }
+});
