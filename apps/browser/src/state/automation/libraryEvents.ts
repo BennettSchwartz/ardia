@@ -13,7 +13,23 @@ export const LIBRARY_EVENTS = ["bookmarks.changed", "history.removed", "download
 
 const MAX_IDS = 1000;
 
+export const HISTORY_EVENT_URL_BYTES = 256 * 1024;
+
 const capped = (ids: readonly string[]) => (ids.length > MAX_IDS ? ids.slice(0, MAX_IDS) : [...ids]);
+
+const utf8 = new TextEncoder();
+
+export function historyRemoval(profiles: string[], all: boolean, urls: readonly string[]) {
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const url of urls) {
+    const size = utf8.encode(url).length + 3;
+    if (kept.length >= MAX_IDS || bytes + size > HISTORY_EVENT_URL_BYTES) break;
+    kept.push(url);
+    bytes += size;
+  }
+  return { profiles, all, count: urls.length, urls: kept, truncated: kept.length < urls.length };
+}
 
 const sameBookmark = (a: BookmarkNode, b: BookmarkNode) =>
   a.kind === b.kind && a.title === b.title && a.parentId === b.parentId && (a.kind === "url" ? a.url === (b as typeof a).url : a.children === (b as typeof a).children || a.children.join() === (b as typeof a).children.join());
@@ -98,7 +114,7 @@ function startHistoryRemovals(send: EventSend) {
     const s = useBrowser.getState();
     const profiles = s.profileOrder.filter((id) => !isIncognitoProfile(id) && s.profiles[id] && engineProfile(s, id) === change.profile);
     if (!profiles.length) return;
-    send("history.removed", { profiles, all: change.all, count: change.urls.length, urls: capped(change.urls) });
+    send("history.removed", historyRemoval(profiles, change.all, change.urls));
   });
   return () => subscription.remove();
 }

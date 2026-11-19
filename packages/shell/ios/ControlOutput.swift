@@ -34,15 +34,28 @@ struct ControlOutput {
 
   var waitingTickets: [Int] { chunks.map(\.ticket).filter { $0 > 0 } }
 
+  static let markerRoom = 32
+
   mutating func addEvent(_ data: Data) -> Bool {
-    if waitingEvents >= Self.maxWaitingEvents, let index = oldestWaitingEvent() {
-      bytes -= chunks[index].data.count
-      chunks.remove(at: index)
-      waitingEvents -= 1
+    if waitingEvents >= Self.maxWaitingEvents { _ = dropOldestEvent() }
+    while !fits(data.count), dropOldestEvent() {}
+    guard fits(data.count) else {
       dropped += 1
+      return true
     }
     waitingEvents += 1
     return append(Chunk(data: data, event: true))
+  }
+
+  private func fits(_ count: Int) -> Bool { bytes + count + Self.markerRoom <= Self.maxBytes }
+
+  private mutating func dropOldestEvent() -> Bool {
+    guard let index = oldestWaitingEvent() else { return false }
+    bytes -= chunks[index].data.count
+    chunks.remove(at: index)
+    waitingEvents -= 1
+    dropped += 1
+    return true
   }
 
   mutating func write(to fd: Int32) -> WriteResult {

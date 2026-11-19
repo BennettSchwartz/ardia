@@ -107,7 +107,7 @@ function fakeExtensions() {
     },
     inspect: async (path) => {
       if (!path.endsWith("/ext")) throw new Error("Manifest file is missing or unreadable");
-      return { ...pkg, path };
+      return { ...pkg, path, digest: "fixture" };
     },
   };
   globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };
@@ -201,7 +201,7 @@ test("events: bookmarks, history removals, downloads and profiles", async () => 
   const bookmarks = events.filter((e) => e.event === "bookmarks.changed");
   assert.ok(bookmarks.some((e) => e.data.added.includes(markId) && e.data.profile === "default"), "the new bookmark");
   const history = events.find((e) => e.event === "history.removed");
-  assert.deepEqual(history.data, { profiles: ["default"], all: false, count: 1, urls: ["https://gone.example/"] });
+  assert.deepEqual(history.data, { profiles: ["default"], all: false, count: 1, urls: ["https://gone.example/"], truncated: false });
   const downloads = events.filter((e) => e.event === "download.changed").map((e) => `${e.data.change}:${e.data.state}`);
   assert.deepEqual(downloads, ["added:downloading", "updated:finished"], "progress alone sends nothing");
   const profiles = events.filter((e) => e.event === "profile.changed").map((e) => e.data);
