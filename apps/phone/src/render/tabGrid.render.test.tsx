@@ -341,6 +341,26 @@ onAndroid("a grid card's Tab Options action gives TalkBack the same drawn CardMe
   unmount(root);
 });
 
+onAndroid("a grid card's Tab Options stays with its own tab when an earlier tab closes while the card is measured", async () => {
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  let measured!: (rect: { x: number; y: number; width: number; height: number }) => void;
+  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => (measured = resolve)));
+  const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
+  const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
+  const root = deck();
+  toggle();
+  const asked = cards(root)[1]!;
+  const askedTab = tabStore.currentTabs().open.find((tab) => tab.title === asked.props.accessibilityLabel)!;
+  const earlier = tabStore.currentTabs().open.find((tab) => tab.title === cards(root)[0]!.props.accessibilityLabel)!;
+  act(() => asked.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== earlier.id) })));
+  await act(async () => measured({ x: 20, y: 200, width: 170, height: 300 }));
+  const items = root.root.findAll((node) => node.type === FloatingMenu)[0]!.props.items as MenuItem[];
+  act(() => (items.find((item) => typeof item === "object" && "label" in item && item.label === "Copy Link") as { onPress: () => void }).onPress());
+  expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: askedTab.id }));
+  unmount(root);
+});
+
 onAndroid("each grid card's long press opens the drawn CardMenu at the finger, dimmed, and its Close Tab closes the tab", () => {
   const closed = jest.spyOn(browse, "closeTabFromDeck").mockImplementation(() => undefined);
   const root = deck();

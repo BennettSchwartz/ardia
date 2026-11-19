@@ -132,6 +132,35 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun destroyingFromAnotherThreadWhileARequestRetriesStopsItThereAndRefusesNewOnes() {
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
+        var looked = 0
+        requests.start {
+            looked += 1
+            null
+        }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(40))
+        val before = looked
+        var failure: Throwable? = null
+        val teardown = Thread {
+            try {
+                requests.destroy()
+            } catch (thrown: Throwable) {
+                failure = thrown
+            }
+        }
+        teardown.start()
+        teardown.join()
+        assertEquals(null, failure)
+        assertTrue(requests.destroyed)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
+        assertEquals(before, looked)
+        assertEquals(0, requests.waiting)
+        assertEquals(0, requests.start { looked += 1; null })
+        assertEquals(before, looked)
+    }
+
+    @Test
     fun anAnnouncementReachesTheScreenReaderAsAnAnnouncementEvent() {
         activity.setContentView(FrameLayout(activity).apply { addView(row, 200, 100) })
         shadowOf(Looper.getMainLooper()).idle()

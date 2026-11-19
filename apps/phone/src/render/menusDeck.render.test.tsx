@@ -378,3 +378,40 @@ drawnTest("on Android TalkBack reaches a deck card's menu through its Tab Option
   expect(placed.place.top + placed.maxHeight).toBe(720 - 16);
   unmount(root);
 });
+
+drawnTest("Tab Options keeps the tab it was asked for while the card is measured: an earlier tab closing meanwhile doesn't move it to the next tab's menu", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  let measured!: (rect: { x: number; y: number; width: number; height: number }) => void;
+  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => (measured = resolve)));
+  const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
+  const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
+  const closed = jest.spyOn(browse, "closeTabFromDeck").mockImplementation(() => undefined);
+  const root = deck();
+  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+  const asked = withMenu()[1]!;
+  const askedTab = tabStore.currentTabs().open.find((tab) => tab.title === asked.props.accessibilityLabel)!;
+  act(() => asked.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  const earlier = tabStore.currentTabs().open.find((tab) => tab.title === withMenu()[0]!.props.accessibilityLabel)!;
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== earlier.id) })));
+  await act(async () => measured({ x: 60, y: 200, width: 280, height: 520 }));
+  pick(root, "Copy Link");
+  expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: askedTab.id }));
+  expect(closed).not.toHaveBeenCalled();
+  unmount(root);
+});
+
+drawnTest("Tab Options is dropped if its tab has gone by the time the card is measured", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  let measured!: (rect: { x: number; y: number; width: number; height: number }) => void;
+  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => (measured = resolve)));
+  const root = deck();
+  const asked = root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"))[1]!;
+  const askedTab = tabStore.currentTabs().open.find((tab) => tab.title === asked.props.accessibilityLabel)!;
+  act(() => asked.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== askedTab.id) })));
+  await act(async () => measured({ x: 60, y: 200, width: 280, height: 520 }));
+  expect(menuitems(root)).toEqual([]);
+  unmount(root);
+});

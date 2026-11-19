@@ -5,7 +5,7 @@ import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
-import { useOverlayCovered, useOverlayGeneration } from "./Overlay";
+import { useOverlayCovered, useOverlayGeneration, useOverlayOpened } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
@@ -108,6 +108,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   const cancelRestore = useRef<() => void>(() => undefined);
   const covered = useOverlayCovered();
   const generation = useOverlayGeneration();
+  const onOverlayOpened = useOverlayOpened();
   useEffect(() => () => cancelRestore.current(), []);
   const frostAround = useMenuFrost();
   const frost = frostHere === undefined ? frostAround : frostHere;
@@ -145,9 +146,11 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
           () => generation() === openedBefore && !covered(),
         );
       }, menuMotion.heldClose);
+      const stopWatching = onOverlayOpened(() => cancelRestore.current());
       cancelRestore.current = () => {
         clearTimeout(wait);
         cancelFocus();
+        stopWatching();
         cancelRestore.current = () => undefined;
       };
     },

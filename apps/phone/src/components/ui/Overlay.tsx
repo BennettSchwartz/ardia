@@ -5,7 +5,7 @@ export type WindowRect = { x: number; y: number; width: number; height: number }
 
 type Layer = { id: number; node: ReactNode; leaving: boolean };
 
-type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect>; covered: () => boolean; generation: () => number };
+type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect>; covered: () => boolean; generation: () => number; onOpened: (listener: () => void) => () => void };
 
 const OverlayContext = createContext<Overlay | null>(null);
 
@@ -27,6 +27,7 @@ export function OverlayHost({ children }: { children: ReactNode }) {
   const coveredNow = useRef(false);
   const shownIds = useRef(new Set<number>());
   const opened = useRef(0);
+  const openListeners = useRef(new Set<() => void>());
   coveredNow.current = layers.some((layer) => !layer.leaving);
   const overlay = useMemo<Overlay>(
     () => ({
@@ -35,6 +36,7 @@ export function OverlayHost({ children }: { children: ReactNode }) {
         else if (!shownIds.current.has(id)) {
           shownIds.current.add(id);
           opened.current += 1;
+          for (const listener of [...openListeners.current]) listener();
         }
         setLayers((now) => {
           if (node === null) return now.filter((layer) => layer.id !== id);
@@ -50,6 +52,10 @@ export function OverlayHost({ children }: { children: ReactNode }) {
       frame: () => measure(root.current),
       covered: () => coveredNow.current,
       generation: () => opened.current,
+      onOpened: (listener) => {
+        openListeners.current.add(listener);
+        return () => void openListeners.current.delete(listener);
+      },
     }),
     [],
   );
@@ -91,6 +97,11 @@ export function Portal({ exitMs = 0, children }: { exitMs?: number; children: Re
 export function useOverlayCovered() {
   const overlay = useContext(OverlayContext);
   return overlay ? overlay.covered : () => false;
+}
+
+export function useOverlayOpened() {
+  const overlay = useContext(OverlayContext);
+  return overlay ? overlay.onOpened : () => () => undefined;
 }
 
 export function useOverlayGeneration() {

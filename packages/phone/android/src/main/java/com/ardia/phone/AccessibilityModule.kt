@@ -28,7 +28,7 @@ class AccessibilityModule : Module() {
         AsyncFunction("cancelFocus") { request: Int -> requests.cancel(request) }.runOnQueue(Queues.MAIN)
 
         OnDestroy {
-            requests.cancelAll()
+            requests.destroy()
         }
 
         AsyncFunction("announce") { text: String ->
@@ -54,14 +54,19 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
     private var lastId = 0
     private val pending = HashMap<Int, Runnable>()
 
+    @Volatile
+    var destroyed = false
+        private set
+
     val waiting: Int get() = pending.size
 
     fun start(resolve: () -> View?): Int {
+        if (destroyed) return 0
         val id = ++lastId
         val deadline = clock() + GIVE_UP_AFTER_MS
         val attempt = object : Runnable {
             override fun run() {
-                if (pending[id] !== this) return
+                if (destroyed || pending[id] !== this) return
                 if (ScreenReaderFocus.focus(resolve()) || clock() >= deadline) {
                     pending.remove(id)
                     return
@@ -81,6 +86,11 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
     fun cancelAll() {
         pending.values.forEach(handler::removeCallbacks)
         pending.clear()
+    }
+
+    fun destroy() {
+        destroyed = true
+        if (Looper.myLooper() == handler.looper) cancelAll() else handler.post { cancelAll() }
     }
 }
 

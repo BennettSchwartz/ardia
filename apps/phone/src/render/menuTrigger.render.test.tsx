@@ -820,3 +820,43 @@ test("a picker gives TalkBack focus back to its row after a choice, as PopupMenu
     unmount(root);
   }
 });
+
+test("on Android a restore already handed to the native side is revoked the moment a newer overlay opens, even if it closes again", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const { updateSurface } = require("../../test/render/harness") as typeof import("../../test/render/harness");
+  const { ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
+  const revoked = jest.fn();
+  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => revoked);
+  function Harness({ asking = false }: { asking?: boolean }) {
+    return (
+      <>
+        <MenuTrigger items={ITEMS} trigger="tap">
+          {({ onPress }) => (
+            <Pressable accessibilityLabel="Trigger" onPress={onPress}>
+              <Text>Trigger</Text>
+            </Pressable>
+          )}
+        </MenuTrigger>
+        {asking ? <ConfirmSheet confirmation={{ title: "Question", message: "", action: "Confirm", run: () => undefined }} onClose={() => undefined} /> : null}
+      </>
+    );
+  }
+  const back = pressBack();
+  const root = renderSurface(<Harness />);
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: 77, nativeEvent: {} }));
+  back();
+  act(() => jest.advanceTimersByTime(menuMotion.heldClose));
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 50));
+  expect(sent).toHaveBeenCalledWith(77);
+  expect(revoked).not.toHaveBeenCalled();
+  updateSurface(root, <Harness asking />);
+  expect(revoked).toHaveBeenCalledTimes(1);
+  updateSurface(root, <Harness />);
+  unmount(root);
+});

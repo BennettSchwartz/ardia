@@ -198,7 +198,7 @@ export const TabDeck = memo(function TabDeck() {
   const [phase, setPhase] = useState<Phase>(first.phase);
   const [menu, setMenu] = useState<"plus" | "chip" | null>(null);
   const [chromeMenu, setChromeMenu] = useState(false);
-  const [cardMenu, setCardMenu] = useState<{ index: number; x: number; y: number; control?: Rect } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; control?: Rect } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [leavingCards, setLeavingCards] = useState<LeavingCard[]>(NO_LEAVING_CARDS);
   const leavingIds = useRef(new Set<string>());
@@ -963,7 +963,7 @@ export const TabDeck = memo(function TabDeck() {
     menuOpenedHaptic();
     hideArchiveCard();
     setMenu(null);
-    setCardMenu({ index, x, y, control });
+    setCardMenu({ id: order[index]!, x, y, control });
   };
   const longPress = Gesture.LongPress()
     .withTestId("deckLongPress")
@@ -1032,10 +1032,14 @@ export const TabDeck = memo(function TabDeck() {
       open: (at: number) => latestActions.current.open(at),
       close: (at: number) => latestActions.current.close(at, 0),
       closeNow: (at: number) => latestActions.current.closeNow(at),
-      menu: (at: number, card: RefObject<ViewInstance | null>) =>
+      menu: (at: number, card: RefObject<ViewInstance | null>) => {
+        const id = latestActions.current.order[at];
+        if (!id) return;
         void measureAnchor(card).then((rect) => {
-          if (rect.height > 0) latestActions.current.showCardMenu(at, rect.x, rect.y + rect.height, rect);
-        }),
+          const now = latestActions.current.order.indexOf(id);
+          if (now >= 0 && rect.height > 0) latestActions.current.showCardMenu(now, rect.x, rect.y + rect.height, rect);
+        });
+      },
       openTab: (id: string) => {
         const at = latestActions.current.order.indexOf(id);
         if (at >= 0) latestActions.current.open(at);
@@ -1261,7 +1265,7 @@ export const TabDeck = memo(function TabDeck() {
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} privately={tabs.get(order[cardMenu.index] ?? "")?.isPrivate === true} at={cardMenu} control={cardMenu.control} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
+      {cardMenu && order.includes(cardMenu.id) ? <CardMenuAt items={cardMenuItems(order.indexOf(cardMenu.id))} privately={tabs.get(cardMenu.id)?.isPrivate === true} at={cardMenu} control={cardMenu.control} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
       {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
     </MenuFloorProvider>
