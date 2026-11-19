@@ -63,6 +63,7 @@ globalThis.acTestNativeModules = {
       return { conflicts: nextConflicts.splice(0) };
     },
     create: async (parent, _parentIdentity, name) => ({ path: `${parent}/${name}`, device: 1, inode: 1 }),
+    resolve: async (path) => ({ path, device: 1, inode: [...path].reduce((n, c) => n + c.charCodeAt(0), 0) }),
     watch: () => {},
     addListener: () => ({ remove() {} }),
   },
@@ -71,12 +72,12 @@ globalThis.acTestNativeModules = {
 const { startPersistence } = await import("../session/persist.ts");
 const { useBrowser } = await import("../browser/store.ts");
 const { pinKeyOf } = await import("../browser/model.ts");
-const { syncFolderNow } = await import("./engine.ts");
+const { startSharedFolders, syncFolderNow } = await import("./engine.ts");
 const { bindFolder, sharedFolderOf, unbindFolder, useSharedFolders } = await import("./store.ts");
 const { shareFolder } = await import("./actions.ts");
 
 const S = () => useBrowser.getState();
-mock.timers.enable({ apis: ["setTimeout"] });
+mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 const flush = () => new Promise(setImmediate);
 async function wait(ms) {
   for (let at = 0; at < ms; at += 5) {
@@ -319,4 +320,21 @@ test("a socket round's conflict retry carries the socket's guard", async () => {
   on = false;
   await wait(5000);
   assert.equal(applies().length, before + 1, "the retry didn't run once control was off");
+});
+
+test("a store change made by a socket round revoked during its save never starts an unguarded round that writes", async () => {
+  startSharedFolders();
+  const { profileId, key, applies } = setupAt("/scratch/Ardia Shared/Echo");
+  await wait(900);
+  await settled(syncFolderNow(profileId, key));
+  await wait(900);
+  listing = remoteLink("https://echo.example/");
+  let on = true;
+  duringSave = () => void (on = false);
+  const before = applies().length;
+  await settled(syncFolderNow(profileId, key, () => on));
+  duringSave = () => {};
+  await wait(3000);
+  assert.ok(Object.values(S().tabs).some((t) => t.url === "https://echo.example/"), "the remote link reached the sidebar");
+  assert.equal(applies().length, before, "no file was written for the revoked round's change");
 });

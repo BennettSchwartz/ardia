@@ -2,7 +2,7 @@ import { discardSharedFolder, readSharedFolder, resolveSharedFolder, SHARED_FOLD
 import { errorText } from "../../lib/errors";
 import { OpError } from "./workspaceTargets";
 
-export { bindingAt } from "../sharedFolders/bindings";
+export { addKey, bindingAt, oneAtATime } from "../sharedFolders/bindings";
 
 const SYSTEM_ROOTS = ["/", "/System", "/Library", "/Applications", "/Users", "/Volumes", "/bin", "/sbin", "/usr", "/etc", "/var", "/tmp", "/dev", "/opt", "/cores", "/private", "/private/etc", "/private/var", "/private/tmp", "/Network"];
 
@@ -30,16 +30,3 @@ export async function readableFolder(found: ResolvedSharedFolder) {
 }
 
 export const discardFolder = (folder: ResolvedSharedFolder) => discardSharedFolder(folder).catch(() => false);
-
-const locks = new Map<string, Promise<unknown>>();
-
-export function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
-  const before = locks.get(key) ?? Promise.resolve();
-  const mine = before.catch(() => undefined).then(work);
-  const held = mine.catch(() => undefined);
-  locks.set(key, held);
-  void held.then(() => {
-    if (locks.get(key) === held) locks.delete(key);
-  });
-  return mine;
-}

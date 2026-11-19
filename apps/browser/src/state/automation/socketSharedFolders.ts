@@ -1,15 +1,14 @@
 import { createSharedFolder, identityOf, sharedFoldersAvailable, sharedLocation } from "../../platform/sharedFolders";
-import { useBrowser } from "../browser/store";
 import { isIncognitoProfile, pinKeyOf } from "../browser/model";
 import type { TabGroup } from "../browser/types";
 import { groupLabel } from "../pins/tabGrouping";
-import { fileUrlOf, stopSyncingGroup, withSharedGroup } from "../sharedFolders/actions";
+import { addFolderGroup, fileUrlOf, stopSyncingGroup } from "../sharedFolders/actions";
 import { syncFolderAfterNow, syncFolderNow } from "../sharedFolders/engine";
 import { canShareGroup, sharedFolderOfGroup } from "../sharedFolders/removal";
-import { bindFolder, bindFolderIfUnbound, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
+import { bindFolderIfUnbound, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
 import type { BaseEntry } from "../sharedFolders/tree";
 import { eligibleKind, ownEntry } from "./automationWindows";
-import { bindingAt, canonicalFolder, discardFolder, isAbsolutePath, oneAtATime, readableFolder } from "./sharedFolderPaths";
+import { addKey, bindingAt, canonicalFolder, discardFolder, isAbsolutePath, oneAtATime, readableFolder } from "./sharedFolderPaths";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { id, obj, text, WINDOW } from "./socketSchema";
 import { expect, now, windowOrFocused } from "./socketTargets";
@@ -115,10 +114,12 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
   if (!isAbsolutePath(params.path)) throw new OpError("bad_request", "path is an absolute folder path.");
   const profileId = windowOrFocused(params.window).profileId;
   const found = await canonicalFolder(params.path, "path");
-  return oneAtATime(`${profileId}\u0001${found.path}`, async () => {
+  call.stillServing();
+  return oneAtATime(addKey(profileId, found), async () => {
     await readableFolder(found);
     call.stillServing();
     const known = await bindingAt(profileId, found);
+    call.stillServing();
     if (known) {
       await syncFolderNow(profileId, known.key, call.serving);
       call.stillServing();
@@ -126,11 +127,8 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
     }
     const w = windowOrFocused(params.window);
     if (w.profileId !== profileId) throw new OpError("no_window", "The window changed profile before the folder was added; nothing was added.");
-    const [next, groupId] = withSharedGroup(now(), w.id, found.path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
-    expect(!!groupId, "the folder's group wasn't made.");
-    useBrowser.setState(next);
-    const key = pinKeyOf(now().groups[groupId]!);
-    bindFolder(profileId, key, found.path, identityOf(found));
+    const key = addFolderGroup(w.id, found);
+    if (!key) throw new OpError("failed", "Another request added this folder first; nothing more was added.");
     await syncFolderNow(profileId, key, call.serving);
     call.stillServing();
     return boundRow(profileId, key);

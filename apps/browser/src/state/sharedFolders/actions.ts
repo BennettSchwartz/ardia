@@ -1,8 +1,8 @@
 import { confirm, pickFolder } from "../../platform/dialogs";
 import { sharePage } from "../../platform/share";
-import { createSharedFolder, discardSharedFolder, identityOf, resolveSharedFolder, revealSharedFolder, sharedFoldersAvailable, sharedLocation } from "../../platform/sharedFolders";
+import { createSharedFolder, discardSharedFolder, identityOf, resolveSharedFolder, revealSharedFolder, sharedFoldersAvailable, sharedLocation, type ResolvedSharedFolder } from "../../platform/sharedFolders";
 import { errorText } from "../../lib/errors";
-import { bindingAt } from "./bindings";
+import { addKey, bindingAt, boundWithIdentity, oneAtATime } from "./bindings";
 import { useBrowser, type BrowserState } from "../browser/store";
 import type { Tab } from "../browser/types";
 import { isIncognitoProfile, makeTab, newId, pinKeyOf } from "../browser/model";
@@ -68,20 +68,29 @@ export async function addSharedFolder(windowId: string) {
     return null;
   });
   if (!found) return;
-  const { path } = found;
   const profileId = store().windows[windowId]?.profileId ?? w.profileId;
-  const known = await bindingAt(profileId, found);
-  if (known) {
-    const g = Object.values(store().groups).find((x) => x.profileId === profileId && x.pinned && pinKeyOf(x) === known.key);
-    showToast(windowId, `“${(g && groupLabel(store(), g)) || path.split("/").at(-1)}” is already in your sidebar`, undefined, { icon: "person.2" });
-    return syncFolderNow(profileId, known.key);
-  }
-  const [next, groupId] = withSharedGroup(store(), windowId, path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
-  if (!groupId) return;
+  return oneAtATime(addKey(profileId, found), async () => {
+    const known = await bindingAt(profileId, found);
+    if (known) {
+      const g = Object.values(store().groups).find((x) => x.profileId === profileId && x.pinned && pinKeyOf(x) === known.key);
+      showToast(windowId, `“${(g && groupLabel(store(), g)) || found.path.split("/").at(-1)}” is already in your sidebar`, undefined, { icon: "person.2" });
+      return syncFolderNow(profileId, known.key);
+    }
+    if (store().windows[windowId]?.profileId !== profileId) return;
+    const key = addFolderGroup(windowId, found);
+    if (key) await syncFolderNow(profileId, key);
+  });
+}
+
+export function addFolderGroup(windowId: string, found: ResolvedSharedFolder): string | null {
+  const w = store().windows[windowId];
+  if (!isRegularWindow(w) || boundWithIdentity(w.profileId, found)) return null;
+  const [next, groupId] = withSharedGroup(store(), windowId, found.path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
+  if (!groupId) return null;
   useBrowser.setState(next);
   const key = pinKeyOf(store().groups[groupId]!);
-  bindFolder(profileId, key, path, identityOf(found));
-  await syncFolderNow(profileId, key);
+  bindFolder(w.profileId, key, found.path, identityOf(found));
+  return key;
 }
 
 export async function shareFolder(windowId: string, groupId: string) {

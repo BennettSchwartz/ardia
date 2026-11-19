@@ -22,6 +22,14 @@ async function passGate(name) {
   await gate;
 }
 
+const latches = new Map();
+function latch(name) {
+  let release;
+  latches.set(name, new Promise((resolve) => (release = resolve)));
+  return () => (latches.delete(name), release());
+}
+let picked = null;
+
 const inodeOf = (path) => [...path].reduce((n, c) => n + c.charCodeAt(0), 0);
 const identityOf = (path) => ({ device: 7, inode: inodeOf(path) });
 const REFUSED = new Set(["/", "/System", "/Users", "/Library"]);
@@ -46,6 +54,7 @@ globalThis.acTestNativeModules = {
       resolved.push(given);
       const path = given.replace(/\/+$/, "") || "/";
       const real = aliases.get(path) ?? path;
+      await latches.get(`resolve ${real}`);
       if (REFUSED.has(real) || /^\/Users\/[^/]+$/.test(real)) throw Object.assign(new Error(`${real} is a system or home folder; pick a folder inside it.`), { code: "ERR_SHARED_FOLDER_REFUSED" });
       if (missing.has(real)) throw new Error(`There's no folder at ${path}.`);
       return { path: real, ...identityOf(real) };
@@ -54,13 +63,20 @@ globalThis.acTestNativeModules = {
     watch: () => {},
     addListener: () => ({ remove() {} }),
   },
+  ArdiaDialogs: {
+    confirm: async () => ({ confirmed: false, suppressed: false }),
+    prompt: async () => null,
+    pickFiles: async () => [],
+    pickFolder: async () => picked,
+  },
 };
 
 const { useBrowser } = await import("../browser/store.ts");
 const { startAutomation } = await import("./controlSocket.ts");
 const { startPersistence } = await import("../session/persist.ts");
 const { bindFolder, boundFolders, sharedFolderOf, setFolderSync } = await import("../sharedFolders/store.ts");
-const { shareFolder } = await import("../sharedFolders/actions.ts");
+const { addSharedFolder, shareFolder } = await import("../sharedFolders/actions.ts");
+const { syncFolderNow } = await import("../sharedFolders/engine.ts");
 const { pinKeyOf } = await import("../browser/model.ts");
 const stub = await import("../../test-native/index.ts");
 
@@ -255,4 +271,49 @@ test("the sidebar and the socket sharing one unbound group make one binding; the
   assert.equal(lost, 2, "both made a folder");
   const loser = [...madePaths].find((p) => p.startsWith("/scratch/Ardia Shared/Race") && p !== socket.path);
   assert.deepEqual(discarded.at(-1), [loser, identityOf(loser)], "the sidebar removed the folder it made, by identity");
+});
+
+test("control switched off while add waits on an existing binding's upgrade: no group and no binding are made", async () => {
+  const { windowId, profileId } = await setup("Late Add");
+  bindFolder(profileId, "legacy-late", "/scratch/legacy-late");
+  const release = latch("resolve /scratch/legacy-late");
+  const groups = Object.keys(S().groups).length;
+  const pending = send("sharedFolders.add", { path: "/scratch/Late Folder", window: windowId });
+  await settle();
+  S().updateSettings({ cliControl: false });
+  release();
+  assert.equal((await pending).error?.code, "failed");
+  assert.equal(Object.keys(S().groups).length, groups, "no group after control went off");
+  assert.ok(!boundFolders().some((b) => b.folder.path === "/scratch/Late Folder"), "no binding after control went off");
+});
+
+test("a legacy binding that can't get an identity never syncs; it shows as broken", async () => {
+  const { group, profileId, key } = await setup("Refused Legacy");
+  bindFolder(profileId, key, "/System");
+  reads.length = 0;
+  const writes = applied.length;
+  await syncFolderNow(profileId, key);
+  assert.deepEqual(reads, [], "nothing was read");
+  assert.equal(applied.length, writes, "nothing was written");
+  const row = (await ok("sharedFolders.list")).find((r) => r.path === "/System");
+  assert.equal(row?.state, "error");
+  assert.match(row.error, /can’t confirm which folder/);
+  assert.ok(S().groups[group]);
+});
+
+test("the sidebar's Add and the socket's add of one folder at once bind it once", async () => {
+  const { windowId, profileId } = await setup("Both Adds");
+  bindFolder(profileId, "legacy-both", "/scratch/legacy-both");
+  const release = latch("resolve /scratch/legacy-both");
+  picked = "/scratch/Both";
+  const sidebar = addSharedFolder(windowId);
+  const socket = send("sharedFolders.add", { path: "/scratch/Both", window: windowId });
+  await settle();
+  release();
+  await sidebar;
+  const reply = await socket;
+  picked = null;
+  assert.ok(!reply.error, JSON.stringify(reply.error));
+  assert.equal(boundFolders().filter((b) => b.folder.path === "/scratch/Both").length, 1, "one binding");
+  assert.equal(Object.values(S().groups).filter((g) => g.name === "Both").length, 1, "one group");
 });

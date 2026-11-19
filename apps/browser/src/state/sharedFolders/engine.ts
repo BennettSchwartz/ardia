@@ -47,6 +47,8 @@ const signatures = new Map<string, string>();
 const timers = new Map<string, { timer: ReturnType<typeof setTimeout>; allowed: Guard }>();
 const running = new Map<string, Promise<void>>();
 const queued = new Map<string, Guard>();
+const producedBy = new Map<string, { signature: string; allowed: Guard }>();
+const UNCONFIRMED = "Ardia can’t confirm which folder this is any more. Stop syncing it, then add it again.";
 
 const either = (a: Guard | undefined, b: Guard): Guard => (!a || a === b ? b : a === always || b === always ? always : () => a() || b());
 
@@ -105,7 +107,9 @@ async function round(profileId: string, key: string, allowed: Guard) {
     else setFolderSync(profileId, key, { state: "paused" });
     return;
   }
-  const listing = await readSharedFolder(folder.path, folder.identity ?? null);
+  if (!folder.identity) return setFolderSync(profileId, key, { state: "error", error: UNCONFIRMED });
+  const identity = folder.identity;
+  const listing = await readSharedFolder(folder.path, identity);
   const stale = () => sharedFolderOf(profileId, key) !== folder;
   if (!allowed()) return;
   if (stale()) return queue(ref, allowed);
@@ -123,7 +127,10 @@ async function round(profileId: string, key: string, allowed: Guard) {
   if (!local) return;
   const { level, waiting } = mergeFolder(folder.base, local.entries, remote);
   const next = withFolder(s, here.groupId, level, local);
-  if (next !== s) fromSync(() => useBrowser.setState(Object.fromEntries(APPLIED_FIELDS.map((f) => [f, next[f]]))));
+  if (next !== s) {
+    fromSync(() => useBrowser.setState(Object.fromEntries(APPLIED_FIELDS.map((f) => [f, next[f]]))));
+    producedBy.set(ref, { signature: signatureOf(localFolder(store(), here.groupId, knownNames(folder.base))), allowed });
+  }
   const { ops, base } = planFiles(level, folder.base);
   const settled = signatureOf(localFolder(store(), here.groupId, knownNames(base)));
   const saved = await sessionSaved();
@@ -133,7 +140,7 @@ async function round(profileId: string, key: string, allowed: Guard) {
     return setFolderSync(profileId, key, { state: "syncing", error: null });
   }
   if (stale()) return queue(ref, allowed);
-  const { conflicts } = ops.length ? await writeSharedFolder(folder.path, ops, folder.identity ?? null) : { conflicts: [] };
+  const { conflicts } = ops.length ? await writeSharedFolder(folder.path, ops, identity) : { conflicts: [] };
   if (stale()) return queue(ref, allowed);
   if (!allowed()) return;
   if (conflicts.length) {
@@ -142,6 +149,7 @@ async function round(profileId: string, key: string, allowed: Guard) {
   }
   setFolderBase(profileId, key, base);
   signatures.set(ref, settled);
+  producedBy.delete(ref);
   checkLocal();
   setFolderSync(profileId, key, { state: waiting ? "waiting" : "synced", waiting, error: null });
 }
@@ -151,7 +159,10 @@ function checkLocal() {
   for (const { profileId, key, folder } of boundFolders()) {
     const place = folderPlace(s, profileId, key);
     const signature = place.kind === "shown" ? signatureOf(localFolder(s, place.groupId, knownNames(folder.base))) : place.kind;
-    if (signature !== signatures.get(folderRef(profileId, key))) schedule(profileId, key, LOCAL_SETTLE_MS);
+    const ref = folderRef(profileId, key);
+    if (signature === signatures.get(ref)) continue;
+    const produced = producedBy.get(ref);
+    schedule(profileId, key, LOCAL_SETTLE_MS, produced?.signature === signature ? produced.allowed : always);
   }
 }
 
