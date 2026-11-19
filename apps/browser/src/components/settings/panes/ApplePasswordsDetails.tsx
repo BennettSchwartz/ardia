@@ -12,6 +12,7 @@ import { unlockPasswordsFor } from "../../../state/site/savedPasswords";
 import { iCloudPasswordsExtensionSupported } from "../../../state/site/passwords";
 import { Group, Row, SectionHeader } from "../Form";
 import { closeSettingsSheet, showSettingsSheet } from "../../../state/settings/sheet";
+import { notePasswordManagerChosen } from "../../../state/telemetry/passwordManagerCounts";
 
 function managerOptions(): Option<PasswordManager>[] {
   return [
@@ -25,7 +26,7 @@ export function PasswordManagerRow() {
   const mode = useEffectivePasswordManager();
   return (
     <Row anchor="profiles.passwordManager">
-      <PopUp value={mode} options={managerOptions()} onChange={(passwordManager) => updateSettings({ passwordManager })} minWidth={210} />
+      <PopUp value={mode} options={managerOptions()} onChange={(passwordManager) => (notePasswordManagerChosen(passwordManager), updateSettings({ passwordManager }))} minWidth={210} />
     </Row>
   );
 }

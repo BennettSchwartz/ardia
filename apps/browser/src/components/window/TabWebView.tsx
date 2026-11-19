@@ -29,6 +29,7 @@ import type { Tab } from "../../state/browser/types";
 import { zoomChangedByUser } from "../../state/site/zoomBubble";
 import { markTabReady, patchPage, pageOf } from "../../state/tabs/pageState";
 import { popupBlocked, showAutofillPrompt, showExternalApp, showPasswordPrompt, showVerificationCodePrompt } from "../../state/site/prompts";
+import { noteApplePasswordsPanel } from "../../state/telemetry/passwordManagerCounts";
 import { leftPage, pageAskedToClose, pageEnded } from "../../state/tabs/pageEvents";
 import { copyLinkToSelection, searchSelection, setPageSelection } from "../../state/site/selection";
 import { shareFromPage } from "../../state/site/share";
@@ -303,6 +304,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onProtectedMedia={(request) => offerWebKit(tabId, request)}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onVerificationCodeSetup={(setup) => showVerificationCodePrompt(tabId, setup)}
+      onApplePasswordsShown={(shown) => noteApplePasswordsPanel("key", shown)}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {
         releaseTranslation(tabId);

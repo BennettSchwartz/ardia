@@ -228,6 +228,7 @@ export type WebViewProps = ViewProps & {
   onSelection?: (selection: PageSelection | null) => void;
   onScroll?: (state: ScrollState) => void;
   onVerificationCodeSetup?: (setup: VerificationCodeSetup) => void;
+  onApplePasswordsShown?: (shown: boolean) => void;
   onProtectedMedia?: (request: ProtectedMediaRequest) => void;
   onAutoplayBlocked?: (count: number) => void;
   onReady?: () => void;

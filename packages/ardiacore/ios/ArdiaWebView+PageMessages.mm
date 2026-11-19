@@ -235,8 +235,10 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
     if ([@[ @"down", @"up", @"top" ] containsObject:state ?: @""])
       [self emit:@"scroll" payload:@{@"state" : state}];
   } else if ([kind isEqualToString:@"applePasswords"]) {
-    if (ApplePasswordsKey(_profile) && _visible && _tab.view.window.isKeyWindow && [self sameSiteFrame:main origin:sender])
-      [self showAppleAutoFill:@"passwords"];
+    if (ApplePasswordsKey(_profile) && [self sameSiteFrame:main origin:sender]) {
+      const BOOL shown = _visible && _tab.view.window.isKeyWindow && [self showAppleAutoFill:@"passwords"];
+      [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown)}];
+    }
   } else if ([kind isEqualToString:@"verificationCodeSetup"] && dict) {
     NSString *url = Field<NSString>(dict, @"url");
     if (gApplePasswords && [self sameSiteFrame:main origin:sender] && url.length && url.length <= 2048 &&

@@ -10,6 +10,7 @@ import { noteExternalAppRequest } from "../telemetry/track";
 import { showToast } from "../app/toasts";
 import { effectivePasswordManager } from "./passwordManager";
 import { parseVerificationCodeSetup } from "./verificationCodes";
+import { noteVerificationCodeSetup } from "../telemetry/passwordManagerCounts";
 
 async function shouldPromptForPopups(profile: string, origin: string): Promise<boolean> {
   try {
@@ -48,14 +49,18 @@ export function showVerificationCodePrompt(tabId: string, data: VerificationCode
   const offered = pageOf(tabId).verificationCodesOffered;
   if (offered.includes(url)) return;
   const setup = parseVerificationCodeSetup(url);
-  if (setup) patchPage(tabId, { verificationCode: { ...setup, url, origin: typeof origin === "string" ? origin : "" }, verificationCodesOffered: [...offered, url] });
+  if (!setup) return;
+  patchPage(tabId, { verificationCode: { ...setup, url, origin: typeof origin === "string" ? origin : "" }, verificationCodesOffered: [...offered, url] });
+  noteVerificationCodeSetup("offered");
 }
 
 export function acceptVerificationCodePrompt(tabId: string, url: string) {
   patchPage(tabId, { verificationCode: null });
+  noteVerificationCodeSetup("setUp");
   void setUpVerificationCode(url)
     .catch(() => false)
     .then((opened) => {
+      if (!opened) noteVerificationCodeSetup("failed");
       const windowId = currentTab(tabId)?.windowId;
       if (!opened && windowId) showToast(windowId, "Couldn't open Passwords.", undefined, { icon: "key.fill" });
     });
