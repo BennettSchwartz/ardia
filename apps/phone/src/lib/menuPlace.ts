@@ -46,15 +46,25 @@ export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: numbe
   return { left: x - host.x, top: y - host.y, height, origin: `${trailing ? "right" : "left"} ${below ? "top" : "bottom"}` };
 }
 
-export function menuAt(point: Point, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean): MenuSpot {
+export const MENU_SMALL_CONTROL = 64;
+
+export type MenuLimits = { control?: Rect | null; floor?: number | null };
+
+export function menuAt(point: Point, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean, limits?: MenuLimits): MenuSpot {
   const roomTop = room.y + margin;
-  const roomBottom = room.y + room.height - margin;
+  const roomBottom = Math.min(room.y + room.height, limits?.floor ?? Infinity) - margin;
+  const control = limits?.control;
+  const ceiling = control && control.height <= MENU_SMALL_CONTROL ? Math.min(point.y, control.y) : point.y;
   const height = Math.min(wanted, roomBottom - roomTop);
   const fitsRight = point.x + width + margin <= room.x + room.width;
   const fitsBelow = keepBelow ?? point.y + height <= roomBottom;
   const x = clamp(fitsRight ? point.x : point.x - width, room.x + margin, room.x + room.width - width - margin);
-  const y = clamp(fitsBelow ? point.y : point.y - MENU_FINGER_GAP - height, roomTop, roomBottom - height);
+  const y = clamp(fitsBelow ? point.y : ceiling - MENU_FINGER_GAP - height, roomTop, roomBottom - height);
   return { left: x - host.x, top: y - host.y, height, origin: `${fitsRight ? "left" : "right"} ${fitsBelow ? "top" : "bottom"}` };
+}
+
+export function menuShrink(anchor: Rect, width: number, height: number): { x: number; y: number } {
+  return { x: Math.min(1, anchor.width / width), y: Math.min(1, anchor.height / height) };
 }
 
 export function insetRect(rect: Rect, inset: { top: number; bottom: number; left: number; right: number }): Rect {

@@ -71,7 +71,7 @@ import {
 } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useHasArchivedTabs, useIncognito, usePrivateCount, useShownSpace } from "../../state/tabs/hooks";
-import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, menuExitMs, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
+import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, menuExitMs, MenuFloorProvider, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
 import { openSettings } from "../../state/settings/hooks";
 import { confirmInSheet, nativeMenus } from "../ui/MenuTrigger";
 import { useSyncEnabled } from "../../state/sync/hooks";
@@ -886,6 +886,7 @@ export const TabDeck = memo(function TabDeck() {
   const touchDown = useSharedValue({ x: 0, y: 0, absoluteX: 0, absoluteY: 0 });
   const scrollFrom = useSharedValue(0);
   const barBand = { bottom: g.barCenterY - tabsLayout.barTouchClearance - g.height };
+  const deckBarTop = g.barCenterY - deckChromeLayout.barCircle / 2;
   const pan = Gesture.Pan()
     .withTestId("deckPan")
     .enabled(!(pulls && reduceMotion && phase.kind === "closing"))
@@ -1064,6 +1065,7 @@ export const TabDeck = memo(function TabDeck() {
     });
 
   return (
+    <MenuFloorProvider value={deckBarTop}>
     <Animated.View
       testID="tabDeck"
       style={[StyleSheet.absoluteFill, shown ? null : pulls ? styles.parked : styles.hidden, handOverStyle]}
@@ -1253,9 +1255,10 @@ export const TabDeck = memo(function TabDeck() {
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} privately={tabs.get(order[cardMenu.index] ?? "")?.isPrivate === true} at={cardMenu} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
+      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} privately={tabs.get(order[cardMenu.index] ?? "")?.isPrivate === true} at={cardMenu} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
       {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
+    </MenuFloorProvider>
   );
 });
 
@@ -1340,11 +1343,11 @@ const styles = StyleSheet.create({
   parked: { transform: [{ translateX: HANDED_OVER_AWAY }] },
 });
 
-function CardMenuAt({ items, privately, at, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; screen: { width: number; height: number }; onDismiss: () => void }) {
+function CardMenuAt({ items, privately, at, floor, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; floor: number; screen: { width: number; height: number }; onDismiss: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Portal exitMs={menuExitMs(true)}>
-      <Menu items={items} placer={pointPlacer(at, screen, insets, tabsLayout.menuWidth)} privately={privately} dimmed onDismiss={onDismiss} />
+      <Menu items={items} placer={pointPlacer(at, screen, insets, tabsLayout.menuWidth, { floor })} privately={privately} dimmed onDismiss={onDismiss} />
     </Portal>
   );
 }

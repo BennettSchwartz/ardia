@@ -6,7 +6,7 @@ import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
 import type { Confirmation } from "./Dialog";
-import { FloatingMenu, isSubmenu, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
+import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
 
 export type MenuHandlers = { onPress?: (event?: GestureResponderEvent) => void; onLongPress?: (event?: GestureResponderEvent) => void };
@@ -21,6 +21,7 @@ type Props = {
   disabled?: boolean;
   privately?: boolean;
   align?: MenuAlign;
+  frost?: string | null;
   place?: ViewStyle;
   dark?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -99,14 +100,16 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
   return touch && typeof touch.pageX === "number" && typeof touch.pageY === "number" ? { x: touch.pageX, y: touch.pageY } : null;
 };
 
-function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, style, testID, children }: Props) {
+function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, frost: frostHere, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
   const restore = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (restore.current) clearTimeout(restore.current);
   }, []);
-  const frost = useMenuFrost();
+  const frostAround = useMenuFrost();
+  const frost = frostHere === undefined ? frostAround : frostHere;
+  const floor = useMenuFloor();
   const [opened, setOpened] = useState<{ at: Point | null } | null>(null);
   useEffect(() => {
     if (!disabled || !opened) return;
@@ -140,7 +143,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
       {children(held ? { onLongPress: open } : { onPress: open })}
-      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} align={align} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
+      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} floor={floor} align={align} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
     </View>
   );
 }

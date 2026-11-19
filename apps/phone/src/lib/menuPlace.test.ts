@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MENU_DIVIDER, MENU_HEADING, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, tallestMenuPage } from "./menuPlace.ts";
+import { MENU_DIVIDER, MENU_HEADING, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, tallestMenuPage } from "./menuPlace.ts";
 
 const host = { x: 0, y: 0, width: 392, height: 873 };
 
@@ -88,4 +88,27 @@ test("a picker's menu lines its trailing edge up with the row's value when the t
 test("with no room below the finger, a long-press menu ends 16 pt above it instead of covering it", () => {
   const spot = menuAt({ x: 60, y: 800 }, host, host, 250, 200, 8);
   assert.equal(spot.top + spot.height, 800 - 16);
+});
+
+test("with no room below, a long-press menu ends 16 pt above the pressed control when that is higher than the finger, so it never covers the tabs button or its bar", () => {
+  const tabsButton = { x: 16, y: 770, width: 48, height: 48 };
+  const spot = menuAt({ x: 40, y: 794 }, host, host, 250, 300, 8, undefined, { control: tabsButton });
+  assert.equal(spot.top + spot.height, 770 - 16);
+  const card = { x: 20, y: 200, width: 280, height: 560 };
+  const onCard = menuAt({ x: 40, y: 700 }, host, host, 250, 300, 8, undefined, { control: card });
+  assert.equal(onCard.top + onCard.height, 700 - 16);
+});
+
+test("a long-press menu stays off a bar below it: opening down, it ends above the bar's top, or turns upward when it can't", () => {
+  const bar = 800;
+  const down = menuAt({ x: 40, y: 400 }, host, host, 250, 300, 8, undefined, { floor: bar });
+  assert.ok(down.top + down.height <= bar - 8);
+  assert.equal(down.top, 400);
+  const mid = menuAt({ x: 40, y: 560 }, host, host, 250, 300, 8, undefined, { floor: bar });
+  assert.equal(mid.top + mid.height, 560 - 16);
+});
+
+test("a closing tap menu shrinks to its trigger's size, never past it", () => {
+  assert.deepEqual(menuShrink({ x: 336, y: 66, width: 44, height: 44 }, 250, 272), { x: 44 / 250, y: 44 / 272 });
+  assert.deepEqual(menuShrink({ x: 16, y: 700, width: 360, height: 52 }, 250, 40), { x: 1, y: 1 });
 });

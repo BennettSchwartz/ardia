@@ -253,6 +253,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
         <Menu
           items={tabsMenuItems(barOrder)}
           place={column ? { ...columnMenuPlace(column, width, SCREEN_COLUMN.top), width: Math.min(tabsLayout.menuWidth, pageWidth - space.l * 2) } : { bottom: barHeight(insets.bottom, design) + space.xs, left: space.l, width: Math.min(tabsLayout.menuWidth, width - space.l * 2) }}
+          frost={null}
           onDismiss={() => setTabsMenu(false)}
         />
       ) : null}

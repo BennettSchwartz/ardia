@@ -32,13 +32,15 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
   const width = confirmCardWidth(window.fontScale, window.width - insets.left - insets.right);
   const maxHeight = window.height - insets.top - insets.bottom - 2 * actionSheetLook.screenMargin;
   const card = useRef<ViewInstance>(null);
+  const spoken = useRef<ViewInstance>(null);
+  const heading = title && message ? `${title}${/[.?!]$/.test(title) ? "" : "."} ${message}` : title || message || "";
   const leaving = usePortalLeaving();
   const shown = useSharedValue(1);
   useEffect(() => {
     if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut });
   }, [leaving]);
   const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
-  useCoverFocus(card, !leaving);
+  useCoverFocus(spoken, !leaving);
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
@@ -57,19 +59,20 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
         <View ref={card} testID="drawnActionSheet" accessibilityViewIsModal style={[styles.card, { width, maxHeight, borderColor: paint.rim, boxShadow: actionSheetLook.shadow }]}>
           <MenuMaterial source={null} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={[styles.material, { maxHeight: maxHeight - 2 * actionSheetLook.rim }]}>
             <ScrollView testID="drawnConfirmationScroll" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.content} bounces={false} overScrollMode="never">
-            {title ? (
-              <Text accessibilityRole="header" style={[actionSheetLook.title, { color: paint.title }]}>
-                {title}
-              </Text>
-            ) : null}
-            {message ? (
-              <Text textBreakStrategy="balanced" style={[actionSheetLook.message, styles.message, { color: paint.message }]}>
-                {message}
-              </Text>
+            {heading ? (
+              <View ref={spoken} testID="drawnConfirmationHeading" accessible accessibilityRole="header" accessibilityLabel={heading}>
+                {title ? <Text style={[actionSheetLook.title, { color: paint.title }]}>{title}</Text> : null}
+                {message ? (
+                  <Text textBreakStrategy="balanced" style={[actionSheetLook.message, styles.message, { color: paint.message }]}>
+                    {message}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
             <View style={[styles.buttons, title || message ? styles.afterText : null]}>
               {actions.map((action, index) => (
                 <Pressable
+                  ref={index === 0 && !heading ? spoken : undefined}
                   key={`${index}:${action.title}`}
                   accessibilityRole="button"
                   accessibilityLabel={action.title}

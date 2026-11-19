@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
 import { lookIsNative } from "@ardia/phone-native";
-import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, type MenuAlign, type Point, type Rect } from "../../lib/menuPlace";
+import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, type MenuAlign, type MenuLimits, type Point, type Rect } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
 import { focusForScreenReader } from "./coverFocus";
 import { LookFrost, SURFACES_FROST } from "./LookViews";
@@ -32,13 +32,19 @@ export const onDrawnMenuOpened = (handler: (privately: boolean) => void) => {
 
 export const countDrawnMenuOpened = (privately = false) => drawnMenuOpened(privately);
 
-export type MenuPlacer = (height: number, keepBelow?: boolean) => { place: ViewStyle; origin: string; maxHeight?: number };
+export type MenuPlacer = (height: number, keepBelow?: boolean) => { place: ViewStyle; origin: string; maxHeight?: number; shrink?: { x: number; y: number } };
 
 const MenuFrostContext = createContext<string | null>(SURFACES_FROST);
 
 export const MenuFrostProvider = MenuFrostContext.Provider;
 
 export const useMenuFrost = () => useContext(MenuFrostContext);
+
+const MenuFloorContext = createContext<number | null>(null);
+
+export const MenuFloorProvider = MenuFloorContext.Provider;
+
+export const useMenuFloor = () => useContext(MenuFloorContext);
 
 const PRESS = menuLook.pressInset;
 const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
@@ -57,7 +63,9 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const [content, setContent] = useState<number | null>(null);
   const revealed = shown && (placer === undefined || content !== null);
   const side = useRef<boolean | undefined>(undefined);
-  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? MENU_ROW : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined };
+  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? MENU_ROW : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined, shrink: undefined };
+  const shrinkX = spot.shrink?.x ?? menuMotion.fromScale;
+  const shrinkY = spot.shrink?.y ?? menuMotion.fromScale;
   if (revealed && placer && side.current === undefined) side.current = spot.origin.includes("top");
   const firstRow = useRef<ViewInstance>(null);
   const chosen = useRef(false);
@@ -90,6 +98,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     return () => back.remove();
   }, [onDismiss, page, leaving]);
   const opened = useSharedValue(reduceMotion ? 1 : 0);
+  const closed = useSharedValue(0);
+  const glass = useSharedValue(1);
   const shownContent = useSharedValue(1);
   const dim = useSharedValue(reduceMotion ? 1 : 0);
   useEffect(() => {
@@ -100,13 +110,24 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   useEffect(() => {
     if (!leaving) return;
     const closing = dimmed ? menuMotion.heldClose : menuMotion.close;
-    if (!reduceMotion) opened.value = withTiming(0, { duration: closing });
-    shownContent.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : dimmed ? closing : menuMotion.contentFade });
-    dim.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.heldClose });
+    if (reduceMotion) {
+      glass.value = withTiming(0, { duration: menuMotion.contentFade });
+      shownContent.value = withTiming(0, { duration: menuMotion.contentFade });
+      dim.value = withTiming(0, { duration: menuMotion.contentFade });
+      return;
+    }
+    closed.value = withTiming(1, { duration: closing, easing: Easing.out(Easing.cubic) });
+    glass.value = withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) });
+    shownContent.value = withTiming(0, { duration: dimmed ? closing : menuMotion.contentFade });
+    dim.value = withTiming(0, { duration: menuMotion.heldClose });
   }, [leaving]);
-  const grow = useAnimatedStyle(() => ({ transform: [{ scale: menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value }] }));
+  const grow = useAnimatedStyle(() => {
+    const open = menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value;
+    return { transform: [{ scaleX: open * (1 + (shrinkX - 1) * closed.value) }, { scaleY: open * (1 + (shrinkY - 1) * closed.value) }] };
+  });
   const dimStyle = useAnimatedStyle(() => ({ opacity: dim.value }));
-  const fade = useAnimatedStyle(() => ({ opacity: shownContent.value }));
+  const fade = useAnimatedStyle(() => ({ opacity: glass.value }));
+  const rowsFade = useAnimatedStyle(() => ({ opacity: shownContent.value }));
   const choose = (action: () => void) => {
     if (chosen.current) return;
     chosen.current = true;
@@ -195,6 +216,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
         <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={[styles.material, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight - 2 * menuLook.rim }]}>
           <View pointerEvents="none" style={[styles.specular, { backgroundColor: paint.specular }]} />
           <ScrollView testID="drawnMenuRows" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.rows} bounces={false} overScrollMode="never" onContentSizeChange={(_width, height) => setContent(height + 2 * menuLook.rim)}>
+          <Animated.View style={rowsFade}>
           {page ? (
             <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={() => setPage(null)} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
               <MenuIcon name="chevronLeft" color={paint.label} left={iconLeft} />
@@ -202,6 +224,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
             </Pressable>
           ) : null}
           {drawn}
+          </Animated.View>
           </ScrollView>
         </MenuMaterial>
       </Animated.View>
@@ -230,10 +253,10 @@ function MenuIcon({ name, color, left }: { name: SymbolName; color: string; left
 
 type Insets = { top: number; bottom: number; left: number; right: number };
 
-export function pointPlacer(at: Point, screen: { width: number; height: number }, insets: Insets, width: number): MenuPlacer {
+export function pointPlacer(at: Point, screen: { width: number; height: number }, insets: Insets, width: number, limits?: MenuLimits): MenuPlacer {
   const host = { x: 0, y: 0, width: screen.width, height: screen.height };
   return (height, keepBelow) => {
-    const spot = menuAt(at, host, insetRect(host, insets), width, height, MENU_MARGIN, keepBelow);
+    const spot = menuAt(at, host, insetRect(host, insets), width, height, MENU_MARGIN, keepBelow, limits);
     return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height };
   };
 }
@@ -241,7 +264,7 @@ export function pointPlacer(at: Point, screen: { width: number; height: number }
 function triggerPlacer(row: Rect, host: Rect, insets: Insets, width: number, align?: MenuAlign): MenuPlacer {
   return (height, keepBelow) => {
     const spot = menuOnTrigger(row, host, host.width > 0 ? insetRect(host, insets) : host, width, height, MENU_MARGIN, keepBelow, align);
-    return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height };
+    return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height, shrink: menuShrink(row, width, spot.height) };
   };
 }
 
@@ -261,9 +284,9 @@ export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose :
 
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 
-type FloatingProps = Omit<Props, "shown" | "origin" | "placer" | "place"> & { place?: ViewStyle; anchor?: RefObject<ViewInstance | null>; at?: Point | null; align?: MenuAlign };
+type FloatingProps = Omit<Props, "shown" | "origin" | "placer" | "place"> & { place?: ViewStyle; anchor?: RefObject<ViewInstance | null>; at?: Point | null; align?: MenuAlign; floor?: number | null };
 
-export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, dimmed, frost, privately }: FloatingProps) {
+export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, floor, dimmed, frost, privately }: FloatingProps) {
   const hostFrame = useOverlayFrame();
   const insets = useSafeAreaInsets();
   const screen = useWindowDimensions();
@@ -271,7 +294,7 @@ export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, 
   const width = widthOf(place);
   const [measured, setMeasured] = useState<{ host: Rect; row: Rect | null } | null>(null);
   useEffect(() => {
-    if (at) return;
+    if (at && !anchor) return;
     let live = true;
     void Promise.all([hostFrame(), anchor ? measureAnchor(anchor) : Promise.resolve(null)]).then(([host, row]) => {
       if (live) setMeasured({ host, row: row && row.height > 0 ? row : null });
@@ -280,7 +303,7 @@ export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, 
       live = false;
     };
   }, []);
-  const placer = at ? pointPlacer(at, screen, insets, width) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width, align) : fixedPlacer(place, measured.host, insets, width)) : undefined;
+  const placer = at ? (anchor && !measured ? undefined : pointPlacer(at, screen, insets, width, { control: measured?.row, floor })) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width, align) : fixedPlacer(place, measured.host, insets, width)) : undefined;
   return (
     <Portal exitMs={menuExitMs(dimmed)}>
       <Menu items={items} place={{ ...place, width }} placer={placer} shown={placer !== undefined} dimmed={dimmed} privately={privately} frost={frost === undefined ? frostAround : frost} onDismiss={onDismiss} />

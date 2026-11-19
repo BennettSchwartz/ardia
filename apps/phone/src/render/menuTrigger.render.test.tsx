@@ -121,9 +121,11 @@ test("Android never opens a system menu or action sheet, even where a native one
   expect(mockNative.sheets).toHaveLength(0);
 });
 
-test("a long press opens the drawn menu at the finger, dimmed, and a tap opens it beside its trigger, undimmed", () => {
+test("a long press opens the drawn menu at the finger, dimmed, and a tap opens it beside its trigger, undimmed", async () => {
+  measuredOverlay({ x: 0, y: 80, width: 393, height: 60 });
   const held = trigger("longPress");
   act(() => held.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress({ nativeEvent: { pageX: 120, pageY: 300 } }));
+  await act(async () => undefined);
   const floating = held.root.findAll((node) => node.type === FloatingMenu)[0]!;
   expect(floating.props.at).toEqual({ x: 120, y: 300 });
   expect(floating.props.dimmed).toBe(true);
@@ -395,12 +397,14 @@ test("TalkBack moves to the first enabled row once the menu is shown, and back t
   expect(restored()).toBe(2);
 });
 
-test("a TalkBack focus asked for as the menu opens is dropped once the menu starts closing, so it never lands on a closing row", () => {
+test("a TalkBack focus asked for as the menu opens is dropped once the menu starts closing, so it never lands on a closing row", async () => {
   const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
   const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => undefined);
   const back = pressBack();
+  measuredOverlay({ x: 0, y: 280, width: 393, height: 60 });
   const root = trigger("longPress");
   act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress({ nativeEvent: { pageX: 120, pageY: 300 } }));
+  await act(async () => undefined);
   act(() => rowsOf(root).props.onContentSizeChange(250, 200));
   expect(asked).toHaveBeenCalledTimes(1);
   const still = asked.mock.calls[0]![1]!;
@@ -528,4 +532,68 @@ test("a row that opens a confirmation shows the card alone: the closing menu is 
   expect(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")).toHaveLength(0);
   expect(covered(root).importantForAccessibility).toBe("no-hide-descendants");
   unmount(root);
+});
+
+const measuredOverlay = (anchor: { x: number; y: number; width: number; height: number }) => {
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  jest.spyOn(overlay, "measureAnchor").mockResolvedValue(anchor);
+  jest.spyOn(overlay, "useOverlayFrame").mockReturnValue(() => Promise.resolve({ x: 0, y: 0, width: 393, height: 873 }));
+};
+
+test("a tap menu closes by shrinking into its trigger's size from the trigger's corner", async () => {
+  measuredOverlay({ x: 336, y: 66, width: 44, height: 44 });
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  await act(async () => undefined);
+  const placed = root.root.findAll((node) => node.type === Menu)[0]!.props.placer(272);
+  expect(placed.origin).toBe("right top");
+  expect(placed.shrink).toEqual({ x: 44 / 250, y: 44 / 272 });
+  expect(placed.place).toMatchObject({ left: 130, top: 66 });
+  unmount(root);
+});
+
+test("a long press on a small control, like the tabs button, opens its menu ending 16 pt above the control when it can't fit below", async () => {
+  measuredOverlay({ x: 16, y: 790, width: 48, height: 48 });
+  const root = trigger("longPress");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress({ nativeEvent: { pageX: 40, pageY: 814 } }));
+  const menu = () => root.root.findAll((node) => node.type === Menu)[0]!;
+  expect(menu().props.shown).toBe(false);
+  await act(async () => undefined);
+  const placed = menu().props.placer(300);
+  expect(placed.place.top + placed.maxHeight).toBe(790 - 16);
+  unmount(root);
+});
+
+test("on Android TalkBack focus lands after layout, a moment after the menu shows, and never once the menu has gone", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const { focusForScreenReader, ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  const focused = jest.spyOn(AccessibilityInfo, "setAccessibilityFocus").mockImplementation(() => undefined);
+  focusForScreenReader(() => 42 as never);
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(20));
+  expect(focused).not.toHaveBeenCalled();
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS));
+  expect(focused).toHaveBeenCalledWith(42);
+  focused.mockClear();
+  let live = true;
+  focusForScreenReader(
+    () => 42 as never,
+    () => live,
+  );
+  await act(async () => undefined);
+  live = false;
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 50));
+  expect(focused).not.toHaveBeenCalled();
+});
+
+test("a confirmation's title and message are one TalkBack stop, the one focus lands on when it opens", () => {
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
+  const heading = sheet.root.findAll((node) => node.props.testID === "drawnConfirmationHeading" && typeof node.type === "string")[0]!;
+  expect(heading.props.accessible).toBe(true);
+  expect(heading.props.accessibilityLabel).toBe("Close 3 Tabs? They’ll stay in your Archive.");
+  expect(sheet.root.findAll((node) => typeof node.type === "string" && node.props.accessible === true && node.props.accessibilityLabel?.includes?.("Close 3 Tabs?"))).toHaveLength(1);
+  unmount(sheet);
 });
