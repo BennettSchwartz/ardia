@@ -66,6 +66,10 @@ extension WindowManager {
     window.toggleFullScreen(nil)
   }
 
+  func recordFullScreen(_ window: NSWindow, on: Bool) {
+    fullScreenChanged(Notification(name: on ? NSWindow.didEnterFullScreenNotification : NSWindow.didExitFullScreenNotification, object: window))
+  }
+
   private func marked(_ id: String, _ key: String, _ value: String) -> [String: Any]? {
     guard var answer = geometry(id: id) else { return nil }
     answer[key] = value

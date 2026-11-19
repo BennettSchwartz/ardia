@@ -24,9 +24,8 @@ public class ShellModule: Module {
       _ = installOutsidePressMonitor
       _ = installWindowMoveFallback
       _ = installCenteredResize
-      FullScreenLifecycle.shared.stateOf = { window in
-        window.styleMask.contains(.fullScreen) || WindowManager.shared.id(of: window).map { WindowManager.shared.isFullScreen($0) } == true
-      }
+      FullScreenLifecycle.shared.stateOf = { ArdiaChromeWindowHost.windowIsFullScreen($0) }
+      FullScreenLifecycle.shared.settledByCheck = { WindowManager.shared.recordFullScreen($0, on: $1) }
       FullScreenLifecycle.shared.start()
       self.lifetime.begin(self) {
         self.appearanceObservation?.invalidate()

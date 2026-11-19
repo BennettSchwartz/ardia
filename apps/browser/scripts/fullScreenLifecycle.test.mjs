@@ -76,10 +76,50 @@ do {
   out["olderTransitionSettledNewerCall"] = late
 }
 
+do {
+  let l = lifecycle()
+  let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+  var state = true
+  var recorded: [Bool] = []
+  l.stateOf = { _ in state }
+  l.settledByCheck = { _, on in recorded.append(on) }
+  center.post(name: NSWindow.willExitFullScreenNotification, object: window)
+  state = false
+  spin(0.6)
+  out["exitWithoutDidExitCleared"] = !l.isUnresolved(window)
+  out["exitRecorded"] = recorded
+}
+
+do {
+  let l = lifecycle()
+  var logged: [String] = []
+  l.log = { logged.append($0) }
+  let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+  var state = false
+  l.stateOf = { _ in state }
+  center.post(name: NSWindow.willEnterFullScreenNotification, object: window)
+  state = true
+  spin(0.6)
+  let before = l.latestGeneration
+  var settled = 0
+  _ = l.waitForTransition(of: window, startedAfter: before) { settled += 1 }
+  center.post(name: NSWindow.willExitFullScreenNotification, object: window)
+  center.post(name: NSWindow.didEnterFullScreenNotification, object: window)
+  spin(0.05)
+  out["lateDidEnterEndedExit"] = !l.isUnresolved(window)
+  out["lateDidEnterSettled"] = settled
+  out["staleLogged"] = logged.filter { $0.contains("stale") }.count
+  state = false
+  center.post(name: NSWindow.didExitFullScreenNotification, object: window)
+  spin(0.05)
+  out["realDidExitEnded"] = !l.isUnresolved(window)
+  out["realDidExitSettled"] = settled
+}
+
 print(String(data: try! JSONSerialization.data(withJSONObject: out), encoding: .utf8)!)
 `;
 
-test("full screen: a transition with no end clears once its real state holds, or gives up at the limit; an exit failure waits for didExit; a late end never answers a newer call", { skip: !swiftc && "needs swiftc" }, () => {
+test("full screen: a transition with no end clears on its real state and records it, gives up at the limit, an exit failure waits for didExit, and a late or stale end never answers a newer call", { skip: !swiftc && "needs swiftc" }, () => {
   const dir = mkdtempSync(join(tmpdir(), "full-screen-lifecycle-"));
   try {
     writeFileSync(join(dir, "main.swift"), MAIN);
@@ -94,6 +134,12 @@ test("full screen: a transition with no end clears once its real state holds, or
     assert.equal(got.exitAfterDidExit, false);
     assert.equal(got.exitSettled, 1);
     assert.equal(got.olderTransitionSettledNewerCall, 0, "a transition that began before the call doesn't answer it");
+    assert.equal(got.exitWithoutDidExitCleared, true, "an exit with no didExit clears on the real state");
+    assert.deepEqual(got.exitRecorded, [false], "and records that real state for geometry");
+    assert.equal(got.lateDidEnterEndedExit, false, "a late didEnter doesn't end a newer exit");
+    assert.equal(got.lateDidEnterSettled, 0);
+    assert.equal(got.staleLogged, 1, "the stale notification is logged");
+    assert.deepEqual([got.realDidExitEnded, got.realDidExitSettled], [true, 1]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

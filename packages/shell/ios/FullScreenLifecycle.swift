@@ -17,6 +17,7 @@ final class FullScreenLifecycle {
 
   private struct Transition {
     let generation: Int
+    let entering: Bool
     weak var window: NSWindow?
     let began: Date
     var lastState: Bool?
@@ -24,6 +25,7 @@ final class FullScreenLifecycle {
 
   var timing = Timing()
   var stateOf: (NSWindow) -> Bool = { $0.styleMask.contains(.fullScreen) }
+  var settledByCheck: (NSWindow, Bool) -> Void = { _, _ in }
   var log: (String) -> Void = { NSLog("%@", $0) }
 
   private var generation = 0
@@ -37,15 +39,16 @@ final class FullScreenLifecycle {
   func start() {
     guard observers.isEmpty else { return }
     let center = NotificationCenter.default
-    for name in [NSWindow.willEnterFullScreenNotification, NSWindow.willExitFullScreenNotification] {
-      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.began(note.object) })
+    for (name, entering) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.willExitFullScreenNotification, false)] {
+      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.began(note.object, entering: entering) })
     }
-    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification, NSWindow.willCloseNotification] {
-      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-        guard let window = note.object as? NSWindow else { return }
-        self?.end(ObjectIdentifier(window))
-      })
+    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
+      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.notifiedEnd(note.object, name: name) })
     }
+    observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
+      guard let window = note.object as? NSWindow else { return }
+      self?.end(ObjectIdentifier(window))
+    })
   }
 
   func isUnresolved(_ window: NSWindow) -> Bool { inFlight[ObjectIdentifier(window)] != nil }
@@ -58,11 +61,23 @@ final class FullScreenLifecycle {
 
   func stopWaiting(_ token: Int) { waiters[token] = nil }
 
-  private func began(_ object: Any?) {
+  private func notifiedEnd(_ object: Any?, name: NSNotification.Name) {
+    guard let window = object as? NSWindow else { return }
+    let key = ObjectIdentifier(window)
+    guard let transition = inFlight[key] else { return }
+    let state = stateOf(window)
+    guard state == transition.entering else {
+      log("[fullscreen] window \(window.windowNumber): ignored a stale \(name.rawValue); the open transition is to \(transition.entering ? "enter" : "exit") and the window is \(state ? "in" : "out of") full screen")
+      return
+    }
+    end(key)
+  }
+
+  private func began(_ object: Any?, entering: Bool) {
     guard let window = object as? NSWindow else { return }
     generation += 1
     let key = ObjectIdentifier(window)
-    let transition = Transition(generation: generation, window: window, began: Date(), lastState: nil)
+    let transition = Transition(generation: generation, entering: entering, window: window, began: Date(), lastState: nil)
     inFlight[key] = transition
     scheduleCheck(key, generation: transition.generation, after: timing.settleCheckAfter)
   }
@@ -76,10 +91,14 @@ final class FullScreenLifecycle {
     guard let window = transition.window else { return end(key) }
     if Date().timeIntervalSince(transition.began) >= timing.giveUpAfter {
       log("[fullscreen] window \(window.windowNumber): no end to the full-screen transition after \(Int(timing.giveUpAfter)) s; clearing it")
-      return end(key)
+      end(key)
+      return settledByCheck(window, stateOf(window))
     }
     let state = stateOf(window)
-    if transition.lastState == state { return end(key) }
+    if transition.lastState == state {
+      end(key)
+      return settledByCheck(window, state)
+    }
     transition.lastState = state
     inFlight[key] = transition
     scheduleCheck(key, generation: generation, after: timing.checkEvery)
