@@ -263,7 +263,7 @@ class ControlServer {
                                       .Set("missed", windowless.missed));
     status.Set("commandsByDomain", TokenCommandsByDomain());
     status.Set("filePickerAnswers", FilePickerAnswerTotals());
-    status.Set("privatePasteboard", CliPrivatePasteboardActive());
+    AddCliTestSignals(status);
     const PluginTotals& plugins = PluginTotalsSoFar();
     status.Set("pluginCredentials", base::DictValue()
                                         .Set("minted", plugins.minted)

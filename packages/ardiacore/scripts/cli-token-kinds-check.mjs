@@ -8,24 +8,29 @@ import { launchVariables, session, sleep } from "../../../scripts/lib/instance.m
 
 const usage = `usage: cli-token-kinds-check.mjs <Ardia.app>
 Checks the two kinds of token connection in one hidden instance with two windows, over the real token server (no
-DevTools port): the ardia command's token (kind cli) gets every method and target, including Browser.setDownloadBehavior,
-a chrome:// page and the browser target; a plugin credential minted for window 1 (engine.cliPluginCredential, kind
-plugin) sees and attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior,
-DOM.setFileInputFiles, cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.json and can't
-read /ardia/active; revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its
-allowlist: the plain-data DOM and accessibility reads work, DOM.focus and DOM.scrollIntoViewIfNeeded work on its own
-nodes, and every Runtime method, DOM.resolveNode, Page.createIsolatedWorld and any Runtime object or context id are
-refused, as are Page.navigate's referrer, referrerPolicy, transitionType and frameId and a script on reload; no Network,
-console or Runtime event reaches it. When its tab moves to another window (or out and straight back), a command in
-flight answers tab_out_of_scope, a late reply never arrives, the session is detached, input it queued before the move
-never lands, and a fresh attach to the returned tab takes input again. Backend node ids from another tab in the same
-renderer (describe, focus, scroll), paste and native key codes, editing commands without a key, the middle button
-(both encodings), window screenshots and clips outside the viewport are refused or confined, a target whose opener
-left the window shows no opener, select all then deleteBackward clears a field, and macOS word deletion still works; a
-scope close drains its replies even with a backlog and a concurrent command, and a revoke during it closes at once.
-It aborts before its first step unless the engine reports its private pasteboard: a Developer ID build ignores test
-flags, so there it stops at that gate and runs no clipboard step. Run the clipboard checks on a test build; on a
-signed build the abort is the expected result. The CLI answers a page's showOpenFilePicker, showSaveFilePicker and
+DevTools port). It needs a test build: it launches with the test flags privatePasteboard and pluginInputHold and aborts
+before its first step unless the engine reports both. A Developer ID build ignores test flags, so there it stops at
+that gate (the expected result on a signed build). pluginInputHold holds a plugin's mouse deliveries for 2 s and its
+out-of-scope detaches for 5 s, so a delivery admitted before its tab leaves lands after the tab is back, every run.
+The ardia command's token (kind cli) gets every method and target, including Browser.setDownloadBehavior, a chrome://
+page and the browser target. A plugin credential minted for window 1 (engine.cliPluginCredential, kind plugin) sees and
+attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
+cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.json and can't read /ardia/active;
+revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its allowlist: the
+plain-data DOM and accessibility reads work, DOM.focus and DOM.scrollIntoViewIfNeeded work on its own nodes, and every
+Runtime method, DOM.resolveNode, DOM search, Page.createIsolatedWorld and any Runtime object or context id are refused,
+as are Page.navigate's referrer, referrerPolicy, transitionType and frameId, every scheme but http, https and
+about:blank, and a script on reload; no Network, console or Runtime event reaches it; a frame of another tab is out of
+its reach; it accepts and cancels a dialog; keys and insertText type; a press, move and release over a draggable
+element starts no drag (no dragenter, dragover or drop). When its tab moves to another window (or out and straight
+back), a command in flight answers tab_out_of_scope, a late reply never arrives, the session is detached, mouse and
+wheel input it queued before the move never lands even though the tab is back, and a fresh attach to the returned tab
+takes input again. Backend node ids from another tab in the same renderer and node ids of a node the page adopted
+into a window-2 document are refused for reads, focus and scroll; paste and native key codes, editing commands
+without a key, the middle button (both encodings), window screenshots and clips outside the viewport are refused or
+confined, a target whose opener left the window shows no opener, select all then deleteBackward clears a field, and
+macOS word deletion still works; a scope close drains its replies even with a backlog and a concurrent command, and a
+revoke during it closes at once. The CLI answers a page's showOpenFilePicker, showSaveFilePicker and
 showDirectoryPicker with Ardia.answerFilePicker (no dialog opens), and a plugin is refused that command. The app's
 file eval runs through its perf probe, so a release build works.`;
 const [appArg] = process.argv.slice(2);
@@ -44,7 +49,12 @@ const PICKERS = `<textarea id=area style="position:fixed;left:240px;top:40px;wid
 <button id=open style="position:fixed;left:0;top:40px;width:200px;height:40px">open</button>
 <button id=save style="position:fixed;left:0;top:90px;width:200px;height:40px">save</button>
 <button id=dir style="position:fixed;left:0;top:140px;width:200px;height:40px">dir</button>
+<div id=drag draggable=true style="position:fixed;left:240px;top:120px;width:80px;height:30px;background:#ccc">drag</div>
+<div id=drop style="position:fixed;left:240px;top:170px;width:80px;height:30px;background:#eee">drop</div>
 <script>
+window.dragLog = [];
+for (const type of ["dragstart", "dragend"]) drag.addEventListener(type, () => dragLog.push(type));
+for (const type of ["dragenter", "dragover", "drop"]) drop.addEventListener(type, (e) => { e.preventDefault(); dragLog.push(type); });
 const report = (p) => p.then((v) => (window.picked = v), (e) => (window.picked = "error:" + e.name));
 open.onclick = () => report(showOpenFilePicker().then(async ([h]) => "open:" + h.name + ":" + (await (await h.getFile()).text())));
 save.onclick = () => report(showSaveFilePicker().then(async (h) => { const w = await h.createWritable(); await w.write("saved by the page"); await w.close(); return "save:" + h.name; }));
@@ -125,7 +135,7 @@ function connect(url) {
 const refused = (reply) => !!reply.error;
 const text = (reply) => (reply.error ? reply.error.message : JSON.stringify(reply.result).slice(0, 120));
 
-const testEnv = Object.entries(launchVariables({ test: { privatePasteboard: true } })).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+const testEnv = Object.entries(launchVariables({ test: { privatePasteboard: true, pluginInputHold: true } })).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
 execFileSync("open", ["-g", "-n", "--env", "ARDIA_BACKGROUND=1", "--env", `ARDIA_DATA_DIR=${data}`, ...testEnv, app]);
 const controlFile = join(data, "Chromium", "ArdiaControl.json");
 let pid = null;
@@ -134,11 +144,11 @@ try {
   const control = JSON.parse(readFileSync(controlFile, "utf8"));
   pid = control.pid;
   const engineStatus = await appEval(`return ac.engine.call("engine.cliControlStatus")`).catch(() => null);
-  if (engineStatus?.privatePasteboard !== true) {
-    console.log("ABORT  the engine didn't confirm the private pasteboard, so no step ran (the general pasteboard is never used)");
-    throw new Error("private pasteboard not confirmed");
+  if (engineStatus?.privatePasteboard !== true || engineStatus?.pluginInputHold !== true) {
+    console.log("ABORT  the engine didn't confirm its test flags (privatePasteboard, pluginInputHold), so no step ran: this needs a test build, and the general pasteboard is never used");
+    throw new Error("test flags not confirmed");
   }
-  check("the engine confirms its private pasteboard before any clipboard step", true);
+  check("the engine confirms its private pasteboard and plugin input hold before any step", true);
   const base = `ws://127.0.0.1:${control.port}${control.browser}`;
 
   const cli = await connect(`${base}?token=${control.token}`);
@@ -187,7 +197,6 @@ try {
   const nodeIn = async (selector) => (await plugin.send("DOM.querySelector", { nodeId: rootNode, selector }, ps)).result?.nodeId;
   const areaNode = await nodeIn("#area");
   const openNode = await nodeIn("#open");
-  const search = await plugin.send("DOM.performSearch", { query: "button" }, ps);
   const reads = [
     ["DOM.querySelectorAll", { nodeId: rootNode, selector: "button" }, (r) => r.nodeIds?.length === 3],
     ["DOM.getAttributes", { nodeId: openNode }, (r) => r.attributes?.includes("open")],
@@ -196,8 +205,6 @@ try {
     ["DOM.getContentQuads", { nodeId: openNode }, (r) => r.quads?.length > 0],
     ["DOM.describeNode", { nodeId: openNode }, (r) => r.node?.nodeName === "BUTTON"],
     ["DOM.getNodeForLocation", { x: 100, y: 60 }, (r) => !!r.backendNodeId],
-    ["DOM.getSearchResults", { searchId: search.result?.searchId, fromIndex: 0, toIndex: 1 }, (r) => r.nodeIds?.length === 1],
-    ["DOM.discardSearchResults", { searchId: search.result?.searchId }, () => true],
     ["Accessibility.getPartialAXTree", { nodeId: openNode }, (r) => r.nodes?.length > 0],
     ["Accessibility.queryAXTree", { nodeId: rootNode, role: "button" }, (r) => r.nodes?.length === 3],
   ];
@@ -212,6 +219,10 @@ try {
   check("plugin: DOM.focus and DOM.scrollIntoViewIfNeeded work on its own node", !refused(focused) && !refused(scrolled), `${text(focused)} ${text(scrolled)}`);
   const wheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 60, deltaX: 0, deltaY: 50 }, ps);
   check("plugin: a mouseWheel event answers", !refused(wheel), text(wheel));
+  const dragSteps = [["mousePressed", 280, 135, 1], ["mouseMoved", 280, 145, 1], ["mouseMoved", 280, 165, 1], ["mouseMoved", 280, 185, 1], ["mouseReleased", 280, 185, 0]];
+  const dragReplies = [];
+  for (const [type, x, y, buttons] of dragSteps) dragReplies.push(await plugin.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, ps));
+  await sleep(500);
 
   const allowed = [
     ["DOM.getDocument", {}],
@@ -228,6 +239,10 @@ try {
   const refusedHere = [
     ["DOM.setFileInputFiles", { files: [join(work, "x")], backendNodeId: 1 }, ps],
     ["DOM.resolveNode", { backendNodeId: 1 }, ps],
+    ["DOM.performSearch", { query: "button" }, ps],
+    ["DOM.getSearchResults", { searchId: "1", fromIndex: 0, toIndex: 1 }, ps],
+    ["DOM.discardSearchResults", { searchId: "1" }, ps],
+    ["Input.setInterceptDrags", { enabled: true }, ps],
     ["Page.printToPDF", {}, ps],
     ["Page.addScriptToEvaluateOnNewDocument", { source: "1" }, ps],
     ["Page.startScreencast", {}, ps],
@@ -264,6 +279,8 @@ try {
   await sleep(1500);
   const leaked = plugin.events.filter((e) => e.method?.startsWith("Network.") || e.method === "Runtime.consoleAPICalled");
   check("plugin: no Network or console event reaches it", leaked.length === 0, leaked.map((e) => e.method).join(" "));
+  const dragLog = (await cli.send("Runtime.evaluate", { expression: "window.dragLog.join(',')", returnByValue: true }, csOne)).result?.result?.value ?? "";
+  check("plugin: a press, move and release over a draggable element starts no drag (no dragenter, dragover or drop)", typeof dragLog === "string" && !/dragenter|dragover|drop(,|$)/.test(dragLog) && dragReplies.every((r) => !r.error || /Not allowed/.test(r.error.message)), `${dragLog || "no drag events"}; ${dragReplies.map(text).join(" | ")}`);
   const runtimeEvents = plugin.events.filter((e) => e.method?.startsWith("Runtime."));
   check("plugin: no Runtime event reaches it", runtimeEvents.length === 0, runtimeEvents.map((e) => e.method).join(" "));
   const activeIs = async (id) => (await cli.send("Runtime.evaluate", { expression: `document.activeElement?.id === ${JSON.stringify(id)}`, returnByValue: true }, csOne)).result?.result?.value === true;
@@ -338,6 +355,19 @@ try {
   const cleared = await pluginKey({ key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, commands: ["deleteBackward"] });
   const afterClear = await areaValue();
   check("plugin: select all then deleteBackward clears a field", !refused(cleared) && afterClear === "", `${text(cleared)} ${JSON.stringify(afterClear)}`);
+  await pluginFocus();
+  const inserted = await plugin.send("Input.insertText", { text: "zz" }, ps);
+  const afterInsert = await areaValue();
+  check("plugin: Input.insertText types into the focused field", !refused(inserted) && afterInsert === "zz", `${text(inserted)} ${JSON.stringify(afterInsert)}`);
+  for (const accept of [true, false]) {
+    const mark = cli.replies.length;
+    cli.raw(555000 + Number(accept), "Runtime.evaluate", { expression: "confirm('ardia dialog')", returnByValue: true }, csOne);
+    const opened = await until("the dialog", async () => plugin.events.find((e) => e.method === "Page.javascriptDialogOpening" && e.sessionId === ps && !e.handled) ?? null, 8000).catch(() => null);
+    if (opened) opened.handled = true;
+    const handled = await plugin.send("Page.handleJavaScriptDialog", { accept }, ps);
+    const answer = (await cli.repliesTo(555000 + Number(accept), mark, 1500))[0]?.result?.result?.value;
+    check(`plugin: Page.handleJavaScriptDialog ${accept ? "accepts" : "cancels"} a dialog`, !!opened && !refused(handled) && answer === accept, `${text(handled)} answer=${answer}`);
+  }
   if (process.platform === "darwin") {
     await fillArea("hello world", false);
     await pluginFocus();
@@ -387,6 +417,20 @@ try {
     const crossTabAct = await plugin.send(method, { backendNodeId: foreign }, ps);
     check(`plugin: ${method} on another tab's node is refused`, !!foreign && refused(crossTabAct) && /isn't in this page/.test(crossTabAct.error?.message ?? ""), text(crossTabAct));
   }
+  const popupFrameId = popupSession && (await cli.send("Page.getFrameTree", {}, popupSession)).result?.frameTree?.frame?.id;
+  const foreignAx = await plugin.send("Accessibility.getFullAXTree", { frameId: popupFrameId }, ps);
+  const ownFrames = JSON.stringify((await plugin.send("Page.getFrameTree", {}, ps)).result ?? {});
+  const ownTree = JSON.stringify((await plugin.send("DOM.getDocument", { depth: -1, pierce: true }, ps)).result ?? {});
+  check("plugin: frame traversal stays in its own page (another tab's frame is refused and never listed)", !!popupFrameId && refused(foreignAx) && !ownFrames.includes(popupFrameId) && !ownTree.includes(popupFrameId), `${text(foreignAx)}`);
+  await cli.send("Runtime.evaluate", { expression: "(() => { const p = document.createElement('p'); p.id = 'adoptme'; p.textContent = 'adopt me'; document.body.append(p); return true })()" }, csOne);
+  const adoptRoot = await pluginRoot();
+  const adoptNode = (await plugin.send("DOM.querySelector", { nodeId: adoptRoot, selector: "#adoptme" }, ps)).result?.nodeId;
+  const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const n = window.opener?.document.getElementById('adoptme'); if (!n) return false; document.body.append(document.adoptNode(n)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
+  const adoptedReads = [];
+  for (const [method, params] of [["DOM.getAttributes", { nodeId: adoptNode }], ["DOM.getOuterHTML", { nodeId: adoptNode }], ["DOM.getBoxModel", { nodeId: adoptNode }], ["DOM.describeNode", { nodeId: adoptNode }], ["DOM.focus", { nodeId: adoptNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: adoptNode }], ["Accessibility.getPartialAXTree", { nodeId: adoptNode }], ["Accessibility.queryAXTree", { nodeId: adoptNode }]]) {
+    adoptedReads.push([method, await plugin.send(method, params, ps)]);
+  }
+  check("plugin: a node the page adopted into a window-2 document is refused by nodeId for every read, focus and scroll", !!adoptNode && adopted === true && adoptedReads.every(([, r]) => refused(r)), adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
 
   const folder = join(work, "picked");
   mkdirSync(folder);
@@ -432,25 +476,37 @@ try {
 
   const threeTarget = (await urlsOf(plugin)).find((t) => t.url === `${origin}/three`);
   const s3 = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
+  const schemes = [[`${origin}/three`, true], ["about:blank", true], ["https://127.0.0.1:1/", true], ["javascript:void 0", false], ["data:text/html,x", false], [`blob:${origin}/x`, false], ["file:///etc/hosts", false], ["chrome://version", false], [`view-source:${origin}/three`, false], [`filesystem:${origin}/temporary/x`, false], ["ftp://127.0.0.1/x", false], ["ardia://settings", false]];
+  for (const [url, allowedScheme] of schemes) {
+    const reply = await plugin.send("Page.navigate", { url }, s3);
+    const refusedByPolicy = refused(reply) && /isn't allowed for a plugin/.test(reply.error?.message ?? "");
+    check(`plugin: Page.navigate to ${url.split(":")[0]}: is ${allowedScheme ? "allowed" : "refused"}`, allowedScheme ? !refusedByPolicy : refusedByPolicy, text(reply));
+  }
   const navigatedPlain = await plugin.send("Page.navigate", { url: `${origin}/three` }, s3);
   check("plugin: Page.navigate with only a web url answers", !refused(navigatedPlain), text(navigatedPlain));
   const cs3 = (await cli.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
   await until("page three loaded", async () => (await cli.send("Runtime.evaluate", { expression: "document.readyState === 'complete'", returnByValue: true }, cs3)).result?.result?.value);
-  await cli.send("Runtime.evaluate", { expression: "window.moves = 0; addEventListener('mousemove', () => window.moves++); true" }, cs3);
+  await cli.send("Runtime.evaluate", { expression: "window.moves = 0; window.wheels = 0; addEventListener('mousemove', () => window.moves++); addEventListener('wheel', () => window.wheels++, { passive: true }); true" }, cs3);
   const moves = async () => (await cli.send("Runtime.evaluate", { expression: "window.moves", returnByValue: true }, cs3)).result?.result?.value;
+  const wheels = async () => (await cli.send("Runtime.evaluate", { expression: "window.wheels", returnByValue: true }, cs3)).result?.result?.value;
   const inWindow = (tab, win) => until(`${tab} in ${win}`, async () =>
     ((await appEval(`return ac.engine.call("tabs.strips")`))?.strips ?? []).some((s) => s.appWindow === win && s.tabs.some((t) => t.key === tab)) || null, 8000).then(() => true, () => false);
-  for (let i = 0; i < 300; i++) plugin.raw(660000 + i, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10 + (i % 200), y: 10 + (i % 100) }, s3);
+  for (let i = 0; i < 20; i++) plugin.raw(660000 + i, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10 + i * 5, y: 10 + i * 3 }, s3);
+  for (let i = 0; i < 5; i++) plugin.raw(661000 + i, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 50, y: 50, deltaX: 0, deltaY: 20 }, s3);
+  const sentAt = Date.now();
   await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
   const reachedOther = await inWindow("t3", "w2");
   const movesAtDeparture = await moves();
   await appEval(`ac.actions.moveTabToWindow("t3", "w1"); return true`);
   const cameBack = await inWindow("t3", "w1");
-  await sleep(1500);
+  const backBeforeDelivery = Date.now() - sentAt < 1800;
+  await sleep(2500);
   const movesAfterReturn = await moves();
+  const wheelsAfterReturn = await wheels();
   const outAndBack = await plugin.send("DOM.getDocument", {}, s3);
-  check("plugin: a tab moved to the other window (confirmed natively) and back stays detached", reachedOther && cameBack && !!s3 && refused(outAndBack) && plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3), `reached w2 ${reachedOther}, back in w1 ${cameBack}, ${text(outAndBack)}`);
-  check("plugin: input its departed session queued never lands, even after the tab returns", Number.isInteger(movesAtDeparture) && movesAfterReturn === movesAtDeparture && movesAtDeparture < 300, `${movesAtDeparture} at departure, ${movesAfterReturn} after the return, of 300 sent`);
+  const detachedS3 = await until("the detach of the moved session", async () => plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3) || null, 10000).catch(() => false);
+  check("plugin: a tab moved to the other window (confirmed natively) and back stays detached", reachedOther && cameBack && !!s3 && refused(outAndBack) && detachedS3, `reached w2 ${reachedOther}, back in w1 ${cameBack}, ${text(outAndBack)}`);
+  check("plugin: mouse and wheel input its departed session queued, delivered after the tab came back, never lands", backBeforeDelivery && movesAtDeparture === 0 && movesAfterReturn === 0 && wheelsAfterReturn === 0, `back before delivery ${backBeforeDelivery}, moves ${movesAtDeparture}/${movesAfterReturn}, wheels ${wheelsAfterReturn}`);
   const old = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: 20 }, s3);
   const fresh = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
   const freshMove = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 30 }, fresh);
@@ -486,7 +542,7 @@ try {
   check("plugin: a target whose opener left its window shows no opener", returned === true && !!orphan && !orphan.openerId && !orphan.openerFrameId && orphan.canAccessOpener !== true, JSON.stringify(orphan ?? null).slice(0, 300));
   check("plugin: a reply that finishes after its tab moved never reaches it; it gets exactly one tab_out_of_scope error",
     late.length === 1 && (late[0].error?.message ?? "").startsWith("ardia: tab_out_of_scope") && !late.some((m) => m.result), JSON.stringify(late).slice(0, 300));
-  const detached = await until("the detach event", async () => plugin.events.find((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === ps) ?? null, 8000).catch(() => null);
+  const detached = await until("the detach event", async () => plugin.events.find((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === ps) ?? null, 12000).catch(() => null);
   check("plugin: its session on the moved tab is detached with Target.detachedFromTarget", !!detached);
   const afterMove = await plugin.send("DOM.getDocument", {}, ps);
   check("plugin: the moved tab's session takes no more commands", refused(afterMove), text(afterMove));

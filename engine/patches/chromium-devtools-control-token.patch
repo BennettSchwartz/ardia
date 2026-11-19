@@ -787,10 +787,39 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    auto mask =
        static_cast<blink::DragOperationsMask>(data->GetDragOperationsMask());
    std::unique_ptr<DropData> drop_data =
-@@ -1583,10 +1685,26 @@ float InputHandler::ScaleFactor() {
+@@ -1583,10 +1685,55 @@ float InputHandler::ScaleFactor() {
    return scale_factor;
  }
  
++void InputHandler::ArdiaRefusePluginDrag(
++    RenderFrameHost* source_frame,
++    const blink::mojom::DragEventSourceInfo* event_info,
++    bool* intercepted) {
++  if (*intercepted || !source_frame || !event_info || !ardia_press_ ||
++      !ArdiaRestrictedSession(session()) ||
++      event_info->press_event_id == -1 || !event_info->trigger_from_debugger ||
++      *ardia_press_ != std::make_pair(static_cast<const void*>(
++                                          source_frame->GetRenderWidgetHost()),
++                                      event_info->press_event_id)) {
++    return;
++  }
++  *intercepted = true;
++  RenderWidgetHostImpl* source =
++      RenderWidgetHostImpl::From(source_frame->GetRenderWidgetHost());
++  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++      FROM_HERE, base::BindOnce(
++                     [](base::WeakPtr<RenderWidgetHostImpl> source) {
++                       if (!source) {
++                         return;
++                       }
++                       source->DragSourceSystemDragEnded();
++                       source->DragSourceEndedAt(
++                           gfx::PointF(), gfx::PointF(),
++                           ui::mojom::DragOperation::kNone, base::DoNothing());
++                     },
++                     source->GetWeakPtr()));
++}
++
 -void InputHandler::StartDragging(const content::DropData& drop_data,
 -                                 const blink::mojom::DragData& drag_data,
 -                                 blink::DragOperationsMask drag_operations_mask,
@@ -818,7 +847,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    // Only allow when Input.setInterceptDrags is disabled.
    if (!intercept_drags_) {
      // If `last_mouse_move_` exists, then CDP is the currently handling mouse
-@@ -1651,6 +1769,10 @@ void InputHandler::OnWidgetForDispatchMouseEvent(
+@@ -1651,6 +1798,10 @@ void InputHandler::OnWidgetForDispatchMouseEvent(
  
    RenderWidgetHostImpl* widget_host =
        RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
@@ -829,7 +858,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    if (event->GetType() == blink::WebInputEvent::Type::kMouseWheel) {
      EnsureInjector(widget_host)
          ->InjectWheelEvent(static_cast<blink::WebMouseWheelEvent*>(event.get()),
-@@ -1667,6 +1789,13 @@ void InputHandler::DispatchTouchEvent(
+@@ -1667,6 +1818,13 @@ void InputHandler::DispatchTouchEvent(
      std::optional<double> timestamp,
      std::unique_ptr<DispatchTouchEventCallback> callback) {
    if (base::FeatureList::IsEnabled(features::kSyntheticPointerActions)) {
@@ -843,7 +872,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
      DispatchSyntheticPointerActionTouch(
          event_type, std::move(touch_points), std::move(modifiers),
          std::move(timestamp), std::move(callback));
-@@ -1751,6 +1880,10 @@ void InputHandler::OnWidgetForDispatchWebTouchEvent(
+@@ -1751,6 +1909,10 @@ void InputHandler::OnWidgetForDispatchWebTouchEvent(
    }
    RenderWidgetHostImpl* widget_host =
        RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
@@ -854,7 +883,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
  
    RenderWidgetHostViewBase* root_view = target->GetRootView();
    if (!root_view) {
-@@ -2312,6 +2445,7 @@ void InputHandler::SynthesizeTapGesture(
+@@ -2312,6 +2474,7 @@ void InputHandler::SynthesizeTapGesture(
  }
  
  void InputHandler::ClearInputState() {
@@ -906,16 +935,19 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
  #include <vector>
  
  #include "base/containers/flat_map.h"
-@@ -62,6 +65,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -62,6 +65,11 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
    void StartDragging(const DropData& drop_data,
                       const blink::mojom::DragData& drag_data,
                       blink::DragOperationsMask drag_operations_mask,
 +                     RenderFrameHost* source_frame,
 +                     const blink::mojom::DragEventSourceInfo* event_info,
                       bool* intercepted);
++  void ArdiaRefusePluginDrag(RenderFrameHost* source_frame,
++                             const blink::mojom::DragEventSourceInfo* event_info,
++                             bool* intercepted);
    // DragEnded is used to inform CDP's InputHandler when a drag has ended. This
    // gets called whenever the Drag n' Drop APIs that end dragging get called
-@@ -220,6 +225,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -220,6 +228,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
          const DropData& drop_data,
          const blink::mojom::DragData& drag_data,
          blink::DragOperationsMask drag_operations_mask,
@@ -924,7 +956,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
          bool* intercepted);
      friend void InputHandler::DragEnded();
  
-@@ -359,6 +366,7 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -359,6 +369,7 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
    std::optional<content::WebContents::ScopedIgnoreInputEvents>
        scoped_ignore_input_events_;
    bool intercept_drags_ = false;
@@ -947,7 +979,7 @@ diff --git a/content/browser/devtools/devtools_instrumentation.h b/content/brows
 diff --git a/content/browser/devtools/devtools_instrumentation.cc b/content/browser/devtools/devtools_instrumentation.cc
 --- a/content/browser/devtools/devtools_instrumentation.cc
 +++ b/content/browser/devtools/devtools_instrumentation.cc
-@@ -2321,11 +2321,14 @@ void WillStartDragging(FrameTreeNode* main_frame_tree_node,
+@@ -2321,11 +2321,17 @@ void WillStartDragging(FrameTreeNode* main_frame_tree_node,
                         const DropData& drop_data,
                         const blink::mojom::DragDataPtr drag_data,
                         blink::DragOperationsMask drag_operations_mask,
@@ -956,6 +988,9 @@ diff --git a/content/browser/devtools/devtools_instrumentation.cc b/content/brow
                         bool* intercepted) {
    CHECK(main_frame_tree_node->frame_tree().root() == main_frame_tree_node,
          base::NotFatalUntil::M159);
++  DispatchToAgents(main_frame_tree_node,
++                   &protocol::InputHandler::ArdiaRefusePluginDrag, source_frame,
++                   event_info, intercepted);
    DispatchToAgents(main_frame_tree_node, &protocol::InputHandler::StartDragging,
 -                   drop_data, *drag_data, drag_operations_mask, intercepted);
 +                   drop_data, *drag_data, drag_operations_mask, source_frame,

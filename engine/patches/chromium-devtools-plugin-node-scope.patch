@@ -43,26 +43,49 @@ diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.c
 diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 --- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 +++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
-@@ -626,6 +626,14 @@ void InspectorDOMAgent::Unbind(Node* node) {
+@@ -76,6 +76,7 @@
+ #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
+ #include "third_party/blink/renderer/core/fileapi/file.h"
+ #include "third_party/blink/renderer/core/frame/frame.h"
++#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+ #include "third_party/blink/renderer/core/frame/local_frame.h"
+ #include "third_party/blink/renderer/core/frame/location.h"
+ #include "third_party/blink/renderer/core/frame/remote_frame.h"
+@@ -626,10 +627,29 @@ void InspectorDOMAgent::Unbind(Node* node) {
    cached_child_count_.erase(id);
  }
  
-+bool InspectorDOMAgent::ArdiaOwnsBackendNode(Node* node) const {
++bool InspectorDOMAgent::ArdiaOwnsNode(Node* node) const {
 +  if (!ardia_owned_backend_nodes_only_) {
 +    return true;
 +  }
-+  LocalFrame* frame = node->GetDocument().GetFrame();
++  Document& document = node->GetDocument();
++  LocalFrame* frame = document.GetFrame();
++  if (!frame) {
++    if (auto* window = DynamicTo<LocalDOMWindow>(document.GetExecutionContext())) {
++      frame = window->GetFrame();
++    }
++  }
 +  return frame && inspected_frames_->Contains(frame);
 +}
 +
  protocol::Response InspectorDOMAgent::AssertNode(int node_id, Node*& node) {
    node = NodeForId(node_id);
    if (!node)
-@@ -644,6 +652,11 @@ protocol::Response InspectorDOMAgent::AssertNode(
+     return protocol::Response::ServerError("Could not find node with given id");
++  if (!ArdiaOwnsNode(node)) {
++    node = nullptr;
++    return protocol::Response::ServerError(
++        "ardia: that nodeId isn't in this page");
++  }
+   return protocol::Response::Success();
+ }
+ 
+@@ -644,6 +664,11 @@ protocol::Response InspectorDOMAgent::AssertNode(
  
    if (backend_node_id.has_value()) {
      node = DOMNodeIds::NodeForId(backend_node_id.value());
-+    if (node && !ArdiaOwnsBackendNode(node)) {
++    if (node && !ArdiaOwnsNode(node)) {
 +      node = nullptr;
 +      return protocol::Response::ServerError(
 +          "ardia: that backendNodeId isn't in this page");
@@ -70,11 +93,11 @@ diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/
      return !node ? protocol::Response::ServerError(
                         "No node found for given backend id")
                   : protocol::Response::Success();
-@@ -1933,6 +1946,10 @@ protocol::Response InspectorDOMAgent::resolveNode(
+@@ -1933,6 +1958,10 @@ protocol::Response InspectorDOMAgent::resolveNode(
      node = NodeForId(node_id.value());
    } else {
      node = DOMNodeIds::NodeForId(backend_node_id.value());
-+    if (node && !ArdiaOwnsBackendNode(node)) {
++    if (node && !ArdiaOwnsNode(node)) {
 +      return protocol::Response::ServerError(
 +          "ardia: that backendNodeId isn't in this page");
 +    }
@@ -84,20 +107,35 @@ diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/
 diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.h b/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
 --- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
 +++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
-@@ -102,6 +102,7 @@ class CORE_EXPORT InspectorDOMAgent final
+@@ -102,6 +102,8 @@ class CORE_EXPORT InspectorDOMAgent final
    void Trace(Visitor*) const override;
    void Dispose() override;
    void Restore() override;
 +  void ArdiaOwnedBackendNodesOnly() { ardia_owned_backend_nodes_only_ = true; }
++  bool ArdiaOwnsNode(Node* node) const;
  
    HeapVector<Member<Document>> Documents();
    void Reset();
-@@ -448,6 +449,8 @@ class CORE_EXPORT InspectorDOMAgent final
+@@ -448,6 +450,7 @@ class CORE_EXPORT InspectorDOMAgent final
    raw_ptr<v8::Isolate, UnprotectedInRelease | DanglingUntriaged>
        isolate_;  // null after Dispose().
    Member<InspectedFrames> inspected_frames_;
 +  bool ardia_owned_backend_nodes_only_ = false;
-+  bool ArdiaOwnsBackendNode(Node* node) const;
    HeapHashSet<Member<DOMListener>> dom_listeners_;
    Member<NodeToIdMap> document_node_to_id_map_;
    // Owns node mappings for dangling nodes.
+diff --git a/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc b/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
+--- a/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
++++ b/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
+@@ -447,6 +447,11 @@ void InspectorAccessibilityAgent::CompleteQuery(
+         protocol::Response::InvalidParams("Root DOM node could not be found"));
+     return;
+   }
++  if (!dom_agent_->ArdiaOwnsNode(root_dom_node)) {
++    callback->sendFailure(protocol::Response::ServerError(
++        "ardia: that node left this page while the query was pending"));
++    return;
++  }
+   Document& document = root_dom_node->GetDocument();
+   // Guard against the document becoming inactive while the query was pending.
+   if (!document.IsActive()) {

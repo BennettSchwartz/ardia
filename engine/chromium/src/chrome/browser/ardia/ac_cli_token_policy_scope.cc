@@ -16,6 +16,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_plugin_credentials.h"
+#include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "components/tabs/public/tab_interface.h"
@@ -258,6 +259,21 @@ void TokenClient::DetachOutOfScope(const std::string& session) {
     detaching_[gone] = session;
   }
   DropSubtree(session);
+  if (CliPluginInputHold()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](base::WeakPtr<TokenClient> self, std::string parent,
+               std::string gone) {
+              if (self) {
+                self->SendInternal(parent, "Target.detachFromTarget",
+                                   base::DictValue().Set("sessionId", gone));
+              }
+            },
+            weak_factory_.GetWeakPtr(), parent_session, session),
+        kHeldPluginDetach);
+    return;
+  }
   SendInternal(parent_session, "Target.detachFromTarget",
                base::DictValue().Set("sessionId", session));
 }

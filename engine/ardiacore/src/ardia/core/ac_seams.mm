@@ -196,6 +196,9 @@ void InstallChromeHooks() {
     ui::ArdiaUsePrivatePasteboard();
     ardia::NoteCliPrivatePasteboard(ui::ArdiaPrivatePasteboardActive());
   }
+  if (TestFlag("pluginInputHold")) {
+    ardia::NoteCliPluginInputHold(true);
+  }
 }
 
 }

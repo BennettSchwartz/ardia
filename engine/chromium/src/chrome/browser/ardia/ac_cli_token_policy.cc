@@ -14,16 +14,20 @@
 
 #include "ardia/core/ac_content_hooks.h"
 #include "ardia/core/ac_host_visibility.h"
+#include "base/functional/bind.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/location.h"
 #include "base/no_destructor.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/strcat.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_file_picker.h"
 #include "chrome/browser/ardia/ac_cli_owned_tabs.h"
+#include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_agent_host_client.h"
@@ -264,6 +268,20 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
   NoteCommand(*method, session, &params);
   outstanding_[key] = NeedsResponse(*method) ? *method : std::string();
   message = base::WriteJson(command).value_or(std::string());
+  if (kind_ == TokenKind::kPlugin && *method == "Input.dispatchMouseEvent" &&
+      CliPluginInputHold() && to_browser_ && !message.empty()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](base::WeakPtr<TokenClient> self, std::string held) {
+              if (self && self->to_browser_ && !self->revoked_) {
+                self->to_browser_.Run(std::move(held));
+              }
+            },
+            weak_factory_.GetWeakPtr(), std::move(message)),
+        kHeldPluginInput);
+    return false;
+  }
   return !message.empty();
 }
 
