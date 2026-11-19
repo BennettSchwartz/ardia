@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { View } from "react-native";
-import { CLI_PLUGIN, describeCliInstall, installCliInBackground, olderCliInstalled, useCli } from "../../../state/app/cliControl";
+import { CLI_PLUGIN, describeCliInstall, installCliInBackground, useCli } from "../../../state/app/cliControl";
 import { usePluginActive, usePluginListing, usePluginPrograms } from "../../../state/plugins/hooks";
 import { canRelink, relinkPrograms } from "../../../state/plugins/actions";
 import type { PluginListing, ProgramsState } from "../../../state/plugins/store";
+import { olderProgramsInstalled } from "../../../state/plugins/programs";
 import { goToSettingsPane, type SettingsPlace } from "../../../state/settings/settingsWindows";
 import { useSettings } from "../../../state/browser/hooks";
 import { updateSettings } from "../../../state/settings/actions";
@@ -149,7 +150,15 @@ function PluginCommandRow() {
   const programs = usePluginPrograms(CLI_PLUGIN);
   const installed = usePluginActive(CLI_PLUGIN);
   const failed = canRelink(programs);
-  const older = useMemo(() => !installed && olderCliInstalled(), [installed]);
+  const [older, setOlder] = useState(false);
+  useEffect(() => {
+    if (installed) return setOlder(false);
+    let current = true;
+    void olderProgramsInstalled().then((found) => current && setOlder(found));
+    return () => {
+      current = false;
+    };
+  }, [installed]);
   return (
     <Row
       anchor="advanced.ardiaCommand"

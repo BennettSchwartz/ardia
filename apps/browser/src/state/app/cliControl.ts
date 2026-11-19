@@ -171,15 +171,6 @@ export function installCliInBackground(reason: CliInstallReason): Promise<CliIns
   return running;
 }
 
-export function olderCliInstalled(): boolean {
-  if (!PLATFORM_FEATURES.ardiaCommand) return false;
-  try {
-    return !!installedCliVersion();
-  } catch {
-    return false;
-  }
-}
-
 export function describeCliInstall(state: Pick<CliState, "installing" | "step" | "installedVersion" | "binPath" | "error">): string {
   if (state.installing) return state.step ? `Installing (${state.step})…` : "Installing…";
   if (state.error) return state.error;
