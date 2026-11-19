@@ -12,44 +12,68 @@ struct PluginSandbox {
   static let searchPath = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"]
 
   static let machAllowed = [
-    "com.apple.system.notification_center", "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
-    "com.apple.logd", "com.apple.diagnosticd", "com.apple.bsd.dirhelper", "com.apple.SystemConfiguration.DNSConfiguration",
-    "com.apple.SystemConfiguration.configd", "com.apple.trustd", "com.apple.trustd.agent", "com.apple.TrustEvaluationAgent",
-    "com.apple.SecurityServer", "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
+    "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
+    "com.apple.logd", "com.apple.bsd.dirhelper", "com.apple.SystemConfiguration.configd",
+    "com.apple.trustd", "com.apple.trustd.agent", "com.apple.TrustEvaluationAgent", "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
   ]
 
-  static let unixSocketsAllowed = ["/private/var/run/mDNSResponder"]
+  static let machAllowedOnline = ["com.apple.SystemConfiguration.DNSConfiguration"]
 
-  static let profile = """
-    (version 1)
-    (allow default)
-    (deny appleevent-send)
-    (deny lsopen)
-    (deny job-creation)
-    (deny distributed-notification-post)
-    (deny user-preference-write)
-    (deny process-info* signal)
-    (allow process-info* signal (target same-sandbox))
-    (allow process-info-listpids)
-    (deny ipc-posix-shm*)
-    (allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center") (ipc-posix-name-prefix "apple.cfprefs."))
-    (deny mach-lookup)
-    (allow mach-lookup \(machAllowed.map { "(global-name \"\($0)\")" }.joined(separator: " ")))
-    (deny file-read* file-write* (subpath (param "HOME")) (subpath (param "APP_DATA")) (subpath (param "CONFIG")))
-    (deny file-write* (subpath "/"))
-    (allow file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper") (subpath "/dev/fd"))
-    (deny network-outbound (remote unix-socket))
-    (allow network-outbound \(unixSocketsAllowed.map { "(remote unix-socket (literal \"\($0)\"))" }.joined(separator: " ")) (remote unix-socket (subpath (param "DATA"))))
-    (allow file-read* (subpath (param "PLUGIN")) (literal (param "PROGRAM")) (subpath (param "INSTALL")))
-    (allow file-read* file-write* (subpath (param "DATA")))
-    (allow file-read-metadata (literal (param "HOME")))
-    """
+  static let unixSocketsAllowedOnline = ["/private/var/run/mDNSResponder"]
 
-  static let offline = """
+  static let preferenceDomainsAllowed = ["kCFPreferencesAnyApplication"]
 
-    (deny network-outbound (remote ip))
-    (allow network-outbound (remote ip "localhost:*"))
-    """
+  static let devicesWritable = ["/dev/null", "/dev/zero"]
+
+  static let carriedEnvironment = [
+    "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  ]
+
+  static let systemCertificates = "/etc/ssl/cert.pem"
+
+  static func networkEnvironment(from given: [String: String]) -> [String] {
+    var carried = carriedEnvironment.compactMap { name in given[name].flatMap { $0.isEmpty || $0.contains("\0") ? nil : "\(name)=\($0)" } }
+    if given["SSL_CERT_FILE"]?.isEmpty ?? true { carried.append("SSL_CERT_FILE=\(systemCertificates)") }
+    return carried
+  }
+
+  static func profile(network: Bool) -> String {
+    let mach = machAllowed + (network ? machAllowedOnline : [])
+    let preferences = preferenceDomainsAllowed.isEmpty
+      ? "" : "\n(allow user-preference-read \(preferenceDomainsAllowed.map { "(preference-domain \"\($0)\")" }.joined(separator: " ")))"
+    let sockets = network
+      ? "\n(allow network-outbound \(unixSocketsAllowedOnline.map { "(remote unix-socket (literal \"\($0)\"))" }.joined(separator: " ")))" : ""
+    let addresses = network ? "" : "\n(deny network-outbound (remote ip))"
+    return """
+      (version 1)
+      (allow default)
+      (deny appleevent-send)
+      (deny lsopen)
+      (deny job-creation)
+      (deny distributed-notification-post)
+      (deny darwin-notification-post)
+      (deny user-preference-write)
+      (deny user-preference-read)\(preferences)
+      (deny iokit-open)
+      (deny sysctl-write)
+      (allow sysctl-read)
+      (deny process-info* signal)
+      (allow process-info* signal (target same-sandbox))
+      (allow process-info-listpids)
+      (deny ipc-posix-shm*)
+      (allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center") (ipc-posix-name-prefix "apple.cfprefs."))
+      (deny mach-lookup)
+      (allow mach-lookup \(mach.map { "(global-name \"\($0)\")" }.joined(separator: " ")))
+      (deny file-read* file-write* (subpath (param "HOME")) (subpath (param "APP_DATA")) (subpath (param "CONFIG")))
+      (deny file-write* (subpath "/"))
+      (allow file-write* \(devicesWritable.map { "(literal \"\($0)\")" }.joined(separator: " ")) (subpath "/dev/fd"))
+      (deny network-outbound (remote unix-socket))\(sockets)\(addresses)
+      (allow file-read* (subpath (param "PLUGIN")) (literal (param "PROGRAM")) (subpath (param "INSTALL")))
+      (allow file-read* file-write* (subpath (param "DATA")))
+      (allow file-read-metadata (literal (param "HOME")))
+      """
+  }
 
   enum Refusal: Error {
     case unsafe(String)
@@ -113,6 +137,6 @@ struct PluginSandbox {
       "HOME": home, "APP_DATA": appData, "CONFIG": configFolder, "PLUGIN": pluginFolder, "DATA": pluginData, "PROGRAM": program,
       "INSTALL": installFolder(),
     ]
-    return ["-p", Self.profile + (network ? "" : Self.offline)] + parameters.sorted { $0.key < $1.key }.flatMap { ["-D", "\($0.key)=\($0.value)"] }
+    return ["-p", Self.profile(network: network)] + parameters.sorted { $0.key < $1.key }.flatMap { ["-D", "\($0.key)=\($0.value)"] }
   }
 }

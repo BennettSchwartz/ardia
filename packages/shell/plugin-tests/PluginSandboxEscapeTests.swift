@@ -5,7 +5,13 @@ import XCTest
 final class PluginSandboxEscapeTests: XCTestCase {
   static let lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
   static let probeSource = """
+    #include <IOKit/IOKitLib.h>
     #include <errno.h>
+    #include <fcntl.h>
+    #include <netdb.h>
+    #include <netinet/in.h>
+    #include <notify.h>
+    #include <sys/mman.h>
     #include <libproc.h>
     #include <servers/bootstrap.h>
     #include <signal.h>
@@ -41,6 +47,60 @@ final class PluginSandboxEscapeTests: XCTestCase {
         kern_return_t result = bootstrap_look_up(bootstrap_port, argv[2], &port);
         printf("%s %d\\n", result == KERN_SUCCESS ? "reachable" : "refused", result);
         return result == KERN_SUCCESS ? 0 : 97;
+      }
+      if (!strcmp(mode, "notify")) {
+        uint32_t status = notify_post(argv[2]);
+        printf("notify %u\\n", status);
+        return status == NOTIFY_STATUS_OK ? 0 : 96;
+      }
+      if (!strcmp(mode, "watch")) {
+        int token = 0, changed = 0;
+        if (notify_register_check(argv[2], &token) != NOTIFY_STATUS_OK) return 96;
+        notify_check(token, &changed);
+        printf("ready\\n");
+        fflush(stdout);
+        for (int i = 0; i < 40; i++) {
+          usleep(50000);
+          notify_check(token, &changed);
+          if (changed) { printf("arrived\\n"); return 0; }
+        }
+        printf("silent\\n");
+        return 92;
+      }
+      if (!strcmp(mode, "shm")) {
+        int fd = shm_open(argv[2], O_CREAT | O_RDWR, 0600);
+        if (fd < 0) return failed();
+        close(fd);
+        shm_unlink(argv[2]);
+        printf("created\\n");
+        return 0;
+      }
+      if (!strcmp(mode, "iokit")) {
+        io_service_t service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(argv[2]));
+        if (!service) { printf("no service\\n"); return 95; }
+        io_connect_t connection = 0;
+        kern_return_t result = IOServiceOpen(service, mach_task_self(), 0, &connection);
+        IOObjectRelease(service);
+        printf("%s %d\\n", result == KERN_SUCCESS ? "opened" : "refused", result);
+        if (result == KERN_SUCCESS) IOServiceClose(connection);
+        return result == KERN_SUCCESS ? 0 : 94;
+      }
+      if (!strcmp(mode, "resolve")) {
+        struct addrinfo *found = NULL;
+        int result = getaddrinfo(argv[2], "443", NULL, &found);
+        printf("resolve %d\\n", result);
+        if (found) freeaddrinfo(found);
+        return result == 0 ? 0 : 93;
+      }
+      if (!strcmp(mode, "tcp")) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in address = {0};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(atoi(argv[2]));
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (connect(fd, (struct sockaddr *)&address, sizeof address) != 0) return failed();
+        printf("connected\\n");
+        return 0;
       }
       if (!strcmp(mode, "connect")) {
         int fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -94,7 +154,7 @@ final class PluginSandboxEscapeTests: XCTestCase {
     try "{\"token\":\"\(token)\"}".write(toFile: tokenFile, atomically: true, encoding: .utf8)
     try Self.probeSource.write(toFile: "\(root)/probe.c", atomically: true, encoding: .utf8)
     probe = "\(plugin)/probe"
-    let built = try Self.run("/usr/bin/xcrun", ["clang", "-O", "-o", probe, "\(root)/probe.c"])
+    let built = try Self.run("/usr/bin/xcrun", ["clang", "-O", "-framework", "IOKit", "-o", probe, "\(root)/probe.c"])
     XCTAssertEqual(built.status, 0, built.output)
   }
 
@@ -129,8 +189,8 @@ final class PluginSandboxEscapeTests: XCTestCase {
     return Outcome(status: process.terminationStatus, output: String(decoding: output, as: UTF8.self))
   }
 
-  func sandboxed(_ program: String, _ arguments: [String]) throws -> Outcome {
-    let box = PluginSandbox(home: home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: program, network: true)
+  func sandboxed(_ program: String, _ arguments: [String], network: Bool = true, realHome: Bool = false) throws -> Outcome {
+    let box = PluginSandbox(home: realHome ? PluginSandbox.resolved(NSHomeDirectory())! : home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: program, network: network)
     return try Self.run("/usr/bin/sandbox-exec", try box.arguments() + [program] + arguments, in: plugin)
   }
 
@@ -231,8 +291,8 @@ final class PluginSandboxEscapeTests: XCTestCase {
     scratch += [launchdLayout, tempAgent]
     for folder in [launchdLayout, tempAgent] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
     let refused = ["\(launchdLayout)/Listeners", "\(tempAgent)/agent.sock", "\(outside)/agent.sock"]
-    let allowed = "\(pluginData)/own.sock"
-    for path in refused + [allowed] { try listen(at: path) }
+    let ownFolder = "\(pluginData)/own.sock"
+    for path in refused + [ownFolder] { try listen(at: path) }
     for path in refused {
       let spellings = [path, path.replacingOccurrences(of: "/private/", with: "/", options: .anchored)]
       for spelling in spellings {
@@ -242,23 +302,28 @@ final class PluginSandboxEscapeTests: XCTestCase {
         XCTAssertEqual(inside.status, EPERM, "\(spelling) is reachable from inside: \(inside.output)")
       }
     }
-    XCTAssertEqual(try sandboxed(probe, ["connect", allowed]).status, 0, "its own folder's sockets still work")
+    XCTAssertEqual(try Self.run(probe, ["connect", ownFolder]).status, 0, "control: its own folder's socket accepts outside")
+    XCTAssertEqual(try sandboxed(probe, ["connect", ownFolder]).status, EPERM, "a pathname socket in its own folder is refused too; fd 3 is its only channel")
   }
 
   func testMachServicesOffTheAllowlistAreRefused() throws {
-    let denied = ["com.apple.lsd.open", "com.apple.lsd.modifydb", "com.apple.coreservices.launchservicesd", "com.apple.xpc.smd", "com.apple.backgroundtaskmanagement", "com.apple.tccd", "com.apple.pasteboard.1"]
+    let denied = [
+      "com.apple.lsd.open", "com.apple.lsd.modifydb", "com.apple.coreservices.launchservicesd", "com.apple.xpc.smd", "com.apple.backgroundtaskmanagement",
+      "com.apple.tccd", "com.apple.pasteboard.1", "com.apple.SecurityServer", "com.apple.diagnosticd",
+    ]
     for name in denied {
       let control = try Self.run(probe, ["lookup", name])
       XCTAssertEqual(control.status, 0, "control: \(name) is reachable outside: \(control.output)")
       let inside = try sandboxed(probe, ["lookup", name])
-      XCTAssertNotEqual(inside.status, 0, "\(name) is reachable from inside")
+      XCTAssertEqual(inside.status, 97, "\(name) is reachable from inside: \(inside.output)")
+      XCTAssertTrue(inside.output.hasPrefix("refused"), inside.output)
     }
     for name in ["com.apple.trustd.agent", "com.apple.cfprefsd.agent", "com.apple.SystemConfiguration.DNSConfiguration"] {
       XCTAssertEqual(try sandboxed(probe, ["lookup", name]).status, 0, "\(name) is on the allowlist")
     }
   }
 
-  func testAppleEventsAreRefused() throws {
+  func testAppleEventsAreRefusedWeakControlFinderRunning() throws {
     try XCTSkipUnless(try Self.run("/usr/bin/pgrep", ["-x", "Finder"]).status == 0, "Finder isn't running, so a refusal proves nothing")
     let disk = try XCTUnwrap(try URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeNameKey]).volumeName)
     let inside = try sandboxed("/usr/bin/osascript", ["-e", "tell application \"Finder\" to get name of startup disk"])
@@ -289,7 +354,92 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertEqual(try Self.run("/usr/bin/defaults", ["write", controlDomain, "key", "value"]).status, 0)
     XCTAssertEqual(try Self.run("/usr/bin/defaults", ["read", controlDomain, "key"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "value", "control")
     XCTAssertNotEqual(try sandboxed("/usr/bin/defaults", ["write", domain, "key", "value"]).status, 0)
-    XCTAssertNotEqual(try Self.run("/usr/bin/defaults", ["read", domain, "key"]).status, 0)
-    XCTAssertEqual(try sandboxed("/usr/bin/defaults", ["read", controlDomain, "key"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "value", "reading preferences still works")
+    XCTAssertNotEqual(try Self.run("/usr/bin/defaults", ["read", domain, "key"]).status, 0, "the write landed")
+  }
+
+  func testItCannotReadOtherAppsPreferencesButReadsTheGlobalDomain() throws {
+    let controlDomain = "dev.ardia.plugin-escape.secret.\(Self.short())"
+    preferenceDomains.append(controlDomain)
+    XCTAssertEqual(try Self.run("/usr/bin/defaults", ["write", controlDomain, "token", "secret-value"]).status, 0)
+    XCTAssertEqual(try Self.run("/usr/bin/defaults", ["read", controlDomain, "token"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "secret-value", "control")
+    let inside = try sandboxed("/usr/bin/defaults", ["read", controlDomain, "token"], realHome: true)
+    XCTAssertNotEqual(inside.status, 0)
+    XCTAssertFalse(inside.output.contains("secret-value"), "another app's preferences are readable: \(inside.output)")
+    let locale = try Self.run("/usr/bin/defaults", ["read", "-g", "AppleLocale"])
+    try XCTSkipUnless(locale.status == 0, "no AppleLocale to compare")
+    XCTAssertEqual(try sandboxed("/usr/bin/defaults", ["read", "-g", "AppleLocale"], realHome: true).output, locale.output, "the global domain stays readable")
+  }
+
+  func watch(_ name: String, while posting: () throws -> Void) throws -> Bool {
+    let watcher = Process()
+    watcher.executableURL = URL(fileURLWithPath: probe)
+    watcher.arguments = ["watch", name]
+    let pipe = Pipe()
+    watcher.standardOutput = pipe
+    try watcher.run()
+    started.append(watcher)
+    var heard = ""
+    let deadline = Date().addingTimeInterval(5)
+    while !heard.contains("ready") && Date() < deadline {
+      heard += String(decoding: pipe.fileHandleForReading.availableData, as: UTF8.self)
+    }
+    XCTAssertTrue(heard.contains("ready"), "the watcher never registered")
+    try posting()
+    watcher.waitUntilExit()
+    heard += String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    return heard.contains("arrived")
+  }
+
+  func testDarwinNotificationsCannotBePosted() throws {
+    let controlName = "dev.ardia.plugin-escape.control.\(Self.short())"
+    XCTAssertTrue(try watch(controlName) { _ = try Self.run(probe, ["notify", controlName]) }, "control: a post from outside arrives")
+    let name = "dev.ardia.plugin-escape.\(Self.short())"
+    XCTAssertFalse(try watch(name) { _ = try sandboxed(probe, ["notify", name]) }, "a post from inside arrived")
+  }
+
+  func testSharedMemoryCannotBeCreated() throws {
+    let name = "/ardia.\(Self.short())"
+    XCTAssertEqual(try Self.run(probe, ["shm", name]).status, 0, "control: shm_open works outside")
+    let inside = try sandboxed(probe, ["shm", name])
+    XCTAssertEqual(inside.status, EPERM, inside.output)
+  }
+
+  func testIOKitUserClientsCannotBeOpened() throws {
+    let control = try Self.run(probe, ["iokit", "IOPMrootDomain"])
+    try XCTSkipUnless(control.status == 0, "IOPMrootDomain doesn't open outside: \(control.output)")
+    let inside = try sandboxed(probe, ["iokit", "IOPMrootDomain"])
+    XCTAssertNotEqual(inside.status, 0, inside.output)
+    XCTAssertFalse(inside.output.hasPrefix("opened"), inside.output)
+  }
+
+  func testWithoutNetworkThereIsNoResolverAndNoLoopback() throws {
+    let listener = socket(AF_INET, SOCK_STREAM, 0)
+    var address = sockaddr_in()
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    address.sin_port = 0
+    let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(listener, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
+    XCTAssertEqual(bound, 0)
+    XCTAssertEqual(Darwin.listen(listener, 8), 0)
+    listeners.append(listener)
+    var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+    _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) } }
+    let port = String(UInt16(bigEndian: address.sin_port))
+    let control = try Self.run(probe, ["resolve", "apple.com"])
+    try XCTSkipUnless(control.status == 0, "no DNS here: \(control.output)")
+    XCTAssertEqual(try Self.run(probe, ["tcp", port]).status, 0, "control: loopback accepts outside")
+    XCTAssertEqual(try sandboxed(probe, ["resolve", "apple.com"], network: true).status, 0, "with network the resolver works")
+    XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: true).status, 0, "with network loopback works")
+    let resolved = try sandboxed(probe, ["resolve", "apple.com"], network: false)
+    XCTAssertEqual(resolved.status, 93, "without network a name resolves: \(resolved.output)")
+    XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: false).status, EPERM, "without network loopback is reachable")
+  }
+
+  func testHelpersGetProxyAndCertificateSettingsButNoSecrets() {
+    let carried = PluginSandbox.networkEnvironment(from: [
+      "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret", "NODE_EXTRA_CA_CERTS": "/etc/corp.pem",
+    ])
+    XCTAssertEqual(Set(carried), ["HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost", "NODE_EXTRA_CA_CERTS=/etc/corp.pem", "SSL_CERT_FILE=/etc/ssl/cert.pem"])
+    XCTAssertEqual(PluginSandbox.networkEnvironment(from: ["SSL_CERT_FILE": "/corp/roots.pem"]), ["SSL_CERT_FILE=/corp/roots.pem"])
   }
 }

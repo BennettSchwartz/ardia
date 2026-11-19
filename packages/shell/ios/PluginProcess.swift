@@ -69,7 +69,7 @@ final class PluginProcess: PluginRun {
       "ARDIA_PLUGIN_NAME=" + name,
       "ARDIA_PLUGIN_FD=\(channelFd)",
       "ARDIA_PLUGIN_PROTOCOL=1",
-    ]
+    ] + PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment)
   }
 
   static func spawn(

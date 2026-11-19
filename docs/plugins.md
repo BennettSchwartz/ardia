@@ -361,7 +361,7 @@ Needs a `process`.
 | `tabs` | The helper may call `windows` and subscribe to tab, window and page events. URLs come without their query and fragment |
 | `fullUrls` | Those URLs in full (needs `tabs`) |
 | `commands` | The helper may run Ardia's commands, the same ones and with the same refusals as the `ardia` command (`docs/automation.md` › Which commands) |
-| `network` | The helper may connect beyond this Mac. Without it, only to this Mac's own addresses |
+| `network` | The helper may resolve names and connect to the internet and to servers on this Mac. Without it, it can't connect anywhere, not even to this Mac's own addresses |
 | `control` | Install or Turn On turns on `cliControl`, the ardia command's control of Ardia; the sheet says "Lets any program you run drive your tabs and pages, with your logins" (for an always-on plugin, "… while it's installed. There's no off switch"). On macOS there's no switch afterwards: while an always-on plugin that asks for it is installed, each launch turns it back on, and the control pill's Stop holds only until the next launch. For an `autoInstall` built-in plugin, its first link turns it on once unless you'd turned it off. `config.json` can't set it. |
 
 Contributions grant their own reach and are shown too: running a program, adding a page, adding commands, changing
@@ -433,7 +433,10 @@ settings only once it is saved, so a failed save changes nothing.
   log, `PluginData/<name>/plugin.log`, 0600, a regular file or the helper doesn't start, moved to `plugin.log.1` at start past 1 MB and emptied while it runs past
   2 MB) and the channel on descriptor 3; both ends of the channel are close-on-exec from the moment they exist. Its
   environment is only `PATH` (above), `HOME` (`PluginData/<name>/home`), `TMPDIR` (`PluginData/<name>/tmp`), `LANG`,
-  `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`. A sandbox Ardia can't set up means the helper
+  `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`, plus the proxy and certificate settings Ardia
+  itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`), and `SSL_CERT_FILE=/etc/ssl/cert.pem` when none is set, since the Keychain's
+  trust settings are out of the helper's reach (a root kept only in the Keychain isn't trusted). Never a token. A sandbox Ardia can't set up means the helper
   doesn't start; it never runs unsandboxed.
 - **Data folder.** `PluginData/<name>` is opened once per start and must be a real folder Ardia's user owns, with
   `home` and `tmp` real folders in it; the log is created inside that opened folder, never through a link. The
@@ -444,17 +447,25 @@ settings only once it is saved, so a failed save changes nothing.
   folder, Ardia's data folder and its config folder are unreadable and unwritable, wherever they are (a scratch data
   folder outside your home included): your files, every browser profile, cookies, passwords and Ardia's own state. It
   can't connect to a Unix socket in your home or Ardia's data folder, so Ardia's control socket is out of reach. It
-  can't write anywhere else on disk. Without `network` its outbound connections reach only this Mac. A plugin whose
+  can't write anywhere else on disk, nor connect to any Unix socket but the system resolver's: its channel to Ardia is
+  the inherited descriptor 3. Without `network` it can't connect anywhere, this Mac's own addresses included, and
+  can't resolve names; with it, it reaches the internet and servers on this Mac. A plugin whose
   folder (after links) would take in your home, Ardia's data or its settings, or whose program lives in Ardia's data or
   config folder, isn't started. The profile's grants are paths, the only kind `sandbox-exec` has: they name the
   approved folder's path at start. A folder put in its place afterwards can be read by the running helper instead
   of its own, and nothing outside the plugins folder can.
+- **What else it refuses.** Launching apps or opening URLs (`lsopen`), Apple Events, creating launchd jobs, posting
+  distributed or Darwin notifications, writing any preferences or reading any but the global domain, opening IOKit
+  user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments, and looking up any
+  system service off a short list: user and group lookups, logging, per-user temp folders, network settings, the
+  resolver (with `network` only), TLS trust and preference reads (`PluginSandbox.machAllowed`). It can't inspect or
+  signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal against a probe that
+  succeeds outside the sandbox.
 - **What the sandbox doesn't do.** It runs as you, so it is a containment layer around a program you chose to run, not
-  a defense against one built to escape. Known gaps: Apple Events aren't blocked (`appleevent-send` isn't enforced for
-  a default-allow profile), so a helper could script an app that accepts them, Ardia's own AppleScript included, which
-  stays behind its own settings; files your config folder links to outside your home are readable; the system services
-  every program reaches are reachable; a local server it starts may listen on any address; it isn't limited in CPU. Out of Ardia's reach: a program started through launchd or another app (`open`,
-  `launchctl`), which isn't the helper's descendant and isn't held to its sandbox either; and a process started within
+  a defense against one built to escape. Known gaps: any process's command line is readable (`KERN_PROCARGS2` can't be
+  sandboxed), so nothing secret ever goes in a helper's arguments; files your config folder links to outside your home
+  are readable; a local server it starts may listen on any address; it isn't limited in CPU. Out of Ardia's reach: a
+  process started within
   the moment between a helper's fork and its own exit. Checking a process id's start time and signalling it are two
   calls, so an id reused within microseconds in between could be hit. The responsibility calls
   (`responsibility_spawnattrs_setdisclaim`, `responsibility_get_pid_responsible_for_pid`) aren't public API: Ardia looks
@@ -463,8 +474,7 @@ settings only once it is saved, so a failed save changes nothing.
   accepts the lookup, and how macOS privacy prompts (TCC) attribute a helper that is responsible for itself; in a
   development build, prompts name the helper's program rather than Ardia. If Ardia crashes, a helper that doesn't exit when its channel closes keeps
   running until it is stopped by hand. So the permissions below are what Ardia hands a helper through its channel and
-  what the sandbox holds it to on disk and on the network; the gaps above are outside them. Issue #2495 moves the
-  helper to a deny-by-default profile.
+  what the sandbox holds it to on disk and on the network; the gaps above are outside them.
 
 ### The channel
 
