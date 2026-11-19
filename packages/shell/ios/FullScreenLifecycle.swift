@@ -54,7 +54,7 @@ final class FullScreenLifecycle {
     let ready = waiters.filter { $0.value.window == key && $0.value.after < finished }
     for (token, waiter) in ready {
       waiters[token] = nil
-      waiter.settle()
+      DispatchQueue.main.async(execute: waiter.settle)
     }
   }
 
