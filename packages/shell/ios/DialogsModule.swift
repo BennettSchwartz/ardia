@@ -1,4 +1,5 @@
 import AppKit
+import ArdiaCore
 import ExpoModulesCore
 
 public class DialogsModule: Module {
