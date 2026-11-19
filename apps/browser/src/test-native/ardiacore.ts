@@ -32,7 +32,7 @@ type TabStripHost = {
 };
 type ExtensionEngine = {
   list(profile: string): Promise<InstalledExtension[]>;
-  install(path: string, profile: string, digest?: string): Promise<string>;
+  install(path: string, profile: string, digest?: string, staged?: string): Promise<string>;
   reload(id: string, profile: string): Promise<void>;
   uninstall(id: string, profile: string): Promise<void>;
   configure?(id: string, profile: string, options: Record<string, unknown>): Promise<void>; inspect?(path: string): Promise<CallResult<"extensions.inspectUnpacked">>;
@@ -302,6 +302,7 @@ export const nativeTabSwitches: boolean[] = [];
 export const nativeTabPresses: { byStart: Map<number, number>; dropped: number[]; splits: string[][] } = { byStart: new Map(), dropped: [], splits: [] };
 export const discardedOffers: string[] = [];
 export const installedCrx: { path: string; profile: string }[] = [];
+export const discardedStages: string[] = [];
 export const crxInstallFailure: { next: string | null } = { next: null };
 export const linkRoute: { next: LinkRoute } = { next: {} };
 export const resolvedPermissions: { id: string; result: string; remember: boolean }[] = [];
@@ -493,11 +494,12 @@ const fakeModules = {
   ),
   ArdiaExtensions: domain("extensions", {
     list: async ({ profile }) => ({ extensions: (await extensionEngine()?.list(profile)) ?? [] }),
-    install: async ({ profile, path, digest }) => {
+    install: async ({ profile, path, digest, staged }) => {
       const engine = extensionEngine();
       if (!engine) throw Object.assign(new Error("no extension engine in this test"), { code: "ERR_ENGINE" });
-      return { id: await engine.install(path, profile, digest) };
+      return { id: await engine.install(path, profile, digest, staged) };
     },
+    discardStaged: ({ staged }) => (discardedStages.push(staged), null),
     setEnabled: async ({ id }) => (await extensionAnswers.change("setEnabled", id), { ok: true }),
     uninstall: async ({ profile, id }) => (await extensionAnswers.change("uninstall", id), await extensionEngine()?.uninstall(id, profile), { ok: true }),
     reload: async ({ profile, id }) => (await extensionAnswers.change("reload", id), await extensionEngine()?.reload(id, profile), { ok: true }),

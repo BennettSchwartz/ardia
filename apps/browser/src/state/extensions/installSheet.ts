@@ -127,8 +127,8 @@ export async function confirmInstall(key?: number) {
     return failSheet(request, errorText(error));
   }
   if (request.source === "unpacked") noteUnpackedInstall(consent);
-  if (useExtensions.getState().install?.key === request.key) useExtensions.setState({ install: null });
   settle(request.key, { installed: id });
+  if (useExtensions.getState().install?.key === request.key) useExtensions.setState({ install: null });
   showWaitingPrompt();
   await refreshExtensionsAfterChange(request.profile);
 }

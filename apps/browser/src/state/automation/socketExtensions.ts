@@ -65,12 +65,17 @@ function addTimeProblem(call: SocketCall, profileId: string, engine: string): st
 function settled(request: InstallRequest, check: () => string | null): Promise<InstallOutcome> {
   return new Promise((resolve) => {
     const unwatch = watchInstall(request.key, { check, settle: finish });
-    const stop = useBrowser.subscribe((s) => {
-      if (!s.windows[request.windowId]) abandonInstall(request.key, SHEET_CLOSED);
-    });
+    const stops = [
+      useBrowser.subscribe((s) => {
+        if (!s.windows[request.windowId]) abandonInstall(request.key, SHEET_CLOSED);
+      }),
+      useExtensions.subscribe((e) => {
+        if (e.install?.key !== request.key) finish({ cancelled: true });
+      }),
+    ];
     function finish(outcome: InstallOutcome) {
       unwatch();
-      stop();
+      stops.forEach((stop) => stop());
       resolve(outcome);
     }
   });

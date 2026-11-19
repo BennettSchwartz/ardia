@@ -6,6 +6,7 @@ const { useExtensions, confirmInstall, cancelInstall } = await import("../extens
 const { nextInstallKey } = await import("../extensions/store.ts");
 const { folderProblem } = await import("./extensionFolders.ts");
 const stub = await import("../../test-native/index.ts");
+const { extensionWorld, row } = await import("./fixtures/extensionWorld.mjs");
 
 const S = () => useBrowser.getState();
 after(() => S().updateSettings({ cliControl: false }));
@@ -36,43 +37,6 @@ const sheet = async () => {
   return useExtensions.getState().install;
 };
 
-const row = (id, extra = {}) => ({ id, name: id, version: "1.0", description: "", enabled: true, state: "ENABLED", icon: "", permissions: [], siteAccess: null, sites: [], optionsUrl: null, pinned: false, incognito: false, fileAccess: false, mayModify: true, errors: [], ...extra });
-
-function world() {
-  const list = [];
-  const folders = new Map();
-  const gates = { inspect: null };
-  const pkg = { version: "1.0", description: "", manifestVersion: 3, icon: null, permissions: [], optionalPermissions: [], hostPermissions: [], hasAction: false, popup: null, optionsPage: null, sidePanel: null };
-  const engine = {
-    list: async () => list.map((x) => ({ ...x })),
-    install: async (path, _profile, digest) => {
-      const folder = folders.get(path);
-      if (digest !== undefined && digest !== folder.digest) throw new Error("The extension's folder changed after Ardia showed it; nothing was added.");
-      if (!list.some((x) => x.id === folder.id)) list.push(row(folder.id));
-      return folder.id;
-    },
-    reload: async () => {},
-    uninstall: async () => {},
-    configure: async (id, _profile, options) => {
-      const x = list.find((e) => e.id === id);
-      if (options.incognito !== undefined) x.incognito = options.incognito;
-      if (options.userScripts !== undefined) x.userScripts = options.userScripts;
-      if (options.siteAccess) {
-        if (x.lockedSites) throw new Error("Can't change this extension's site access");
-        x.siteAccess = options.siteAccess === "allSites" ? "ON_ALL_SITES" : x.sites.length && options.siteAccess === "specificSites" ? "ON_SPECIFIC_SITES" : "ON_CLICK";
-      }
-    },
-    inspect: async (path) => {
-      if (gates.inspect) await gates.inspect;
-      const folder = folders.get(path);
-      if (!folder) throw new Error("Manifest file is missing or unreadable");
-      return { ...pkg, name: folder.id, path, ...(folder.digest ? { digest: folder.digest } : {}) };
-    },
-  };
-  globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };
-  return { list, folders, gates };
-}
-
 async function setup() {
   cancelInstall();
   S().hydrate({});
@@ -81,7 +45,7 @@ async function setup() {
   for (let i = 0; i < 5 && !stub.controlSocket.running; i++) await tick();
   await tick();
   const windowId = S().createWindow({ url: "https://a.example/" });
-  return { windowId, ...world() };
+  return { windowId, ...extensionWorld() };
 }
 
 test("folder paths: system and home folders and dot segments are refused before anything is read", () => {
@@ -107,18 +71,28 @@ test("a second folder request is refused while a sheet shows, and a sheet confir
   cancelInstall(other.key);
 });
 
-test("a folder that changed after the sheet showed it isn't installed", async () => {
-  const { folders, list } = await setup();
-  folders.set("/tmp/c/ext", { id: "ccc", digest: "d-c1" });
+test("a folder edited after the sheet showed it installs the copy the sheet showed", async () => {
+  const { folders, list, installs } = await setup();
+  folders.set("/tmp/c/ext", { id: "ccc", digest: "d-c1", version: "1.0" });
   const pending = send("extensions.install", { folder: "/tmp/c/ext" });
   const shown = await sheet();
-  folders.get("/tmp/c/ext").digest = "d-c2";
+  assert.ok(shown.pkg.staged, "the sheet describes Ardia's own copy");
+  Object.assign(folders.get("/tmp/c/ext"), { digest: "d-c2", version: "2.0" });
   await confirmInstall(shown.key);
   const reply = await pending();
-  assert.equal(reply.error?.code, "failed");
-  assert.match(reply.error.message, /changed/);
-  assert.equal(list.length, 0);
-  cancelInstall();
+  assert.ok(!reply.error, JSON.stringify(reply.error));
+  assert.deepEqual(installs.at(-1), { path: "/tmp/c/ext", staged: shown.pkg.staged, id: "ccc", version: "1.0" });
+  assert.equal(list.find((x) => x.id === "ccc").version, "1.0", "what the sheet showed, not the edit");
+});
+
+test("cancelling a folder's sheet throws Ardia's copy away", async () => {
+  const { folders } = await setup();
+  folders.set("/tmp/g/ext", { id: "ggg", digest: "d-g" });
+  const pending = send("extensions.install", { folder: "/tmp/g/ext" });
+  const shown = await sheet();
+  cancelInstall(shown.key);
+  assert.deepEqual((await pending()).result, { installed: false, extensions: [] });
+  assert.ok(stub.discardedStages.includes(shown.pkg.staged));
 });
 
 test("the reply names the request's own extension, a reinstall counts as installed, and a closed window settles it", async () => {
