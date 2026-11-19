@@ -3,6 +3,7 @@ import { folderPlace } from "../sharedFolders/engine";
 import { knownNames, localFolder, signatureOf } from "../sharedFolders/local";
 import { boundFolders, folderRef } from "../sharedFolders/store";
 import { syncWriteHooks } from "../sharedFolders/syncWriteHooks";
+import { uiWriteHooks } from "../browser/uiWriteHooks";
 import { withTreesFrom } from "./sharedTrees";
 import { SHARED_GROUPS_SIDEBAR_ONLY } from "./workspaceSharedGuard";
 
@@ -44,10 +45,24 @@ function endCheck(owner?: SocketOrigin) {
   check.owner.vetoed = true;
 }
 
-syncWriteHooks.around = (write) => {
-  write();
-  if (open) open.before = withTreesFrom(open.before, useBrowser.getState());
-};
+function openCheck(owner: SocketOrigin) {
+  open = { owner, before: useBrowser.getState() };
+  queueMicrotask(() => endCheck(owner));
+}
+
+function aroundForeignWrite(write: () => void) {
+  const check = open;
+  if (!check) return write();
+  endCheck(check.owner);
+  try {
+    write();
+  } finally {
+    if (!check.owner.answered && !open) openCheck(check.owner);
+  }
+}
+
+syncWriteHooks.around = aroundForeignWrite;
+uiWriteHooks.around = aroundForeignWrite;
 
 export class SocketOrigin {
   vetoed = false;
@@ -56,8 +71,7 @@ export class SocketOrigin {
   segment() {
     if (this.answered || open?.owner === this) return;
     if (open) endCheck(open.owner);
-    open = { owner: this, before: useBrowser.getState() };
-    queueMicrotask(() => endCheck(this));
+    openCheck(this);
   }
 
   settle<B>(body: B, refused: (message: string) => B): B {

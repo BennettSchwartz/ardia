@@ -96,3 +96,27 @@ test("every method in the catalogue says whether it changes anything, so the cho
   const unclassified = methodsCatalog().filter((m) => typeof m.mutates !== "boolean").map((m) => m.name);
   assert.deepEqual(unclassified, []);
 });
+
+test("reviewer repro: a sidebar link edit queued alongside an apply on a loose tab is neither undone nor blamed", async () => {
+  const { uiWriteHooks } = await import("../browser/uiWriteHooks.ts");
+  const f = await fixture();
+  queueMicrotask(() => uiWriteHooks.around(() => swapMembers(f)));
+  const pending = emit("apply", { ops: [{ op: "tab.mute", tabs: [f.loose] }] });
+  queueMicrotask(() => uiWriteHooks.around(() => swapMembers(f)));
+  const reply = await pending;
+  assert.ok(!(reply.error ?? reply.result?.error), JSON.stringify(reply));
+  assert.equal(linkOf(f), "https://changed.example/", "the sidebar's edit stays");
+  assert.equal(S().tabs[f.loose].muted, true);
+});
+
+test("reviewer repro: an engine merge during an open check never absorbs the socket's own change", async () => {
+  const f = await fixture();
+  const origin = new SocketOrigin();
+  origin.segment();
+  swapMembers(f);
+  syncWriteHooks.around(() => moveUnrelated(f));
+  const answer = origin.settle({ ok: true }, (message) => ({ refused: message }));
+  assert.ok(answer.refused, `the socket's change is still refused: ${JSON.stringify(answer)}`);
+  assert.equal(linkOf(f), "https://one.example/", "the socket's change is undone");
+  assert.equal(S().tabs[f.other].customTitle, "Moved meanwhile", "the engine's write stays");
+});
