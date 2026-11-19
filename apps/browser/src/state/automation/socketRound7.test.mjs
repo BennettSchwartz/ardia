@@ -8,8 +8,8 @@ const { shellNativeModules } = await import("../../test-native/shell.ts");
 const stub = await import("../../test-native/index.ts");
 
 const dialogs = shellNativeModules.ArdiaDialogs;
-const originals = { confirm: dialogs.confirm, dismiss: dialogs.dismissShownOnly };
-const restore = () => Object.assign(dialogs, { confirm: originals.confirm, dismissShownOnly: originals.dismiss });
+const originals = { confirm: dialogs.confirm, dismiss: dialogs.dismissShownOnly, can: dialogs.dismissesShownOnly };
+const restore = () => Object.assign(dialogs, { confirm: originals.confirm, dismissShownOnly: originals.dismiss, dismissesShownOnly: originals.can });
 after(() => {
   restore();
   S().updateSettings({ cliControl: false });
@@ -61,7 +61,7 @@ test("without native dismissal the guard holds until the question closes, then f
   const windowId = await windowThatAsks();
   const waiting = [];
   dialogs.confirm = () => new Promise((resolve) => waiting.push(resolve));
-  delete dialogs.dismissShownOnly;
+  dialogs.dismissesShownOnly = false;
   try {
     const a = socketClient(191);
     const b = socketClient(192);

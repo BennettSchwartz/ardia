@@ -23,6 +23,7 @@ struct ControlOutput {
   private var headStarted = false
   private var offset = 0
   private var headWritten = 0
+  private var headMarked = 0
   private(set) var bytes = 0
   private(set) var eventBytes = 0
   private(set) var waitingEvents = 0
@@ -78,7 +79,10 @@ struct ControlOutput {
         waitingEvents -= 1
       }
     }
-    if !midLine { headStarted = false }
+    if !midLine {
+      headStarted = false
+      headMarked = 0
+    }
     chunks = kept
     dropped = 0
   }
@@ -120,6 +124,7 @@ struct ControlOutput {
         chunks.removeFirst()
         offset = 0
         headWritten = 0
+        headMarked = 0
         headStarted = false
       } else if offset >= Self.releaseWrittenBytes {
         chunks[0].data = Data(data[(data.startIndex + offset)...])
@@ -141,7 +146,13 @@ struct ControlOutput {
   }
 
   private mutating func dropOldestEvent() -> Bool {
-    guard let index = chunks.indices.first(where: { chunks[$0].kind == .event && !($0 == 0 && headStarted) }) else { return false }
+    guard let index = chunks.indices.first(where: { chunks[$0].kind == .event && !($0 == 0 && midLine) }) else { return false }
+    if index == 0 && headStarted {
+      dropped += headMarked
+      headMarked = 0
+      headStarted = false
+      offset = 0
+    }
     bytes -= chunks[index].data.count
     eventBytes -= chunks[index].data.count
     chunks.remove(at: index)
@@ -160,6 +171,7 @@ struct ControlOutput {
     bytes += grown
     eventBytes += grown
     chunks[0].data = marked
+    headMarked = dropped
     dropped = 0
   }
 

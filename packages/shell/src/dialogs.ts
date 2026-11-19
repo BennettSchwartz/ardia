@@ -22,6 +22,7 @@ export type PromptOptions = {
 export type DialogsNative = {
   confirm(options: ConfirmOptions): Promise<{ confirmed: boolean; suppressed: boolean; unshown?: boolean }>;
   prompt(options: PromptOptions): Promise<string | null>;
+  dismissesShownOnly?: boolean;
   dismissShownOnly?(key: string | null): Promise<void>;
   pickFiles(): Promise<string[]>;
   pickFolder(current: string | null, prompt: string | null): Promise<string | null>;

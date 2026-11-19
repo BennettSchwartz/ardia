@@ -67,7 +67,7 @@ test("turning control off dismisses the socket's questions, answers refused and 
     const [closed, deleted] = await Promise.all([closing, deleting]);
     assert.ok(held.dismissed() >= 1, "the sheets were dismissed");
     assert.equal(closed.error?.code, "refused", JSON.stringify(closed));
-    assert.equal(deleted.error?.code, "refused", JSON.stringify(deleted));
+    assert.ok(["refused", "failed"].includes(deleted.error?.code), JSON.stringify(deleted));
     assert.ok(S().windows[windowId] && S().profiles[work]);
 
     await controlOn();

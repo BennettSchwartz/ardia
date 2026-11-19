@@ -33,8 +33,7 @@ export function dismissSocketAsks(connection?: number) {
   if (!canDismissShownOnlyDialogs()) return;
   for (const entry of [...waiting]) {
     if (connection !== undefined && entry.connection !== connection) continue;
-    entry.dismiss();
-    void dismissShownOnlyDialogs(entry.key).catch(() => {});
+    void dismissShownOnlyDialogs(entry.key).then(entry.dismiss, () => {});
   }
 }
 
