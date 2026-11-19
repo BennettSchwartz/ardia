@@ -117,7 +117,8 @@ TypeScript browse client), not to #2808. It must:
   input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
   and releases in place, so a plugin can never drag). Clicks, moves and wheels go only to the page target's own
   session. A click succeeds when the renderer has acknowledged every event, which isn't proof the page handled it; a
-  wheel answers once it's submitted, so read `DOM.getBoxModel` again to see whether it scrolled. It can't focus, scroll
+  wheel answers once it's submitted, so read `DOM.getBoxModel` again to see whether it scrolled; a wheel to a
+  hidden page is refused (`page hidden`). It can't focus, scroll
   a node into view, or emulate focus: only a click focuses the page (its keys and text don't), and it scrolls with the
   wheel.
   It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in

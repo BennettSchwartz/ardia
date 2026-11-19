@@ -59,6 +59,10 @@ inline PointerOutcome PointerOutcomeOf(const std::vector<PointerEvent>& events,
                                                       : PointerOutcome::kUnknown;
 }
 
+inline bool RefusesHiddenTarget(bool wheel, bool hidden) {
+  return wheel && hidden;
+}
+
 inline bool NeedsRecoveryRelease(const std::vector<PointerEvent>& events,
                                  PointerOutcome outcome) {
   if (outcome != PointerOutcome::kUnknown) {

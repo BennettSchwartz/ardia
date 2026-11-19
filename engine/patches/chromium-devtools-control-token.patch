@@ -879,7 +879,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    while (!injectors_.empty())
      (*injectors_.begin())->Cleanup();
    // TODO(dgozman): cleanup touch callbacks as well?
-@@ -2346,4 +2484,390 @@
+@@ -2346,4 +2484,402 @@
    return view->GetRootView();
  }
  
@@ -1089,6 +1089,10 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    std::move(done).Run("ardia: the page changed after the input was sent");
 +    return;
 +  }
++  if (ardia::RefusesHiddenTarget(wheel, widget_host->IsHidden())) {
++    std::move(done).Run("ardia: page hidden");
++    return;
++  }
 +  std::vector<std::unique_ptr<blink::WebMouseEvent>> events;
 +  const bool right = button == Input::MouseButtonEnum::Right;
 +  if (click) {
@@ -1180,6 +1184,14 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +      RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
 +  if (!ArdiaMayInject(session(), host_, widget_host)) {
 +    run->Fail("Not allowed");
++    return;
++  }
++  if (ardia::RefusesHiddenTarget(
++          !events.empty() &&
++              events.front()->GetType() ==
++                  blink::WebInputEvent::Type::kMouseWheel,
++          widget_host->IsHidden())) {
++    run->Fail("ardia: page hidden");
 +    return;
 +  }
 +  const gfx::PointF screen_point =

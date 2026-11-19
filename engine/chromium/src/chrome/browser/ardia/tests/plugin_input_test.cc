@@ -383,6 +383,12 @@ int main() {
          "recovery: none after success", "");
   Expect(!ardia::NeedsRecoveryRelease({release(R::kSentUnknown)}, O::kUnknown),
          "recovery: none for a move", "");
+  Expect(ardia::RefusesHiddenTarget(true, true),
+         "hidden: a wheel to a hidden widget is refused", "");
+  Expect(!ardia::RefusesHiddenTarget(true, false),
+         "hidden: a wheel to a visible widget goes", "");
+  Expect(!ardia::RefusesHiddenTarget(false, true),
+         "hidden: clicks and moves to a hidden widget go", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;
