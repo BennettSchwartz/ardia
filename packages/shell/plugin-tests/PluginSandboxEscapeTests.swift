@@ -849,11 +849,11 @@ int main(int argc, char **argv) {
         try? FileManager.default.removeItem(atPath: "\(realHome)/\(secret)")
       }
       DispatchQueue.global().async(execute: writer)
-      let arguments = ["/", "none", secret, "now", "2.5"]
+      let arguments = [inside ? "/" : realHome, "none", secret, "now", "2.5"]
       return (inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)).output
     }
     let outside = try run(inside: false, network: true)
-    XCTAssertTrue(outside.contains("started"), "control: a stream on / must start outside, or this test proves nothing: \(outside)")
+    XCTAssertTrue(outside.contains("started"), "control: a stream on the home folder must start outside, or this test proves nothing: \(outside)")
     XCTAssertTrue(outside.contains("leak "), "control: outside, the stream shows the write in the home folder: \(outside)")
     for network in [true, false] {
       let inside = try run(inside: true, network: network)
