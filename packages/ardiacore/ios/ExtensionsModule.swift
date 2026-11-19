@@ -28,8 +28,9 @@ public class ExtensionsModule: Module {
 
   static func inspectUnpacked(_ args: CallArgs, _ reply: CallReply) throws {
     let path = try args.text("path")
+    let profile = args.profile
     packageReads.async {
-      let info = ArdiaServices.inspectUnpacked(path)
+      let info = ArdiaServices.inspectUnpacked(path, profile: profile)
       DispatchQueue.main.async {
         if let error = info["error"] { return reply.fail("ERR_ENGINE", error as? String ?? "\(error)") }
         reply.ok(info)
@@ -51,7 +52,9 @@ public class ExtensionsModule: Module {
     "setEnabled": { args, reply in
       ArdiaServices.setExtension(try args.text("id"), enabled: try args.bool("enabled"), profile: args.profile) { reply.service($0, $1) }
     },
-    "uninstall": { args, reply in ArdiaServices.uninstallExtension(try args.text("id"), profile: args.profile) { reply.service($0, $1) } },
+    "uninstall": { args, reply in
+      ArdiaServices.uninstallExtension(try args.text("id"), managed: try args.optionalText("managed"), profile: args.profile) { reply.service($0, $1) }
+    },
     "reload": { args, reply in ArdiaServices.reloadExtension(try args.text("id"), profile: args.profile) { reply.service($0, $1) } },
     "configure": { args, reply in
       ArdiaServices.configureExtension(try args.text("id"), profile: args.profile, options: try args.dict("options")) { reply.service($0, $1) }

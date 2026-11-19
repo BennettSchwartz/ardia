@@ -19,7 +19,7 @@ export { extensionSearchEngines };
 export type { ExtensionsSyncApply, InstalledExtension, ActionState, ExtensionPackage, ExtensionInstallPrompt, TabsRequest };
 
 export const listExtensions = async (profile: string) => (await call("extensions.list", { profile })).extensions;
-export const inspectUnpackedExtension = (path: string) => call("extensions.inspectUnpacked", { path });
+export const inspectUnpackedExtension = (path: string, profile: string) => call("extensions.inspectUnpacked", { path, profile });
 export const installExtension = async (pkg: Pick<ExtensionPackage, "path" | "digest" | "staged">, profile: string) =>
   (await call("extensions.install", { profile, path: pkg.path, ...(pkg.digest ? { digest: pkg.digest } : {}), ...(pkg.staged ? { staged: pkg.staged } : {}) })).id;
 export const discardStagedExtension = (pkg: Pick<ExtensionPackage, "staged">) => {
@@ -30,8 +30,8 @@ export const chooseExtensionFolder = () => call("extensions.chooseFolder");
 export const setExtensionEnabled = async (id: string, profile: string, enabled: boolean) => {
   await call("extensions.setEnabled", { profile, id, enabled });
 };
-export const uninstallExtension = async (id: string, profile: string) => {
-  await call("extensions.uninstall", { profile, id });
+export const uninstallExtension = async (id: string, profile: string, managed?: string | null) => {
+  await call("extensions.uninstall", { profile, id, ...(managed ? { managed } : {}) });
 };
 export const reloadExtension = async (id: string, profile: string) => {
   await call("extensions.reload", { profile, id });
