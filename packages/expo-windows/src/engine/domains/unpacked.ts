@@ -195,4 +195,5 @@ export async function readUnpacked(desktop: Desktop, folder: string, uiLocale = 
 export const unpackedCalls: Handlers = {
   chooseFolder: async (_args, engine) => ok(await desktopOf(engine).pickFolder("Select")),
   inspectUnpacked: async (args, engine) => ok(await readUnpacked(desktopOf(engine), args.text("path"))),
+  discardStaged: async () => ok(null),
 };

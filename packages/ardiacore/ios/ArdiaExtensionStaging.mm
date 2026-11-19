@@ -1,7 +1,6 @@
 #import "ArdiaExtensionStaging.h"
 
 #import "ArdiaExtensionPackage.h"
-#import "ArdiaHost.h"
 
 #import <CommonCrypto/CommonDigest.h>
 #include <dirent.h>
@@ -166,8 +165,7 @@ void SweepAbandoned(NSString *root) {
   }
 }
 
-NSString *PendingKey(NSString *staged) {
-  NSString *root = StagingRoot();
+NSString *PendingKey(NSString *staged, NSString *root) {
   if (!root.length || ![staged.stringByDeletingLastPathComponent isEqualToString:root]) return nil;
   NSString *name = staged.lastPathComponent;
   NSRange mark = [name rangeOfString:kPendingMark];
@@ -179,16 +177,14 @@ NSString *PendingKey(NSString *staged) {
 
 }
 
-NSString *StagingRoot() {
-  NSString *data = ArdiaHost.dataDirectory;
-  return data.length ? [data stringByAppendingPathComponent:@"Ardia Unpacked Extensions"] : nil;
+NSString *StagingRoot(NSString *dataDirectory) {
+  return dataDirectory.length ? [dataDirectory stringByAppendingPathComponent:@"Ardia Unpacked Extensions"] : nil;
 }
 
-NSDictionary *StageUnpacked(NSString *path) {
+NSDictionary *StageUnpacked(NSString *path, NSString *root) {
   NSString *error = nil;
   NSString *source = CanonicalFolder(path, &error);
   if (!source) return @{@"error" : error};
-  NSString *root = StagingRoot();
   if (!root.length) return @{@"error" : @"Ardia has no data folder to copy the extension into"};
   if ([[source stringByAppendingString:@"/"] hasPrefix:[root stringByAppendingString:@"/"]] || [[root stringByAppendingString:@"/"] hasPrefix:[source stringByAppendingString:@"/"]])
     return @{@"error" : @"That folder holds Ardia's own copies of extensions"};
@@ -209,13 +205,13 @@ NSDictionary *StageUnpacked(NSString *path) {
   return info;
 }
 
-NSString *PromoteStaged(NSString *staged, NSString *digest, NSString **error) {
-  NSString *key = PendingKey(staged);
+NSString *PromoteStaged(NSString *staged, NSString *digest, NSString *root, NSString **error) {
+  NSString *key = PendingKey(staged, root);
   if (!key) return Fail(error, @"That isn't a copy Ardia made of an extension");
   NSString *now = HashTree(staged, nil, error);
   if (!now) return nil;
   if (![now isEqualToString:digest]) return Fail(error, @"Ardia's copy of the extension changed after the sheet showed it, so nothing was added. Load it again.");
-  NSString *final = [StagingRoot() stringByAppendingPathComponent:key];
+  NSString *final = [root stringByAppendingPathComponent:key];
   struct stat info;
   if (lstat(final.fileSystemRepresentation, &info) == 0) {
     if (renamex_np(staged.fileSystemRepresentation, final.fileSystemRepresentation, RENAME_SWAP) != 0) return Fail(error, @"Ardia couldn't replace its earlier copy of the extension");
@@ -226,8 +222,8 @@ NSString *PromoteStaged(NSString *staged, NSString *digest, NSString **error) {
   return final;
 }
 
-void DiscardStaged(NSString *staged) {
-  if (PendingKey(staged)) [NSFileManager.defaultManager removeItemAtPath:staged error:nil];
+void DiscardStaged(NSString *staged, NSString *root) {
+  if (PendingKey(staged, root)) [NSFileManager.defaultManager removeItemAtPath:staged error:nil];
 }
 
 }

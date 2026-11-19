@@ -4,12 +4,12 @@
 
 namespace ardia_extensions {
 
-NSString *StagingRoot();
+NSString *StagingRoot(NSString *dataDirectory);
 
-NSDictionary *StageUnpacked(NSString *path);
+NSDictionary *StageUnpacked(NSString *path, NSString *root);
 
-NSString *PromoteStaged(NSString *staged, NSString *digest, NSString **error);
+NSString *PromoteStaged(NSString *staged, NSString *digest, NSString *root, NSString **error);
 
-void DiscardStaged(NSString *staged);
+void DiscardStaged(NSString *staged, NSString *root);
 
 }

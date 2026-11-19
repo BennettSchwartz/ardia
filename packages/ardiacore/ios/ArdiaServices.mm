@@ -308,12 +308,12 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
 }
 
 + (NSDictionary *)inspectUnpacked:(NSString *)path {
-  return ardia_extensions::StageUnpacked(path);
+  return ardia_extensions::StageUnpacked(path, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory));
 }
 
 + (void)discardStagedExtension:(NSString *)staged {
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-    ardia_extensions::DiscardStaged(staged);
+    ardia_extensions::DiscardStaged(staged, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory));
   });
 }
 
@@ -330,7 +330,7 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   if (!digest.length || !staged.length) return reply(nil, @"An unpacked extension installs from the copy Ardia showed, with its digest.");
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     NSString *error = nil;
-    NSString *installed = ardia_extensions::PromoteStaged(staged, digest, &error);
+    NSString *installed = ardia_extensions::PromoteStaged(staged, digest, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory), &error);
     dispatch_async(dispatch_get_main_queue(), ^{
       if (!installed) return reply(nil, error);
       [self installUnpacked:installed profile:profile reply:reply];
