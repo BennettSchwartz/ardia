@@ -120,6 +120,23 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertEqual(try sandboxed("kill -0 $$ || exit 1; /bin/sleep 30 & child=$!; kill -0 $child && kill $child"), 0, "it still signals itself and its children")
   }
 
+  static func launchdListeners() -> [String] {
+    ["/private/var/run", "/private/tmp"].flatMap { folder in
+      ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasPrefix("com.apple.launchd.") }.map { "\(folder)/\($0)/Listeners" }
+    }.filter { FileManager.default.fileExists(atPath: $0) }
+  }
+
+  func testTheSshAgentIsUnreachable() throws {
+    let cantConnect: Int32 = 2
+    let listeners = Self.launchdListeners().filter { (try? Self.execute("/usr/bin/env", ["SSH_AUTH_SOCK=\($0)", "/usr/bin/ssh-add", "-l"])) != cantConnect }
+    try XCTSkipIf(listeners.isEmpty, "no ssh-agent listens on a launchd socket here")
+    for listener in listeners {
+      for spelling in [listener, listener.replacingOccurrences(of: "/private/var/run/", with: "/var/run/", options: .anchored)] {
+        XCTAssertEqual(try sandboxed("SSH_AUTH_SOCK='\(spelling)' /usr/bin/ssh-add -l"), cantConnect, "the ssh-agent at \(spelling) answers from inside")
+      }
+    }
+  }
+
   func testItCannotWriteOtherAppsPreferences() throws {
     XCTAssertNotEqual(try sandboxed("/usr/bin/defaults write '\(preferenceDomain)' key value"), 0)
     XCTAssertNotEqual(try Self.execute("/usr/bin/defaults", ["read", preferenceDomain, "key"]), 0)

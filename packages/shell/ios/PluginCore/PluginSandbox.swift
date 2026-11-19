@@ -25,6 +25,7 @@ struct PluginSandbox {
     (deny file-write* (subpath "/"))
     (allow file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper") (subpath "/dev/fd"))
     (deny network-outbound (remote unix-socket (subpath (param "HOME"))) (remote unix-socket (subpath (param "APP_DATA"))))
+    (deny network-outbound (remote unix-socket (regex #"^/private/var/run/com\\.apple\\.launchd\\.[^/]+/") (regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/")))
     (allow file-read* (subpath (param "PLUGIN")) (literal (param "PROGRAM")) (subpath (param "INSTALL")))
     (allow file-read* file-write* (subpath (param "DATA")))
     (allow file-read-metadata (literal (param "HOME")))
