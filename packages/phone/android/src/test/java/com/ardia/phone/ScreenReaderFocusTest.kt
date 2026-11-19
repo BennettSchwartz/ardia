@@ -213,6 +213,79 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun theFirstStopIsTheTopLeftNodeOnScreenAsTalkBackReadsItNotTheFirstInTheTreeAsTheDeckLaysItsCardsBeforeItsHeader() {
+        val deck = FrameLayout(activity)
+        val card = stop("Lisbon - Wikipedia") { false }
+        val header = stop("Space, Personal") { false }
+        val more = stop("More") { false }
+        deck.addView(card, FrameLayout.LayoutParams(200, 100).apply { topMargin = 100 })
+        deck.addView(header, FrameLayout.LayoutParams(100, 40).apply { topMargin = 10; leftMargin = 10 })
+        deck.addView(more, FrameLayout.LayoutParams(60, 40).apply { topMargin = 10; leftMargin = 200 })
+        activity.setContentView(deck)
+        layOut()
+        assertTrue(ScreenReaderFocus.firstStop(deck) === header)
+    }
+
+    @Test
+    fun aRestoresFirstAskAndItsRetriesLeaveAUserWhoHasAlreadyMovedAndGoAheadOnlyFromTheResetANothingAClosingLayerOrTheTargetItself() {
+        val asked = mutableListOf<Int>()
+        var focusOn = "none"
+        val deck = FrameLayout(activity)
+        val card = stop("Lisbon - Wikipedia") { focusOn == "card" }
+        val header = stop("Space, Personal") { focusOn == "header" }
+        val target = holding(asked) { focusOn == "target" }
+        val next = stop("Incognito") { focusOn == "next" }
+        val closing = FrameLayout(activity).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS }
+        val closingRow = stop("Archive") { focusOn == "closing" }
+        closing.addView(closingRow, 100, 40)
+        deck.addView(card, FrameLayout.LayoutParams(200, 100).apply { topMargin = 100 })
+        deck.addView(header, FrameLayout.LayoutParams(100, 40).apply { topMargin = 10; leftMargin = 10 })
+        deck.addView(target, FrameLayout.LayoutParams(60, 40).apply { topMargin = 10; leftMargin = 200 })
+        deck.addView(next, FrameLayout.LayoutParams(100, 40).apply { topMargin = 250 })
+        deck.addView(closing, FrameLayout.LayoutParams(100, 40).apply { topMargin = 320 })
+        activity.setContentView(deck)
+        layOut()
+        assertTrue("the target can take focus", ScreenReaderFocus.reachable(target))
+        assertTrue("the next node is on screen", ScreenReaderFocus.reachable(next))
+        assertTrue(ScreenReaderFocus.firstStop(deck) === header)
+        val looper = shadowOf(Looper.getMainLooper())
+        val focusAction = AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis) { deck }
+        fun askedWhileFocusIsOn(place: String): List<Int> {
+            asked.clear()
+            focusOn = place
+            requests.start(recheck = true) { target }
+            if (asked.isNotEmpty()) focusOn = "target"
+            looper.idleFor(Duration.ofSeconds(1))
+            assertEquals(0, requests.waiting)
+            return asked.toList()
+        }
+        assertEquals("a user already on the next node is left there", emptyList<Int>(), askedWhileFocusIsOn("next"))
+        assertEquals("a user on a card is left there", emptyList<Int>(), askedWhileFocusIsOn("card"))
+        assertEquals("TalkBack's reset to the first stop is taken back", listOf(focusAction), askedWhileFocusIsOn("header"))
+        assertEquals("focus nowhere is taken", listOf(focusAction), askedWhileFocusIsOn("none"))
+        assertEquals("focus still in the closing layer is taken", listOf(focusAction), askedWhileFocusIsOn("closing"))
+        assertEquals("focus already on the target lands with nothing to do", emptyList<Int>(), askedWhileFocusIsOn("target"))
+
+        asked.clear()
+        focusOn = "none"
+        var ready = false
+        requests.start(recheck = true) { if (ready) target else null }
+        looper.idleFor(Duration.ofMillis(50))
+        focusOn = "next"
+        ready = true
+        looper.idleFor(Duration.ofSeconds(1))
+        assertTrue("a retry that finds the user moved on gives up", asked.isEmpty())
+        assertEquals(0, requests.waiting)
+
+        asked.clear()
+        focusOn = "next"
+        requests.start { target }
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals("focus into a menu's first row is not a restore and goes ahead", listOf(focusAction), asked)
+    }
+
+    @Test
     fun aCancelledRequestNeverLooksAgain() {
         val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
         var looked = 0

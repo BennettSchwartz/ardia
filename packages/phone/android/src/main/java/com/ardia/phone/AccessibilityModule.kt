@@ -75,7 +75,7 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
                 if (destroyed || pending[id] !== this) return
                 pending.remove(id)
                 val view = resolve() ?: return
-                if (ScreenReaderFocus.lostToReset(view, rootOf(view))) ScreenReaderFocus.focus(view)
+                if (!ScreenReaderFocus.holds(view) && ScreenReaderFocus.focusIsFree(view, rootOf(view))) ScreenReaderFocus.focus(view)
             }
         }
         val attempt = object : Runnable {
@@ -85,7 +85,12 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
                     pending.remove(id)
                     return
                 }
-                if (!ScreenReaderFocus.focus(resolve())) {
+                val view = resolve()
+                if (recheck && view != null && ScreenReaderFocus.ready(view) && !ScreenReaderFocus.focusIsFree(view, rootOf(view))) {
+                    pending.remove(id)
+                    return
+                }
+                if (!ScreenReaderFocus.focus(view)) {
                     handler.postDelayed(this, RETRY_EVERY_MS)
                     return
                 }
@@ -140,16 +145,26 @@ internal object ScreenReaderFocus {
     }
 
     fun firstStop(root: View): View? {
-        if (!root.isShown || root.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) return null
-        if (isStop(root)) return root
-        if (root is ViewGroup) for (at in 0 until root.childCount) firstStop(root.getChildAt(at))?.let { return it }
-        return null
+        var first: View? = null
+        val firstRect = Rect()
+        val rect = Rect()
+        fun visit(view: View) {
+            if (!view.isShown || view.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) return
+            if (isStop(view) && view.getGlobalVisibleRect(rect)) {
+                if (first == null || rect.top < firstRect.top || (rect.top == firstRect.top && rect.left < firstRect.left)) {
+                    first = view
+                    firstRect.set(rect)
+                }
+            }
+            if (view is ViewGroup) for (at in 0 until view.childCount) visit(view.getChildAt(at))
+        }
+        visit(root)
+        return first
     }
 
-    fun lostToReset(target: View, root: View): Boolean {
-        if (holds(target)) return false
+    fun focusIsFree(target: View, root: View): Boolean {
         val holding = holder(root) ?: return true
-        return holding === firstStop(root)
+        return holding === target || !reachable(holding) || holding === firstStop(root)
     }
 
     private fun isStop(view: View): Boolean {
