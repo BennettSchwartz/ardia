@@ -25,6 +25,12 @@ export const failure = (code: ErrorCode, message: string) => ({ error: { code, m
 
 const isFields = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
+export const MAX_ID_BYTES = 256;
+
+const utf8 = new TextEncoder();
+
+const usableId = (id: unknown): id is number | string => (typeof id === "string" ? id.length <= MAX_ID_BYTES && utf8.encode(id).length <= MAX_ID_BYTES : typeof id === "number" && Number.isSafeInteger(id));
+
 export function parseRequest(line: string): ParsedRequest | { id: RequestId; error: MethodError } {
   let doc: unknown;
   try {
@@ -34,8 +40,7 @@ export function parseRequest(line: string): ParsedRequest | { id: RequestId; err
   }
   if (!isFields(doc)) return { id: null, ...failure("bad_request", "A request is a JSON object.") };
   const id = doc.id;
-  const usable = typeof id === "string" || (typeof id === "number" && Number.isSafeInteger(id));
-  if (!usable) return { id: null, ...failure("bad_request", "A request needs an id: a safe integer or a string.") };
+  if (!usableId(id)) return { id: null, ...failure("bad_request", `A request needs an id: a safe integer, or a string of at most ${MAX_ID_BYTES} UTF-8 bytes.`) };
   if (typeof doc.method !== "string") return { id, ...failure("bad_request", "A request needs a method.") };
   if (doc.params !== undefined && !isFields(doc.params)) return { id, ...failure("bad_request", "params must be an object.") };
   return { id, method: doc.method, params: (doc.params as Record<string, unknown> | undefined) ?? {} };
