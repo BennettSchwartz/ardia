@@ -12,7 +12,7 @@ const { patchPage, pageOf } = await import("../tabs/pageState.ts");
 const { leftPage } = await import("../tabs/pageEvents.ts");
 const { requestAutofill } = await import("./autofill.ts");
 const { markTabReady } = await import("../tabs/pageState.ts");
-const { acceptVerificationCode } = await import("./verificationCodes.ts");
+const { acceptVerificationCode, declineVerificationCode, verificationCodeDocument } = await import("./verificationCodes.ts");
 const pm = await import("./passwordManager.ts");
 
 const MANIFEST = readFileSync(new URL("../../../../../tests/fixtures/plugins/password-manager/plugin.json", import.meta.url), "utf8");
@@ -144,6 +144,27 @@ test("a verification code found in a profile that sets them up is offered, accep
   await settle();
   assert.equal(pageOf(tabId).verificationCode, null, "a token with no app bound to it is never offered");
   native.calls.length = 0;
+});
+
+test("a second code on the same page waits for the first prompt to close, and a reload of the same URL closes both", async () => {
+  const windowId = S().windowOrder[0];
+  const tabId = S().windows[windowId].tabIds[0];
+  verificationCodeDocument(tabId, 1000);
+  pm.verificationCodeFound(tabId, { token: "q1", main: true, app: "Passwords" });
+  pm.verificationCodeFound(tabId, { token: "q2", main: true, app: "Passwords" });
+  assert.equal(pageOf(tabId).verificationCode?.token, "q1");
+  declineVerificationCode(tabId);
+  assert.equal(pageOf(tabId).verificationCode?.token, "q2", "the second code is offered next");
+  pm.verificationCodeFound(tabId, { token: "q3", main: true, app: "Passwords" });
+  verificationCodeDocument(tabId, 1000);
+  assert.equal(pageOf(tabId).verificationCode?.token, "q2", "the same document keeps its prompt");
+  verificationCodeDocument(tabId, 2000);
+  assert.equal(pageOf(tabId).verificationCode, null, "a new document (a reload) closes it");
+  declineVerificationCode(tabId);
+  assert.equal(pageOf(tabId).verificationCode, null, "and drops the queued one with it");
+  pm.verificationCodeFound(tabId, { token: "q4", main: true, app: "Passwords" });
+  assert.equal(pageOf(tabId).verificationCode?.token, "q4", "the new document's code is offered");
+  declineVerificationCode(tabId);
 });
 
 test("turning a plugin off withdraws its profiles natively before the host reports it off, and gives offer to save back", async () => {

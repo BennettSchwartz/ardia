@@ -3,7 +3,7 @@ import { setUpVerificationCode, type VerificationCodeFound } from "../../platfor
 import { patchPage, pageOf, usePages } from "../tabs/pageState";
 import { currentTab } from "../browser/current";
 import { showToast } from "../app/toasts";
-import { consentToken } from "../telemetry/choice";
+import { consentToken, type ConsentToken } from "../telemetry/choice";
 import { noteVerificationCodeSetup } from "../telemetry/passwordManagerCounts";
 
 const MAX_APP = 40;
@@ -22,22 +22,61 @@ const appOf = (found: VerificationCodeFound): string => {
   return typeof app === "string" ? app.trim() : "";
 };
 
+type Offer = NonNullable<ReturnType<typeof pageOf>["verificationCode"]>;
+const QUEUED_PER_PAGE = 8;
+const queued = new Map<string, { offer: Offer; consent: ConsentToken | null }[]>();
+const documents = new Map<string, number>();
+
+function showOffer(tabId: string, offer: Offer, consent: ConsentToken | null) {
+  patchPage(tabId, { verificationCode: offer });
+  noteVerificationCodeSetup("offered", consent);
+}
+
+function showNext(tabId: string) {
+  const next = queued.get(tabId)?.shift();
+  if (!queued.get(tabId)?.length) queued.delete(tabId);
+  if (next) showOffer(tabId, next.offer, next.consent);
+}
+
 export function offerVerificationCode(tabId: string, found: VerificationCodeFound, offered: (tabId: string) => boolean, generation: number) {
   const token = typeof found?.token === "string" ? found.token : "";
   const app = appOf(found);
-  if (!token || !app || !offered(tabId) || pageOf(tabId).verificationCode) return;
-  patchPage(tabId, { verificationCode: { token, app, host: hostOf(currentTab(tabId)?.url ?? "") ?? "", generation } });
-  noteVerificationCodeSetup("offered", consentToken());
+  if (!token || !app || !offered(tabId)) return;
+  const offer = { token, app, host: hostOf(currentTab(tabId)?.url ?? "") ?? "", generation };
+  const consent = consentToken();
+  if (!pageOf(tabId).verificationCode) return showOffer(tabId, offer, consent);
+  const waiting = queued.get(tabId) ?? [];
+  if (waiting.length < QUEUED_PER_PAGE) queued.set(tabId, [...waiting, { offer, consent }]);
+}
+
+export function forgetVerificationCodes(tabId: string) {
+  queued.delete(tabId);
+  if (pageOf(tabId).verificationCode) patchPage(tabId, { verificationCode: null });
+}
+
+export function verificationCodeDocument(tabId: string, committedAt: number | undefined) {
+  if (typeof committedAt !== "number" || !(committedAt > 0)) return;
+  const last = documents.get(tabId);
+  if (last !== undefined && committedAt <= last) return;
+  documents.set(tabId, committedAt);
+  if (last !== undefined) forgetVerificationCodes(tabId);
+}
+
+export function verificationCodeTabGone(tabId: string) {
+  queued.delete(tabId);
+  documents.delete(tabId);
 }
 
 export function declineVerificationCode(tabId: string) {
   patchPage(tabId, { verificationCode: null });
+  showNext(tabId);
 }
 
 export function acceptVerificationCode(tabId: string) {
   const offer = pageOf(tabId).verificationCode;
   if (!offer) return;
   patchPage(tabId, { verificationCode: null });
+  showNext(tabId);
   const consent = consentToken();
   noteVerificationCodeSetup("accepted", consent);
   void setUpVerificationCode(tabId, offer.token, offer.generation)
@@ -51,5 +90,6 @@ export function acceptVerificationCode(tabId: string) {
 }
 
 export function closeVerificationCodePrompts() {
+  queued.clear();
   for (const [tabId, page] of Object.entries(usePages.getState().pages)) if (page.verificationCode) patchPage(tabId, { verificationCode: null });
 }

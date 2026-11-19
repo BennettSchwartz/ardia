@@ -30,6 +30,7 @@ import { zoomChangedByUser } from "../../state/site/zoomBubble";
 import { markTabReady, patchPage, pageOf } from "../../state/tabs/pageState";
 import { popupBlocked, showAutofillPrompt, showExternalApp, showPasswordPrompt } from "../../state/site/prompts";
 import { fieldProviderOpened, verificationCodeFound, type VerificationCodeFound } from "../../state/site/passwordManager";
+import { verificationCodeDocument, verificationCodeTabGone } from "../../state/site/verificationCodes";
 import { leftPage, pageAskedToClose, pageEnded } from "../../state/tabs/pageEvents";
 import { copyLinkToSelection, searchSelection, setPageSelection } from "../../state/site/selection";
 import { shareFromPage } from "../../state/site/share";
@@ -117,6 +118,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
     return () => {
       if (handedToTab()) return forgetPeekHandover(tabId);
       noteGone(tabId);
+      verificationCodeTabGone(tabId);
       noteFirstPagePending(tabId, false);
       forgetUnreadIfGone(tabId);
     };
@@ -175,6 +177,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       }}
       onNavigationChange={({ url: reported, title: reportedPageTitle, canGoBack, canGoForward, isLoading, themeColor, themeColorSource, initialDocumentAccessed, committedInitial, committedUrl, committedAt, httpStatus }) => {
         noteCommit(tabId, committedUrl, committedAt, httpStatus);
+        verificationCodeDocument(tabId, committedAt);
         if (reopening.current && reported && !isBlankAddress(reported)) {
           reopening.current = false;
           noteReopenedPage(canGoBack);

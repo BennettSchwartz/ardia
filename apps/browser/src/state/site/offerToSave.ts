@@ -116,6 +116,12 @@ async function holdOff(profile: string, intent: Intent): Promise<boolean> {
   return true;
 }
 
+async function oweUnlessForgotten(profile: string, intent: Intent) {
+  if (!intents.has(profile)) return;
+  owed.set(profile, intent.consent);
+  await payOwed(profile, intent.consent);
+}
+
 async function giveBack(profile: string, intent: Intent): Promise<boolean> {
   const recorded = heldOffProfiles().has(profile);
   if (!recorded && !owed.has(profile)) return true;
@@ -123,16 +129,11 @@ async function giveBack(profile: string, intent: Intent): Promise<boolean> {
   if (!stillWanted(profile, intent)) return true;
   if (recorded && !(await recordHeldOff(profile, false))) return (notePasswordManagerRecordFailed(intent.consent), false);
   owed.delete(profile);
-  if (!stillWanted(profile, intent)) {
-    owed.set(profile, intent.consent);
-    await payOwed(profile, intent.consent);
-    return true;
-  }
+  if (!stillWanted(profile, intent)) return (await oweUnlessForgotten(profile, intent), true);
   try {
     await setPasswordAutofill(true, profile);
   } catch {
-    owed.set(profile, intent.consent);
-    await payOwed(profile, intent.consent);
+    await oweUnlessForgotten(profile, intent);
     return false;
   }
   storeResource(passwordAutofill, [profile], true);

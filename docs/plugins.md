@@ -400,7 +400,7 @@ write that succeeds (so a relaunch keeps it) and is retried every 30 s, doubling
 turn it on yourself; each failure counts in `password_manager_record_failed`. A record from a newer Ardia (a higher
 `version`) is never overwritten: offer to save is left as it is for that run.
 
-**Withdrawn at once.** Ardia pushes the whole set of profiles with a key (`passwords.setFieldProviders {generation,
+**Withdrawn at once.** Ardia pushes the whole set of profiles with a key (`passwords.setFieldProviders {session, generation,
 profiles: [{profile, fields, codeSetup}]}`) at launch and whenever it changes. Turning the plugin off, removing it or
 changing its manifest pushes the set without its profiles before the plugin is reported off, so the key leaves every
 live page first. Each push has a new generation; native drops badge clicks, menu requests, code detections and token

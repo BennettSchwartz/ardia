@@ -5,14 +5,16 @@ import { choosePasswordManager, useManagerPlugins, useProfilePasswordManager, us
 import { type Option, PopUp } from "../../ui";
 import { Row } from "../Form";
 
-export function managerPopUp(plugins: readonly ManagerPlugin[], stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, storedTitle: string | null): { value: PasswordManagerChoice; options: Option<PasswordManagerChoice>[] } {
+type StoredPlugin = { title: string; installed: boolean } | null;
+
+export function managerPopUp(plugins: readonly ManagerPlugin[], stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, storedPlugin: StoredPlugin): { value: PasswordManagerChoice; options: Option<PasswordManagerChoice>[] } {
   const offPlugin = stored !== undefined && stored !== effective && choicePlugin(stored) !== null ? stored : null;
   return {
     value: offPlugin ?? effective,
     options: [
       { value: "ardia", title: "Ardia" },
       ...plugins.map((p) => ({ value: `plugin:${p.name}` as PasswordManagerChoice, title: p.title })),
-      ...(offPlugin ? [{ value: offPlugin, title: `${storedTitle ?? choicePlugin(offPlugin)} (off)` }] : []),
+      ...(offPlugin ? [{ value: offPlugin, title: `${storedPlugin?.title ?? choicePlugin(offPlugin)} (${storedPlugin?.installed === false ? "not installed" : "off"})` }] : []),
       { value: "none", title: "None (an extension handles logins)", separatorBefore: true },
     ],
   };
@@ -24,14 +26,17 @@ function sharedChoiceNote(names: string[]): string | null {
   return `Also applies to ${others}, which ${names.length === 1 ? "shares" : "share"} this profile's browser data.`;
 }
 
-const useStoredTitle = (stored: PasswordManagerChoice | undefined) => {
+function useStoredPlugin(stored: PasswordManagerChoice | undefined): StoredPlugin {
   const name = stored ? choicePlugin(stored) : null;
-  return usePlugins((p) => (name ? (p.listings[name]?.manifest?.title ?? name) : null));
-};
+  const title = usePlugins((p) => (name ? (p.listings[name]?.manifest?.title ?? name) : null));
+  const installed = usePlugins((p) => !!name && !!p.listings[name]);
+  return name && title ? { title, installed } : null;
+}
 
-function unavailableNote(stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, title: string | null): string | null {
-  if (!stored || !choicePlugin(stored) || stored === effective) return null;
-  return `${title} is off, so this profile uses Ardia until you turn it back on in Plugins or pick another password manager.`;
+export function unavailableNote(stored: PasswordManagerChoice | undefined, effective: PasswordManagerChoice, storedPlugin: StoredPlugin): string | null {
+  if (!stored || !choicePlugin(stored) || stored === effective || !storedPlugin) return null;
+  if (!storedPlugin.installed) return `${storedPlugin.title} isn't installed, so this profile uses Ardia. Pick another password manager, or install it again.`;
+  return `${storedPlugin.title} is off, so this profile uses Ardia until you turn it back on in Plugins or pick another password manager.`;
 }
 
 export function PasswordManagerRow({ profileId }: { profileId: string }) {
@@ -43,9 +48,9 @@ function PasswordManagerChoiceRow({ profileId }: { profileId: string }) {
   const effective = useProfilePasswordManager(profileId);
   const stored = useStoredPasswordManager(profileId);
   const sharing = useProfilesSharingChoice(profileId);
-  const storedTitle = useStoredTitle(stored);
-  const unavailable = unavailableNote(stored, effective, storedTitle);
-  const popUp = managerPopUp(plugins, stored, effective, storedTitle);
+  const storedPlugin = useStoredPlugin(stored);
+  const unavailable = unavailableNote(stored, effective, storedPlugin);
+  const popUp = managerPopUp(plugins, stored, effective, storedPlugin);
   const description = [unavailable, sharedChoiceNote(sharing)].filter(Boolean).join(" ") || undefined;
   return (
     <Row anchor="profiles.passwordManager" description={description}>

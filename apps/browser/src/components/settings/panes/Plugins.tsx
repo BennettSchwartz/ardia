@@ -100,12 +100,12 @@ function statusOf(m: PluginManifest | null, problems: string[], active: boolean,
   return [describe ? m.description : null, running].filter(Boolean).join(" · ");
 }
 
-function setOn(name: string, on: boolean) {
+function setOn(name: string, on: boolean): Promise<unknown> | void {
   if (on) {
     releaseOrphanedConsent();
     requestPluginConsent(name);
   }
-  else void disablePlugin(name);
+  else return disablePlugin(name);
 }
 
 function PluginRow({ name }: { name: string }) {

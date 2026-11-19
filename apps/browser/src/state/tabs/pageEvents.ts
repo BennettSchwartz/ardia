@@ -12,6 +12,7 @@ import { isQuitting } from "../app/quit";
 import { closeTabNow } from "./actions";
 import { closedByUnload } from "../profiles/profileUnloading";
 import { forgetRendererHang } from "../telemetry/freezes";
+import { forgetVerificationCodes } from "../site/verificationCodes";
 
 export function leftPage(tabId: string, url: string, previousPage: string, engine: PageEngine, inPeek: boolean) {
   if (pageOf(tabId).externalApp && hostOf(url) !== hostOf(previousPage)) answerExternalApp(tabId, false);
@@ -19,7 +20,8 @@ export function leftPage(tabId: string, url: string, previousPage: string, engin
   setPopover(tabId, null);
   setPageSelection(tabId, null);
   clearEngineOffer(tabId);
-  patchPage(tabId, { popups: [], passwordPrompt: null, verificationCode: null, crashed: null, status: "" });
+  forgetVerificationCodes(tabId);
+  patchPage(tabId, { popups: [], passwordPrompt: null, crashed: null, status: "" });
   revealToolbar(tabId);
   if (!inPeek) followSiteChoice(tabId, engine, url, previousPage);
 }

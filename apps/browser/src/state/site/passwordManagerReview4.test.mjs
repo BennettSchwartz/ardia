@@ -70,6 +70,26 @@ test("two removals at once: the second is refused while the first is still turni
   assert.equal((await first).ok, true);
 });
 
+test("a profile change while a withdrawal waits for native pushes the withdrawn set, never the plugin being turned off", async () => {
+  const work = S().createProfile({ name: "Work" });
+  pm.choosePasswordManager(work, "plugin:one-pm");
+  await settle();
+  await wait(50);
+  native.holdNext = new Promise(() => {});
+  native.calls.length = 0;
+  const off = lifecycle.turnOffPlugin("one-pm", consentToken());
+  await settle();
+  S().updateProfile(work, { name: "Work 2" });
+  await settle();
+  const pushed = native.calls.filter((c) => c[0] === "setFieldProviders").map((c) => c[2]);
+  assert.ok(pushed.length >= 1);
+  assert.ok(pushed.every((profiles) => profiles.length === 0), JSON.stringify(pushed));
+  assert.ok(await off);
+  turnOn("one-pm");
+  await settle();
+  await wait(1200);
+});
+
 test("a held-off record that can't be written keeps the request and retries it, then saving goes off", async () => {
   offer.OWED_RETRY.firstMs = 50;
   pm.choosePasswordManager("default", "ardia");
@@ -117,4 +137,26 @@ test("turning offer to save off in Settings is refused while the record can't dr
   await setPasswordAutofillFor("", false);
   assert.equal(offerToSave(""), false);
   assert.ok(!record().includes(""), "cleared once the write works");
+});
+
+test("turning offer to save off while Ardia is giving it back leaves no record that could turn it on again", async () => {
+  stub.profileToggles.user.set("", { ...stub.profileToggles.user.get(""), passwords: true });
+  pm.choosePasswordManager("default", "ardia");
+  await settle();
+  pm.choosePasswordManager("default", "plugin:one-pm");
+  await settle();
+  await wait(50);
+  assert.ok(record().includes(""));
+  assert.equal(offerToSave(""), false);
+  stub.heldSaves.on = true;
+  pm.choosePasswordManager("default", "ardia");
+  await settle();
+  const off = setPasswordAutofillFor("", false);
+  stub.heldSaves.on = false;
+  for (const land of stub.heldSaves.queue.splice(0)) land();
+  await off;
+  await settle();
+  await wait(50);
+  assert.equal(offerToSave(""), false, "the person's Off stands");
+  assert.ok(!record().includes(""), "no record says Ardia turned it off");
 });

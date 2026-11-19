@@ -129,11 +129,15 @@ const ATTEMPT_MS = 1000;
 const RETRY_FIRST_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
+let withdrawing: PluginsCommit | null = null;
+const commitPlugins = (commit: PluginsCommit) => managerPlugins({ ...commit, order: Object.keys(commit.listings).sort() });
+const providerPlugins = (committed: readonly ManagerPlugin[]) => (withdrawing ? commitPlugins(withdrawing) : committed);
+
 function retryPush(consent: ConsentToken | null) {
   clearTimeout(retry);
   const delay = Math.min(RETRY_FIRST_MS * 2 ** attempts, RETRY_MAX_MS);
   attempts += 1;
-  retry = setTimeout(() => void pushProviders(currentManagerPlugins(), consent, true), delay);
+  retry = setTimeout(() => void pushProviders(providerPlugins(currentManagerPlugins()), consent, true), delay);
 }
 
 function want(key: string) {
@@ -212,7 +216,7 @@ export function startPasswordManager() {
     const next = engineModes(browser(), current);
     for (const [profile, mode] of next) if (modes.get(profile) !== mode) followMode(profile, mode);
     modes = next;
-    void pushProviders(current, consentToken());
+    void pushProviders(providerPlugins(current), consentToken());
   };
 
   const syncWindows = () => {
@@ -243,11 +247,18 @@ export function startPasswordManager() {
 
   beforePluginsCommit((next, before) => {
     if (!ready) return;
+    withdrawing = null;
     for (const name of newlyTurnedOn(next, before)) adoptNeverChosen(name);
-    void pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() }), consentToken());
+    void pushProviders(commitPlugins(next), consentToken());
   });
 
-  beforePluginsWithdraw((next) => (ready ? pushProviders(managerPlugins({ ...next, order: Object.keys(next.listings).sort() }), consentToken()) : undefined));
+  beforePluginsWithdraw((next) => {
+    if (!ready) return undefined;
+    withdrawing = next;
+    const confirmed = pushProviders(commitPlugins(next), consentToken());
+    void confirmed.then(() => withdrawing === next && (withdrawing = null));
+    return confirmed;
+  });
 
   const begin = () => {
     if (ready || !pluginsView().scanned) return;
