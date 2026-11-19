@@ -42,8 +42,8 @@ final class FullScreenLifecycle {
     for (name, entering) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.willExitFullScreenNotification, false)] {
       observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.began(note.object, entering: entering) })
     }
-    for name in [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification] {
-      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.notifiedEnd(note.object, name: name) })
+    for (name, entering) in [(NSWindow.didEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
+      observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in self?.notifiedEnd(note.object, entering: entering) })
     }
     observers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
       guard let window = note.object as? NSWindow else { return }
@@ -61,16 +61,18 @@ final class FullScreenLifecycle {
 
   func stopWaiting(_ token: Int) { waiters[token] = nil }
 
-  private func notifiedEnd(_ object: Any?, name: NSNotification.Name) {
-    guard let window = object as? NSWindow else { return }
-    let key = ObjectIdentifier(window)
-    guard let transition = inFlight[key] else { return }
-    let state = stateOf(window)
-    guard state == transition.entering else {
-      log("[fullscreen] window \(window.windowNumber): ignored a stale \(name.rawValue); the open transition is to \(transition.entering ? "enter" : "exit") and the window is \(state ? "in" : "out of") full screen")
+  func acceptsEnd(of window: NSWindow, entering: Bool) -> Bool {
+    let directionMatches = inFlight[ObjectIdentifier(window)].map { $0.entering == entering } ?? true
+    return directionMatches && stateOf(window) == entering
+  }
+
+  private func notifiedEnd(_ object: Any?, entering: Bool) {
+    guard let window = object as? NSWindow, let transition = inFlight[ObjectIdentifier(window)] else { return }
+    guard acceptsEnd(of: window, entering: entering) else {
+      log("[fullscreen] window \(window.windowNumber): ignored a stale did\(entering ? "Enter" : "Exit"); the open transition is to \(transition.entering ? "enter" : "exit") and the window is \(stateOf(window) ? "in" : "out of") full screen")
       return
     }
-    end(key)
+    end(ObjectIdentifier(window))
   }
 
   private func began(_ object: Any?, entering: Bool) {

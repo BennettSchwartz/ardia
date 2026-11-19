@@ -116,6 +116,27 @@ do {
   out["realDidExitSettled"] = settled
 }
 
+do {
+  let l = lifecycle()
+  let window = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+  var state = true
+  l.stateOf = { _ in state }
+  var settled = 0
+  _ = l.waitForTransition(of: window, startedAfter: l.latestGeneration) { settled += 1 }
+  center.post(name: NSWindow.willExitFullScreenNotification, object: window)
+  state = false
+  out["windowManagerWouldRecordLateEnter"] = l.acceptsEnd(of: window, entering: true)
+  center.post(name: NSWindow.didEnterFullScreenNotification, object: window)
+  spin(0.05)
+  out["lateEnterEndedExitWithStateOut"] = !l.isUnresolved(window)
+  out["lateEnterSettledExit"] = settled
+  out["windowManagerRecordsRealExit"] = l.acceptsEnd(of: window, entering: false)
+  center.post(name: NSWindow.didExitFullScreenNotification, object: window)
+  spin(0.05)
+  out["didExitEndedIt"] = !l.isUnresolved(window)
+  out["didExitSettled"] = settled
+}
+
 print(String(data: try! JSONSerialization.data(withJSONObject: out), encoding: .utf8)!)
 `;
 
@@ -140,6 +161,11 @@ test("full screen: a transition with no end clears on its real state and records
     assert.equal(got.lateDidEnterSettled, 0);
     assert.equal(got.staleLogged, 1, "the stale notification is logged");
     assert.deepEqual([got.realDidExitEnded, got.realDidExitSettled], [true, 1]);
+    assert.equal(got.lateEnterEndedExitWithStateOut, false, "a late didEnter doesn't finish an exit, even with the window already out of full screen");
+    assert.equal(got.lateEnterSettledExit, 0);
+    assert.equal(got.windowManagerWouldRecordLateEnter, false, "WindowManager's cached flag takes the same decision");
+    assert.equal(got.windowManagerRecordsRealExit, true);
+    assert.deepEqual([got.didExitEndedIt, got.didExitSettled], [true, 1]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
