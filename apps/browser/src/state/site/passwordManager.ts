@@ -1,8 +1,6 @@
 import {
-  applePasswordsAvailable,
   getPasswordAutofill,
   iCloudPasswordsExtensionSupported,
-  listPasswords,
   setApplePasswords,
   setPasswordAutofill,
 } from "../../platform/passwords";
@@ -36,12 +34,6 @@ function extensionProfiles(lists: Record<string, InstalledExtension[]>): string[
 }
 
 export const passwordAutofill = resource("passwordAutofill", (profile: string) => getPasswordAutofill(profile).catch(() => true));
-export const ardiaLoginCount = resource("ardiaLoginCount", (profile: string) =>
-  listPasswords(profile).then(
-    (list) => list.length,
-    () => 0,
-  ),
-);
 
 export const PASSWORD_PREF_RETRY_MS = 1500;
 
@@ -74,23 +66,6 @@ export function startPasswordManager() {
   let seen = new Set<string>();
   const owedOn = new Set<string>();
   const ready = new Set<string>();
-  const ardiaLogins = new Map<string, number>();
-
-  const upgradedIntoArdia = () => {
-    const { settings, settingsMeta } = browser();
-    return settings.passwordManager === "ardia" && settingsMeta.inferred.includes("passwordManager");
-  };
-  const adoptAppleIfNothingSaved = (profile: string) => {
-    if (!upgradedIntoArdia() || !applePasswordsAvailable() || ardiaLogins.has(profile)) return;
-    void listPasswords(profile).then(
-      (list) => {
-        ardiaLogins.set(profile, list.length);
-        const profiles = engineProfiles(browser());
-        if (upgradedIntoArdia() && profiles.every((p) => ardiaLogins.get(p) === 0)) browser().updateSettings({ passwordManager: "apple" }, { fromSync: true });
-      },
-      () => {},
-    );
-  };
 
   const wants = (profile: string): boolean | null => (mode !== "ardia" ? false : owedOn.has(profile) ? true : null);
 
@@ -132,7 +107,6 @@ export function startPasswordManager() {
       const profile = tab && engineProfile(s, regularProfile(tab.profileId));
       if (profile === undefined || ready.has(profile)) continue;
       ready.add(profile);
-      adoptAppleIfNothingSaved(profile);
       const on = mode === "ardia" ? (owedOn.has(profile) ? true : null) : false;
       if (on === null) continue;
       owedOn.delete(profile);
