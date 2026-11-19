@@ -145,3 +145,55 @@ test("sync writes are refused while sync is turning off, so a sent tab is never 
     native.forget = plain;
   }
 });
+
+async function heldPasses(run) {
+  const native = globalThis.acTestNativeModules.ArdiaSync;
+  const plain = native.chainStatus;
+  const held = { passes: 0, release: null };
+  try {
+    if (!sync.useSync.getState().enabled) assert.ok("ok" in (await sync.turnOnSync("/sync")));
+    for (let i = 0; i < 500 && sync.useSync.getState().status === "starting"; i++) await tick();
+    await sync.syncNow();
+    native.chainStatus = async () => {
+      held.passes++;
+      if (held.passes === 1) await new Promise((resolve) => (held.release = resolve));
+      return "ok";
+    };
+    const running = sync.syncNow();
+    for (let i = 0; i < 500 && !held.release; i++) await tick();
+    assert.ok(held.release, "a pass is running");
+    await run(held, running);
+  } finally {
+    native.chainStatus = plain;
+  }
+}
+
+test("a sync.now queued behind a running pass starts no normal pass once sync begins turning off", async () => {
+  await heldPasses(async (held, running) => {
+    const id = ++nextId;
+    const before = stub.controlSocket.replies.length;
+    stub.emitControlRequest({ connection: 41, generation: stub.controlSocket.generation, line: JSON.stringify({ id, method: "sync.now" }) });
+    for (let i = 0; i < 10; i++) await tick();
+    const stopping = sync.stopSync();
+    held.release();
+    await running;
+    await stopping;
+    for (let i = 0; i < 500 && !stub.controlSocket.replies.slice(before).some((r) => r.connection === 41); i++) await tick();
+    const reply = JSON.parse(stub.controlSocket.replies.slice(before).find((r) => r.connection === 41).line);
+    assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+    assert.equal(held.passes, 2, "the running pass and the retiring pass, no normal pass between them");
+  });
+});
+
+test("a sync.now queued behind a running pass starts nothing once control turns off", async () => {
+  await heldPasses(async (held, running) => {
+    stub.emitControlRequest({ connection: 41, generation: stub.controlSocket.generation, line: JSON.stringify({ id: ++nextId, method: "sync.now" }) });
+    for (let i = 0; i < 10; i++) await tick();
+    S().updateSettings({ cliControl: false });
+    held.release();
+    await running;
+    for (let i = 0; i < 50; i++) await tick();
+    assert.equal(held.passes, 1, "only the pass that was already running");
+  });
+  S().updateSettings({ cliControl: true });
+});
