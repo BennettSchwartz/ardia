@@ -12,12 +12,17 @@ import type { BrowserTab } from "../../state/tabs/tabModels";
 import { TabFace, useTheme } from "../ui";
 import { PageLoadingPlaceholder } from "./PageLoadingPlaceholder";
 
+export type CoverFace = { kind: "card"; picture: string | null } | { kind: "placeholder" };
+
+export const coverFace = (picture: string | null, fromCard: boolean): CoverFace => (picture || fromCard ? { kind: "card", picture } : { kind: "placeholder" });
+
 export const PageCover = memo(function PageCover({ tab }: { tab: BrowserTab }) {
   countRender("PageCover");
   const theme = useTheme();
   const tone = usePageTone(tab.id);
   const [frozen] = useState(() => launchArguments().loadFreeze !== null);
   const [needed] = useState(() => frozen || pageCoverNeeded(pageNavigation(tab.id), Boolean(tab.snapshotFileName)));
+  const [face] = useState(() => coverFace(frozen ? null : tab.snapshotFileName, useBrowse.getState().opening === tab.id));
   const [gone, setGone] = useState(!needed);
   const opacity = useSharedValue(needed ? 1 : 0);
   useEffect(() => {
@@ -74,8 +79,7 @@ export const PageCover = memo(function PageCover({ tab }: { tab: BrowserTab }) {
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
   if (gone) return null;
   const shown = display(tab.url);
-  const picture = frozen ? null : tab.snapshotFileName;
-  const spoken = !picture && Platform.OS === "ios";
+  const spoken = face.kind === "placeholder" && Platform.OS === "ios";
   return (
     <Animated.View
       testID="pageCover"
@@ -85,8 +89,8 @@ export const PageCover = memo(function PageCover({ tab }: { tab: BrowserTab }) {
       accessibilityElementsHidden={!spoken}
       style={[StyleSheet.absoluteFill, { backgroundColor: theme.surface }, style]}
     >
-      {picture ? (
-        <TabFace tab={tab} title={tab.title || shown.host} host={shown.host} tone={tone?.top ?? null} roles={theme} paintedAs={`cover:${tab.id}`} />
+      {face.kind === "card" ? (
+        <TabFace tab={{ ...tab, snapshotFileName: face.picture }} title={tab.title || shown.host} host={shown.host} tone={tone?.top ?? null} roles={theme} paintedAs={`cover:${tab.id}`} />
       ) : (
         <PageLoadingPlaceholder tab={tab} />
       )}
