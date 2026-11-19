@@ -47,8 +47,10 @@ public class WalkNamedMutex : IDisposable {
 }
 public static class QuitPages {
   public static int Port = 1;
-  public static int DownloadsStarted { get { return 1; } }
-  public static int DownloadsOpen { get { return 1; } }
+  static int downloadsRead;
+  public static int DownloadsStarted { get { return ++downloadsRead; } }
+  static int openRead;
+  public static int DownloadsOpen { get { return ++openRead % 2; } }
   public static string DownloadClosedAt { get { return "never"; } }
   public static void ReleaseDownloads() { }
   public static void Start() { }
@@ -148,7 +150,9 @@ $script:WalkLogLines = @(
   "quit 1 the app answered yes after 10 ms",
   "quit 2 no answer in 3000 ms",
   "quit 3 cancelled by a relaunch after 900 ms",
-  "launch 1 process ending"
+  "launch 1 process ending",
+  "info 10 [quit] not asked on a hidden instance: 1 download in progress, warning off",
+  "info 20 [quit] asked: 1 download in progress, warning off; answered quit"
 )
 function Quit-Log { return @(& $realQuitLog) + $script:WalkLogLines }
 

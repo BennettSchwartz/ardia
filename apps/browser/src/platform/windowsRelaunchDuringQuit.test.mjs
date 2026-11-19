@@ -215,6 +215,7 @@ test("the quit's stretches are test-only keys, the update installer quits with i
     "Test-QuitWithABeforeUnloadPage",
     "Test-TurnedAwayLaunchKeepsItsUserDataDir",
     "Test-LaunchRefusedForGood",
+    "Test-HiddenQuitWithADownloadIsLogged",
     "Test-LaunchWhileTheDownloadsQuestionShows",
   ];
   for (const step of steps) assert.match(during, new RegExp(`\\n    "${step}",?\\n`), step);
@@ -224,7 +225,8 @@ test("the quit's stretches are test-only keys, the update installer quits with i
   assert.match(during, /if \(\$Visible\) \{ Remove-Item -Path Env:ARDIA_BACKGROUND/, "a shown launch drops ARDIA_BACKGROUND, which answers every question unseen");
   assert.match(during, /\$old = Open-QuitInstance \$what "appDialog" -Visible/, "the downloads question case runs a shown Ardia");
   assert.match(during, /Assert-NoQuitLine '\\\[quit\\\] not asked on a hidden instance'/, "the shown Ardia never logs itself as a hidden instance that didn't ask");
-  assert.match(during, /if \(\$downloadAsks\.Count -ne \$answers\)/, "when the build logs the quit question, there is one line per question the case answered");
+  assert.match(during, /if \(\$downloadAsks\.Count -ne \$answers -or \$askedLines\.Count -ne \$answers\)/, "the shown Ardia logs exactly one '[quit] asked: 1 download in progress ...; answered quit' line per question the case answered");
+  assert.match(during, /\$notAsked\.Count -ne 1/, "a hidden Ardia's quit with a held download logs that it saw the download and didn't ask");
   assert.equal((during.match(/ -Visible$/gm) ?? []).length, 3, "only the downloads question case's three launches run shown");
   assert.match(during, /\[QuitPages\]::LoadsOf\(\$name\)/, "a link counts as opened by its loads on the test server");
 });
