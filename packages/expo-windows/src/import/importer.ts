@@ -29,7 +29,9 @@ export class Unlocks {
 
 function secretWarnings(result: Result, kind: ImportKind, outcome: Secrets, noun: string, browser: Browser) {
   if (outcome.undecryptable > 0) result.warnings.push({ kind, code: "undecryptable", message: `${plural(outcome.undecryptable, noun)} couldn't be decrypted` });
-  if (outcome.appBound > 0)
+  if (outcome.appBound > 0 && kind === "cookies")
+    result.warnings.push({ kind, code: "undecryptable", message: `Skipped ${plural(outcome.appBound, noun)} locked by ${browser.name}'s app-bound encryption, which only ${browser.name} can read: sites that used ${outcome.appBound === 1 ? "it" : "them"} will ask you to sign in again` });
+  else if (outcome.appBound > 0)
     result.warnings.push({ kind, code: "undecryptable", message: `${plural(outcome.appBound, noun)} use ${browser.name}'s app-bound encryption, which only ${browser.name} can read` });
 }
 

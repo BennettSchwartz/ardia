@@ -95,7 +95,13 @@ test("A kind whose values are all app-bound warns why instead of failing", async
   const result = await importProfile(fakeHost({ cookies: { count: 0, undecryptable: 0, appBound: 40, dropped: 0 } }), new Unlocks(), "chrome", "Default", ["cookies"], {}, quiet);
   assert.deepEqual(result.failed, []);
   assert.equal(result.cookieCount, 0);
-  assert.match(result.warnings[0].message, /40 cookies use Google Chrome's app-bound encryption/);
+  assert.match(result.warnings[0].message, /^Skipped 40 cookies locked by Google Chrome's app-bound encryption, .*: sites that used them will ask you to sign in again$/);
+});
+
+test("One app-bound cookie is counted in the singular", async () => {
+  const result = await importProfile(fakeHost({ cookies: { count: 3, undecryptable: 0, appBound: 1, dropped: 0 } }), new Unlocks(), "chrome", "Default", ["cookies"], {}, quiet);
+  assert.equal(result.cookieCount, 3);
+  assert.match(result.warnings[0].message, /^Skipped 1 cookie locked by Google Chrome's app-bound encryption, .*: sites that used it will ask you to sign in again$/);
 });
 
 test("Kinds Windows can't read yet fail on their own and the rest still import", async () => {
