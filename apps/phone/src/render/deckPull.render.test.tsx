@@ -99,13 +99,13 @@ function app() {
 
 type Step = { dy: number; velocityY?: number };
 
-function swipe(steps: Step[]) {
+function swipe(steps: Step[], finish: State = State.END) {
   const last = steps[steps.length - 1]!;
   act(() =>
     fireGestureHandler(getByGestureTestId("barSwipeUp"), [
       { state: State.BEGAN, translationX: 0, translationY: 0, velocityX: 0, velocityY: 0 },
       ...steps.map((step) => ({ state: State.ACTIVE, translationX: 0, translationY: step.dy, velocityX: 0, velocityY: step.velocityY ?? -300 })),
-      { state: State.END, translationX: 0, translationY: last.dy, velocityX: 0, velocityY: last.velocityY ?? -300 },
+      { state: finish, translationX: 0, translationY: last.dy, velocityX: 0, velocityY: last.velocityY ?? -300 },
     ]),
   );
   frame();
@@ -221,6 +221,16 @@ test("let go early, or dragged back down, the page grows back and nothing on the
     expect(counted).not.toHaveBeenCalledWith("deck_bar_swipes");
     unmount(mounted.pop()!);
   }
+});
+
+test("a cancelled long swipe returns, and an accepted long swipe with no finite release velocity still lands", () => {
+  app();
+  swipe([{ dy: -22 }, { dy: -170, velocityY: 0 }], State.CANCELLED);
+  framesUntil(() => deckPull.stage.value === PULL_STAGE.idle, 240);
+  expect(surface()).toBe("browsing");
+  swipe([{ dy: -22 }, { dy: -170, velocityY: Number.NaN }]);
+  framesUntil(() => surface() === "deck", 240);
+  expect(surface()).toBe("deck");
 });
 
 test("a swipe in Incognito follows the finger too, and neither its landing nor its return is counted", () => {

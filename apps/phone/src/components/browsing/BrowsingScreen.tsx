@@ -8,7 +8,7 @@ import { BAR_SHOWN, barShown, followScroll, obscuredBottom, pageInsets } from ".
 import { neighbours, PAGER } from "../../lib/pagerPhysics";
 import { useSystemBars } from "../../state/app/systemBars";
 import { useFrozenOrder, useNavigation, usePageTone, watchPageLoad } from "../../state/browse/hooks";
-import { abandonDeckPull, armDeckPull, beginDeckPull, deckPull, disarmDeckPull, releaseDeckPull, trackDeckPull, type PullSettled } from "../../state/browse/deckPull";
+import { armDeckPull, beginDeckPull, deckPull, disarmDeckPull, releaseDeckPull, trackDeckPull, type PullSettled } from "../../state/browse/deckPull";
 import { refreshHiddenDeck } from "../../state/browse/deckHold";
 import { closePageMenu, editPageQuery, openPageMenu } from "../../state/page/actions";
 import { useFindOpen, useMenuOpen, usePressOpen, useReaderTabId } from "../../state/page/hooks";
@@ -329,14 +329,11 @@ export function barSwipeUp(enabled: boolean, pagerActive: { value: number }, ope
       });
   }
   const { id, prepare, began, released, settled } = pull;
+  const frameRelease = Platform.OS === "android";
   return pan
     .onBegin(() => {
       deckPull.warm.value = true;
       if (deckPull.target.value?.id !== id) runOnJS(prepare)();
-    })
-    .onFinalize(() => {
-      deckPull.warm.value = false;
-      abandonDeckPull(id, settled);
     })
     .onStart((event) => {
       if (pagerActive.value) return;
@@ -349,8 +346,17 @@ export function barSwipeUp(enabled: boolean, pagerActive: { value: number }, ope
     .onUpdate((event) => {
       trackDeckPull(event.translationY);
     })
-    .onEnd((event, success) => {
-      releaseDeckPull(id, event.velocityY, success, released, settled);
+    .onFinalize((event, success) => {
+      deckPull.warm.value = false;
+      const velocity = Number.isFinite(event.velocityY) ? event.velocityY : 0;
+      if (frameRelease) {
+        requestAnimationFrame(() => {
+          "worklet";
+          releaseDeckPull(id, velocity, success, released, settled);
+        });
+      } else {
+        releaseDeckPull(id, velocity, success, released, settled);
+      }
     });
 }
 

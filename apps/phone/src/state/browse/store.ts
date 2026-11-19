@@ -488,6 +488,7 @@ function deckPullRefused(id: string) {
 }
 
 export function deckPullSettled(id: string, landed: boolean, worstFrameMs = 0) {
+  labTrace(`PAGELAB deck pull animation ${landed ? "landed" : "returned"}`);
   landingFromRest = null;
   handingOver = null;
   trackedPull = null;
