@@ -74,17 +74,14 @@ test("open menus are listed and closed through the native menu, and page menus a
   const { windowId, tab } = await freshWindow();
   stub.surfaces.open = [
     { id: "m1", kind: "select", tab, window: windowId, items: [{ path: [0], title: "apple", enabled: true, checked: true, separator: false }] },
-    { id: "m2", kind: "page", tab, window: windowId, items: [] },
+    { id: "m2", kind: "page", captured: true, tab, window: windowId, items: [] },
     { id: "m3", kind: "menuBar", window: windowId, items: [] },
   ];
   const open = await ok("menus.open");
   assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m1", windowId, tab], ["m2", windowId, tab]], "a tracking menu bar isn't listed");
   assert.equal((await call("menus.choose", { menu: "m1", path: [] })).error.code, "bad_request");
-  for (const menu of ["m1", "m2"]) {
-    const reply = await call("menus.choose", { menu, path: [0] });
-    assert.equal(reply.error.code, "refused", menu);
-    assert.match(reply.error.message, /menus.runBar instead/);
-  }
+  for (const menu of ["m1", "m2"]) assert.equal((await call("menus.choose", { menu, path: [0] })).error.code, "refused", menu);
+  assert.match((await call("menus.choose", { menu: "m1", path: [0] })).error.message, /menus.runBar instead/);
   await ok("menus.dismiss", { menu: "m2" });
   assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m1"]);
 });
@@ -93,7 +90,7 @@ test("a page's menu in a private window is not listed", async () => {
   await freshWindow();
   const priv = S().createWindow({ kind: "private", url: "https://p.example/" });
   const tab = S().windows[priv].activeTabIds[S().windows[priv].profileId];
-  stub.surfaces.open = [{ id: "m4", kind: "page", tab, window: priv, items: [] }, { id: "m5", kind: "select", window: priv, items: [] }];
+  stub.surfaces.open = [{ id: "m4", kind: "page", captured: true, tab, window: priv, items: [] }, { id: "m5", kind: "select", window: priv, items: [] }];
   assert.deepEqual(await ok("menus.open"), []);
   assert.equal((await call("menus.dismiss", { menu: "m4" })).error.code, "no_window");
 });

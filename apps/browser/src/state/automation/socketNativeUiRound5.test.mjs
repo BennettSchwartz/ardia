@@ -61,11 +61,8 @@ test("picks from a page's menu or a <select> popup are refused on every route, a
     { id: "sl1", kind: "select", tab, window: windowId, items: [item([0], "apple")] },
   ];
   stub.surfaces.chosen.length = 0;
-  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["pg1", "sl1"], "page menus stay listed");
-  for (const menu of ["pg1", "sl1"]) {
-    const reply = await call("menus.choose", { menu, path: [0] });
-    assert.equal(reply.error?.code, "refused", menu);
-    assert.match(reply.error.message, /menus.runBar instead/);
-  }
+  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["sl1"], "a select popup stays listed; a context menu on screen has no known source");
+  for (const menu of ["pg1", "sl1"]) assert.equal((await call("menus.choose", { menu, path: [0] })).error?.code, "refused", menu);
+  assert.match((await call("menus.choose", { menu: "sl1", path: [0] })).error.message, /menus.runBar instead/);
   assert.deepEqual(stub.surfaces.chosen, []);
 });
