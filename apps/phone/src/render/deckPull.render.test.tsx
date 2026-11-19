@@ -1,4 +1,4 @@
-import { Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { State } from "react-native-gesture-handler";
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { getAnimatedStyle, runOnUI } from "react-native-reanimated";
@@ -31,8 +31,6 @@ const lookModule = require("@ardia/phone-native/src/look") as typeof import("@ar
 
 const { deckPull, PULL_STAGE } = pull;
 
-const onIPhone = Platform.OS === "ios" ? test : test.skip;
-const onAndroid = Platform.OS === "android" ? test : test.skip;
 
 const SCREEN = { width: 393, height: 873 };
 const AWAY = 100_000;
@@ -116,7 +114,7 @@ function swipe(steps: Step[]) {
 const order = (root: Root) =>
   root.root.findAll((node) => typeof node.type === "string" && (node.props.testID === "tabDeck" || node.props.testID === "pageBar")).map((node) => node.props.testID as string);
 
-onIPhone("on iPhone the deck waits under the page, laid out and parked off screen rather than undrawn, so a swipe can show it without a layout pass", () => {
+test("on both phones the deck waits under the page, laid out and parked off screen rather than undrawn, so a swipe can show it without a layout pass", () => {
   const root = app();
   const deck = host(root, "tabDeck")!;
   expect(order(root)).toEqual(["tabDeck", "pageBar"]);
@@ -130,16 +128,7 @@ onIPhone("on iPhone the deck waits under the page, laid out and parked off scree
   expect(deckPull.target.value?.id).toBe(currentTabs().selectedId);
 });
 
-onAndroid("Android keeps its page over nothing and its waiting deck undrawn above it: no page layer, no pull wrapper, no blocker, and nothing arms the pull", () => {
-  const root = app();
-  expect(order(root)).toEqual(["pageBar", "tabDeck"]);
-  expect(StyleSheet.flatten(host(root, "tabDeck")!.props.style).display).toBe("none");
-  for (const id of ["pageLayer", "pagePull", "pagePullShadow", "pagePullBlocker", "pullGlyphs"]) expect(hosts(root, id)).toHaveLength(0);
-  expect(pull.deckPullArmed()).toBeNull();
-  expect(pull.deckStandbyId()).toBeNull();
-});
-
-onIPhone("the page follows the finger with no React render: every move sets where the live page is heading, it eases there over a few frames instead of jumping, its bottom edge rising with the finger's travel and its frame heading for its own card's, over the deck's backdrop alone", () => {
+test("the page follows the finger with no React render: every move sets where the live page is heading, it eases there over a few frames instead of jumping, its bottom edge rising with the finger's travel and its frame heading for its own card's, over the deck's backdrop alone", () => {
   const root = app();
   const id = currentTabs().selectedId!;
   const target = deckPull.target.value!;
@@ -182,7 +171,7 @@ onIPhone("the page follows the finger with no React render: every move sets wher
   expect(moved(host(root, "pagePullBlocker")!).translateX).toBe(AWAY);
 });
 
-onIPhone("let go past the commit point, the page lands in its own card and only then does the deck take over: the page stays mounted through the landing, the swipe is counted, and the card it lands on is the selected one", () => {
+test("let go past the commit point, the page lands in its own card and only then does the deck take over: the page stays mounted through the landing, the swipe is counted, and the card it lands on is the selected one", () => {
   const root = app();
   const id = currentTabs().selectedId!;
   const before = new Set(hosts(root, "deckCard"));
@@ -209,7 +198,7 @@ onIPhone("let go past the commit point, the page lands in its own card and only 
   expect(browse.useBrowse.getState().deckEntrance).toBeNull();
 });
 
-onIPhone("let go early, or dragged back down, the page grows back and nothing on the browsing surface has changed: the same screen, no render, the deck parked again, and the swipe counted as returned", () => {
+test("let go early, or dragged back down, the page grows back and nothing on the browsing surface has changed: the same screen, no render, the deck parked again, and the swipe counted as returned", () => {
   for (const steps of [[{ dy: -22 }, { dy: -70, velocityY: 0 }], [{ dy: -22 }, { dy: -190 }, { dy: -170, velocityY: 420 }]] as Step[][]) {
     const root = app();
     const screen = pagesShown(root)[0]!;
@@ -234,7 +223,7 @@ onIPhone("let go early, or dragged back down, the page grows back and nothing on
   }
 });
 
-onIPhone("a swipe in Incognito follows the finger too, and neither its landing nor its return is counted", () => {
+test("a swipe in Incognito follows the finger too, and neither its landing nor its return is counted", () => {
   act(() => useTabs.setState({ incognito: true }));
   const root = app();
   swipe([{ dy: -22 }, { dy: -60, velocityY: 0 }]);
@@ -246,7 +235,7 @@ onIPhone("a swipe in Incognito follows the finger too, and neither its landing n
   expect(counted).not.toHaveBeenCalledWith("deck_bar_swipes_returned");
 });
 
-onIPhone("a tap on the tabs button ends in the same landing as a released swipe, starting from rest, and isn't counted as a swipe", () => {
+test("a tap on the tabs button ends in the same landing as a released swipe, starting from rest, and isn't counted as a swipe", () => {
   const root = app();
   const button = root.root.findAll((node) => node.props.accessibilityLabel === "Tabs" && typeof node.props.onPress === "function")[0]!;
   act(() => void button.props.onPress());
@@ -259,7 +248,7 @@ onIPhone("a tap on the tabs button ends in the same landing as a released swipe,
   expect(counted).not.toHaveBeenCalledWith("deck_bar_swipes");
 });
 
-onIPhone("the handover waits for the fresh picture of the page: the capture starts with the pull, the waiting deck takes the new picture only once the landing has ended so its render can't stall the pull, and the deck takes over once it has painted in the card", async () => {
+test("the handover waits for the fresh picture of the page: the capture starts with the pull, the waiting deck takes the new picture only once the landing has ended so its render can't stall the pull, and the deck takes over once it has painted in the card", async () => {
   const FRESH = "file:///snapshots/pulled-fresh.jpg";
   const id = currentTabs().selectedId!;
   act(() => browse.pageStateChanged(id, { url: "https://site0.example/", title: "Site 0", isLoading: false, isLive: true, canGoBack: false, canGoForward: false } as never));
@@ -295,7 +284,7 @@ const BROWSING_GLASS = ["floatingBarTabs", "floatingBarAddress", "floatingBarPlu
 const DECK_GLASS = ["deckBarIncognito", "deckSearchTabs", "deckBarPlus"];
 const DECK_GLYPHS = ["deckBarIncognitoGlyph", "deckSearchTabsContent", "deckBarPlusGlyph"];
 
-onIPhone("the bar is one bar throughout: its three glass shapes stay while the browsing glyphs cross-fade into the tab view's on them, the deck's bar takes the glass over in one commit once the page's bottom edge has cleared it, and gives it back if the finger comes down again", () => {
+test("the bar is one bar throughout: its three glass shapes stay while the browsing glyphs cross-fade into the tab view's on them, the deck's bar takes the glass over in one commit once the page's bottom edge has cleared it, and gives it back if the finger comes down again", () => {
   jest.spyOn(lookModule, "glassIsNative").mockImplementation(() => true);
   const root = app();
   const id = currentTabs().selectedId!;
@@ -371,7 +360,7 @@ async function freshPictureTakesOver(root: Root) {
   expect(surface()).toBe("deck");
 }
 
-onIPhone("with Reduce Motion nothing tracks the finger and nothing waits: over a card whose picture is already painted the swipe starts the cross-fade within two frames, the page fades where it is, and when the fade ends the live page stands in its own card until its fresh picture has painted under it", async () => {
+test("with Reduce Motion nothing tracks the finger and nothing waits: over a card whose picture is already painted the swipe starts the cross-fade within two frames, the page fades where it is, and when the fade ends the live page stands in its own card until its fresh picture has painted under it", async () => {
   const { id, snapped } = reducedMotionPage();
   act(() => updateTabById(id, { snapshotFileName: CACHED }));
   const root = app();
@@ -408,7 +397,7 @@ onIPhone("with Reduce Motion nothing tracks the finger and nothing waits: over a
   expect(counted).toHaveBeenCalledWith("deck_bar_swipes");
 });
 
-onIPhone("with Reduce Motion the waiting deck takes each new picture of the page in front as it lands, so the next request can fade over it; with normal motion it doesn't re-render for one", async () => {
+test("with Reduce Motion the waiting deck takes each new picture of the page in front as it lands, so the next request can fade over it; with normal motion it doesn't re-render for one", async () => {
   for (const reduced of [true, false]) {
     mockMotion.reduced = reduced;
     const id = currentTabs().selectedId!;
@@ -431,7 +420,7 @@ onIPhone("with Reduce Motion the waiting deck takes each new picture of the page
   }
 });
 
-onIPhone("with Reduce Motion and no painted picture in the card there is no fade and still no wait: within two frames of the tap the live page stands in its own card with the tabs around it, a cut as before the swipe followed the finger, and the card is never seen empty", async () => {
+test("with Reduce Motion and no painted picture in the card there is no fade and still no wait: within two frames of the tap the live page stands in its own card with the tabs around it, a cut as before the swipe followed the finger, and the card is never seen empty", async () => {
   const { snapped } = reducedMotionPage();
   const root = app();
   const target = deckPull.target.value!;
@@ -450,7 +439,7 @@ onIPhone("with Reduce Motion and no painted picture in the card there is no fade
   expect(snapped).toHaveBeenCalledTimes(1);
 });
 
-onIPhone("the tab view's bar is never seen without its glyphs: when the page lands too low for the deck to have taken the bar, the deck's glyphs are in place from the frame the page is handed over, before the surface changes", () => {
+test("the tab view's bar is never seen without its glyphs: when the page lands too low for the deck to have taken the bar, the deck's glyphs are in place from the frame the page is handed over, before the surface changes", () => {
   jest.spyOn(lookModule, "glassIsNative").mockImplementation(() => true);
   reducedMotionPage();
   const root = app();
@@ -476,7 +465,7 @@ const landed = () => {
   expect(deckPull.stage.value).toBe(PULL_STAGE.landed);
 };
 
-onIPhone("a second request for the tabs while the landed page waits for its picture is ignored: the first one finishes and the old entrance never starts over it", async () => {
+test("a second request for the tabs while the landed page waits for its picture is ignored: the first one finishes and the old entrance never starts over it", async () => {
   reducedMotionPage();
   const root = app();
   act(() => void browse.showDeck());
@@ -490,7 +479,7 @@ onIPhone("a second request for the tabs while the landed page waits for its pict
   await freshPictureTakesOver(root);
 });
 
-onIPhone("a pull's wait for its picture gives up only its own capture: one begun for another tab meanwhile is still held when the first pull hands over", async () => {
+test("a pull's wait for its picture gives up only its own capture: one begun for another tab meanwhile is still held when the first pull hands over", async () => {
   const { snapped } = reducedMotionPage();
   const other = currentTabs().open.find((tab) => tab.id !== currentTabs().selectedId)!.id;
   act(() => browse.pageStateChanged(other, { url: "https://site1.example/", title: "Site 1", isLoading: false, isLive: true, canGoBack: false, canGoForward: false } as never));
@@ -510,7 +499,7 @@ onIPhone("a pull's wait for its picture gives up only its own capture: one begun
   expect(browse.deckPullInFlight()).toBe(false);
 });
 
-onIPhone("a pull whose picture arrives after a card has really begun to open stands down without ending that open: the card is growing on the UI thread before the stale wait is answered and still is after", async () => {
+test("a pull whose picture arrives after a card has really begun to open stands down without ending that open: the card is growing on the UI thread before the stale wait is answered and still is after", async () => {
   reducedMotionPage();
   const root = app();
   act(() => void browse.showDeck());
@@ -538,7 +527,7 @@ onIPhone("a pull whose picture arrives after a card has really begun to open sta
   expect(surface()).toBe("deck");
 });
 
-onIPhone("the waits for a late picture share one deadline: a first picture that never paints and a replacement that never paints either still hand the page over about a second after the wait began, counted once", async () => {
+test("the waits for a late picture share one deadline: a first picture that never paints and a replacement that never paints either still hand the page over about a second after the wait began, counted once", async () => {
   const OLD = "file:///snapshots/older.jpg";
   const { id, snapped } = reducedMotionPage();
   const captures: ((snapshot: unknown) => void)[] = [];
@@ -567,7 +556,7 @@ onIPhone("the waits for a late picture share one deadline: a first picture that 
   expect(counted.mock.calls.filter(([name]) => name === "deck_pictures_late")).toHaveLength(1);
 });
 
-onIPhone("a replacement picture that has painted by the deadline is not counted late, even when the wait that ran out was for the picture it replaced", async () => {
+test("a replacement picture that has painted by the deadline is not counted late, even when the wait that ran out was for the picture it replaced", async () => {
   const OLD = "file:///snapshots/older.jpg";
   const { id, snapped } = reducedMotionPage();
   const captures: ((snapshot: unknown) => void)[] = [];
@@ -594,7 +583,7 @@ onIPhone("a replacement picture that has painted by the deadline is not counted 
   expect(counted).not.toHaveBeenCalledWith("deck_pictures_late");
 });
 
-onIPhone("with Reduce Motion an overtaken card open is cleared when what overtook it left it recorded: a page opened from a link while the page fades in stays in front, and no opening is left behind", () => {
+test("with Reduce Motion an overtaken card open is cleared when what overtook it left it recorded: a page opened from a link while the page fades in stays in front, and no opening is left behind", () => {
   mockMotion.reduced = true;
   withTabs(3);
   browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null });
@@ -616,7 +605,7 @@ onIPhone("with Reduce Motion an overtaken card open is cleared when what overtoo
   expect(pull.deckPullGrowing()).toBeNull();
 });
 
-onIPhone("with Reduce Motion a card open that has been overtaken doesn't come back: when another tab is put in front while the page fades in, the fade's end clears the open and leaves that tab selected and in front", () => {
+test("with Reduce Motion a card open that has been overtaken doesn't come back: when another tab is put in front while the page fades in, the fade's end clears the open and leaves that tab selected and in front", () => {
   mockMotion.reduced = true;
   withTabs(3);
   browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null });
@@ -640,7 +629,7 @@ onIPhone("with Reduce Motion a card open that has been overtaken doesn't come ba
   expect(pull.deckPullGrowing()).toBeNull();
 });
 
-onIPhone("with normal motion an overtaken card open doesn't come back either: another tab put in front while the card grows, before its page is made, stays selected and in front", () => {
+test("with normal motion an overtaken card open doesn't come back either: another tab put in front while the card grows, before its page is made, stays selected and in front", () => {
   withTabs(3);
   browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null });
   const root = renderSurface(<Surfaces />);
@@ -659,7 +648,7 @@ onIPhone("with normal motion an overtaken card open doesn't come back either: an
   expect(deckPull.stage.value).toBe(PULL_STAGE.idle);
 });
 
-onIPhone("the deck takes over only when the picture that is current at the handover has painted: a newer one that lands while an older one is awaited is drawn and awaited instead", async () => {
+test("the deck takes over only when the picture that is current at the handover has painted: a newer one that lands while an older one is awaited is drawn and awaited instead", async () => {
   const OLD = "file:///snapshots/older.jpg";
   const { id, snapped } = reducedMotionPage();
   const captures: ((snapshot: unknown) => void)[] = [];
@@ -690,7 +679,7 @@ onIPhone("the deck takes over only when the picture that is current at the hando
   expect(surface()).toBe("deck");
 });
 
-onIPhone("a picture that hasn't painted when the paint cap runs out doesn't uncover an empty card: the live page keeps standing in the card for the longer cap, the deck takes over the moment the picture paints, and only if it never does is the page handed over and the late picture counted", async () => {
+test("a picture that hasn't painted when the paint cap runs out doesn't uncover an empty card: the live page keeps standing in the card for the longer cap, the deck takes over the moment the picture paints, and only if it never does is the page handed over and the late picture counted", async () => {
   for (const paints of [true, false]) {
     reducedMotionPage();
     const root = app();
@@ -719,7 +708,7 @@ onIPhone("a picture that hasn't painted when the paint cap runs out doesn't unco
   }
 });
 
-onIPhone("a request for the tabs that is still waiting for the deck is dropped when another tab comes in front, not answered over that tab; with the same page still in front it falls back to the old entrance", () => {
+test("a request for the tabs that is still waiting for the deck is dropped when another tab comes in front, not answered over that tab; with the same page still in front it falls back to the old entrance", () => {
   const first = currentTabs().selectedId!;
   const other = currentTabs().open.find((tab) => tab.id !== first)!.id;
   const root = renderSurface(<Surfaces />, { flushTimers: false });
@@ -747,7 +736,7 @@ onIPhone("a request for the tabs that is still waiting for the deck is dropped w
   expect(pull.peekDeckPullEntrance()).toBeNull();
 });
 
-onIPhone("with Reduce Motion a card opens as a cross-fade too: the deck holds still, can't be dragged and stays the surface, the page is made under it unseen, and once it is laid out it fades in over the cards and the deck lets go when the fade has ended", () => {
+test("with Reduce Motion a card opens as a cross-fade too: the deck holds still, can't be dragged and stays the surface, the page is made under it unseen, and once it is laid out it fades in over the cards and the deck lets go when the fade has ended", () => {
   mockMotion.reduced = true;
   withTabs(3);
   browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null });
@@ -799,7 +788,7 @@ onIPhone("with Reduce Motion a card opens as a cross-fade too: the deck holds st
   expect(opacity(host(root, "pagePull")!)).toBe(1);
 });
 
-onIPhone("with Grid chosen the waiting deck holds the grid, the page's target is its own tile, and the swipe lands there", () => {
+test("with Grid chosen the waiting deck holds the grid, the page's target is its own tile, and the swipe lands there", () => {
   writePreference(browserDatabase(), deckGrid.DECK_GRID_KEY, "true");
   act(() => deckGrid.forgetDeckGrid());
   const root = app();
@@ -823,7 +812,7 @@ onIPhone("with Grid chosen the waiting deck holds the grid, the page's target is
   expect(hosts(root, "tabGridCell")).toHaveLength(5);
 });
 
-onIPhone("the scripted pull replays a fixed finger path through the gesture's own worklets: each pull commits and reopens the same tab, the last is let go early, and the log gets a line for tracking, one for landing and a last line", async () => {
+test("the scripted pull replays a fixed finger path through the gesture's own worklets: each pull commits and reopens the same tab, the last is let go early, and the log gets a line for tracking, one for landing and a last line", async () => {
   const lines: string[] = [];
   perf.enableInteractionPerf(true, (line) => lines.push(line));
   const root = app();
@@ -864,7 +853,7 @@ test("the scripted pull only logs when no page is showing", async () => {
   expect(surface()).toBe("start");
 });
 
-onIPhone("a pull whose frames stalled is counted once it settles, and not in Incognito; a pull at the display's pace isn't", () => {
+test("a pull whose frames stalled is counted once it settles, and not in Incognito; a pull at the display's pace isn't", () => {
   const root = app();
   const id = currentTabs().selectedId!;
   swipe([{ dy: -22 }, { dy: -60, velocityY: 0 }]);

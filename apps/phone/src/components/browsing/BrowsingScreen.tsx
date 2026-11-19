@@ -8,7 +8,7 @@ import { BAR_SHOWN, barShown, followScroll, obscuredBottom, pageInsets } from ".
 import { neighbours, PAGER } from "../../lib/pagerPhysics";
 import { useSystemBars } from "../../state/app/systemBars";
 import { useFrozenOrder, useNavigation, usePageTone, watchPageLoad } from "../../state/browse/hooks";
-import { armDeckPull, beginDeckPull, deckPull, disarmDeckPull, releaseDeckPull, trackDeckPull, type PullSettled } from "../../state/browse/deckPull";
+import { abandonDeckPull, armDeckPull, beginDeckPull, deckPull, disarmDeckPull, releaseDeckPull, trackDeckPull, type PullSettled } from "../../state/browse/deckPull";
 import { refreshHiddenDeck } from "../../state/browse/deckHold";
 import { closePageMenu, editPageQuery, openPageMenu } from "../../state/page/actions";
 import { useFindOpen, useMenuOpen, usePressOpen, useReaderTabId } from "../../state/page/hooks";
@@ -27,7 +27,6 @@ import {
   barHeight,
   browseLayout,
   ink,
-  iPhoneOr,
   isDarkColor,
   LoadingLine,
   type LoadWatch,
@@ -130,12 +129,12 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   };
   const incognito = useIncognito();
   const reduceMotion = useReduceMotion();
-  const pulls = Platform.OS === "ios" && design === "redesigned" && !column;
+  const pulls = design === "redesigned" && !column;
   const tracks = pulls && !reduceMotion;
   useEffect(() => {
     if (!pulls) return;
     armDeckPull(tab.id, reduceMotion);
-    return () => disarmDeckPull(tab.id);
+    return () => disarmDeckPull(tab.id, deckPullSettled);
   }, [pulls, reduceMotion, tab.id]);
   const barCenter = barCenterFromBottom(insets.bottom, design);
   const barTop = barCenter + floatingBarLayout.control / 2;
@@ -198,7 +197,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
               style={[styles.bar, { height: barHeight(insets.bottom, design) }, underBar ? null : barStyle, collapse.style]}
             >
               {design === "redesigned" ? (
-                <BarControls style={[styles.controls, { bottom: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2, paddingHorizontal: safeSide }, pulls ? barShift : null]} pointerEvents="box-none">
+                <Animated.View style={[styles.controls, { bottom: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2, paddingHorizontal: safeSide }, pulls ? barShift : null]} pointerEvents="box-none">
                   <Animated.View
                     testID="floatingBarFold"
                     collapsable={false}
@@ -234,7 +233,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                       <HostPill tab={tab} dark={barDark} shown={collapse.collapsed} anchors={collapse.collapsed} contentStyle={collapse.fold.pillContent} onExpand={collapse.expand} />
                     </Animated.View>
                   ) : null}
-                </BarControls>
+                </Animated.View>
               ) : (
                 <>
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: barDark ? tabsInk.barShadeOnDark : tabsInk.barShadeOnLight }]} />
@@ -265,7 +264,6 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   );
 });
 
-const BarControls = iPhoneOr<typeof Animated.View>(Animated.View, View as unknown as typeof Animated.View);
 
 const COLUMN_PAGE = { pageBottom: 0, toneBottom: 0 };
 const COLUMN_OBSCURED = { top: 0, bottom: 0 };
@@ -338,6 +336,7 @@ export function barSwipeUp(enabled: boolean, pagerActive: { value: number }, ope
     })
     .onFinalize(() => {
       deckPull.warm.value = false;
+      abandonDeckPull(id, settled);
     })
     .onStart((event) => {
       if (pagerActive.value) return;

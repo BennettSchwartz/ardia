@@ -1,4 +1,5 @@
 import { Platform } from "react-native";
+import { FLOATING_BAR_PLACE } from "../../lib/deckGeometry";
 export const ink = { white: "#FFFFFF", black: "#000000", clear: "#00000000", knobShadow: "rgba(0,0,0,0.25)" } as const;
 
 const ANDROID_DARK_SURFACE = "#1E1B1D";
@@ -407,9 +408,9 @@ export const archiveCardLayout = { radius: 16, tile: 28, maxWidth: 520, aboveBar
 export const onboardingArt = { appIcon: 60, linkCardWidth: 210, linkCardRadius: 18, stripHeight: 64, arrowLift: 26, shadowRadius: 12, sheetRadius: 38 } as const;
 
 export const floatingBarLayout = {
-  control: 48,
-  gap: 8,
-  bottomGap: 21.5,
+  control: FLOATING_BAR_PLACE.control,
+  gap: FLOATING_BAR_PLACE.gap,
+  bottomGap: FLOATING_BAR_PLACE.bottomGap,
   glyph: 19,
   menuGlyph: 17,
   plusSymbol: 23.6,

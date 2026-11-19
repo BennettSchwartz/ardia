@@ -5,7 +5,7 @@ import { pages, type PageEngineEvent, type PageRequestAnswer } from "../../platf
 
 export type { ReadableContent } from "../../platform/pages";
 import { copyText, openExternal, preferredLanguage, pressHaptic, shareLink, successHaptic } from "../../platform/system";
-import { cancelSearch, closeArchive, openTab, showDeck, takeSheetFromSettings, useBrowse } from "../browse/store";
+import { cancelSearch, closeArchive, deckPullCommitted, openTab, showDeck, takeSheetFromSettings, useBrowse } from "../browse/store";
 import { display } from "../search/omnibox";
 import { presentSearch, searchState } from "../search/store";
 import { setPreference } from "../settings/store";
@@ -429,6 +429,7 @@ export function handleSystemBack(): boolean {
     return true;
   }
   if (surface === "deck") return dismissArchiveCard();
+  if (surface === "browsing" && deckPullCommitted()) return true;
   const layer = backLayer({
     isFullscreen: surface === "browsing" && pageIsFullscreen(id),
     hasRequest: surface === "browsing" && pageRequest(id) !== null,

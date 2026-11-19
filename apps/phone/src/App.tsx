@@ -123,7 +123,7 @@ export function Surfaces() {
   const leaving = useLeavingTab();
   const design = useDesign();
   const column = useColumn();
-  const pageOverDeck = PAGE_LAYERED && design === "redesigned" && !column;
+  const pageOverDeck = design === "redesigned" && !column;
   const pageUnderDeck = surface === "deck" && tab !== null && (tab.id === opening || tab.id === leaving);
   const settingsOpen = useSettingsNav((s) => s.open);
   const onboarding = useOnboarding((s) => s.showing);
@@ -156,12 +156,7 @@ export function Surfaces() {
           <Shade shaded={searching}>
             <FrostSource name={SURFACES_FROST} style={StyleSheet.absoluteFill} pointerEvents="box-none" collapsable={false}>
               {duo && surface !== "start" ? <DuoBrowsing /> : null}
-              {PAGE_LAYERED ? (pageOverDeck ? [deck, pageLayer] : [pageLayer, deck]) : (
-                <>
-                  {page}
-                  {deck}
-                </>
-              )}
+              {pageOverDeck ? [deck, pageLayer] : [pageLayer, deck]}
               {surface === "start" ? <StartScreen /> : null}
             </FrostSource>
           </Shade>
@@ -187,7 +182,6 @@ export function Surfaces() {
   );
 }
 
-const PAGE_LAYERED = Platform.OS === "ios";
 const PAGE_UNSEEN_AWAY = 100_000;
 
 function PageLayer({ away, unseen, children }: { away: boolean; unseen: boolean; children: ReactNode }) {

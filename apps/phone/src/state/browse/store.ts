@@ -54,7 +54,7 @@ import { DECK_PULL } from "../../lib/deckPull";
 import { runOnUI } from "react-native-reanimated";
 import { showToast } from "../toasts/store";
 import { hideArchiveCard } from "./archiveCard";
-import { cutDeckPullFromRest, deckPullArmed, deckPullFades, deckPullGrowing, deckStandbyId, endDeckPull, fadeDeckPullFromRest, handOverDeckPull, landDeckPullFromRest, noteDeckPullEntrance, whenDeckStandby } from "./deckPull";
+import { cutDeckPullFromRest, deckPull, deckPullArmed, deckPullFades, deckPullGrowing, deckStandbyId, endDeckPull, fadeDeckPullFromRest, handOverDeckPull, landDeckPullFromRest, noteDeckPullEntrance, PULL_STAGE, whenDeckStandby } from "./deckPull";
 import { beginInteraction, cutInteraction, INTERACTION_WINDOW_MS } from "../app/interactionPerf";
 import { refreshHiddenDeck, wantDeckStandby } from "./deckStandby";
 import { countUsage } from "../telemetry/telemetry";
@@ -525,6 +525,8 @@ function enterDeckFromPull(id: string) {
     useBrowse.setState({ surface: "deck", deckEntrance: null, frozenOrder: null, opening: null, veiled: null, covered: null, leaving: null });
   });
 }
+
+export const deckPullCommitted = () => deckPull.stage.value === PULL_STAGE.landing || landingFromRest !== null || handingOver !== null;
 
 export const deckPullInFlight = () => trackedPull !== null || landingFromRest !== null || handingOver !== null || pullCapture !== null;
 

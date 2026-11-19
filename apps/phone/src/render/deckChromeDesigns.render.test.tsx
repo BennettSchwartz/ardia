@@ -5,7 +5,7 @@ import { DeckBar } from "../components/tabs/DeckBar";
 import { IncognitoChip } from "../components/tabs/DeckChrome";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { ConfirmSheet, DesignProvider, IncognitoSpecs, Symbol, SystemGlyph } from "../components/ui";
-import { deckGeometry } from "../lib/deckGeometry";
+import { deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import { designFor, type Design } from "../lib/design";
 import { haptics } from "../state/app/haptics";
 import { useArchiveCard } from "../state/browse/archiveCard";
@@ -110,7 +110,7 @@ test("the redesign drops the old bar and chip for main's header and bottom bar",
   unmount(root);
 });
 
-test("the redesigned cards sit 24 points lower than the original's, centred in the band between main's header and bar", () => {
+test("the redesigned cards sit 24 points lower than the original's on iPhone, centred in the band between main's header and bar; on Android the bar sits where the browsing bar does, so the band's centre rises by half of that lift", () => {
   const { width, height } = Dimensions.get("window");
   const original = deck("original");
   const before = cardCentres(original);
@@ -120,7 +120,9 @@ test("the redesigned cards sit 24 points lower than the original's, centred in t
   expect(after.length).toBeGreaterThan(0);
   const expected = deckGeometry(width, height, SAFE_TOP, SAFE_BOTTOM, 0, Platform.OS, "redesigned", 48).cardCenterY;
   for (const centre of after) expect(centre).toBeCloseTo(expected, 5);
-  for (const centre of before) expect(centre).toBeCloseTo(expected - 24, 5);
+  const barLift = redesignedBarCenterFromBottom(SAFE_BOTTOM, Platform.OS) - (Math.max(SAFE_BOTTOM, 20) + 11);
+  expect(barLift).toBe(Platform.OS === "android" ? 10.5 : 0);
+  for (const centre of before) expect(centre).toBeCloseTo(expected - 24 + barLift / 2, 5);
   unmount(root);
 });
 
@@ -221,14 +223,14 @@ test("the Incognito pill shows only while there are private tabs, with their cou
   unmount(root);
 });
 
-test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-point plus, with no grid button, 8 apart, 24 in from the sides, centred 11 points above the safe bottom", () => {
+test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-point plus, with no grid button, 8 apart, 24 in from the sides, centred 11 points above the safe bottom on iPhone and where the browsing bar sits on Android", () => {
   const { height } = Dimensions.get("window");
   const root = deck();
   const bar = style(root, "deckBottomBar");
   expect(bar).toMatchObject({ height: 48, gap: 8, paddingHorizontal: 24 });
   let place = host(root, "deckBottomBar")!.parent;
   while (place && StyleSheet.flatten(place.props.style)?.position !== "absolute") place = place.parent;
-  expect((StyleSheet.flatten(place!.props.style).top as number) + 24).toBe(height - Math.max(SAFE_BOTTOM, 20) - 11);
+  expect((StyleSheet.flatten(place!.props.style).top as number) + 24).toBe(height - redesignedBarCenterFromBottom(SAFE_BOTTOM, Platform.OS));
   expect(host(root, "deckBarGrid")).toBeUndefined();
   expect(style(root, "deckBarIncognito")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(style(root, "deckBarPlus")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
