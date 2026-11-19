@@ -11,39 +11,19 @@ const { call, ok } = socketClient(35);
 
 const item = (path, title, more) => ({ path, title, enabled: true, checked: false, separator: false, ...more });
 
-test("menus.bar and a tracked menu bar are refused while the menu bar reflects a private window", async () => {
+test("the menu bar is refused while a private window is open, and a tracked bar is never listed", async () => {
   const { windowId } = await freshWindow();
   const minimize = item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" });
-  stub.surfaces.bar = [item([5], "Window", { submenu: [minimize] })];
-  stub.surfaces.open = [{ id: "pb1", kind: "menuBar", window: windowId, reflectsPrivate: true, items: [minimize] }];
-  stub.surfaces.barReflectsPrivate = true;
-  try {
-    const bar = await call("menus.bar");
-    assert.equal(bar.error?.code, "refused");
-    assert.match(bar.error.message, /private window/);
-    assert.deepEqual(await ok("menus.open"), [], "a tracked bar that reflects a private window isn't listed");
-    const chose = await call("menus.choose", { menu: "pb1", path: minimize.path, ref: minimize.ref });
-    assert.equal(chose.error?.code, "refused");
-    assert.equal((await call("menus.runBar", { path: minimize.path, ref: minimize.ref, window: windowId })).error?.code, "refused");
-  } finally {
-    stub.surfaces.barReflectsPrivate = false;
-  }
+  stub.surfaces.bar = [item([5], "Window", { ref: "menu@Window", submenu: [minimize] })];
+  stub.surfaces.open = [{ id: "pb1", kind: "menuBar", window: windowId, items: [minimize] }];
+  assert.deepEqual(await ok("menus.open"), []);
+  S().createWindow({ kind: "private", url: "https://p.example/" });
+  const bar = await call("menus.bar");
+  assert.equal(bar.error?.code, "refused");
+  assert.match(bar.error.message, /private window is open/);
+  assert.equal((await call("menus.choose", { menu: "pb1", path: minimize.path, ref: minimize.ref })).error?.code, "refused");
+  assert.equal((await call("menus.runBar", { path: minimize.path, ref: minimize.ref, window: windowId })).error?.code, "refused");
 });
-
-test("a command doesn't run when its menu closed during the native check", async () => {
-  const { windowId } = await freshWindow();
-  const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
-  stub.surfaces.bar = [item([1], "File", { submenu: [newTab] })];
-  stub.surfaces.open = [{ id: "cl1", kind: "menuBar", window: windowId, items: [newTab] }];
-  const tabsBefore = Object.keys(S().tabs).length;
-  stub.surfaces.checkHook = () => stub.surfaces.emit({ type: "menuClosed", id: "cl1", kind: "menuBar" });
-  const reply = await call("menus.choose", { menu: "cl1", path: newTab.path, ref: newTab.ref });
-  stub.surfaces.checkHook = null;
-  assert.equal(reply.error?.code, "no_window");
-  await tick();
-  assert.equal(Object.keys(S().tabs).length, tabsBefore, "run never ran");
-});
-
 test("Arrange in Front runs with no private window open and is refused with one", async () => {
   const { windowId } = await freshWindow();
   const arrange = item([5, 3], "Arrange in Front", { action: "arrangeWindowsInFront:", ref: "sel:arrangeWindowsInFront:@Window\u001fArrange in Front" });

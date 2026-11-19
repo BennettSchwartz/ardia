@@ -78,15 +78,15 @@ test("open menus are listed and closed through the native menu, and page menus a
     { id: "m3", kind: "menuBar", window: windowId, items: [] },
   ];
   const open = await ok("menus.open");
-  assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m1", windowId, tab], ["m2", windowId, tab], ["m3", windowId, null]]);
+  assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m1", windowId, tab], ["m2", windowId, tab]], "a tracking menu bar isn't listed");
   assert.equal((await call("menus.choose", { menu: "m1", path: [] })).error.code, "bad_request");
   for (const menu of ["m1", "m2"]) {
     const reply = await call("menus.choose", { menu, path: [0] });
     assert.equal(reply.error.code, "refused", menu);
-    assert.match(reply.error.message, /only from the menu bar/);
+    assert.match(reply.error.message, /menus.runBar instead/);
   }
   await ok("menus.dismiss", { menu: "m2" });
-  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m1", "m3"]);
+  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m1"]);
 });
 
 test("a page's menu in a private window is not listed", async () => {
@@ -98,34 +98,36 @@ test("a page's menu in a private window is not listed", async () => {
   assert.equal((await call("menus.dismiss", { menu: "m4" })).error.code, "no_window");
 });
 
-test("menus.runBar sends Ardia commands through run and other items through the menu", async () => {
+test("menus.runBar runs a catalog item by its ref: Ardia commands through run with no validation, other items to their native target", async () => {
   const { windowId } = await freshWindow();
   stub.surfaces.bar = [
     {
       path: [1],
       title: "File",
-      enabled: true,
-      checked: false,
+      ref: "menu@File",
       separator: false,
       submenu: [
-        { path: [1, 0], ref: "cmd:newTab@File\u001fNew Tab", title: "New Tab", enabled: true, checked: false, separator: false, command: "newTab" },
-        { path: [1, 2], ref: "cmd:newWindow@File\u001fOff", title: "Off", enabled: false, checked: false, separator: false, command: "newWindow" },
+        { path: [1, 0], ref: "cmd:newTab@File\u001fNew Tab", title: "New Tab", separator: false, command: "newTab" },
+        { path: [1, 2], ref: "cmd:newWindow@File\u001fNew Window", title: "New Window", separator: false, command: "newWindow" },
+        { path: [1, 3], ref: "dynamic@menu@File\u001fShare", title: "Share", separator: false, dynamic: true },
       ],
     },
-    { path: [2], title: "Edit", enabled: true, checked: false, separator: false, submenu: [{ path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", title: "Copy", enabled: true, checked: false, separator: false, action: "copy:" }] },
+    { path: [2], title: "Edit", ref: "menu@Edit", separator: false, submenu: [{ path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", title: "Copy", separator: false, action: "copy:" }] },
   ];
-  const tabsBefore = S().windows[windowId].tabIds?.length ?? Object.values(S().tabs).filter((t) => t.windowId === windowId).length;
+  const tabsBefore = Object.values(S().tabs).filter((t) => t.windowId === windowId).length;
   assert.deepEqual(await ok("menus.runBar", { path: [1, 0], ref: "cmd:newTab@File\u001fNew Tab", window: windowId }), { ok: true, title: "New Tab", command: "newTab" });
   await tick();
-  const tabsAfter = S().windows[windowId].tabIds?.length ?? Object.values(S().tabs).filter((t) => t.windowId === windowId).length;
-  assert.ok(tabsAfter > tabsBefore, "run opened a tab");
-  assert.equal((await call("menus.runBar", { path: [1, 2], ref: "cmd:newWindow@File\u001fOff" })).error.code, "refused");
+  assert.ok(Object.values(S().tabs).filter((t) => t.windowId === windowId).length > tabsBefore, "run opened a tab");
+  assert.equal((await call("menus.runBar", { path: [1, 1], ref: "cmd:newTab@File\u001fNew Tab" })).error.code, "no_window", "path and ref must agree");
   assert.equal((await call("menus.runBar", { path: [1, 1], ref: "x" })).error.code, "no_window");
+  const dynamic = await call("menus.runBar", { path: [1, 3], ref: "dynamic@menu@File\u001fShare" });
+  assert.equal(dynamic.error.code, "refused");
+  assert.match(dynamic.error.message, /built from open windows/);
+  assert.equal((await call("menus.runBar", { path: [1], ref: "menu@File" })).error.code, "no_window");
   assert.deepEqual(await ok("menus.runBar", { path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", window: windowId }), { ok: true, title: "performed", action: "copy:" });
-  assert.deepEqual(stub.surfaces.performed.at(-1), { menu: null, path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", windowId });
+  assert.deepEqual(stub.surfaces.performed.at(-1), { ref: "sel:copy:@Edit\u001fCopy", windowId });
   assert.equal((await ok("menus.bar")).length, 2);
 });
-
 test("menu and prompt events reach subscribers", async () => {
   const { windowId, tab } = await freshWindow("https://cam.example/");
   await ok("subscribe", { events: ["menu.opened", "menu.closed", "permission.prompted"] });

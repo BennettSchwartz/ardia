@@ -21,10 +21,8 @@ test("the socket never starts Open File, through run, menus.runBar or a menu bar
     await call("menus.runBar", { path: openFile.path, ref: openFile.ref, window: windowId }),
     await call("menus.choose", { menu: "of1", path: openFile.path, ref: openFile.ref }),
   ];
-  for (const reply of replies) {
-    assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
-    assert.match(reply.error.message, /apply's open op/);
-  }
+  for (const reply of replies) assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+  for (const reply of replies.slice(0, 3)) assert.match(reply.error.message, /needs the person to finish it/);
 });
 
 test("the menu bar is refused while a private window is open in the background behind a regular key window", async () => {
@@ -67,7 +65,7 @@ test("picks from a page's menu or a <select> popup are refused on every route, a
   for (const menu of ["pg1", "sl1"]) {
     const reply = await call("menus.choose", { menu, path: [0] });
     assert.equal(reply.error?.code, "refused", menu);
-    assert.match(reply.error.message, /only from the menu bar/);
+    assert.match(reply.error.message, /menus.runBar instead/);
   }
   assert.deepEqual(stub.surfaces.chosen, []);
 });

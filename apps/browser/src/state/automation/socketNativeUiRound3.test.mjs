@@ -56,24 +56,6 @@ test("permissions.respond is refused for every decision, and the prompt stays qu
   assert.equal(usePages.getState().pages[tab].permission.id, "r1");
 });
 
-test("a menu bar command is checked inside the tracked menu as the last step, so a row gone meanwhile never runs", async () => {
-  const { windowId } = await freshWindow();
-  const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
-  stub.surfaces.bar = [item([1], "File", { submenu: [newTab] })];
-  stub.surfaces.open = [{ id: "f2", kind: "menuBar", window: windowId, items: [newTab] }];
-  const tabsBefore = Object.keys(S().tabs).length;
-  stub.surfaces.checked.length = 0;
-  stub.surfaces.checkHook = () => {
-    stub.surfaces.open = [{ id: "f2", kind: "menuBar", window: windowId, items: [] }];
-  };
-  const reply = await call("menus.choose", { menu: "f2", path: newTab.path, ref: newTab.ref });
-  stub.surfaces.checkHook = null;
-  assert.equal(stub.surfaces.checked.at(-1)?.menu, "f2", "the check resolves inside the tracked menu");
-  assert.equal(reply.error?.code, "refused");
-  await tick();
-  assert.equal(Object.keys(S().tabs).length, tabsBefore, "run never ran");
-});
-
 test("username ids are tokens of the prompt and the username, never reusable positions", async () => {
   const { tab } = await freshWindow("https://login.example/");
   const usernames = Array.from({ length: 30 }, (_, i) => `user${i}`);

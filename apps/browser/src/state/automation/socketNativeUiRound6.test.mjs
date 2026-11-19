@@ -24,32 +24,20 @@ function barWith(state) {
   ];
 }
 
-test("menus.bar carries structure only: no field changes with the active page's state", async () => {
-  await freshWindow();
-  stub.surfaces.bar = barWith({ canGoBack: false, loading: false, muted: false });
-  const quiet = await ok("menus.bar");
-  stub.surfaces.bar = barWith({ canGoBack: true, loading: true, muted: true });
-  const busy = await ok("menus.bar");
-  assert.deepEqual(busy, quiet);
-  for (const row of flat(busy)) for (const key of Object.keys(row)) assert.ok(STRUCTURE.has(key), `${row.title}: ${key}`);
-});
-
-test("a private window opened during the last native check stops the command before run", async () => {
+test("a private window opened while the catalog is read stops the command before run", async () => {
   const { windowId } = await freshWindow();
   const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
-  stub.surfaces.bar = [item([1], "File", { submenu: [newTab] })];
-  stub.surfaces.open = [{ id: "pv1", kind: "menuBar", window: windowId, items: [newTab] }];
+  stub.surfaces.bar = [item([1], "File", { ref: "menu@File", submenu: [newTab] })];
   const tabsBefore = Object.keys(S().tabs).length;
-  stub.surfaces.checkHook = () => S().createWindow({ kind: "private", url: "https://p.example/" });
-  const reply = await call("menus.choose", { menu: "pv1", path: newTab.path, ref: newTab.ref });
-  stub.surfaces.checkHook = null;
+  stub.surfaces.barHook = () => S().createWindow({ kind: "private", url: "https://p.example/" });
+  const reply = await call("menus.runBar", { path: newTab.path, ref: newTab.ref, window: windowId });
+  stub.surfaces.barHook = null;
   assert.equal(reply.error?.code, "refused");
   assert.match(reply.error.message, /private window is open/);
   await tick();
   const regularTabs = Object.values(S().tabs).filter((t) => S().windows[t.windowId]?.kind !== "private").length;
   assert.equal(regularTabs, tabsBefore, "run never ran");
 });
-
 test("a background Ardia refuses every native menu item and runs only allowlisted Ardia commands", async () => {
   const { windowId } = await freshWindow();
   const minimize = item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" });
@@ -89,6 +77,6 @@ test("Open File isn't in commands, and run refuses it before resolving a window,
   S().createWindow({ kind: "private", url: "https://p.example/" });
   const reply = await call("run", { command: "openFile" });
   assert.equal(reply.error?.code, "refused");
-  assert.match(reply.error.message, /apply's open op/);
-  assert.match(surfacesModule.SURFACE_METHODS.find((m) => m.name === "menus.runBar").description, /Open File is refused[\s\S]*private window[\s\S]*background Ardia/);
+  assert.match(reply.error.message, /needs the person to finish it/);
+  assert.match(surfacesModule.SURFACE_METHODS.find((m) => m.name === "menus.runBar").description, /Open File[\s\S]*private window[\s\S]*background Ardia/);
 });

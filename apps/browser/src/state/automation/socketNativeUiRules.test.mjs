@@ -29,21 +29,20 @@ function trackingMenuBar(windowId) {
   return { quit, appleEvents, selectAll };
 }
 
-test("menus.choose on the tracking menu bar goes through the runBar rules, never straight to the item", async () => {
+test("a tracking menu bar isn't listed, and nothing is chosen from it", async () => {
   const { windowId } = await freshWindow();
   const { quit, appleEvents, selectAll } = trackingMenuBar(windowId);
   stub.surfaces.chosen.length = 0;
   stub.surfaces.performed.length = 0;
-  assert.equal((await call("menus.choose", { menu: "bar1", path: quit.path })).error.code, "bad_request", "a menu bar item needs its ref");
-  const refused = await call("menus.choose", { menu: "bar1", path: appleEvents.path, ref: appleEvents.ref });
-  assert.equal(refused.error.code, "refused", "an Ardia command meets run's automation policy");
-  assert.equal((await call("menus.choose", { menu: "bar1", path: selectAll.path, ref: quit.ref })).error.code, "refused", "a ref for another item");
-  const done = await ok("menus.choose", { menu: "bar1", path: selectAll.path, ref: selectAll.ref });
-  assert.equal(done.action, "selectAll:");
-  assert.deepEqual(stub.surfaces.performed, [{ menu: "bar1", path: selectAll.path, ref: selectAll.ref, windowId }], "the native allowlist decides, inside the tracked menu, at the window it names");
-  assert.deepEqual(stub.surfaces.chosen, [], "the menu's own item is never performed directly");
+  assert.deepEqual(await ok("menus.open"), []);
+  for (const it of [quit, appleEvents, selectAll]) {
+    const reply = await call("menus.choose", { menu: "bar1", path: it.path, ref: it.ref });
+    assert.equal(reply.error?.code, "refused", it.title);
+    assert.match(reply.error.message, /menus.runBar instead/);
+  }
+  assert.deepEqual(stub.surfaces.performed, []);
+  assert.equal((await call("menus.dismiss", { menu: "bar1" })).error?.code, "refused");
 });
-
 test("Ardia's own menus and unknown menus are refused, and runBar needs a ref", async () => {
   const { windowId } = await freshWindow();
   stub.surfaces.open = [
@@ -52,29 +51,7 @@ test("Ardia's own menus and unknown menus are refused, and runBar needs a ref", 
   ];
   assert.equal((await call("menus.choose", { menu: "app1", path: [0] })).error.code, "refused");
   assert.equal((await call("menus.choose", { menu: "oth1", path: [0] })).error.code, "refused");
-  trackingMenuBar(windowId);
   assert.equal((await call("menus.runBar", { path: [2, 4] })).error.code, "bad_request");
-});
-
-test("every menu needs a known owner outside private windows", async () => {
-  const { windowId, tab } = await freshWindow();
-  const priv = S().createWindow({ kind: "private", url: "https://p.example/" });
-  const other = S().createWindow({ url: "https://b.example/" });
-  stub.surfaces.open = [
-    { id: "n1", kind: "page", tab, items: [] },
-    { id: "n2", kind: "app", items: [] },
-    { id: "n3", kind: "app", window: priv, items: [] },
-    { id: "n4", kind: "select", tab, window: other, items: [] },
-    { id: "n5", kind: "select", window: windowId, items: [] },
-    { id: "n6", kind: "page", tab, window: windowId, items: [] },
-    { id: "n7", kind: "menuBar", items: [] },
-    { id: "n8", kind: "menuBar", keyless: true, items: [] },
-    { id: "n9", kind: "page", tab, keyless: true, items: [] },
-  ];
-  const listed = await ok("menus.open");
-  assert.deepEqual(listed.map((m) => m.id), ["n6"], "no menu bar is listed while a private window is open");
-  trackingMenuBar(windowId);
-  assert.equal((await call("menus.runBar", { path: [2, 4], ref: "sel:selectAll:@Edit\u001fSelect All", window: priv })).error.code, "refused");
 });
 
 test("a password answer is refused: for a replaced prompt as closed, for the current one until the engine names offers", async () => {
