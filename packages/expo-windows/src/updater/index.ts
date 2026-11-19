@@ -130,7 +130,7 @@ async function check(asked: boolean) {
     }
     if (await update.install(path, installer.sha256)) {
       console.info(`[ardia windows] update ${manifest.build} is installing`);
-      await TurboModuleRegistry.get<TurboModule & Pick<AppWindowsModule, "quit">>("ArdiaAppWindows")?.quit();
+      await TurboModuleRegistry.get<TurboModule & Pick<AppWindowsModule, "quit">>("ArdiaAppWindows")?.quit("update");
     }
   } catch (error) {
     console.info(`[ardia windows] update check failed: ${reason(error)}`);

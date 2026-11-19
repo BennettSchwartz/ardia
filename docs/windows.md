@@ -52,7 +52,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | New tab, close, reopen closed tab (Ctrl+Shift+T) | Works | |
 | Ctrl+Z reopens closed tabs | Works once turned on in Settings › Shortcuts (off by default, as on the Mac) | |
 | New window | Works | |
-| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again) | #1453 |
+| Private window | Works; closing one with two tabs asks first (Close 2 tabs?, Don't ask me again). Its pages paint as fast as a normal window's: in run 44320319587 a page's own window showed 40 to 50 ms after Enter in both, the local page painted in 141 to 168 ms and DuckDuckGo in 375 to 411 ms on its first visit (100 to 118 ms again). The first walk's 6 to 9 s of white was a slow navigation, which looks the same in any window (a CI run's DuckDuckGo visit hung 19 s on a white page before ERR_CONNECTION_RESET); the tour's `private-pages` part keeps the local page under 5 s in both windows | #1453, #2653 |
 | Close-tabs confirm while other windows load | Works: the confirm (like the prompt and the file pickers) runs on its own thread, so other windows keep loading and taking input while it is open; it stays in front of its own window and comes forward with it (#1688's self-check holds a confirm while a page loads, on CI; not walked here) | #1672, #1688 |
 | Quit and relaunch with the session restored | Works (tabs, the split and the open windows came back) | |
 | Engine memory trimmed after tabs close, once input is idle | Works (logged after closes) | #1544 |
@@ -62,6 +62,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Little Ardia (Ctrl+Alt+N) | Works, app-drawn chrome; its command bar lists recent pages | |
 | Search Tabs (Ctrl+Shift+A), Ctrl+Tab | Works (d83398e1f): the new page has the keyboard after Ctrl+Tab and after Next Tab into a tab a restore left unloaded (#1658, #1691). Gap: a new tab opened with an address (Ctrl+T, the address, Enter) doesn't get the keyboard, tracked in #1689 (still so on 72901e27a) | #1658, #1689 |
 | Pin, Top Apps, New Group with Tab, tab menus | Works (the tab menu offers Move to Top Apps, Remove from Split View, Close Split View) | |
+| A group's folder opening and closing | Works: where the Mac draws the lid swinging open over 0.2 s (`FolderIconView`), Windows cross-fades the closed and open folder symbols over the same 0.2 s, shorter in proportion when a swap turns back part way, and at once with Windows' animation effects off (`views/FolderIcon.tsx`). The tour's `folder-swap` part captures both settings. A live folder's row shows its source's icon on both, so nothing swaps there | #2645 |
 | Page picture (a pinned page in another window) | Works: the other window shows the page picture | #1540 |
 | Tabs in the sidebar or across the top (Ctrl+Shift+S), hide the sidebar (Ctrl+S) | Works. The pale box once left over the page's top-left came from visiting a second profile, not from Ctrl+S: the next profile's sidebar page, parked beside the sidebar, cut a hole in the page. Gone on d83398e1f, on a full-width tab and a split pane. With tabs across the top (72901e27a), the open and recently closed tabs button and New Tab stay clear of the caption buttons down to the narrowest window (600 px), where tabs scroll instead, and a right-click on the empty strip opens the tab menu | #1673, #1583 |
 | Minimalism mode (Ctrl+Alt+M) | Works, except one edge (53d5a2bee, walked 2026-11-14): in all five layouts (sidebar left, right, hidden; tabs on top with the strip shown and hidden) the window buttons sit in the band, the sidebar header or the strip with only app UI under them; minimize, maximize, restore and close work, the band, strip or header drags and double-click maximizes; Split View, full screen, a second window and turning it off behave, at 100% and 125%. Left, right and bottom resize work; where the page reaches the top edge (sidebar right), the band resizes the window (#1888; a real drag in CI, the cursor and double click untried in the VM) | #1831, #1888 |
@@ -89,6 +90,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Page, link and image menus | Differs: Chromium's menu, trimmed as on the Mac (no Open link in split view, Cast, reading mode, QR code, send to your devices, Lens or other-profile items; Save as shows no Ctrl+S), but without the Mac's own items for a selection (search with Ardia's engine, Share) | #1811 |
 | Full-screen (a page element) | Works; Escape leaves it | |
 | Picture in picture | Differs: Chromium's window, no stash, corners or mini player | #1425 |
+| Playing now (the sidebar card and mini player for a tab playing media) | Works (engine `windows-engine-20261118-2`; seen by the `engine now playing:` self-checks in CI, not walked in the VM): the engine sends the Mac's `nowPlaying` tab event from Chromium's media session for the tab (`ardia/win/now_playing.cc`, a `MediaSessionObserver`), so media in a cross-site iframe shows too. Title, artist, album and artwork come from the page's Media Session metadata (the title falls back to the page title, the artwork is the largest declared size, as on the Mac); position, duration and rate from its position state or its one player; the actions are the page's handlers plus Chromium's defaults for a controllable player (play, pause, stop, seeks), so track buttons show only for a page with `nexttrack` or `previoustrack` handlers, as on the Mac. A report goes out when something changes, not on a timer, at most one per 100 ms with the latest state (playing, paused, controllable and the session ending go at once), and only when the position strays 0.5 s or more from where the card projects it; null when the page navigates, closes or drops its media. The report is read from the live session when it goes out (`chromium-win-media-session-page-state.patch`): a session that is active and controllable (a normal player, or a page-declared playback state) and whose players and routed frame all belong to the tab's primary page, so a page navigated away from (still unloading, or in the back/forward cache) is never reported as the new page's, and a track started muted on its element gets its card once it is unmuted. A muted tab keeps its session, and so does a track that plays to its end: the engine's patch `chromium-win-media-session-keeps-players.patch` stops Chromium dropping a muted tab's players (it does so only to avoid ducking other tabs, and audio focus is not enforced on Windows), so a muted tab reports and obeys exactly as an unmuted one, cross-site frames included (#2138), but it never takes the hardware media keys or Windows's media controls from a tab that is heard: `chromium-win-media-session-muted-ignored.patch` marks a muted tab's session as one the active-session choice skips, and moves the active session at once on mute and unmute, so focusing the muted tab's page does not take them either; unmuted, it is eligible again. It also keeps a persistent player (longer than 5 s) that reaches its end in the session as paused, as the Mac reports it: the card stays at the end and its play starts the track again from the start. The ended player holds the same suspended audio focus request as any paused one and leaves the same way (the page drops or replaces its media, navigates, or the tab closes). With other players in the session, an ended player the session dropped stays out, so a later mute, Picture-in-Picture or metadata change does not add it back. A short clip (5 s or less, Chromium's transient player, as for a notification sound) is still dropped at its end and leaves no card. Both apply to every WebContents in the engine; a player that never played with sound still never joins, as on the Mac. Commands read the session at the moment they run and go only to a live session; with none they do nothing and answer `done: false`. The one exception is a sleeping tab woken to play. The app wakes it with `reloadToPlay` (`platform/wakeReload.windows.ts`; the Mac and Linux keep a plain `reload`), and only that reload of a discarded tab arms the allowance, never a reload the user starts. It arms only when the navigation starts inside the host's own `Reload()` call (the discarded tab's empty document has no beforeunload handler, so in 157 the reload's navigation starts there; a reload Chromium holds back, such as behind its form resubmission warning, arms nothing); a second `reloadToPlay` while a wake reload is still pending keeps that wake and does nothing else (it calls no `Reload()`), because 157 ignores a duplicate browser-initiated navigation to the same address within 3 s of the pending one (`Navigator::Navigate`, `kIgnoreDuplicateNavs`), so a second reload would start nothing and strand the tab. The allowance then belongs to that navigation and to the document it commits (not an error page); it ends if that navigation is replaced or fails, at any other cross-document navigation, a host navigation call (load, reload, back, forward, stop), a discard, the tab's close, its key being bound again, `tab.create` with its key (the page moving to another window; the app's own wake never does that, since `wakeToPlay` needs the mounted view and an unmounted view closes its tab), or after 20 s. It is used once, in one step: with no live session, a `seekTo` (finite, non-negative) runs nothing and only records its seconds on the host, the latest winning, and answers `recorded`; the first `play` or `toggle` uses the allowance up before it is dispatched, whether or not a session is live, and with no session runs one script in the committed document's main frame inside Ardia's media-command scope, which picks the element, seeks it to the recorded seconds if any, and plays it, so only that document counts as asked. Nothing is kept in the page between commands, so a page cannot move a chosen element into another document. Accepted: the allowance survives `document.open()` and same-document navigations (the same document, with the page's own content), and next, previous, pause and stop while it is armed do nothing and leave it armed until the deadline. Commands reach the host in the order the app sends them (`callPage` chains them on the page's `ready` promise, the host module posts each to the UI thread in arrival order, and the engine runs a tab call synchronously), and the engine's answer (`done`, `byScript`, `recorded`) reaches the app through `engine/pageCalls.ts`. Reports go out at most once per 100 ms, and an artwork address over 2 KB is reported as a short token that `downloadImage` accepts, until the page changes. The card's play, pause, track, seek and stop go through the session; Next and Previous the page does not handle and seeks the session does not list are refused. A skip goes to the page's `seekto` handler at the last report plus 15 s when it has one, to its `seekforward` or `seekbackward` handler when it has only that (a report follows within a second so the card drops its guess), else to the players. Artwork goes through Chromium's own call for it, as Chrome's media controls do (`MediaSession::GetMediaImageBitmap`, from `now_playing_artwork.cc`): only an image the session declares (http(s) or `data:image/`), downloaded by the renderer in the frame that declared it, so it carries that frame's cookies and Sec-Fetch-Site and falls under its local network access, mixed content and extension rules, decoded there (SVG by Blink) and sized to at most 512 px, then encoded as a PNG; one download at a time per tab, the newest ask waiting and an older waiting ask answered with no image, and a result dropped when its image is no longer declared. At 30 s the asker is answered with no image, but the slot stays taken until Chromium's own callback arrives (it always does, on completion or when the frame or session goes), and only then does the newest waiting ask start; a late result is dropped. What SVG artwork returns is logged by a self-check. Watch `usage_counts.media_commands_not_done` (a card command with no session to take it) and `now_playing_artwork_empty` (an artwork ask that came back with no image). Differs from the Mac: media never heard has no session, so no card; `loop` is always false (the host cannot read the element's flag), so the card stops at the end of a looping track until the next report and each wrap counts as a rewind in `media_position_rewinds`; `hasVideo` is a video track in the session's players, where the Mac asks for a decoded video width. Self-checks (the `media` stage, its own app launch in `launch-smoke.ps1` with the autoplay checks, `selfCheck/engineMediaStage.ts`): `engine now playing:` in `selfCheck/engineNowPlaying.ts`, `engineNowPlayingAsks.ts`, `engineNowPlayingMuted.ts`, `engineNowPlayingArtwork.ts`, `engineNowPlayingEnded.ts` and `engineNowPlayingSessions.ts` | #2318, #2138 |
 | Downloads (download, panel, Ctrl+J) | Works: the panel opens for a new download and lists it, including one held for Keep; Ctrl+J opens it and Escape closes it (53d5a2bee, walked 2026-11-14) | #1519, #1610 |
 | History (Ctrl+H), Clear Browsing Data (Ctrl+Shift+Del) | Works; history is kept past 90 days and an import keeps its older pages, as on the Mac (engine `windows-engine-20261116-4` passes `keep-old-history`; seen by the `engine history:` self-check in CI) | #2009 |
 | Bookmarks (Ctrl+D, Ctrl+Shift+O) | Works | |
@@ -109,7 +111,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | ardia://extensions | Works | |
 | Ad, tracker and cookie-banner blocking | Not offered; hidden | #1425 |
 | Hide anything (Hide Element) | Not offered; hidden: its rules are kept by the content blocker, which Windows lacks | #1425 |
-| Block autoplay on every site, and Autoplay per site in Site Controls | Works (engine `windows-engine-20261116-9`; seen by the `engine autoplay:` self-checks in CI, not walked in the VM): the Mac's settings and rule, enforced in Blink. A tab whose top-level site is set to Block, or has no Autoplay setting of its own while Block autoplay everywhere is on, plays media only in a document whose user asked: a click, tap or key press that reached that document (not Escape, not a Ctrl or Windows-key chord; Ctrl with Alt is AltGr and counts), Ardia's own play controls for the media they play, or a user action through Chrome's media session; a subframe also plays while it has transient activation, as the Mac's page script allows. The site is the top-level document's origin, or for a `blob:` or `about:blank` page the origin that made it. `chromium-win-autoplay-policy.patch` carries the decision to each new document with its commit (out-of-process iframes included), updates open documents when the setting changes, after a back/forward cache restore and when a prerendered page is shown, and refuses in `AutoplayPolicy` before Chrome's exemptions (media engagement, a Sound allowance, capture) and before muted autoplay: `play()` rejects with NotAllowedError, the autoplay attribute and internal resumptions do nothing, detached elements and shadow roots included. Blocking an open page pauses what its user did not ask to play. Plays refused are counted in the engine (`usage_counts.autoplay_plays_blocked`, at most 20 per page). Not covered, as on the Mac: Web Audio. Ardia's play controls reach media in the page and its same-origin iframes only, as before. Self-checks: `engine autoplay:` in `selfCheck/engineAutoplay.ts` | #1425, #1774, #2125 |
+| Block autoplay on every site, and Autoplay per site in Site Controls | Works (engine `windows-engine-20261116-9`; seen by the `engine autoplay:` self-checks in CI, not walked in the VM): the Mac's settings and rule, enforced in Blink. A tab whose top-level site is set to Block, or has no Autoplay setting of its own while Block autoplay everywhere is on, plays media only in a document whose user asked: a click, tap or key press that reached that document (not Escape, not a Ctrl or Windows-key chord; Ctrl with Alt is AltGr and counts), Ardia's own play controls for the media they play, or a user action through Chrome's media session; a subframe also plays while it has transient activation, as the Mac's page script allows. The site is the top-level document's origin, or for a `blob:` or `about:blank` page the origin that made it. `chromium-win-autoplay-policy.patch` carries the decision to each new document with its commit (out-of-process iframes included), updates open documents when the setting changes, after a back/forward cache restore and when a prerendered page is shown, and refuses in `AutoplayPolicy` before Chrome's exemptions (media engagement, a Sound allowance, capture) and before muted autoplay: `play()` rejects with NotAllowedError, the autoplay attribute and internal resumptions do nothing, detached elements and shadow roots included. Blocking an open page pauses what its user did not ask to play. Plays refused are counted in the engine (`usage_counts.autoplay_plays_blocked`, at most 20 per page). Not covered, as on the Mac: Web Audio. Ardia's play controls go through Chrome's media session (engine `windows-engine-20261117-2`), so they reach media in cross-site iframes too, and a play counts as the user asking in the document that holds the media: a page's `play` handler runs as a user action through the media session, and without one the player's play is a user-triggered `RequestPlay` (both marked by the patch). From the card and hardware media keys alike, only a play, next track or previous track the page handles counts as asking (`chromium-win-media-session-asks.patch`); seeks, pause, stop and actions the page does not handle mark nothing, though Chrome still grants its own user activation for them in the handler's frame, and the host refuses track and seek commands the page's session does not take. A page with no live session (muted or never-heard media, or a tab the user muted) falls back to the old script, which reaches the page and its same-origin iframes only. Self-checks: `engine autoplay:` in `selfCheck/engineAutoplay.ts` | #1425, #1774, #2125 |
 | Block requests to send notifications (Settings › Privacy & Security) | Not offered; hidden: it turns a notification request down when the app hears one, and on Windows the app hears none and can't answer one (`permissions.resolve`), so Chromium's own prompt still asks | #1425 |
 | Bookmark export | Works: Windows' Save As, then the HTML file is written | #1551 |
 | Password export | Works up to Windows' own sign-in prompt over the app window; the walk cancelled it there (the VM account's password is not typed in a test), so the file was not written | #1551 |
@@ -130,6 +132,7 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
 | Keep new-tab links inside a Little Ardia window, zoom with Ctrl and the mouse wheel, offer to save and fill passwords | Does nothing (the engine has no call for them yet); hidden | #1783, #1425 |
 | Warn before quitting | Works (#1796's build 1f4d97db1, run 43631924720): with it on, closing the last window (close button, Alt+F4, Ctrl+Shift+W, a lone Little Ardia's Ctrl+W; Ctrl+W on a window's last tab follows the same rule) asks first with the Mac's words; Cancel keeps the app running, Quit exits, Don't ask again turns it off; a hidden instance never asks | #1782, #1803 |
 | Quitting with a download running | Asks first, like the Mac. Seen in the tour (run 44238038941): Alt+F4 asks, Cancel keeps the window, Quit ends the app; Ctrl+W on the only tab asks "Close 1 tab?", then the downloads question, and Cancel keeps the window and the tab; no download, no question. The update's install sentence is unit-tested only | #2488 |
+| A download's flight to the Downloads button | Works, from beside the page: the Mac's icon starts in the middle of the page, under the page's window here, so on Windows it starts in the sidebar at the page's edge (or, with no sidebar, above the page's middle in the top band) and flies the rest of the Mac's path over the app. It starts once its icon has drawn (at most 300 ms after the download comes), since a view animating from the moment it mounts loses its first frames here. The tour's `download-flight` part captures both starts | #2603 |
 | Widevine | Not offered (says so) | |
 | Copy naming the Mac | Works: the walk found three more (a ⌘T, "History › Recently Closed", "File › Close All Tabs"), fixed in #1668's PR | #1522, #1668 |
 
@@ -270,7 +273,8 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     another open window means no question, because nothing quits; the last-tab confirm stands in for the warning but
     never for this question (#2488; `quit_warnings_with_downloads` and its
     `_cancelled` count them). It is asked in the UI before the window closes: once the app has decided to quit, the
-    engine closes without a second question. The update's "ready to install" question adds a sentence when a
+    engine closes without a second question. A launch while the question is up is an ordinary launch: the same Ardia
+    opens it, nothing is cancelled or held, and the answer then quits or not as usual. The update's "ready to install" question adds a sentence when a
     download is running, since installing closes Ardia. The launch log says what happened at a close that quits:
     `[quit] asked: 1 download in progress, warning on; answered quit` (or `cancel`) when a question was shown, and on a
     hidden test instance, which never asks, `[quit] not asked on a hidden instance: 1 download in progress, warning on`,
@@ -642,6 +646,13 @@ is plain Chromium.
   a hole there, with the surface's corners. A surface inside a `ClipView` (the sidebar's and the tab strip's profile
   pages, which sit side by side and clip to one) reports only the part its clips show, so the next profile's rows,
   parked beside the sidebar, cut nothing in the page (#1673). A translucent surface shows the card behind it in the hole, not the page.
+  A download's flight to the Downloads button cuts no hole: a hole that moves with the icon would show the card
+  through a rectangle sliding across the page. It starts beside the page instead (`magnetPath`, from
+  `platform/downloadFlight.windows.ts`): in the sidebar at the page's edge, or in the top band when there is no
+  sidebar, and flies over the app. Its clock starts when its icon has drawn (the image's `onLoad`, at most 300 ms
+  after the download comes): started at once, as on the Mac, its first 150 ms or so never reached the screen in CI,
+  the mount lag the fade lab measures. `ARDIA_TEST downloadFlightFromPage=1` brings back the Mac's start in the page's
+  middle, which the tour's `download-flight` part captures beside the fixed one (#2603).
   A `Surface` that only draws a gradient (`GradientFill`, the address field's load glow) reports no rectangle: it always
   sits inside a toolbar, sidebar or Little Ardia plate that does, and `windowsGradientFill.test.mjs` pins its callers.
   Gradients draw through `ArdiaMaterialGradient` (`GradientView.h`): `fillColors` at `fillStops` top to bottom, masked
@@ -724,6 +735,12 @@ is plain Chromium.
   (`state/sync/syncPause.ts`), and Linux's authority start isn't changed for it. On the dashboard, `usage_counts`
   carries `sync_paused_by_launch_guard`, `sync_resumes` and `sync_resumes_completed`: resumes well below pauses means
   people don't find Resume, and completed well below resumes means the crash comes back when Sync loads.
+  On Windows `recoveredStart` is true only when the engine's `launch-guard.json` in the data folder parses, says
+  `"restoreStateSetAside": true`, and was written at or after this process started (`AppModule.h` `LaunchGuard`); a
+  missing, unreadable or stale file, or the app outside the engine, reads false. A test instance logs
+  `[sync] test: recoveredStart …, status …` and each Sync status after it, writes `[sync] unlock finished: unlocked`
+  (or `not unlocked`) when the native unlock returns, just before the load and its 2-minute timer begin, and
+  `ARDIA_TEST=syncTurnOn=1` turns Sync on in the `syncFolder` folder after the first window.
 - Sync keeps its own count of unsettled starts, because the launch guard misses a Sync crash that comes later than
   15 s (#2570's profile died at 5.2, 19.4, 3.8, 18.9 and 4.6 s, so the guard's count went 1, 0, 1, 0, 1). It's shared
   code, so it holds on the Mac too; Linux doesn't keep it, because its Sync starts again at every handover between
@@ -738,6 +755,16 @@ is plain Chromium.
   when it ends updated, and the count doesn't move while paused. Every count write keeps the `seqs` on disk. With Sync off no
   count is kept. `recoveredStart` stays a second trigger. On the dashboard,
   `usage_counts.sync_paused_after_unsettled_starts` counts these pauses beside `sync_paused_by_launch_guard`.
+- `scripts/windows/sync-pause-check.ps1` (CI, after the relaunch check) installs the build as a test instance, turns
+  Sync on, checks an ordinary start reports `recoveredStart` false, writes `unsettledStarts` 1 before it unlocks,
+  keeps it through a finished cycle and leaves 0 after a clean quit; a full run (`FULL`, `-SettleCheck`) also keeps a
+  start alive until `sync.json`, sampled while the app runs and before its window is closed, shows the count back at 0,
+  between 110 and 200 s after its `[sync] unlock finished: unlocked` line (the load's start); a start whose key didn't
+  unlock is never asserted to reach 0. Then it records two unfinished
+  starts: that start must report true, stay `paused` through its quit with `pausedByGuard` in `sync.json`,
+  `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
+  the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and
+  `sync_paused_after_unsettled_starts` never) in the local telemetry copy. The start after it must still be paused.
 - Sync judges its saved state before it loads it (#2623), with the checks it already applies to files from the sync
   folder: every record has a stamp the clock can read, an origin and a value, every base entry is text, this device's
   batches are well-formed log files, and the bookkeeping and maps the load, the summary and the first cycle walk have
@@ -759,6 +786,110 @@ is plain Chromium.
   wait, with no second browser), once with two unfinished starts recorded (the session must be set aside), and
   once with `Microsoft.ReactNative.dll` hidden (it must exit 0 with the reason logged). Every launch must show one
   window from one browser, and Windows must log no Ardia crash, Crashpad no dump and the launch log no fatal line.
+- A launch that meets a quitting Ardia (#2441). The new launch always carries itself: the closing copy never starts a
+  process. One hook answers every launch that reaches a running Ardia, inside Chromium's single-instance window
+  message and before any of Chromium's own drops (`chromium-win-hand-off-asks-the-app.patch`: the first thing
+  `ProcessSingletonNotificationCallback` does is ask `g_ardia_win_answers_hand_off`). It answers one of three ways:
+  - turned away (the reply is false): this Ardia is past its quit's point of no return;
+  - taken (the reply is true): the engine asks the app's `ArdiaAppLaunchArriving` on the same UI thread, the app
+    starts its launch hold or cancels its quit there and then, and the engine posts its own delivery of the command
+    line and folder. Chromium's posted callback (`ProcessSingletonNotificationCallbackImpl`) is never involved, so
+    its shutdown and `--uninstall` drops don't apply, and a taken launch always reaches the app while the process
+    lives (`ArdiaAppLaunchDelivered`, then the `relaunch` event);
+  - not ours: `--uninstall`, automation and headless launches go on down Chromium's own path.
+  - Inside that message `ArdiaAppLaunchArriving` makes no WinRT or COM call and nothing that pumps messages or can
+    block: it reads the quit's phase, sets plain fields (the undelivered count, a note to announce a cancel), bumps
+    the quit generation, so the pending 3 s timer and any late answer become no-ops through the generation check,
+    and returns its answer. A message sent from another process can't make outgoing COM calls
+    (`RPC_E_CANTCALLOUT_ININPUTSYNCCALL`), and anything that pumps there could run other code in the middle of a
+    quit. Everything else runs after the message returns, from a task the engine posts before it replies
+    (`ArdiaAppAfterLaunchArriving`): the log lines, telling the engine the quit was cancelled, `quitCancelled` to JS
+    and the windows asked for during the quit. The delivery is posted after it, so JS hears `quitCancelled` before
+    the `relaunch` event. The engine's own lines from inside the message are posted the same way.
+  - No quit begins while a taken launch hasn't been delivered, and only its delivery clears it. Between the last
+    window closing and the quit (400 ms), a taken launch holds the quit until its window opens. The 5 s for that
+    window count from the first delivery that finds no window (later launches don't extend them); if a delivered
+    launch or a cancelled quit leaves no window when they run out, the quit begins again, so a windowless Ardia never
+    lives on.
+  - While the quit waits for the app's answer to `willQuit` (3 s at most; phase `asking`): a launch cancels the quit
+    inside the hand-off message, so the answer or the timeout can no longer finish it. Answers carry no id; the app
+    counts the `willQuit`s it has sent and not had answered, and an answer finishes the quit only when that count
+    reaches zero. That is safe whatever order the answers come in: JS answers every `willQuit` exactly once
+    (`answerQuitAfterSaves` answers when the saves finish or at its 3 s deadline, whichever comes first) and always
+    with yes, so the count reaches zero only once the current quit's own answer has arrived, and an answer to a
+    cancelled quit only lowers it. A new React instance resets the count, since the old one's answers can't come, and
+    the native 3 s timer finishes a quit whose answer never comes. The launch log says `quit … began (user|update)`
+    and `the app answered yes after N ms`, `no answer in 3000 ms` or `cancelled by a relaunch after N ms`;
+    `app_launched` reports the last one as a range. That native line is the whole wait from `willQuit` to the answer,
+    as the native side sees it, and nothing else. In a quit's log the UI's `[quit] last saves: …` line (each save's
+    time) comes just before it, then `launch <ms> quitting`, then the flush's `telemetry drained in N ms` and one
+    `document … written at quit in N ms` per file, and `process ending` stays each quitting process's last line.
+    `relaunch-check.ps1`'s `Quit-Writes` reads all of them.
+  - From `Finish()` (phase `final`, the point of no return): the engine marks the profile exiting, so a new launch
+    waits in the launch guard for this process to end, and one already past the guard is turned away, which Chromium
+    turns into `PROFILE_IN_USE` after one retry. `AfterChromeMain` then reads the profile's owner (published once a
+    launch has really started, as `Local\ArdiaBrowser.<key>.owner`: its pid and start time), and starts itself once
+    with its own command line, folder and environment plus `ARDIA_RESTARTED_AFTER_REFUSAL=1`: after that process and
+    the `lockfile` are gone if it is closing, at once if it is already gone or a healthy successor holds the profile.
+    Only a launch turned away again after its restart, or whose 45 s wait ran out with the old process still there,
+    shows the start-failure message.
+  - A predecessor that doesn't answer is never killed (`chromium-win-hung-predecessor-not-killed.patch`). Stock
+    Chrome, when the running browser doesn't answer `WM_COPYDATA` within `SendMessageTimeout`'s 20 s
+    (`SMTO_ABORTIFHUNG`), treats it as hung: with no visible window it terminates it (`RESULT_CODE_HUNG`) without
+    asking, with one it asks the user first, and the new process becomes the browser. An Ardia that doesn't answer
+    is quitting or flushing (or quitting for an update and no longer pumping messages), never a wedged browser to
+    clear away, and killing it loses its documents and Chromium's own data. So when Ardia runs the app, a hung
+    notification reads as `PROFILE_IN_USE` with no retry, and the launch waits for that process like any turned-away
+    launch (or, for an update, ends at once).
+  - De-elevation: in 157 an unnecessarily elevated start goes through `MaybeAutoDeElevate`, which starts the copy
+    with `base::win::RunDeElevated`, that is `CreateProcessWithTokenW` with Explorer's token and no environment
+    block. The copy gets the user's default environment, so `ARDIA_*` variables and the restart marker don't reach
+    it; the guard passes the marker on as `--ardia-restarted-after-refusal` (also for a launch that isn't the guard's
+    owner) and the wait as `--ardia-waited-for-previous-ms`, so the one-restart bound holds across it.
+  - The engine's quit (`QuitApp`) closes every tab without running `beforeunload` (`chrome::ExitIgnoreUnloadHandlers`;
+    the app has already asked about downloads). A hung shutdown is not force-ended: a timer can't be a real deadline
+    (a hung unload never arms it, a blocked UI thread never runs it) and ending the process early would skip
+    Chromium's own writes (preferences, cookies). It shows instead in the quit log line, the quit-wait telemetry
+    and, at the next launch, the guard's wait and its error after 45 s.
+  - Launch log lines (`Logs\launch.log`, shared by every process on the profile). No existing line changes format:
+    - the app's lines: `<category> <ms> <text>`, where `<ms>` counts from that process's start, for example
+      `launch 1371 process ending`;
+    - the app's first line ends with its pid: `launch <ms> process started inside the engine pid=<pid>` (or
+      `launch <ms> process started pid=<pid>` when the app runs on its own). The engine's guard and test-gate lines
+      of the same process can come before it, unchanged;
+    - the engine's lines in the browser: `engine 0 <text>`, unchanged;
+    - every line of a process that never becomes the browser (a launch that hands over, waits, is turned away,
+      starts itself again or fails): `refused <ms> pid=<pid> <text>`, for example
+      `refused 6120 pid=4410 launch guard: the closing Ardia (3876) turned this launch away; it starts again by itself
+      once that one has ended`. Such a process never writes `process ending`, so `process ending` stays unique to a
+      real quit and can be counted anywhere in the file; a refused line can come after it.
+  - Update installs are the one stated exception (#2569 follows it up). While Ardia quits for an update (the
+    updater's `quit("update")`; the reason is a caller convention, set only by the updater), every launch is taken
+    and dropped, in every phase in which this Ardia can still answer, past `Finish()` too: the hook answers before
+    Chromium's own shutdown refusal and posts nothing. A launch that meets the quit anywhere else ends at once with
+    0: the quit sets `Local\ArdiaBrowser.<key>.updating`, and the launch guard and `AfterChromeMain` check it before
+    they would wait. No launch ever waits, because a waiting launch is an `Ardia.exe` with `chrome.dll` loaded, which
+    holds the files the installer replaces. The launch's link isn't opened; the installer's own start
+    (`/relaunch=1`) reopens Ardia.
+  - Launches that arrive while Chromium's startup lock holds notifications are acknowledged by Chromium and replayed
+    at unlock, through the same hook; the app is starting then, not quitting.
+  - Still outside "never lost", besides update installs: a launch that reaches a starting Ardia before the app's
+    events do (the engine has no one to give it to); automation and headless launches, which Chromium drops itself;
+    and a session end, which is Chromium's own `SessionEnding()`: it never goes through the app's quit and pumps no
+    messages until it ends the process, so a launch gets no answer and waits for that process like a hung one.
+  - `relaunch-during-quit.ps1`, run from `relaunch-check.ps1`, has 15 cases. It stages each stretch with test-only
+    `ARDIA_TEST` keys (`lastWindowWaitMs`, `windowOpenHoldMs`, `quitWaitMs`, `quitReason`, `quitAnswerHoldMs`,
+    `quitUnloadHoldMs`, `quitFlushHoldMs`, `handOffHoldMs`, `handOffDeliveryHoldMs`, `handOffTimeoutMs`, which
+    shortens Chromium's 20 s hand-off timeout through `SetNotificationTimeoutForTesting`, and `quitByMessage`, which
+    lets the registered message `ArdiaTestQuit` start a quit with windows open). Links are served by the check's own
+    server, which counts their loads, so "opened once" means loaded once; a launch that should start a fresh Ardia
+    must still be there 20 s later. One case holds a download open on that server, closes the window so the
+    downloads question shows, and launches with a link while it is up: the same Ardia opens it once, no quit begins,
+    and answering Quit afterwards ends Ardia through the normal quit. The check turns on full Windows Error Reporting
+    dumps for `Ardia.exe` for its whole run (`dumps` in the artifact, read with `cdb` when the runner has it) and puts
+    back whatever that machine-wide setting held before, keeps each case's launch log, and names each crash event's
+    process id, start time and path; only a crash of a process the check started (same id and start time) fails it. The cases take about 8 minutes and the whole relaunch
+    step about 14; its timeout is 22 minutes.
 - A second launch reaches the running app: Chromium's process singleton hands it the command line, and
   `chromium-win-relaunch-to-app.patch` gives that to `//ardia/win`, which sends the topic `relaunch` with the web and
   file addresses on it. The app treats them as links from another app (`onOpenURLs`: a Little Ardia window or a tab,
@@ -1048,14 +1179,13 @@ is plain Chromium.
 Mac forwards a call the shipped Windows engine lacks, `forwarded.json` lists it under `awaitingEngine` and Windows
 answers it in TypeScript until a new engine build has it; none waits now.
 
-Not in `forwarded.json` but also engine work: media next and previous track. The media controls send `mediaCommand`
-`next` or `previous` (`state/media/media.ts`), the Windows view passes it on as `tab.call`, and `MediaCommand` in
-`tab_calls.cc` runs a page script that has no case for either, so nothing happens. The Mac calls the page's own
-`nexttrack` and `previoustrack` handlers through its page script. The engine needs to call
-`content::MediaSession::Get(contents)->NextTrack()` and `PreviousTrack()` there, and to send a `nowPlaying` tab event
-(title, artist, album, artwork, playback state, position, duration, rate, video or not, and the actions the page set
-handlers for, from a `MediaSessionObserver`): Windows sends only `media` (audible, muted), so the app never builds a
-session with track actions, and the mini player shows skip by 15 seconds where the Mac shows the track buttons.
+Not in `forwarded.json` but also engine work, now done (engine `windows-engine-20261118-2`): media next and previous track and the
+`nowPlaying` tab event. `MediaCommand` in `tab_calls.cc` sends `play`, `pause`, `toggle`, `next`, `previous`, `seekBy`,
+`seekTo` and `stop` to `content::MediaSession` for the tab (`Resume` and `Suspend` as the UI, `NextTrack`,
+`PreviousTrack`, `Seek`, `SeekTo`, `Stop`), and `ardia/win/now_playing.cc` sends `nowPlaying` from a
+`MediaSessionObserver`, so the app builds a session with track actions and the mini player shows the track buttons
+for a page with `nexttrack` or `previoustrack` handlers, as on the Mac. The page call `downloadImage` (the card's
+artwork) is a `tab.call` too, answered by the browser's own cookieless fetch of an address the session declares.
 
 Answered in TypeScript on Windows since this list was made: `engine.info` (from `host.info`), `favicons.fetch` (the
 icon Chromium stored for that address, from `ac_favicons_get`, asked again after 0.4 and 1.5 s while Chromium writes

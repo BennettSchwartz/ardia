@@ -16,6 +16,7 @@
 #include "ardia/win/frame_view.h"
 #include "ardia/win/hooks.h"
 #include "ardia/win/main.h"
+#include "ardia/win/now_playing.h"
 #include "ardia/win/page_links.h"
 #include "ardia/win/private_sessions.h"
 #include "ardia/win/profiles.h"
@@ -417,6 +418,10 @@ void Host::Call(const std::string& verb,
     std::move(reply).Run(Ok());
     QuitApp();
     return;
+  } else if (verb == "app.quitting") {
+    AppQuitting(Text(args, "phase"), Text(args, "reason"),
+                args.FindInt("waitMs").value_or(-1), Text(args, "answer"));
+    result = Ok();
   } else {
     result = Error("unknown verb");
   }
@@ -562,6 +567,8 @@ void Host::CreateTab(base::DictValue args, HWND parent, Reply reply) {
     TabEvents::Attach(existing);
   }
   if (existing) {
+    NowPlaying::CancelWake(existing);
+    NowPlaying::Resend(existing);
     if (!PlaceTab(existing, parent)) {
       std::move(reply).Run(Error("the tab could not move to this window"));
       return;
@@ -722,6 +729,7 @@ base::DictValue Host::CloseTab(const base::DictValue& args) {
     Hide(browser, found->second);
   }
   tabs_.erase(key);
+  NowPlaying::End(contents);
   TabState* state = TabState::FromWebContents(contents);
   if (state) {
     state->ReleaseKey();
@@ -850,6 +858,11 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
   if (method == "moveWindowForTest") {
     return MoveWindowForTest(contents, args);
   }
+  if (method == "loadUrl" || method == "goBack" || method == "goForward" ||
+      method == "goToOffset" || method == "reload" ||
+      method == "forceReload" || method == "stopLoading") {
+    NowPlaying::CancelWake(contents);
+  }
   if (method == "loadUrl") {
     bool user_initiated = args.FindBool("userInitiated").value_or(false);
     content::NavigationController::LoadURLParams params(
@@ -880,6 +893,8 @@ std::optional<base::DictValue> Host::CallTab(content::WebContents* contents,
     }
   } else if (method == "reload") {
     controller.Reload(content::ReloadType::NORMAL, true);
+  } else if (method == "reloadToPlay") {
+    NowPlaying::ReloadToPlay(contents);
   } else if (method == "forceReload") {
     controller.Reload(content::ReloadType::BYPASSING_CACHE, true);
   } else if (method == "stopLoading") {
