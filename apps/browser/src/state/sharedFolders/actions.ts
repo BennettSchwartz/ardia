@@ -14,8 +14,8 @@ import { ASLEEP } from "../tabs/pageSession";
 import { isRegularWindow } from "../windows/small";
 import { measureRow } from "../sidebar/sidebarUi";
 import { EMPTY_FOLDER_URL } from "./applyFolder";
-import { syncFolderAfterNow, syncFolderNow } from "./engine";
-import { bindFolder, bindFolderIfUnbound, folderRef, sharedFolderOf, unbindFolder, useSharedFolders } from "./store";
+import { stopSyncing, syncFolderAfterNow, syncFolderNow } from "./engine";
+import { bindFolder, bindFolderIfUnbound, folderRef, reconnectFolder, sharedFolderOf, useSharedFolders, type SharedFolder } from "./store";
 import { canShareGroup, sharedFolderOfGroup } from "./removal";
 import { showToast } from "../app/toasts";
 
@@ -69,7 +69,7 @@ export async function addSharedFolder(windowId: string) {
   });
   if (!found) return;
   const profileId = store().windows[windowId]?.profileId ?? w.profileId;
-  return oneAtATime(addKey(profileId, found), async () => {
+  return oneAtATime(addKey(found), async () => {
     const known = await bindingAt(profileId, found);
     if (known) {
       const g = Object.values(store().groups).find((x) => x.profileId === profileId && x.pinned && pinKeyOf(x) === known.key);
@@ -77,6 +77,8 @@ export async function addSharedFolder(windowId: string) {
       return syncFolderNow(profileId, known.key);
     }
     if (store().windows[windowId]?.profileId !== profileId) return;
+    const elsewhere = syncedElsewhereText(found);
+    if (elsewhere) return showToast(windowId, "Couldn’t add this folder", elsewhere, { icon: "exclamationmark.icloud" });
     const key = addFolderGroup(windowId, found);
     if (key) await syncFolderNow(profileId, key);
   });
@@ -84,7 +86,7 @@ export async function addSharedFolder(windowId: string) {
 
 export function addFolderGroup(windowId: string, found: ResolvedSharedFolder): string | null {
   const w = store().windows[windowId];
-  if (!isRegularWindow(w) || boundWithIdentity(w.profileId, found)) return null;
+  if (!isRegularWindow(w) || boundWithIdentity(found)) return null;
   const [next, groupId] = withSharedGroup(store(), windowId, found.path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
   if (!groupId) return null;
   useBrowser.setState(next);
@@ -127,7 +129,35 @@ export function revealGroupFolder(groupId: string) {
   if (shared) void revealSharedFolder(shared.folder.path);
 }
 
-export function stopSyncingGroup(groupId: string) {
+export function stopSyncingGroup(groupId: string): Promise<boolean> {
   const shared = sharedFolderOfGroup(store(), groupId);
-  if (shared) unbindFolder(shared.profileId, shared.key);
+  return shared ? stopSyncing(shared.profileId, shared.key) : Promise.resolve(true);
+}
+
+export function syncedElsewhereText(found: ResolvedSharedFolder): string | null {
+  const bound = boundWithIdentity(found);
+  if (!bound) return null;
+  const s = store();
+  const g = Object.values(s.groups).find((x) => x.profileId === bound.profileId && x.pinned && !x.parentId && pinKeyOf(x) === bound.key);
+  const name = (g && groupLabel(s, g)) || bound.folder.path.split("/").at(-1) || "A folder";
+  const profile = s.profiles[bound.profileId]?.name ?? "another profile";
+  return `“${name}” in ${profile} already syncs this folder; a folder syncs with one profile at a time.`;
+}
+
+export async function reconnectSharedFolder(windowId: string, groupId: string) {
+  const shared = sharedFolderOfGroup(store(), groupId);
+  if (!shared || shared.folder.identity) return;
+  const was: SharedFolder = shared.folder;
+  const picked = await pickFolder(was.path.split("/").slice(0, -1).join("/") || null, "Reconnect");
+  if (!picked) return;
+  const found = await resolveSharedFolder(picked).catch((error: unknown) => {
+    showToast(windowId, "Couldn’t reconnect this folder", errorText(error), { icon: "exclamationmark.icloud" });
+    return null;
+  });
+  if (!found) return;
+  return oneAtATime(addKey(found), async () => {
+    const elsewhere = syncedElsewhereText(found);
+    if (elsewhere) return showToast(windowId, "Couldn’t reconnect this folder", elsewhere, { icon: "exclamationmark.icloud" });
+    if (reconnectFolder(shared.profileId, shared.key, was, found)) await syncFolderNow(shared.profileId, shared.key);
+  });
 }

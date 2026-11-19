@@ -77,6 +77,7 @@ const { bindFolder, sharedFolderOf, unbindFolder, useSharedFolders } = await imp
 const { shareFolder } = await import("./actions.ts");
 
 const S = () => useBrowser.getState();
+const idOf = (path) => ({ device: 1, inode: [...path].reduce((n, c) => n + c.charCodeAt(0), 0) });
 mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
 const flush = () => new Promise(setImmediate);
 async function wait(ms) {
@@ -117,7 +118,7 @@ function setup() {
   const g = S().groupTabs([t], { pinned: true, name: "Team" });
   const profileId = S().groups[g].profileId;
   const key = pinKeyOf(S().groups[g]);
-  bindFolder(profileId, key, "/scratch/Ardia Shared/Team");
+  bindFolder(profileId, key, "/scratch/Ardia Shared/Team", idOf("/scratch/Ardia Shared/Team"));
   return { profileId, key };
 }
 
@@ -153,7 +154,7 @@ test("a session snapshot that never got staged stops the round too, and is stage
   const g = S().groupTabs([t], { pinned: true, name: "Second" });
   const profileId = S().groups[g].profileId;
   const key = pinKeyOf(S().groups[g]);
-  bindFolder(profileId, key, "/scratch/Ardia Shared/Second");
+  bindFolder(profileId, key, "/scratch/Ardia Shared/Second", idOf("/scratch/Ardia Shared/Second"));
   await wait(900);
   listing = { exists: true, root: { entries: [{ kind: "link", file: "Staged.webloc", text: webloc("https://staged.example/") }], manifest: null, manifestPending: false } };
   unstageable.add("session.json");
@@ -177,7 +178,7 @@ test("a folder unbound and bound again while its round reads changes neither bin
   duringRead = async () => {
     duringRead = async () => {};
     unbindFolder(profileId, key);
-    bindFolder(profileId, key, "/scratch/Ardia Shared/Elsewhere");
+    bindFolder(profileId, key, "/scratch/Ardia Shared/Elsewhere", idOf("/scratch/Ardia Shared/Elsewhere"));
   };
   await settled(syncFolderNow(profileId, key));
   await wait(400);
@@ -194,7 +195,7 @@ test("a read that fails after the folder was bound again doesn't mark the new bi
   duringRead = async () => {
     duringRead = async () => {};
     unbindFolder(profileId, key);
-    bindFolder(profileId, key, "/scratch/Ardia Shared/Fresh");
+    bindFolder(profileId, key, "/scratch/Ardia Shared/Fresh", idOf("/scratch/Ardia Shared/Fresh"));
     throw new Error("the old disk went away");
   };
   await settled(syncFolderNow(profileId, key));
@@ -228,7 +229,7 @@ test("unbinding and binding the same path again during a read still counts as a 
   duringRead = async () => {
     duringRead = async () => {};
     unbindFolder(profileId, key);
-    bindFolder(profileId, key, path);
+    bindFolder(profileId, key, path, idOf(path));
     replaced = sharedFolderOf(profileId, key);
   };
   await settled(syncFolderNow(profileId, key));
@@ -245,7 +246,7 @@ test("Share Folder waits for a round that starts after it, not one already runni
   const g = S().groupTabs([t], { pinned: true, name: "Fourth" });
   const profileId = S().groups[g].profileId;
   const key = pinKeyOf(S().groups[g]);
-  bindFolder(profileId, key, "/scratch/Ardia Shared/Fourth");
+  bindFolder(profileId, key, "/scratch/Ardia Shared/Fourth", idOf("/scratch/Ardia Shared/Fourth"));
   await wait(900);
   await settled(syncFolderNow(profileId, key));
   let release;
@@ -270,7 +271,7 @@ test("Share Folder waits for a round that starts after it, not one already runni
 function setupAt(path) {
   const { profileId, key } = setup();
   unbindFolder(profileId, key);
-  bindFolder(profileId, key, path);
+  bindFolder(profileId, key, path, idOf(path));
   return { profileId, key, applies: () => events.filter((e) => e.startsWith(`apply ${path} `)) };
 }
 

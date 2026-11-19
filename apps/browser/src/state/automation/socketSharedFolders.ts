@@ -2,7 +2,7 @@ import { createSharedFolder, identityOf, sharedFoldersAvailable, sharedLocation 
 import { isIncognitoProfile, pinKeyOf } from "../browser/model";
 import type { TabGroup } from "../browser/types";
 import { groupLabel } from "../pins/tabGrouping";
-import { addFolderGroup, fileUrlOf, stopSyncingGroup } from "../sharedFolders/actions";
+import { addFolderGroup, fileUrlOf, stopSyncingGroup, syncedElsewhereText } from "../sharedFolders/actions";
 import { syncFolderAfterNow, syncFolderNow } from "../sharedFolders/engine";
 import { canShareGroup, sharedFolderOfGroup } from "../sharedFolders/removal";
 import { bindFolderIfUnbound, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
@@ -115,7 +115,7 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
   const profileId = windowOrFocused(params.window).profileId;
   const found = await canonicalFolder(params.path, "path");
   call.stillServing();
-  return oneAtATime(addKey(profileId, found), async () => {
+  return oneAtATime(addKey(found), async () => {
     await readableFolder(found);
     call.stillServing();
     const known = await bindingAt(profileId, found);
@@ -125,6 +125,8 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
       call.stillServing();
       return boundRow(profileId, known.key);
     }
+    const elsewhere = syncedElsewhereText(found);
+    if (elsewhere) throw new OpError("refused", elsewhere);
     const w = windowOrFocused(params.window);
     if (w.profileId !== profileId) throw new OpError("no_window", "The window changed profile before the folder was added; nothing was added.");
     const key = addFolderGroup(w.id, found);
@@ -149,9 +151,9 @@ async function syncNow(params: Record<string, unknown>, call: SocketCall) {
   return boundRow(profileId, key);
 }
 
-function stop(params: Record<string, unknown>) {
+async function stop(params: Record<string, unknown>) {
   const { profileId, key } = sharedOf(params.group);
-  stopSyncingGroup(params.group as string);
+  if (!(await stopSyncingGroup(params.group as string))) throw new OpError("failed", "Ardia stopped syncing the folder, but its last write didn't finish within 10 seconds, so it can't confirm nothing more was written. Check the folder.");
   expect(!sharedFolderOf(profileId, key), "the folder still syncs.");
   return { ok: true };
 }
