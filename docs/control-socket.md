@@ -308,18 +308,31 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   `unlinkat`), so a root or subfolder swapped after the check is never followed. Binding is compare-and-set: whichever
   finishes making a folder second keeps the first one's binding and removes its own.
   A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone, with one
-  choke point (`socketSharedChokePoint.ts`). Every socket request, `run` and plugin methods included, runs in a
-  socket-origin context: each synchronous stretch of it (the call itself, and each resumption after an await, which
-  re-checks control) is checked as soon as it ends, before the shared-folder sync, which waits 300 ms for the sidebar to
-  settle, reads the store. At that point the synced projection of every bound group and everything inside it (exactly what the
-  shared-folder engine would write: each link's name and URL, their order, nested groups) is compared with what it was;
-  if it changed, the store goes back to its exact state before that stretch and the request answers `refused` ("shared
-  folder groups change only from the sidebar"). Muting, sleeping, activating, colour, icon and collapsing don't touch
-  the projection, so they still work, and so do closing or parking a window that shows the folder. Earlier, more
-  specific refusals remain where they give a clearer message: `apply`'s per-op check (`workspaceSharedGuard.ts`),
-  `pins.createFolder` and `pins.addToFolder` for a member, `tabs.navigate`, `tabs.back`, `tabs.forward` and `run`
-  `back`/`forward` on a member with no pinned home (whose page is the link it syncs, and whose navigation reaches the
-  page before any rollback could), and `airTraffic.addRule`/`updateRule` for a group in a shared folder's tree.
+  choke point (`socketSharedChokePoint.ts`). Every request for a method the catalogue marks as changing something
+  (`mutates`; every method declares it, and a test fails if one doesn't), `run` and plugin methods included, runs in a
+  socket-origin context. Its first synchronous stretch, and each stretch that resumes after an await and re-checks
+  control through `stillOn` before it changes anything, is checked when the stretch ends, in the next microtask, so
+  before any shared-folder round reads the store (rounds read only from a timer or an awaited callback). The check
+  compares the synced projection of every bound group and everything inside it, which is exactly what the
+  shared-folder engine would write: each link's name and URL, their order, and nested groups. If it changed, only the
+  bound groups' trees go back: their groups, member tabs, the splits those tabs are in, and their places and the active
+  tab in their windows. Everything else stays as it is now. The request then answers `refused` ("shared folder groups
+  change only from the sidebar"). When the shared-folder engine's own merge writes the store during an open check, the
+  check takes the engine's result as its new starting point, so sync's own changes are never undone or blamed on the
+  socket. A stretch of another request starting while a check is open ends that check first, so each check covers one
+  request. A guard called after its request has answered (a live refresh that goes on, the guards handed to
+  `goBackAsking` and `closeWindowAsked`) only checks control and opens no check. Read-only requests open none either.
+  Muting, sleeping, activating, colour, icon and collapsing don't touch the projection, so they still work, and so do
+  closing or parking a window that shows the folder. A socket-reachable action that awaits before it writes the store
+  takes the request's guard and calls it after each await (`closeTab`, `closeGroup`, `sleepTab`); a test lists every
+  async function the socket and `run`'s command table import and fails if one writes after an await without its guard
+  (`socketAwaitGuards.test.mjs`). Earlier, more specific refusals remain where they read better or where a rollback
+  can't reach, because the action reaches a page or the engine before any check runs:
+  - `apply`'s per-op check (`workspaceSharedGuard.ts`);
+  - `pins.createFolder` and `pins.addToFolder` for a member;
+  - `tabs.navigate`, `tabs.back`, `tabs.forward` and `run` `back`/`forward` on a member with no pinned home;
+  - `run` `closeTab` and `closeTabGroup` when the tab or its group is in a shared folder's tree;
+  - `airTraffic.addRule`/`updateRule` for a group in a shared folder's tree.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
   menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no

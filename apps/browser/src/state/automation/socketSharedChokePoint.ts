@@ -2,6 +2,8 @@ import { useBrowser, type BrowserState } from "../browser/store";
 import { folderPlace } from "../sharedFolders/engine";
 import { knownNames, localFolder, signatureOf } from "../sharedFolders/local";
 import { boundFolders, folderRef } from "../sharedFolders/store";
+import { syncWriteHooks } from "../sharedFolders/syncWriteHooks";
+import { withTreesFrom } from "./sharedTrees";
 import { SHARED_GROUPS_SIDEBAR_ONLY } from "./workspaceSharedGuard";
 
 export const SHARED_GROUP_CHANGE_REFUSED = `That would change a group synced to a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}. The change that reached it was undone.`;
@@ -28,44 +30,66 @@ export function changesSharedFolders(before: BrowserState, after: BrowserState):
   return false;
 }
 
-type Segment = { owner: SocketOrigin; before: BrowserState };
+type Check = { owner: SocketOrigin; before: BrowserState };
 
-let open: Segment | null = null;
+let open: Check | null = null;
 
-function endSegment(owner?: SocketOrigin) {
-  const segment = open;
-  if (!segment || (owner && segment.owner !== owner)) return;
+function endCheck(owner?: SocketOrigin) {
+  const check = open;
+  if (!check || (owner && check.owner !== owner)) return;
   open = null;
-  if (!changesSharedFolders(segment.before, useBrowser.getState())) return;
-  useBrowser.setState(segment.before, true);
-  segment.owner.vetoed = true;
+  const now = useBrowser.getState();
+  if (!changesSharedFolders(check.before, now)) return;
+  useBrowser.setState(withTreesFrom(now, check.before), true);
+  check.owner.vetoed = true;
 }
+
+syncWriteHooks.around = (write) => {
+  write();
+  if (open) open.before = withTreesFrom(open.before, useBrowser.getState());
+};
 
 export class SocketOrigin {
   vetoed = false;
+  answered = false;
 
   segment() {
-    if (open) return;
+    if (this.answered || open?.owner === this) return;
+    if (open) endCheck(open.owner);
     open = { owner: this, before: useBrowser.getState() };
-    queueMicrotask(() => endSegment(this));
+    queueMicrotask(() => endCheck(this));
   }
 
   settle<B>(body: B, refused: (message: string) => B): B {
-    endSegment(this);
+    endCheck(this);
+    this.answered = true;
     return this.vetoed ? refused(SHARED_GROUP_CHANGE_REFUSED) : body;
   }
 }
 
-export function guardedBySocketOrigin<B>(run: (origin: SocketOrigin) => B | Promise<B>, refused: (message: string) => B): B | Promise<B> {
+export const READ_ONLY_ORIGIN: Pick<SocketOrigin, "segment"> = { segment() {} };
+
+export function guardedBySocketOrigin<B>(mutates: boolean, run: (origin: Pick<SocketOrigin, "segment">) => B | Promise<B>, refused: (message: string) => B): B | Promise<B> {
+  if (!mutates) return run(READ_ONLY_ORIGIN);
   const origin = new SocketOrigin();
   origin.segment();
   let body: B | Promise<B>;
   try {
     body = run(origin);
   } catch (error) {
-    endSegment(origin);
+    endCheck(origin);
+    origin.answered = true;
     throw error;
   }
-  if (body instanceof Promise) return body.then((settled) => origin.settle(settled, refused), (error) => (endSegment(origin), Promise.reject(error)));
+  if (body instanceof Promise) {
+    return body.then(
+      (settled) => origin.settle(settled, refused),
+      (error) => {
+        endCheck(origin);
+        origin.answered = true;
+        return Promise.reject(error);
+      },
+    );
+  }
   return origin.settle(body, refused);
 }

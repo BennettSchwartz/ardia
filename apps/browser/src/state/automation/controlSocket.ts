@@ -1,6 +1,6 @@
 import { guardedBySocketOrigin, type SocketOrigin } from "./socketSharedChokePoint";
 import { commandTarget } from "../commands/commandTarget";
-import { refuseSyncedLinkChange } from "./workspaceSharedGuard";
+import { refuseSharedRunCommand } from "./workspaceSharedGuard";
 import { create } from "zustand";
 import {
   broadcastOnControlSocket,
@@ -173,24 +173,20 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
   }));
 }
 
-export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
+export function runMethod(params: Record<string, unknown>, background = backgroundInstance, stillOn: () => boolean = () => true): Body {
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
-  if (plan.command === "back" || plan.command === "forward") {
-    const target = commandTarget(useBrowser.getState(), plan.command, plan.windowId, plan.tabId);
-    if (target.kind === "window" && target.tabId) {
-      try {
-        refuseSyncedLinkChange(target.tabId, plan.command === "back" ? "going back" : "going forward");
-      } catch (error) {
-        return failure("refused", errorText(error));
-      }
-    }
+  const target = commandTarget(useBrowser.getState(), plan.command, plan.windowId, plan.tabId);
+  try {
+    refuseSharedRunCommand(plan.command, target.kind === "window" ? target.tabId : null);
+  } catch (error) {
+    return failure("refused", errorText(error));
   }
   if (background && !BACKGROUND_RUN_COMMANDS.has(plan.command)) {
     return failure("refused", `${plan.command} isn't one of the commands a background Ardia runs, since it may open something only a person can answer; use the matching socket method instead (apply's tab.close, tabs.back, tabs.reload, …).`);
   }
   try {
-    runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId });
+    runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId, mayWrite: stillOn });
   } catch (error) {
     if (error instanceof NoCommandWindowError) return failure("no_window", error.message);
     throw error;
@@ -213,10 +209,10 @@ function subscribe(connection: number, params: Record<string, unknown>): Body {
 const connectionAccess = (_connection: number): ConnectionAccess => "owner";
 
 function answer(connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
-  return guardedBySocketOrigin((origin) => answerAs(origin, connection, method, given), (message) => failure("refused", message));
+  return guardedBySocketOrigin(methodSpec(method)?.mutates ?? true, (origin) => answerAs(origin, connection, method, given), (message) => failure("refused", message));
 }
 
-function answerAs(origin: SocketOrigin, connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
+function answerAs(origin: Pick<SocketOrigin, "segment">, connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
   const spec = methodSpec(method);
   if (!spec) return failure("unknown_method", `There's no method ${method}.`);
   const refused = accessProblem(connectionAccess(connection), spec);
@@ -258,7 +254,7 @@ function answerAs(origin: SocketOrigin, connection: number, method: string, give
       return "error" in answered ? failure("bad_request", answered.error) : { result: answered };
     }
     case "run":
-      return runMethod(params);
+      return runMethod(params, backgroundInstance, stillOn);
   }
   const area = runSpec(spec, params, servingWhile(stillOn, connection));
   if (area) return area;

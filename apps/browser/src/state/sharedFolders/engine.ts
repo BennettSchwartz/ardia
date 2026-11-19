@@ -1,6 +1,7 @@
 import { useBrowser, type BrowserState } from "../browser/store";
 import { pinKeyOf } from "../browser/model";
 import { fromSync } from "../pins/pinOrderChoices";
+import { syncWriteHooks } from "./syncWriteHooks";
 import { sessionSaved } from "../session/persist";
 import { saveBeforeQuit } from "../app/quit";
 import { guardGroupClose, keepGroupsOpen } from "../groups/closeGuard";
@@ -123,7 +124,7 @@ async function round(profileId: string, key: string, allowed: Guard) {
   if (!local) return;
   const { level, waiting } = mergeFolder(folder.base, local.entries, remote);
   const next = withFolder(s, here.groupId, level, local);
-  if (next !== s) fromSync(() => useBrowser.setState(Object.fromEntries(APPLIED_FIELDS.map((f) => [f, next[f]]))));
+  if (next !== s) syncWriteHooks.around(() => fromSync(() => useBrowser.setState(Object.fromEntries(APPLIED_FIELDS.map((f) => [f, next[f]])))));
   const { ops, base } = planFiles(level, folder.base);
   const settled = signatureOf(localFolder(store(), here.groupId, knownNames(base)));
   const saved = await sessionSaved();
