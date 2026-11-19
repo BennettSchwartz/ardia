@@ -111,14 +111,14 @@ test("frames never carry the message when the header has no name, the message ch
 
 test("a frame made of message text never goes out, even when the message was shortened after the stack was taken", () => {
   const before = queued().length;
-  const shortened = new Error("Failed to save the draft\n    at Quarterly budget draft (customer.example:2:4)\n    at Another line of notes (notes.js:1:1)\n    at PrivateDraft (sensitive-project.js:2:4)\n    at PrivateDraft (Private Project.js:2:4)\n    at PrivateDraft (sensitive-project.bundle:2:4)");
+  const shortened = new Error("Failed to save the draft\n    at Quarterly budget draft (customer.example:2:4)\n    at Another line of notes (notes.js:1:1)\n    at PrivateDraft (sensitive-project.js:2:4)\n    at PrivateDraft (Private Project.js:2:4)\n    at PrivateDraft (sensitive-project.bundle:2:4)\n    at PrivateReport (https://example.com/index.bundle/PrivateReport.js:2:4)\n    at PrivateReport (http://localhost:8081/index.bundle/PrivateReport.js:2:4)\n    at PrivateReport (https://example.com/index.bundle:2:4)");
   void shortened.stack;
   shortened.message = "Failed to save the draft";
   captureException(shortened, "onerror");
   const events = queued().slice(before);
   const frames = events[0].properties.$exception_list[0].stacktrace.frames;
   const json = JSON.stringify(frames);
-  for (const secret of ["Quarterly", "customer.example", "Another line", "notes.js", "PrivateDraft", "sensitive-project"]) assert.equal(json.includes(secret), false, secret);
+  for (const secret of ["Quarterly", "customer.example", "Another line", "notes.js", "PrivateDraft", "sensitive-project", "PrivateReport"]) assert.equal(json.includes(secret), false, secret);
 });
 
 test("frames from Ardia's own code on each platform are sent, and nothing else", () => {
