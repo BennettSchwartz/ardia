@@ -136,8 +136,9 @@ test("extensions: folders are refused, the Web Store opens its page, and configu
   list[0].siteAccess = "ON_ALL_SITES";
   list[0].userScriptsAvailable = true;
   await ok("extensions.list");
-  const changed = await ok("extensions.configure", { id: "folderext", siteAccess: "onClick", userScripts: true });
-  assert.deepEqual([changed.siteAccess, changed.userScripts], ["ON_CLICK", true]);
+  assert.equal(await code("extensions.configure", { id: "folderext", siteAccess: "onClick", userScripts: true }), "bad_request", "one setting per call");
+  assert.equal((await ok("extensions.configure", { id: "folderext", siteAccess: "onClick" })).siteAccess, "ON_CLICK");
+  assert.equal((await ok("extensions.configure", { id: "folderext", userScripts: true })).userScripts, true);
   list[0].mayModify = false;
   await ok("extensions.list");
   assert.equal(await code("extensions.configure", { id: "folderext", incognito: false }), "refused");

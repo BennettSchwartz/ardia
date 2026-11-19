@@ -37,8 +37,7 @@ export function extensionWorld() {
       const x = list.find((e) => e.id === id);
       if (gates.breakListsOnWrite) gates.listFails = true;
       writes.push({ id, ...options });
-      if (options.incognito !== undefined && x.refuseIncognito) throw new Error("Chromium declined Allow in Incognito");
-      if (options.incognito !== undefined) x.incognito = options.incognito;
+      if (options.incognito !== undefined && !x.ignoreIncognito) x.incognito = options.incognito;
       if (options.userScripts !== undefined) x.userScripts = options.userScripts;
       if (options.siteAccess) {
         if (x.lockedSites) throw new Error("Can't change this extension's site access");
