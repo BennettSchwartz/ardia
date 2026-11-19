@@ -23,7 +23,8 @@ cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.
 revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its allowlist: the
 plain-data DOM and accessibility reads work; DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and
 Emulation.setFocusEmulationEnabled are refused (Ardia.dispatchClick focuses a field, a wheel scrolls); its moves and
-wheels never focus the page; input held past an in-scope navigation is refused; and every
+wheels, keys and text never focus the page (only Ardia.dispatchClick does), and clicks, moves and wheels go
+only to the page target's own session (a wheel reports submitted); input held past an in-scope navigation is refused; and every
 Runtime method, DOM.resolveNode, DOM search, Page.createIsolatedWorld and any Runtime object or context id are refused,
 as are Page.navigate's referrer, referrerPolicy, transitionType and frameId, every scheme but http, https and
 about:blank, and a script on reload; no Network, console or Runtime event reaches it; a frame of another tab is out of
@@ -348,6 +349,19 @@ try {
   await sleep(500);
   const clickDragLog = await logOf(csOne);
   check("plugin: Ardia.dispatchClick on a draggable element starts no drag (no dragstart)", !refused(onDraggable) && clickDragLog === "", `${text(onDraggable)} log ${JSON.stringify(clickDragLog)}`);
+  await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
+  const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
+  const xsiteSession = xsite?.params?.sessionId;
+  const frameClick = xsiteSession && (await plugin.send("Ardia.dispatchClick", { x: 20, y: 20 }, xsiteSession));
+  const frameMove = xsiteSession && (await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: 20 }, xsiteSession));
+  const frameWheel = xsiteSession && (await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 20, y: 20, deltaX: 0, deltaY: 10 }, xsiteSession));
+  check("plugin: Ardia.dispatchClick, moves and wheels on a cross-site frame's own session are refused (page target only)", !!xsiteSession && [frameClick, frameMove, frameWheel].every((r) => refused(r) && /page target's own session/.test(r.error?.message ?? "")), [frameClick, frameMove, frameWheel].map((r) => (r ? text(r) : "none")).join(" | "));
+  const xsiteTargetId = xsite?.params?.targetInfo?.targetId;
+  const cliFrame = xsiteTargetId && (await cli.send("Target.attachToTarget", { targetId: xsiteTargetId, flatten: true })).result?.sessionId;
+  const cliFrameClick = cliFrame && (await cli.send("Ardia.dispatchClick", { x: 20, y: 20 }, cliFrame));
+  check("cli: Ardia.dispatchClick on a cross-site frame's own session is refused too (owners keep raw Input there)", !!cliFrameClick && refused(cliFrameClick) && /page target's own session/.test(cliFrameClick.error?.message ?? ""), cliFrameClick ? text(cliFrameClick) : "no session");
+  const intoFrame = await plugin.send("Ardia.dispatchClick", { x: 480, y: 160 }, ps);
+  check("plugin: a click from the page's own session into a cross-site frame works through hit testing", !refused(intoFrame), text(intoFrame));
   const [captureX, captureY] = await centerOf(csOne, "capture");
   const captured = await plugin.send("Ardia.dispatchClick", { x: captureX, y: captureY }, ps);
   await sleep(300);
@@ -650,8 +664,11 @@ try {
   const freshMove = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 30 }, fresh);
   const freshWheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 30, y: 30, deltaX: 0, deltaY: 20 }, fresh);
   const hasFocus = () => csValue(cs3, "document.hasFocus()");
+  const freshKey = await plugin.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", text: "a", windowsVirtualKeyCode: 65 }, fresh);
+  await plugin.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65 }, fresh);
+  const freshText = await plugin.send("Input.insertText", { text: "zz" }, fresh);
   const focusAfterPointer = await hasFocus();
-  check("plugin: its buttonless moves and wheels on a background page don't focus it", focusAfterPointer === false && !refused(freshMove) && !refused(freshWheel), `hasFocus ${focusAfterPointer}`);
+  check("plugin: its buttonless moves, wheels, keys and insertText on a background page don't focus it", focusAfterPointer === false && !refused(freshMove) && !refused(freshWheel) && !refused(freshKey) && !refused(freshText), `hasFocus ${focusAfterPointer}`);
   const freshClicksBefore = await csValue(cs3, "window.clicks");
   const freshClick = await plugin.send("Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, fresh);
   await sleep(300);

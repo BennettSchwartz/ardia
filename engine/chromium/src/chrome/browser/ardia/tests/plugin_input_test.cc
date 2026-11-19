@@ -329,29 +329,60 @@ int main() {
   }
   using R = ardia::PointerEventResult;
   using O = ardia::PointerOutcome;
-  const auto outcome = [](std::vector<R> events, bool epoch, bool widget) {
+  const auto press = [](R result) { return ardia::PointerEvent{true, result}; };
+  const auto release = [](R result) {
+    return ardia::PointerEvent{false, result};
+  };
+  const auto outcome = [](std::vector<ardia::PointerEvent> events, bool epoch,
+                          bool widget) {
     return ardia::PointerOutcomeOf(events, epoch, widget);
   };
-  Expect(outcome({R::kDelivered, R::kDelivered}, true, true) == O::kDone,
-         "outcome: both events acked by the renderer is done", "");
-  Expect(outcome({R::kDelivered, R::kPending}, true, true) == O::kPending,
+  Expect(outcome({press(R::kAcked), release(R::kAcked)}, true, true) ==
+             O::kDone,
+         "outcome: every event acknowledged by the renderer is done", "");
+  Expect(outcome({press(R::kAcked), release(R::kPending)}, true, true) ==
+             O::kPending,
          "outcome: waits while the release is pending", "");
-  Expect(outcome({R::kDropped, R::kDelivered}, true, true) == O::kNotDelivered,
-         "outcome: a dropped press is not delivered", "");
-  Expect(outcome({R::kDelivered, R::kDropped}, true, true) == O::kUnknown,
-         "outcome: a dropped release after a delivered press is unknown", "");
-  Expect(outcome({R::kDelivered, R::kDelivered}, false, true) == O::kUnknown,
+  Expect(outcome({press(R::kNotSent), release(R::kNotSent)}, true, true) ==
+             O::kNotDelivered,
+         "outcome: no press sent is not delivered", "");
+  Expect(outcome({press(R::kNotSent), release(R::kAcked)}, true, true) ==
+             O::kNotDelivered,
+         "outcome: a release alone without a sent press is not delivered", "");
+  Expect(outcome({press(R::kSentUnknown), release(R::kAcked)}, true, true) ==
+             O::kUnknown,
+         "outcome: a timed-out press is sent, outcome unknown", "");
+  Expect(outcome({press(R::kAcked), release(R::kSentUnknown)}, true, true) ==
+             O::kUnknown,
+         "outcome: a timed-out release is unknown", "");
+  Expect(outcome({press(R::kAcked), release(R::kNotSent)}, true, true) ==
+             O::kUnknown,
+         "outcome: an unsent release after a sent press is unknown", "");
+  Expect(outcome({press(R::kNotSent), release(R::kNotSent), press(R::kAcked),
+                  release(R::kNotSent)},
+                 true, true) == O::kUnknown,
+         "outcome: a later press of a double click that was sent is unknown",
+         "");
+  Expect(outcome({press(R::kAcked), release(R::kAcked)}, false, true) ==
+             O::kUnknown,
          "outcome: an epoch change by the last ack is unknown", "");
-  Expect(outcome({R::kDelivered, R::kDelivered}, true, false) == O::kUnknown,
+  Expect(outcome({press(R::kAcked), release(R::kAcked)}, true, false) ==
+             O::kUnknown,
          "outcome: a torn-down widget is unknown", "");
+  Expect(outcome({release(R::kAcked)}, true, true) == O::kDone,
+         "outcome: a move or wheel acknowledged is done", "");
+  Expect(outcome({release(R::kNotSent)}, true, true) == O::kNotDelivered,
+         "outcome: a move that wasn't sent is not delivered", "");
   Expect(outcome({}, true, true) == O::kNotDelivered,
          "outcome: no events is not delivered", "");
-  Expect(ardia::NeedsRecoveryRelease(true, O::kUnknown),
-         "outcome: an unknown click sends a recovery release", "");
-  Expect(!ardia::NeedsRecoveryRelease(true, O::kNotDelivered) &&
-             !ardia::NeedsRecoveryRelease(true, O::kDone) &&
-             !ardia::NeedsRecoveryRelease(false, O::kUnknown),
-         "outcome: no recovery release otherwise", "");
+  Expect(ardia::NeedsRecoveryRelease(
+             {press(R::kAcked), release(R::kSentUnknown)}, O::kUnknown),
+         "recovery: a sent press with an unknown outcome needs a release", "");
+  Expect(!ardia::NeedsRecoveryRelease(
+             {press(R::kAcked), release(R::kAcked)}, O::kDone),
+         "recovery: none after success", "");
+  Expect(!ardia::NeedsRecoveryRelease({release(R::kSentUnknown)}, O::kUnknown),
+         "recovery: none for a move", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;
