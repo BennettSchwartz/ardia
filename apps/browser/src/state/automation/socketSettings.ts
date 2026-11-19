@@ -2,6 +2,7 @@ import { sameValue, checkedSettings } from "../config/configSettings";
 import { isConfigSettingKey } from "../settings/configAllowlist";
 import { controllingSearchExtension, DEFAULT_SETTINGS, defaultSearchEngine, SETTING_KEYS, SETTING_SPECS, searchEngines, type SettingKey, type Settings } from "../settings/settings";
 import { chooseTabLayout } from "../settings/actions";
+import { tabLayoutOf } from "../browser/model";
 import type { MethodSpec } from "./socketCatalog";
 import { id, ids, obj, text } from "./socketSchema";
 import { expect, now } from "./socketTargets";
@@ -44,6 +45,8 @@ function refuseWhileExtensionControlsSearch() {
   if (controlling) throw new OpError("refused", `${controlling.extensionName || "An extension"} controls the default search engine; turn it off or change its settings first.`);
 }
 
+const windowLayouts = () => Object.keys(now().windows).map((id) => `${id}:${tabLayoutOf(now(), id)}`).join(",");
+
 function apply(values: Record<string, unknown>, label: string, replaced: Partial<Settings> = {}) {
   const refused = Object.keys(values).map(whyNot).filter((w): w is string => !!w);
   if (refused.length) throw new OpError("refused", `${refused.join("; ")}.`);
@@ -53,10 +56,14 @@ function apply(values: Record<string, unknown>, label: string, replaced: Partial
   if (problems.length) throw new OpError("bad_request", problems.join("; "));
   const patch: Partial<Record<SettingKey, unknown>> = {};
   for (const [key, value] of Object.entries({ ...checked, ...replaced }) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
+  const layouts = windowLayouts();
   if (Object.keys(patch).length) now().updateSettings(patch as Partial<Settings>);
-  if (patch.tabLayout !== undefined) chooseTabLayout(patch.tabLayout as Settings["tabLayout"]);
+  const layout = (Object.hasOwn(checked, "tabLayout") ? checked.tabLayout : patch.tabLayout) as Settings["tabLayout"] | undefined;
+  if (layout !== undefined) chooseTabLayout(layout);
   const after = now().settings;
+  const moved = layout !== undefined && windowLayouts() !== layouts;
   const changed = Object.keys(patch).filter((k) => !sameValue(after[k as SettingKey], settings[k as SettingKey]));
+  if (moved && !changed.includes("tabLayout")) changed.push("tabLayout");
   return { changed, values: Object.fromEntries(Object.keys(values).map((k) => [k, after[k as SettingKey]])) };
 }
 

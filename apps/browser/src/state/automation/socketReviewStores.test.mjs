@@ -146,3 +146,16 @@ test("downloads.list shows live progress and pages like history.search", async (
   assert.deepEqual([first.items[0].received, first.items[0].total, first.items[0].speed], [50, 100, 7]);
   assert.equal((await ok("downloads.list", { offset: 2 })).items[0].id, "d3");
 });
+
+test("naming tabLayout moves windows that override it, even when the stored value already matches", async () => {
+  const { windowId } = await freshWindow();
+  const overrideTop = () => useBrowser.setState((s) => ({ windows: { ...s.windows, [windowId]: { ...s.windows[windowId], tabLayout: "top" } } }));
+  assert.equal(S().settings.tabLayout, "sidebar");
+  overrideTop();
+  assert.equal(tabLayoutOf(S(), windowId), "top");
+  await ok("settings.set", { values: { tabLayout: "sidebar" } });
+  assert.equal(tabLayoutOf(S(), windowId), "sidebar", "settings.set moved the window back");
+  overrideTop();
+  await ok("settings.reset", { keys: ["tabLayout"] });
+  assert.equal(tabLayoutOf(S(), windowId), "sidebar", "settings.reset moved the window back");
+});

@@ -2,7 +2,8 @@ import Darwin
 import Foundation
 
 struct ControlOutput {
-  static let maxBytes = 4 * 1024 * 1024
+  static let maxEventBytes = 4 * 1024 * 1024
+  static let maxReplyBytes = 34 * 1024 * 1024
   static let maxWaitingEvents = 1000
 
   enum WriteResult { case drained, blocked, failed }
@@ -17,6 +18,7 @@ struct ControlOutput {
   private var headStarted = false
   private var offset = 0
   private(set) var bytes = 0
+  private(set) var eventBytes = 0
   private(set) var waitingEvents = 0
   private(set) var dropped = 0
   private var finished: [Int] = []
@@ -24,7 +26,10 @@ struct ControlOutput {
   var isEmpty: Bool { chunks.isEmpty }
 
   mutating func addReply(_ data: Data, ticket: Int) -> Bool {
-    append(Chunk(data: data, event: false, ticket: ticket))
+    guard bytes - eventBytes + data.count <= Self.maxReplyBytes else { return false }
+    bytes += data.count
+    chunks.append(Chunk(data: data, event: false, ticket: ticket))
+    return true
   }
 
   mutating func takeFinishedTickets() -> [Int] {
@@ -35,14 +40,22 @@ struct ControlOutput {
   var waitingTickets: [Int] { chunks.map(\.ticket).filter { $0 > 0 } }
 
   mutating func addEvent(_ data: Data) -> Bool {
-    if waitingEvents >= Self.maxWaitingEvents, let index = oldestWaitingEvent() {
+    while waitingEvents >= Self.maxWaitingEvents || eventBytes + data.count > Self.maxEventBytes {
+      guard let index = oldestWaitingEvent() else {
+        dropped += 1
+        return true
+      }
       bytes -= chunks[index].data.count
+      eventBytes -= chunks[index].data.count
       chunks.remove(at: index)
       waitingEvents -= 1
       dropped += 1
     }
     waitingEvents += 1
-    return append(Chunk(data: data, event: true))
+    bytes += data.count
+    eventBytes += data.count
+    chunks.append(Chunk(data: data, event: true))
+    return true
   }
 
   mutating func write(to fd: Int32) -> WriteResult {
@@ -59,6 +72,7 @@ struct ControlOutput {
       }
       offset += written
       bytes -= written
+      if chunks[0].event { eventBytes -= written }
       if offset == data.count {
         if chunks[0].ticket > 0 { finished.append(chunks[0].ticket) }
         chunks.removeFirst()
@@ -67,13 +81,6 @@ struct ControlOutput {
       }
     }
     return .drained
-  }
-
-  private mutating func append(_ chunk: Chunk) -> Bool {
-    guard bytes + chunk.data.count <= Self.maxBytes else { return false }
-    bytes += chunk.data.count
-    chunks.append(chunk)
-    return true
   }
 
   private func oldestWaitingEvent() -> Int? {
@@ -88,8 +95,8 @@ struct ControlOutput {
     guard dropped > 0 else { return true }
     let marked = Self.marking(chunks[0].data, dropped: dropped)
     let grown = marked.count - chunks[0].data.count
-    guard bytes + grown <= Self.maxBytes else { return false }
     bytes += grown
+    eventBytes += grown
     chunks[0].data = marked
     dropped = 0
     return true

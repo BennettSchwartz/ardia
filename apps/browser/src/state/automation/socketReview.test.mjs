@@ -3,7 +3,6 @@ import { test } from "node:test";
 const { S, tick, socketClient, controlOn, freshWindow } = await import("./fixtures/socketHarness.mjs");
 const { schemaProblem, obj } = await import("./socketSchema.ts");
 const { familyOf, methodSpec, accessProblem, PLUGIN_SESSION_METHODS } = await import("./socketCatalog.ts");
-const { replyLine, REPLY_BYTE_LIMIT } = await import("./controlSocket.ts");
 const stub = await import("../../test-native/index.ts");
 
 const { fire, call, ok } = socketClient(21);
@@ -97,21 +96,29 @@ function sample(schema) {
   return null;
 }
 
-const SKIPPED = new Set(["profiles.delete", "extensions.uninstall", "plugins.remove", "plugins.disable", "history.clear", "downloads.open", "downloads.reveal", "windows.merge"]);
-
-test("no handler reads a param its schema doesn't list", async () => {
+test("every method reaches its real handler, and no handler reads a param its schema doesn't list", async () => {
   await freshWindow();
   const list = await ok("methods");
   const unlisted = [];
+  const unhandled = [];
   for (const m of list) {
-    if (SKIPPED.has(m.name)) continue;
     for (const params of [{}, sample(m.params)]) {
       const reply = await call(m.name, params);
       if (/its params schema doesn't list/.test(reply.error?.message ?? "")) unlisted.push(reply.error.message);
+      if (reply.error?.code === "unknown_method") unhandled.push(m.name);
     }
     await controlOn();
   }
   assert.deepEqual(unlisted, []);
+  assert.deepEqual(unhandled, []);
+});
+
+test("plugins.call reads plugin, tool and input, the params the shipped command sends", async () => {
+  await freshWindow();
+  const reply = await call("plugins.call", { plugin: "nobody", tool: "hello", input: { who: "you" } });
+  assert.ok(reply.error, "there's no plugin nobody");
+  assert.doesNotMatch(reply.error.message, /schema doesn't list/);
+  assert.notEqual(reply.error.code, "unknown_method");
 });
 
 test("a handler reading a param outside its schema fails loudly instead of reading it", async () => {
@@ -119,6 +126,15 @@ test("a handler reading a param outside its schema fails loudly instead of readi
   const guarded = listedParams(methodSpec("tabs.get"), { tab: "t1" });
   assert.equal(guarded.tab, "t1");
   assert.throws(() => guarded.window, /tabs.get read window/);
+  assert.throws(() => "window" in guarded, /tabs.get read window/);
+  assert.throws(() => Object.hasOwn(guarded, "window"), /tabs.get read window/);
+  assert.throws(() => Object.getOwnPropertyDescriptor(guarded, "window"), /tabs.get read window/);
+  assert.equal("tab" in guarded, true);
+  assert.deepEqual({ ...guarded }, { tab: "t1" });
+  const nested = listedParams(methodSpec("subscribe"), { events: [], idle: { tab: [60] } });
+  assert.deepEqual(nested.idle.tab, [60]);
+  assert.throws(() => nested.idle.bogus, /subscribe read idle\.bogus/);
+  assert.throws(() => "bogus" in nested.idle, /subscribe read idle\.bogus/);
 });
 
 test("a plugin's session reaches only the methods the dispatcher lets it", () => {
@@ -126,17 +142,6 @@ test("a plugin's session reaches only the methods the dispatcher lets it", () =>
   assert.equal(accessProblem("plugin", methodSpec("bookmarks.remove"))?.code, "refused");
   assert.equal(accessProblem("plugin", methodSpec("passwords.list"))?.code, "refused");
   for (const name of PLUGIN_SESSION_METHODS) assert.equal(accessProblem("plugin", methodSpec(name)), null);
-});
-
-test("a reply over the socket's limit goes out as a failed error instead of closing the connection", () => {
-  const big = { result: "x".repeat(REPLY_BYTE_LIMIT + 10) };
-  const line = JSON.parse(replyLine(7, big));
-  assert.equal(line.id, 7);
-  assert.equal(line.error.code, "failed");
-  assert.match(line.error.message, /over 3 MiB/);
-  assert.equal(JSON.parse(replyLine(8, { result: "small" })).result, "small");
-  const wide = { result: "é".repeat(Math.ceil(REPLY_BYTE_LIMIT / 2) + 10) };
-  assert.equal(JSON.parse(replyLine(9, wide)).error.code, "failed");
 });
 
 test("sites.setZoom describes the profile it changed even when the default changes meanwhile", async () => {

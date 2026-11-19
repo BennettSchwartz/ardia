@@ -165,7 +165,7 @@ export function cancelInstall() {
   useExtensions.setState({ install: null });
 }
 
-export async function removeExtension(profile: string, ext: InstalledExtension, windowId?: string) {
+export async function removeExtension(profile: string, ext: InstalledExtension, windowId?: string, mayRemove: () => boolean = () => true) {
   const { confirmed } = await confirm({
     title: `Remove “${ext.name}”?`,
     message: ext.fromWebStore ? "Its data and settings will be removed too." : `The extension's folder stays on your ${PLATFORM_TERMS.computer}.`,
@@ -173,7 +173,7 @@ export async function removeExtension(profile: string, ext: InstalledExtension, 
     destructive: true,
     windowId,
   });
-  if (!confirmed) return;
+  if (!confirmed || !mayRemove()) return;
   if (useExtensions.getState().popup?.extensionId === ext.id) closeExtensionPopup();
   closeSidePanelsOf(ext.id);
   await changeThenRefresh(profile, "remove", () => uninstallExtension(ext.id, profile));

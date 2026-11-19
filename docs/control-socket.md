@@ -20,18 +20,40 @@ UI update still happens.
   schema before any handler runs, the core and plugin methods included (`socketSchema.ts`, `socketCatalog.ts`), so the
   catalogue can't drift from what it accepts. Only own properties count (a `constructor` or `__proto__` key is an
   unknown param, never a match from `Object.prototype`), and numbers must be finite (`1e999` parses to Infinity and is
-  refused). A handler only sees the params its schema lists: reading any other key fails the call with `failed`, and a
-  test calls every method to prove none does. `ardia methods` prints it and `ardia call <method> [params]` calls any
+  refused). A handler only sees the params its schema lists: reading, `in`-testing, `Object.hasOwn`-checking or describing any
+  other key fails the call with `failed`, at the top level and inside nested closed objects (`subscribe`'s `idle`);
+  values the schema leaves open (`apply`'s `ops`, `settings.set`'s `values`, `plugins.call`'s `input`) are the
+  handler's to check. A test registers every handler the app registers (the core, area and plugin ones) and calls every
+  method through it, so none reads an unlisted key and none is left without a handler. `ardia methods` prints it and `ardia call <method> [params]` calls any
   of them.
 - **Control off means no more writes.** Consent is checked when a request arrives and again before every write that
   follows an `await` in a handler (a lookup, a confirmation, a settings read): handlers get a `SocketCall` and call
   `stillServing()` first, as `apply` does between ops. Turning control off mid-call answers `failed` "Control was
-  turned off before Ardia made the change, so nothing changed."
+  turned off before Ardia made the change, so nothing changed." The check also runs inside the shared actions the
+  socket calls, through a `may…` callback they take: after `profiles.delete`'s and `extensions.uninstall`'s
+  confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes, before the close
+  starts, and again when the close animation commits; in Little Ardia's close after its quit prompt; in `tabs.reload`,
+  `tabs.back` and `tabs.forward` after a shared page is handed over, and in cross-engine back after its unsaved-work
+  check; in `downloads.open` before it reveals an opened archive; in `history.clear` before the cache write (the engine
+  clear already ran, and the cache reconciles from the engine's own events); in `offscreen` after its ownership read;
+  and in `plugins.remove` after the plugin is saved as off and before its files go. A write that already happened is
+  reported as done, never as "nothing changed". Left as they are: `apply` checks between ops, not between one op's sleep
+  and wake steps, which are synchronous store calls; `run` checks once, as a menu command's own async work (a prompt it
+  shows) belongs to the UI it runs; and an `answer` to a decide hook is checked when it arrives, and Ardia acts on it at
+  once.
 - **The UI's path, not a shortcut.** Where the UI does more than one store call, the socket does the same:
   `windows.close` goes through the window close guard (it asks first when the user set **Ask before closing a window
-  with multiple tabs**, answers `refused` if they cancel, and keeps the last window to reopen), `profiles.update
+  with multiple tabs**, answers `refused` if they cancel, and keeps the last window to reopen). It shares the UI's
+  one-close-per-window guard (a second close of a window that is already asking or closing answers `refused`), and
+  decides whether a window is the last one at the moment its close commits, so two closes at once keep exactly one
+  window to reopen. When Ardia would have to ask and nobody could see the question (the window isn't visible, or Ardia
+  runs as a background instance), it answers `refused` instead of waiting on a dialog nobody can answer
+  (`confirm({onlyIfShown})`, `DialogsModule.swift`); it never falls back to an app-modal alert. Linux and Windows
+  ignore `onlyIfShown` for now and ask as before. `littleArdia.close` and `windows.close` on a Little Ardia reply
+  only once the window is closed, so a Cancel on its quit prompt answers `refused`, `profiles.update
   {syncTabs: false}` retires the open-tab records as the Settings switch does (`setOpenTabsSynced`), `settings.set
-  {tabLayout}` moves open windows as Settings does (`chooseTabLayout`), and `settings.reset {keys: ["shortcuts"]}`
+  {tabLayout}` and `settings.reset {keys: ["tabLayout"]}` move open windows as Settings does (`chooseTabLayout`), even
+  when the stored value already matches (windows that override it move back), and `settings.reset {keys: ["shortcuts"]}`
   drops every custom shortcut (where `settings.set {shortcuts}` adds to them, as `config.json` does).
 - **Store actions only.** Writes call the domain's own actions (`storeAction(…)` on `useBrowser`, or the domain's
   exported functions for the stores outside it). Nothing calls `setState` on another domain's store.
@@ -46,13 +68,35 @@ UI update still happens.
   `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen). A new code needs a new
   protocol number; none was needed for this work.
 - **Big lists page, and the bound comes first.** `history.search`, `bookmarks.search`, `downloads.list` and `live.items` take `limit`
-  (default 100, at most 1000) and `offset`, and answer `{ items, total, nextOffset }`; only the page is built.
-  `history.search` without a query or time range asks the engine for just `offset + limit + 1` pages (one visit each)
-  and answers `total: null` when it didn't count the rest; with a query it searches the newest 20,000 pages and says
-  `truncated: true` when there were more. `bookmarks.tree` stops at 5,000 items or about 1 MiB, leaves the folders it
-  didn't open as a child count and says `truncated: true`; ask for a `folder` or a lower `depth` to see more.
-- **No reply is too big to send.** A reply over 3 MiB (the native queue holds 4 MiB per connection) goes out as
-  `failed` "The reply would be over 3 MiB; ask for less" instead of the connection closing with no answer.
+  (default 100, at most 1000) and `offset`, and answer `{ items, total, nextOffset }`; only the page is built. A page
+  also stops once it reaches 512 KiB, with `nextOffset` where it stopped, and a string field over 32,768 characters is
+  cut there and named in the row's `clipped` list, so any page fits on one line.
+  `bookmarks.tree` stops at 5,000 items or about 1 MiB, leaves the folders it didn't open as a child count and says
+  `truncated: true`; ask for a `folder` or a lower `depth` to see more.
+- **History reads the newest 20,000 pages, cold or warm.** `history.search` works on one window: the newest 20,000
+  pages by last visit, read from the engine, or from the app's history cache when that has loaded, with the same
+  answer either way. Without a query or time range it reads only `offset + limit + 1` pages; with one it reads the
+  window and filters it. `truncated: true` means history goes past the window (pages older than the newest 20,000
+  aren't searched or paged to: an `offset` past it returns no items). `total` is exact only when Ardia read all of
+  history: `null` when it read just enough for this page and one more, or when the window was cut off. `nextOffset`
+  is `null` at the end of the results or of the window. The engine's query takes a page cap but still loads every
+  visit before applying it (`ac_history.cc`); pushing the cap into the query is an `engine/` change, due with the next
+  engine build.
+- **The 1 MiB line.** Every line Ardia writes on the socket is at most 1 MiB (1,048,576 bytes before the newline),
+  the limit every shipped command reads (`MAX_LINE` in the command's `control.py` and `control.rs`; a longer line
+  drops the connection) (`socketWire.ts`):
+  - a read whose reply wouldn't fit answers `failed` "The reply would be over 1 MiB, the most a line can carry; ask for
+    less (a smaller limit, a later offset, a folder, a window or a lower depth)";
+  - a write (`mutates: true`) whose result wouldn't fit answers `{ok: true, oversized: true, …}` with its scalar fields
+    and each list as `{count}`, and a hint to read it back, so the size never hides whether the write happened;
+  - an event that wouldn't fit goes out with its scalar fields, each list as `{count}` and `truncated: true`;
+  - a decide request that wouldn't fit isn't sent: Ardia goes on as if nobody answered (its default);
+  - an error message is cut to 4 KiB.
+  The native queue (`ControlOutput.swift`) keeps up to 4 MiB of unsent events per connection: past that, or past
+  1,000 waiting events, it drops the oldest waiting ones, and the next event it writes starts with `"dropped": <n>`.
+  Events never close a connection. Replies have their own 34 MiB (32 pending requests of 1 MiB each, and room); only a
+  connection that leaves that much of its own replies unread is closed. `cli_socket_lines_shrunk` counts replies,
+  events and decide requests that went out shortened.
 - **Telemetry.** Each call counts once in its method family (`cli_socket_calls_<family>`) and once in
   `cli_socket_call_failures` when it answers an error: counts only, never which method's params
   (`state/telemetry/cliCounts.ts`).

@@ -32,6 +32,7 @@ import { applyMethod, workspaceMethod } from "./workspaceMethods";
 import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, runSpec, servingWhile, type ConnectionAccess } from "./socketCatalog";
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
+import { fittedEvent, fittedReply } from "./socketWire";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
 
@@ -47,18 +48,10 @@ let nextTicket = 0;
 
 const controlOn = () => useBrowser.getState().settings.cliControl;
 
-export const REPLY_BYTE_LIMIT = 3 * 1024 * 1024;
+export const replyLine = (id: RequestId, body: Body, method?: string, consent: ConsentToken | null = null) => fittedReply(id, body, method ? methodSpec(method) : undefined, consent);
 
-const utf8 = new TextEncoder();
-
-export function replyLine(id: RequestId, body: Body) {
-  const line = JSON.stringify({ id, ...body });
-  if (line.length * 3 <= REPLY_BYTE_LIMIT || utf8.encode(line).length <= REPLY_BYTE_LIMIT) return line;
-  return JSON.stringify({ id, ...failure("failed", `The reply would be over ${REPLY_BYTE_LIMIT / 1024 / 1024} MiB; ask for less (a smaller limit, a folder, or a lower depth).`) });
-}
-
-function send(connection: number, id: RequestId, body: Body, ticket = 0) {
-  replyOnControlSocket(connection, replyLine(id, body), ticket);
+function send(connection: number, id: RequestId, body: Body, ticket = 0, method?: string, consent: ConsentToken | null = null) {
+  replyOnControlSocket(connection, replyLine(id, body, method, consent), ticket);
 }
 
 function runWritten(tickets: readonly number[]) {
@@ -81,8 +74,9 @@ export function eventTargets(subs: ReadonlyMap<number, Subscription>, name: Auto
 
 function deliver(name: AutomationEventName, data: Record<string, unknown>, time = Date.now(), only?: number) {
   const { full, plain } = eventTargets(only === undefined ? subscriptions : new Map([[only, subscriptions.get(only)!]]), name, data);
-  if (full.length) broadcastOnControlSocket(full, JSON.stringify({ event: name, time, data }));
-  if (plain.length) broadcastOnControlSocket(plain, JSON.stringify({ event: name, time, data: minimized(data) }));
+  const consent = consentToken();
+  if (full.length) broadcastOnControlSocket(full, fittedEvent(name, time, data, consent));
+  if (plain.length) broadcastOnControlSocket(plain, fittedEvent(name, time, minimized(data), consent));
 }
 
 export type FeedConsumer = { subscriptions: () => Iterable<Subscription>; deliver: (name: AutomationEventName, data: Record<string, unknown>, time: number) => void };
@@ -101,7 +95,7 @@ export function refreshFeed() {
   else stopFeed();
 }
 
-type MethodHandler = (method: string, params: Record<string, unknown>) => Body | Promise<Body> | null;
+type MethodHandler = (method: string, params: Record<string, unknown>, serving: () => boolean) => Body | Promise<Body> | null;
 
 let pluginMethods: MethodHandler | null = null;
 
@@ -149,7 +143,7 @@ export function handleControlRequest({ connection, generation: tagged, line }: C
   const reply = (settled: Body) => {
     noteSocketCall(family, "error" in settled, consent);
     try {
-      send(connection, id, settled, ticket);
+      send(connection, id, settled, ticket, method, consent);
     } catch (error) {
       runWritten([ticket]);
       throw error;
@@ -227,7 +221,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
     case "workspace":
       return workspaceMethod(params);
     case "offscreen":
-      return offscreenMethod(params);
+      return offscreenMethod(params, stillOn);
     case "apply":
       return applyMethod(params, stillOn);
     case "subscribe":
@@ -241,7 +235,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
   }
   const area = runSpec(spec, params, servingWhile(stillOn));
   if (area) return area;
-  const plugin = pluginMethods?.(method, params);
+  const plugin = pluginMethods?.(method, params, stillOn);
   if (plugin) return plugin;
   return failure("unknown_method", `There's no method ${method}.`);
 }
