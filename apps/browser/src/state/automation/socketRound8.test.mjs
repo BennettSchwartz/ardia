@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 const { S, socketClient, freshWindow, tick } = await import("./fixtures/socketHarness.mjs");
-const { BACKGROUND_RUN_COMMANDS } = await import("./backgroundRun.ts");
 const { useLifecycle } = await import("../tabs/sleepingTabs.ts");
 const { webviews } = await import("../../platform/webviews.ts");
 const { shellNativeModules } = await import("../../test-native/shell.ts");
@@ -98,8 +97,4 @@ test("a bridge that answers every method doesn't count as dismissal support: onl
   } finally {
     restore();
   }
-});
-
-test("the background allowlist loads no URL: reopenClosedTab and duplicateTab are off it", () => {
-  assert.deepEqual([...BACKGROUND_RUN_COMMANDS].sort(), ["moveTabDown", "moveTabUp", "nextTab", "previousTab", "selectLastTab", "stop", "toggleMute", "togglePin", "toggleSidebar", "toggleTabLayout"]);
 });

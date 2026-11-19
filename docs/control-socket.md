@@ -67,8 +67,10 @@ UI update still happens.
   confirmation is open, on macOS it's taken away (its sheet ends as a cancel, `DialogsModule.swift`
   `dismissShownOnly`), the call ends `refused` internally and the per-window close guard is released, so a later close
   asks again. Where nothing can take a dialog away (Linux and Windows today) the guard holds until the dialog is
-  answered, and a yes given after control went off changes nothing. Either way the client doesn't see that `refused`:
-  turning control off closes its connection, so it sees the stream end, and the outcome is unknown to it. Left as they are: `run` checks once, as a menu command's own async work belongs to the UI it runs (a command
+  answered, and a yes given after control went off changes nothing. A question taken away may end its call as `refused` or as `failed` ("nothing changed"), depending on whether the
+  dismissal or a user's answer given at the same moment lands first. Either way the client doesn't see it: turning
+  control off closes its connection, so it sees the stream end, and the outcome is unknown to it. A window close the
+  user had already authorized before control went off still finishes its animation and commits. Left as they are: `run` checks once, as a menu command's own async work belongs to the UI it runs (a command
   that would ask or open a picker is refused up front in a background instance, see below); and an `answer` to a decide hook is checked when it arrives, and Ardia acts on it at
   once.
 - **The UI's path, not a shortcut.** Where the UI does more than one store call, the socket does the same:
@@ -83,17 +85,16 @@ UI update still happens.
   have to ask and nobody could see the question (no window of it is visible, or Ardia runs as a background instance), it
   answers `refused` instead of waiting on a dialog nobody can answer, and it never falls back to an app-modal alert. The
   reply comes only after the user answers. `run` keeps its contract (the reply comes at dispatch, and a prompt the
-  command shows belongs to the UI it runs), so in a background instance it runs only a small allowlist and refuses everything else before running it (`backgroundRun.ts`: `toggleSidebar`, `toggleTabLayout`, `nextTab`, `previousTab`, `selectLastTab`, `togglePin`,
-  `toggleMute`, `moveTabUp`, `moveTabDown`, `stop`: none of them loads a URL), each one read to be a plain store or page call and run for real in a background fixture (a tab that can move, a view to stop) that checks it did its job and opened no sheet, prompt, dialog, picker, menu or
-  external handler. `newTab`, `newWindow`, `reopenClosedTab` and `duplicateTab` aren't on it: each can load a URL (the homepage, a
-  closed tab's saved URL, the source URL when native cloning fails), which can raise Chromium's HTTP-auth dialog;
-  `apply`'s `open`, `windows.create`, `closed.restore` and `tabs.duplicate` cover them. In a background instance
-  `downloads.open` is refused too ("opening a download needs the person"), since it launches another app;
-  `downloads.reveal` still works. Commands that ask only in
-  some states (`closeTab`, `renameTab`, `back`, …) aren't on it; their socket methods cover them (`apply`'s
-  `tab.close`, `tabs.back`, `tabs.reload`). `state/commands/commandInteraction.ts` documents every command as `quiet`,
-  `interactive` or `asksWhen`, and its test checks that every allowlisted command is `quiet`. A visible instance runs
-  every command, since the person sees whatever opens. `runCommand` resolves its target in one place, `commandTarget` (`state/commands/commandTarget.ts`). Linux and Windows
+  command shows belongs to the UI it runs), so a background instance runs no command at all: `run` answers `refused` "run isn't available in background
+  instances; use the dedicated methods". Menu commands reach UI and page loads in too many ways (a lazy tab that
+  starts loading when switching tabs activates it, a homepage, a closed tab's saved URL, any of which can raise
+  Chromium's HTTP-auth dialog), so the dedicated methods are the background surface: `apply`, `tabs.*`, `windows.*`,
+  `closed.restore` and the rest. Anything that calls `runMethod` gets the same answer there (a plugin's `run`,
+  surface menus). `state/commands/commandInteraction.ts` still documents every command as `quiet`, `interactive` or
+  `asksWhen`. A visible instance runs every command, since the person sees whatever opens. In a background instance
+  `downloads.open` is refused too ("opening a download needs the person"), since it launches another app, and so is
+  `downloads.reveal` ("revealing a download needs the person"): a background instance only logs a reveal, so it
+  can't claim Finder showed the file. `runCommand` resolves its target in one place, `commandTarget` (`state/commands/commandTarget.ts`). Linux and Windows
   ignore `onlyIfShown` for now and ask as before. `littleArdia.close` and `windows.close` on a Little Ardia reply
   only once the window is closed, so a Cancel on its quit prompt answers `refused`, `profiles.update
   {syncTabs: false}` retires the open-tab records as the Settings switch does (`setOpenTabsSynced`), `settings.set

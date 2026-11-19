@@ -84,11 +84,10 @@ bookmark searches) and their fixed page title.
 - `commands` → `[{"id", "title", "scope", "variants": [ids] | null}]`: the automatable commands. `title` is the menu
   title (else the command bar's, else the id), `scope` is `"page"`, `"window"` or `null`.
 - `run` `{"command", "arg"?, "window"?, "tab"?}` → `{"ok": true}` once the command was dispatched (not necessarily finished).
-  A command that would ask the user first (`closeTab` on a window's last tab with **Ask before closing the last tab**,
-  `closeTabGroup` with its warning on or on a shared folder, `back` across page engines), or anything else outside the background allowlist (`backgroundRun.ts`: commands verified to open no sheet, dialog,
-  picker, menu or external handler), answers `refused` in a
-  background instance, where nobody could answer, and doesn't run; elsewhere its question shows in its window and the
-  reply still comes at dispatch, as for a click on the menu.
+  In a background instance `run` answers `refused` for every command ("run isn't available in background instances;
+  use the dedicated methods"), since a menu command can open UI or start a page load nobody can answer; a visible
+  instance runs it, and a question it asks shows in its window while the reply still comes at dispatch, as for a
+  click on the menu.
   `command` is a catalog id, `arg` one of its variant ids. It runs through `runCommand`, exactly as the menu or a
   shortcut would. `window` must be an eligible window id, else `no_window` (no fallback to another window); without
   it, the last focused eligible window (windows never focused come after, in window order); with no browser window
