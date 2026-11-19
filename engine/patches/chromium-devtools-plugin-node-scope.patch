@@ -40,6 +40,30 @@ diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.c
  
    session->CreateAndAppend<InspectorLayerTreeAgent>(inspected_frames, this);
  
+diff --git a/third_party/blink/renderer/core/input/event_handler.cc b/third_party/blink/renderer/core/input/event_handler.cc
+--- a/third_party/blink/renderer/core/input/event_handler.cc
++++ b/third_party/blink/renderer/core/input/event_handler.cc
+@@ -2499,7 +2499,19 @@ void EventHandler::DragSourceEndedAt(
+   MouseEventWithHitTestResults mev =
+       event_handling_util::PerformMouseEventHitTest(frame_, request, event);
+ 
+-  if (auto* target_frame = LocalFrameFromTargetNode(mev.InnerNode())) {
++  auto* target_frame = LocalFrameFromTargetNode(mev.InnerNode());
++  Node* drag_source = mouse_event_manager_->GetDragState().drag_src_.Get();
++  LocalFrame* source_frame =
++      drag_source ? drag_source->GetDocument().GetFrame() : nullptr;
++  if (source_frame && source_frame != frame_ &&
++      source_frame->Tree().IsDescendantOf(frame_) &&
++      !(target_frame && source_frame->Tree().IsDescendantOf(target_frame))) {
++    EventHandler& source = source_frame->GetEventHandler();
++    source.mouse_event_manager_->DragSourceEndedAt(event, operation);
++    source.gesture_manager_->HandleTouchDragEnd(event, operation);
++    return;
++  }
++  if (target_frame) {
+     target_frame->GetEventHandler().DragSourceEndedAt(event, operation);
+     return;
+   }
 diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 --- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 +++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc

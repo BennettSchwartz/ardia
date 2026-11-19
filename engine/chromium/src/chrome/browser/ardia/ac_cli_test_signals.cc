@@ -39,6 +39,7 @@ void AddCliTestSignals(base::DictValue& status) {
   status.Set("pluginDeliveriesRefusedDeparted",
              g_plugin_deliveries_refused_departed);
   status.Set("pluginDragsRefused", g_ardia_plugin_drags_refused);
+  status.Set("pluginDragsRefusedUnknown", g_ardia_plugin_drags_refused_unknown);
 }
 
 }

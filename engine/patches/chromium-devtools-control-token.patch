@@ -619,13 +619,13 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
  
 +#include "ardia/core/ac_content_hooks.h"  // nogncheck
 +#include "base/trace_event/trace_id_helper.h"
-+#include "content/browser/devtools/devtools_instrumentation.h"
 +#include "content/browser/devtools/devtools_session.h"
 +#include "content/public/browser/web_contents.h"
 +#include "third_party/blink/public/mojom/drag/drag.mojom.h"
 +#include "ui/latency/latency_info.h"
 +
 +int g_ardia_plugin_drags_refused = 0;
++int g_ardia_plugin_drags_refused_unknown = 0;
 +
 +bool (*g_ardia_devtools_session_may_input)(
 +    content::DevToolsAgentHostClient* root_client,
@@ -650,9 +650,9 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +  }
 +  DevToolsAgentHostClient* client = session->GetRootSession()->GetClient();
 +  if (!g_ardia_devtools_may_input(client, nullptr)) {
-+    input::TouchEmulator* touch_emulator =
-+        static_cast<WebContentsImpl*>(contents)->GetTouchEmulator(false);
-+    if (touch_emulator && touch_emulator->IsEnabled()) {
++    auto* touch_emulator = static_cast<TouchEmulatorImpl*>(
++        static_cast<WebContentsImpl*>(contents)->GetTouchEmulator(false));
++    if (touch_emulator && touch_emulator->ArdiaEmulatingTouchFromMouse()) {
 +      return false;
 +    }
 +  }
@@ -705,6 +705,11 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    ui::LatencyInfo latency;
 +    latency.set_trace_id(
 +        static_cast<int64_t>(base::trace_event::GetNextGlobalTraceId()));
++    if (mouse_event.GetType() == blink::WebInputEvent::Type::kMouseDown &&
++        mouse_event.button != blink::WebPointerProperties::Button::kNoButton &&
++        ArdiaRestrictedSession(owner_->session())) {
++      widget_host_->ArdiaExpectPluginPress(latency.trace_id());
++    }
 +    injected_mouse_type_ = mouse_event.GetType();
 +    injected_mouse_dispatched_ = false;
 +    widget_host_->ForwardMouseEventWithLatencyInfo(mouse_event, latency);
@@ -718,11 +723,6 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +      owner_->ardia_press_.emplace(
 +          static_cast<RenderWidgetHost*>(widget_host_.get()),
 +          latency.trace_id());
-+      if (ArdiaRestrictedSession(owner_->session())) {
-+        devtools_instrumentation::ArdiaNotePluginPress(
-+            latency.trace_id(), owner_->session()->ArdiaSessionId(),
-+            mouse_event.PositionInWidget(), mouse_event.PositionInScreen());
-+      }
 +    }
      if (!input_queued_) {
        pending_mouse_callbacks_.back()->sendSuccess();
@@ -959,39 +959,10 @@ diff --git a/content/browser/devtools/devtools_instrumentation.h b/content/brows
                         bool* intercepted);
  
  void DragEnded(FrameTreeNode& node);
-@@ -625,6 +627,14 @@ bool ApplyNetworkCookieControlsOverrides(
-     DevToolsAgentHostImpl* params,
-     net::CookieSettingOverrides& overrides);
- 
-+void ArdiaNotePluginPress(int64_t press_event_id,
-+                          const std::string& session_id,
-+                          const gfx::PointF& point_in_widget,
-+                          const gfx::PointF& point_in_screen);
-+bool ArdiaRefusePluginDrag(int64_t press_event_id,
-+                           gfx::PointF* point_in_widget,
-+                           gfx::PointF* point_in_screen);
-+
- }  // namespace devtools_instrumentation
- 
- }  // namespace content
 diff --git a/content/browser/devtools/devtools_instrumentation.cc b/content/browser/devtools/devtools_instrumentation.cc
 --- a/content/browser/devtools/devtools_instrumentation.cc
 +++ b/content/browser/devtools/devtools_instrumentation.cc
-@@ -4,9 +4,13 @@
- 
- #include "content/browser/devtools/devtools_instrumentation.h"
- 
-+#include <algorithm>
-+#include <deque>
- #include <ranges>
- 
-+#include "ardia/core/ac_content_hooks.h"  // nogncheck
- #include "base/byte_size.h"
- #include "base/feature_list.h"
-+#include "base/no_destructor.h"
- #include "base/notreached.h"
- #include "base/strings/string_util.h"
-@@ -2321,11 +2325,14 @@ void WillStartDragging(FrameTreeNode* main_frame_tree_node,
+@@ -2321,11 +2321,14 @@ void WillStartDragging(FrameTreeNode* main_frame_tree_node,
                         const DropData& drop_data,
                         const blink::mojom::DragDataPtr drag_data,
                         blink::DragOperationsMask drag_operations_mask,
@@ -1007,63 +978,25 @@ diff --git a/content/browser/devtools/devtools_instrumentation.cc b/content/brow
  }
  
  void DragEnded(FrameTreeNode& node) {
-@@ -3267,6 +3274,52 @@ void DidStartNavigating(FrameTreeNode& ftn,
-                    loader_id, navigation_type);
- }
- 
-+namespace {
-+
-+struct ArdiaPluginPress {
-+  int64_t press_event_id;
-+  std::string session_id;
-+  gfx::PointF point_in_widget;
-+  gfx::PointF point_in_screen;
-+};
-+
-+constexpr size_t kArdiaPluginPressLimit = 64;
-+
-+std::deque<ArdiaPluginPress>& ArdiaPluginPresses() {
-+  static base::NoDestructor<std::deque<ArdiaPluginPress>> presses;
-+  return *presses;
-+}
-+
-+}  // namespace
-+
-+void ArdiaNotePluginPress(int64_t press_event_id,
-+                          const std::string& session_id,
-+                          const gfx::PointF& point_in_widget,
-+                          const gfx::PointF& point_in_screen) {
-+  std::deque<ArdiaPluginPress>& presses = ArdiaPluginPresses();
-+  presses.push_back(
-+      {press_event_id, session_id, point_in_widget, point_in_screen});
-+  if (presses.size() > kArdiaPluginPressLimit) {
-+    presses.pop_front();
-+  }
-+}
-+
-+bool ArdiaRefusePluginDrag(int64_t press_event_id,
-+                           gfx::PointF* point_in_widget,
-+                           gfx::PointF* point_in_screen) {
-+  std::deque<ArdiaPluginPress>& presses = ArdiaPluginPresses();
-+  auto press = std::ranges::find(presses, press_event_id,
-+                                 &ArdiaPluginPress::press_event_id);
-+  if (press == presses.end()) {
-+    return false;
-+  }
-+  *point_in_widget = press->point_in_widget;
-+  *point_in_screen = press->point_in_screen;
-+  presses.erase(press);
-+  ++g_ardia_plugin_drags_refused;
-+  return true;
-+}
-+
- }  // namespace devtools_instrumentation
- 
- }  // namespace content
 diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/browser/renderer_host/render_widget_host_impl.cc
 --- a/content/browser/renderer_host/render_widget_host_impl.cc
 +++ b/content/browser/renderer_host/render_widget_host_impl.cc
-@@ -2957,6 +2957,9 @@ void RenderWidgetHostImpl::NotifyObserversOfInputEventWithSource(
+@@ -1744,6 +1744,14 @@ void RenderWidgetHostImpl::ForwardMouseEventWithLatencyInfo(
+   GetRenderInputRouter()->DispatchInputEventWithLatencyInfo(
+       mouse_with_latency.event, &mouse_with_latency.latency,
+       &mouse_with_latency.event.GetModifiableEventLatencyMetadata());
++  if (mouse_event.GetType() == WebInputEvent::Type::kMouseDown &&
++      mouse_event.button != blink::WebPointerProperties::Button::kNoButton) {
++    ardia_last_press_id_ = mouse_with_latency.latency.trace_id();
++    ardia_last_press_from_plugin_ =
++        ardia_last_press_id_ == std::exchange(ardia_expected_plugin_press_, -1);
++    ardia_last_press_point_ = mouse_event.PositionInWidget();
++    ardia_last_press_screen_point_ = mouse_event.PositionInScreen();
++  }
+   {
+     input::ScopedDispatchToRendererCallback dispatch_callback(
+         GetRenderInputRouter()->GetDispatchToRendererCallback());
+@@ -2957,6 +2965,9 @@ void RenderWidgetHostImpl::NotifyObserversOfInputEventWithSource(
      bool dispatched_to_renderer) {
    for (auto& observer : input_event_observers_) {
      observer.OnInputEvent(*this, event, source);
@@ -1073,20 +1006,23 @@ diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/
    }
    if (dispatched_to_renderer) {
      delegate_->DidReceiveInputEvent(this, event);
-@@ -3233,11 +3236,23 @@ void RenderWidgetHostImpl::StartDragging(
+@@ -3233,11 +3244,26 @@ void RenderWidgetHostImpl::StartDragging(
      }
    }
  
-+  gfx::PointF ardia_press_point;
-+  gfx::PointF ardia_press_screen_point;
-+  if (event_info && event_info->press_event_id != -1 &&
-+      devtools_instrumentation::ArdiaRefusePluginDrag(
-+          event_info->press_event_id, &ardia_press_point,
-+          &ardia_press_screen_point)) {
-+    DragSourceEndedAt(ardia_press_point, ardia_press_screen_point,
-+                      ui::mojom::DragOperation::kNone, base::DoNothing());
-+    DragSourceSystemDragEnded();
-+    return;
++  if (!event_info || event_info->source != ui::mojom::DragEventSource::kTouch) {
++    const bool known_press = event_info && event_info->press_event_id != -1 &&
++                             event_info->press_event_id == ardia_last_press_id_;
++    if (!known_press || ardia_last_press_from_plugin_) {
++      ++(known_press ? g_ardia_plugin_drags_refused
++                     : g_ardia_plugin_drags_refused_unknown);
++      DragSourceEndedAt(known_press ? ardia_last_press_point_ : gfx::PointF(),
++                        known_press ? ardia_last_press_screen_point_
++                                    : gfx::PointF(),
++                        ui::mojom::DragOperation::kNone, base::DoNothing());
++      DragSourceSystemDragEnded();
++      return;
++    }
 +  }
 +
    if (frame_tree_) {
@@ -1148,3 +1084,39 @@ diff --git a/content/browser/devtools/devtools_session.h b/content/browser/devto
 +  const std::string& ArdiaSessionId() const { return session_id_; }
  
    // Browser-only sessions do not talk to mojom::DevToolsAgent, but instead
+diff --git a/content/browser/renderer_host/render_widget_host_impl.h b/content/browser/renderer_host/render_widget_host_impl.h
+--- a/content/browser/renderer_host/render_widget_host_impl.h
++++ b/content/browser/renderer_host/render_widget_host_impl.h
+@@ -344,5 +344,8 @@
+                          ui::mojom::DragOperation operation,
+                          base::OnceClosure callback) override;
+   void DragSourceSystemDragEnded() override;
++  void ArdiaExpectPluginPress(int64_t trace_id) {
++    ardia_expected_plugin_press_ = trace_id;
++  }
+   void FilterDropData(DropData* drop_data) override;
+   void SetCursor(const ui::Cursor& cursor) override;
+@@ -1423,5 +1426,10 @@
+   // Indicates whether the page is hidden or not. Need to call
+   // process_->UpdateClientPriority when this value changes.
+   bool is_hidden_ = true;
++  int64_t ardia_expected_plugin_press_ = -1;
++  int64_t ardia_last_press_id_ = -1;
++  bool ardia_last_press_from_plugin_ = false;
++  gfx::PointF ardia_last_press_point_;
++  gfx::PointF ardia_last_press_screen_point_;
+ 
+   // Records the latest time when |this| widget's visibility state changes from
+diff --git a/content/browser/renderer_host/input/touch_emulator_impl.h b/content/browser/renderer_host/input/touch_emulator_impl.h
+--- a/content/browser/renderer_host/input/touch_emulator_impl.h
++++ b/content/browser/renderer_host/input/touch_emulator_impl.h
+@@ -45,6 +45,9 @@
+   void SetDeviceScaleFactor(float device_scale_factor) override;
+   void SetDoubleTapSupportForPageEnabled(bool enabled) override;
+   bool IsEnabled() const override;
++  bool ArdiaEmulatingTouchFromMouse() const {
++    return IsEnabled() && mode_ == Mode::kEmulatingTouchFromMouse;
++  }
+   bool HandleTouchEvent(const blink::WebTouchEvent& event) override;
+   void OnGestureEventAck(
+       const blink::WebGestureEvent& event,

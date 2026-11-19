@@ -32,6 +32,7 @@ const NONE = {
   cli_plugin_credentials_revoked: 0,
   cli_plugin_commands_refused: 0,
   cli_plugin_drags_refused: 0,
+  cli_drags_refused_unknown_press: 0,
   cli_file_picker_answers_armed: 0,
   cli_file_picker_answers_used: 0,
 };
@@ -51,7 +52,7 @@ let windowlessSeen = { given: 0, missed: 0 };
 const PLUGIN_TOTALS = { minted: "cli_plugin_credentials_minted", revoked: "cli_plugin_credentials_revoked", refused: "cli_plugin_commands_refused" } as const;
 let pluginSeen = { minted: 0, revoked: 0, refused: 0 };
 let pickerSeen = { armed: 0, used: 0 };
-let pluginDragsSeen = 0;
+let dragsSeen = { plugin: 0, unknown: 0 };
 let cdpCommandsSeen: Record<CdpCommandDomain, number> = Object.fromEntries(CDP_COMMAND_DOMAINS.map((domain) => [domain, 0])) as Record<CdpCommandDomain, number>;
 
 export const noteCliInstall = (reason: CliInstallReason, ok: boolean, consent?: ConsentToken | null) => countFor(consent, () => void counts[FIELDS[reason][ok ? 0 : 1]]++, { [FIELDS[reason][ok ? 0 : 1]]: 1 });
@@ -95,14 +96,20 @@ export function notePickerAnswers(totals: { armed?: number; used?: number } | un
   pickerSeen = { armed: Math.max(armed, pickerSeen.armed), used: Math.max(used, pickerSeen.used) };
 }
 
-export function notePluginDragsRefused(total: number | undefined) {
-  if (total === undefined) return;
-  const refused = Number(total) || 0;
-  counts.cli_plugin_drags_refused += Math.max(0, refused - pluginDragsSeen);
-  pluginDragsSeen = Math.max(refused, pluginDragsSeen);
+export function noteDragsRefused(plugin: number | undefined, unknown: number | undefined) {
+  if (plugin !== undefined) {
+    const total = Number(plugin) || 0;
+    counts.cli_plugin_drags_refused += Math.max(0, total - dragsSeen.plugin);
+    dragsSeen.plugin = Math.max(total, dragsSeen.plugin);
+  }
+  if (unknown !== undefined) {
+    const total = Number(unknown) || 0;
+    counts.cli_drags_refused_unknown_press += Math.max(0, total - dragsSeen.unknown);
+    dragsSeen.unknown = Math.max(total, dragsSeen.unknown);
+  }
 }
 
-type EngineTotals = { windowlessPages?: { given: number; missed: number }; commandsByDomain?: CdpCommandsByDomain; pluginCredentials?: Partial<Record<keyof typeof PLUGIN_TOTALS, number>>; filePickerAnswers?: { armed?: number; used?: number }; pluginDragsRefused?: number };
+type EngineTotals = { windowlessPages?: { given: number; missed: number }; commandsByDomain?: CdpCommandsByDomain; pluginCredentials?: Partial<Record<keyof typeof PLUGIN_TOTALS, number>>; filePickerAnswers?: { armed?: number; used?: number }; pluginDragsRefused?: number; pluginDragsRefusedUnknown?: number };
 let baselineEpoch: string | null = null;
 
 export function noteCliEngineTotals(status: EngineTotals, epoch: string = consentEpoch()) {
@@ -113,7 +120,7 @@ export function noteCliEngineTotals(status: EngineTotals, epoch: string = consen
     noteCdpCommands(status.commandsByDomain);
     notePluginTotals(status.pluginCredentials);
     notePickerAnswers(status.filePickerAnswers);
-    notePluginDragsRefused(status.pluginDragsRefused);
+    noteDragsRefused(status.pluginDragsRefused, status.pluginDragsRefusedUnknown);
     counts = counted;
     return;
   }
@@ -121,7 +128,7 @@ export function noteCliEngineTotals(status: EngineTotals, epoch: string = consen
   noteCdpCommands(status.commandsByDomain);
   notePluginTotals(status.pluginCredentials);
   notePickerAnswers(status.filePickerAnswers);
-  notePluginDragsRefused(status.pluginDragsRefused);
+  noteDragsRefused(status.pluginDragsRefused, status.pluginDragsRefusedUnknown);
 }
 
 export function takeCliCounts() {

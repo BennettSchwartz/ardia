@@ -51,7 +51,7 @@ const data = join(work, "d");
 mkdirSync(data);
 
 const DRAG_LOG = `window.dragLog = [];
-for (const type of ["dragstart", "dragend", "dragenter", "dragover", "drop"]) document.addEventListener(type, (e) => { if (type !== "dragstart" && type !== "dragend") e.preventDefault(); dragLog.push(type); }, true);`;
+for (const type of ["dragstart", "dragend", "dragenter", "dragover", "drop"]) document.addEventListener(type, (e) => { if (type !== "dragstart" && type !== "dragend") e.preventDefault(); dragLog.push(type + ":" + (e.target.id || e.target.nodeName)); }, true);`;
 const XCHILD = `<!doctype html><title>xchild</title>
 <div id=drag draggable=true style="position:fixed;left:10px;top:10px;width:80px;height:30px;background:#ccc">drag</div>
 <div id=drop style="position:fixed;left:10px;top:60px;width:80px;height:30px;background:#eee">drop</div>
@@ -314,21 +314,23 @@ try {
   };
   const logOf = async (session) => (await cli.send("Runtime.evaluate", { expression: "(() => { const log = window.dragLog.join(','); window.dragLog = []; return log; })()", returnByValue: true }, session)).result?.result?.value;
   const dragsRefused = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefused ?? -1;
+  const unknownDrags = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefusedUnknown ?? -1;
+  const unknownAtStart = await unknownDrags();
   await logOf(csOne);
   const refusedBeforeMain = await dragsRefused();
   const pluginDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
   const pluginLog = await logOf(csOne);
   const refusedAfterMain = await dragsRefused();
-  check("plugin: a drag from its press in the main frame is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart,dragend" && refusedBeforeMain >= 0 && refusedAfterMain - refusedBeforeMain === 1 && pluginDrag.every((r) => !refused(r)), `${pluginLog}; refused ${refusedBeforeMain} -> ${refusedAfterMain}; ${pluginDrag.map(text).join(" | ")}`);
+  check("plugin: a drag from its press in the main frame is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart:drag,dragend:drag" && refusedBeforeMain >= 0 && refusedAfterMain - refusedBeforeMain === 1 && pluginDrag.every((r) => !refused(r)), `${pluginLog}; refused ${refusedBeforeMain} -> ${refusedAfterMain}; ${pluginDrag.map(text).join(" | ")}`);
   const clicksOf = async () => (await cli.send("Runtime.evaluate", { expression: "window.clicks", returnByValue: true }, csOne)).result?.result?.value;
   const clicksBefore = await clicksOf();
   for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
   await sleep(300);
   const clicksAfter = await clicksOf();
   check("plugin: its next click after the refused drag is delivered", clicksAfter === clicksBefore + 1, `${clicksBefore} -> ${clicksAfter}`);
-  await dragWith(cli, csOne, dragPath(280, 135, 185));
+  const ownerDrag = await dragWith(cli, csOne, dragPath(280, 135, 185));
   const ownerLog = await logOf(csOne);
-  check("cli: the owner's drag over the same elements still drags and drops", /^dragstart,.*dragenter.*dragover.*drop.*dragend$/.test(ownerLog ?? ""), ownerLog);
+  check("cli: the owner's drag over the same elements still drags and drops on the drop element", ownerDrag.every((r) => !refused(r)) && /^dragstart:drag,.*dragenter:drop.*dragover:drop.*drop:drop,dragend:drag$/.test(ownerLog ?? ""), `${ownerLog}; ${ownerDrag.map(text).join(" | ")}`);
   await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
   const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
   const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));
@@ -338,29 +340,49 @@ try {
   const xsiteDrag = xsite ? await dragWith(plugin, xsite.params.sessionId, dragPath(50, 25, 75)) : [];
   const xsiteLog = cliXsite ? await logOf(cliXsite) : null;
   const refusedAfterXsite = await dragsRefused();
-  check("plugin: a drag from its press in a cross-site frame (its own frame session) is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart,dragend" && refusedAfterXsite - refusedBeforeXsite === 1 && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; refused ${refusedBeforeXsite} -> ${refusedAfterXsite}; ${xsiteDrag.map(text).join(" | ")}`);
+  check("plugin: a drag from its press in a cross-site frame (its own frame session) is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart:drag,dragend:drag" && refusedAfterXsite - refusedBeforeXsite === 1 && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; refused ${refusedBeforeXsite} -> ${refusedAfterXsite}; ${xsiteDrag.map(text).join(" | ")}`);
   if (cliXsite) {
     const refusedBeforeOwner = await dragsRefused();
-    await dragWith(cli, csOne, dragPath(510, 165, 215));
+    const ownerXsiteDrag = await dragWith(cli, csOne, dragPath(510, 165, 215));
     const ownerXsite = await logOf(cliXsite);
-    check("cli: the owner's drag through the top-level session, aimed at the cross-site frame, still drops there and isn't refused", /^dragstart,.*drop.*dragend$/.test(ownerXsite ?? "") && (await dragsRefused()) === refusedBeforeOwner, ownerXsite);
+    check("cli: the owner's drag through the top-level session, aimed at the cross-site frame, drops on its drop element and isn't refused", ownerXsiteDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(ownerXsite ?? "") && (await dragsRefused()) === refusedBeforeOwner, `${ownerXsite}; ${ownerXsiteDrag.map(text).join(" | ")}`);
+  }
+  if (xsite) {
+    await logOf(csOne);
+    const refusedBeforeEviction = await dragsRefused();
+    const [press, ...rest] = dragPath(280, 135, 185);
+    const pressReply = await plugin.send("Input.dispatchMouseEvent", { type: press[0], x: press[1], y: press[2], button: "left", buttons: press[3], clickCount: 1 }, ps);
+    const evictMark = plugin.replies.length;
+    for (let i = 0; i < 70; i++) {
+      for (const [type, buttons] of [["mousePressed", 1], ["mouseReleased", 0]]) plugin.raw(670000 + i * 2 + buttons, "Input.dispatchMouseEvent", { type, x: 20, y: 100, button: "left", buttons, clickCount: 1 }, xsite.params.sessionId);
+    }
+    await until("the 140 presses on the other widget", async () => plugin.replies.slice(evictMark).filter((m) => m.id >= 670000 && m.id < 670140).length === 140 || null, 20000).catch(() => null);
+    const evictReplies = plugin.replies.slice(evictMark).filter((m) => m.id >= 670000 && m.id < 670140);
+    const restReplies = [];
+    for (const [type, x, y, buttons] of rest) restReplies.push(await plugin.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, ps));
+    await sleep(500);
+    const evictLog = await logOf(csOne);
+    check("plugin: 70 plugin presses on another widget between its press and the drag don't evict that press: the drag is still refused as a plugin drag", !refused(pressReply) && evictReplies.length === 140 && evictReplies.every((r) => !r.error) && restReplies.every((r) => !refused(r)) && evictLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeEviction === 1, `${evictLog}; ${evictReplies.length} presses answered`);
   }
   const childTarget = (await cli.send("Page.getFrameTree", {}, csOne)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childLogOf = async () => (await cli.send("Runtime.evaluate", { expression: "(() => { const w = document.getElementById('child').contentWindow; const log = w.dragLog.join(','); w.dragLog = []; return log; })()", returnByValue: true }, csOne)).result?.result?.value;
   await childLogOf();
   const refusedBeforeChild = await dragsRefused();
-  await dragWith(plugin, ps, dragPath(510, 57, 97));
+  const childDrag = await dragWith(plugin, ps, dragPath(510, 57, 97));
   const childLog = await childLogOf();
   const clicksBeforeChild = await clicksOf();
   for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
   await sleep(300);
-  check("plugin: a drag from its press in a same-process child frame is refused, its dragend reaches that child frame, and the next click is delivered", !!childTarget && childLog === "dragstart,dragend" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
+  check("plugin: a drag from its press in a same-process child frame is refused, its dragend reaches that child frame, and the next click is delivered", !!childTarget && childDrag.every((r) => !refused(r)) && childLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
+  check("no drag in this run was refused for an unknown press (owner and plugin presses are all recorded)", unknownAtStart >= 0 && (await unknownDrags()) === unknownAtStart, `${unknownAtStart} -> ${await unknownDrags()}`);
   const childFrame = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childAx = childFrame && (await plugin.send("Accessibility.getFullAXTree", { frameId: childFrame }, ps));
   const childNodes = childAx?.result?.nodes ?? [];
+  const childRoot = childNodes.find((n) => !n.parentId);
   const childFrameIds = childNodes.map((n) => n.frameId).filter(Boolean);
+  const inChildSubtree = (node) => { for (let n = node, hops = 0; n && hops < 200; n = childNodes.find((c) => c.nodeId === n.parentId), hops++) if (n === childRoot) return true; return false; };
   const pierced = JSON.stringify((await plugin.send("DOM.getDocument", { depth: -1, pierce: true }, ps)).result ?? {});
-  check("plugin: an in-scope child frame is traversed (frame tree, its accessibility tree by name and frame id, and pierced DOM)", !!childFrame && !refused(childAx) && childNodes.some((n) => n.role?.value === "heading" && n.name?.value === "ardia child heading") && childFrameIds.every((id) => id === childFrame) && pierced.includes("childp"), childAx ? `${childNodes.length} nodes, frame ids ${[...new Set(childFrameIds)].join(",") || "none"}` : "no child frame");
+  check("plugin: an in-scope child frame is traversed (frame tree, its accessibility tree by name and frame id, and pierced DOM)", !!childFrame && !refused(childAx) && childRoot?.frameId === childFrame && childNodes.some((n) => n.role?.value === "heading" && n.name?.value === "ardia child heading" && inChildSubtree(n)) && childFrameIds.every((id) => id === childFrame) && pierced.includes("childp"), childAx ? `${childNodes.length} nodes, frame ids ${[...new Set(childFrameIds)].join(",") || "none"}` : "no child frame");
   const runtimeEvents = plugin.events.filter((e) => e.method?.startsWith("Runtime."));
   check("plugin: no Runtime event reaches it", runtimeEvents.length === 0, runtimeEvents.map((e) => e.method).join(" "));
   const activeIs = async (id) => (await cli.send("Runtime.evaluate", { expression: `document.activeElement?.id === ${JSON.stringify(id)}`, returnByValue: true }, csOne)).result?.result?.value === true;
@@ -579,13 +601,15 @@ try {
     const refusedByPolicy = refused(reply) && /isn't allowed for a plugin/.test(reply.error?.message ?? "");
     check(`plugin: Page.navigate to ${url.split(":")[0]}: is ${allowedScheme ? "allowed and loads" : "refused"}`, allowedScheme ? !refused(reply) && !reply.result?.errorText && !!reply.result?.frameId : refusedByPolicy, text(reply));
     if (url.startsWith(secureOrigin)) {
-      const committed = (await plugin.send("Page.getFrameTree", {}, s3)).result?.frameTree?.frame?.url;
-      const content = await until("the secure fixture's content", async () => {
+      let committed = null, content = null;
+      const loaded = await until("the secure fixture's URL and content", async () => {
+        committed = (await plugin.send("Page.getFrameTree", {}, s3)).result?.frameTree?.frame?.url;
         const root = (await plugin.send("DOM.getDocument", {}, s3)).result?.root?.nodeId;
         const node = root && (await plugin.send("DOM.querySelector", { nodeId: root, selector: "#secure" }, s3)).result?.nodeId;
-        return node ? (await plugin.send("DOM.getOuterHTML", { nodeId: node }, s3)).result?.outerHTML : null;
-      }, 8000).catch(() => null);
-      check("plugin: the HTTPS navigation committed the fixture's URL and shows its content", committed === `${secureOrigin}/secure` && /ardia secure fixture/.test(content ?? ""), `${committed} ${content}`);
+        content = node ? (await plugin.send("DOM.getOuterHTML", { nodeId: node }, s3)).result?.outerHTML : null;
+        return committed === `${secureOrigin}/secure` && /ardia secure fixture/.test(content ?? "") || null;
+      }, 8000).then(() => true, () => false);
+      check("plugin: the HTTPS navigation committed exactly the fixture's URL and shows its content", loaded, `${committed} ${content}`);
     }
   }
   const navigatedPlain = await plugin.send("Page.navigate", { url: `${origin}/three` }, s3);

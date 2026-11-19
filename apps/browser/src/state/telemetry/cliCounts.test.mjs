@@ -49,8 +49,9 @@ test("plugin drags the engine refused turn into counts since the last take", () 
   noteCliEngineTotals({ pluginDragsRefused: 0 }, "drags");
   noteCliEngineTotals({ pluginDragsRefused: 2 }, "drags");
   noteCliEngineTotals({ pluginDragsRefused: 1 }, "drags");
-  noteCliEngineTotals({ pluginDragsRefused: 3 }, "drags");
-  assert.equal(takeCliCounts().cli_plugin_drags_refused, 3);
+  noteCliEngineTotals({ pluginDragsRefused: 3, pluginDragsRefusedUnknown: 1 }, "drags");
+  const counts = takeCliCounts();
+  assert.deepEqual([counts.cli_plugin_drags_refused, counts.cli_drags_refused_unknown_press], [3, 1]);
   assert.equal(takeCliCounts().cli_plugin_drags_refused, 0);
 });
 

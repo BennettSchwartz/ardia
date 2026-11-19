@@ -175,6 +175,7 @@ extern bool (*g_ardia_devtools_may_input)(
     content::RenderFrameHost* frame);
 
 extern int g_ardia_plugin_drags_refused;
+extern int g_ardia_plugin_drags_refused_unknown;
 
 extern bool (*g_ardia_devtools_session_may_input)(
     content::DevToolsAgentHostClient* root_client,
