@@ -135,9 +135,11 @@ TypeScript browse client), not to #2808. It must:
   has read it, before it spawns anything.
 - **Connecting.** The child opens `<endpoint>?token=<credential>` (base64url needs no escaping) with no `Origin`
   header, exactly like the `ardia` command's browser connection. `/ardia/active` and `/json*` answer it nothing.
-  The credential in the query isn't recorded by the browser: the token server's DevTools handler and `net/server`
-  never log a request path (their logs are accept errors, a non-HTTP/1.1 protocol token and buffer sizes), its socket
-  has no NetLog (`LoopbackSocketFactory` passes none, so `--log-net-log` and net-internals never see it), and nothing
-  on that path sets a crash key, emits a trace event, shows on a `chrome://` page, or logs from our `ac_cli_*` code or
-  the app's `NSLog`/`os_log`. A crash dump holds process memory and could contain it, as it could any secret the
-  browser holds. A client should keep the URL out of its own error messages and logs.
+  The credential stays in the query (`?token=`), and the engine never records it:
+  - **Not recorded:** nothing on the engine side records the request path or query: not `net/server`, the DevTools
+    handler, NetLog (the server socket has no NetLog source), crash keys, tracing, internals pages or our own logging.
+  - **Crash dumps:** a dump holds process memory, so it can hold the credential, as it would any secret, whichever way
+    the credential arrived.
+  - **Client side:** the remaining risk is there. The TS client never puts the raw endpoint in an error.
+  - **Malformed request lines:** the one edge case. `net/server` logs the protocol token of a request line it can't
+    parse, which could carry part of a URL with a space in it; such a line only ever comes from the client itself.
