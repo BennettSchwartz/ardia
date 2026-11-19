@@ -1,4 +1,5 @@
 import AppKit
+import ArdiaCore
 import ExpoModulesCore
 
 public class DialogsModule: Module {
@@ -10,6 +11,10 @@ public class DialogsModule: Module {
          let answer = MenuChoice.testAnswer(dumping: options.toDictionary().merging(["kind": "confirm"]) { $1 }, to: file) {
         let words = Set(answer.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
         promise.resolve(["confirmed": words.contains("confirm"), "suppressed": words.contains("suppress")])
+        return
+      }
+      if options.onlyIfShown && (LaunchConfig.shared.background || DialogsModule.visibleWindow(options.windowId) == nil) {
+        promise.resolve(["confirmed": false, "suppressed": false, "unshown": true])
         return
       }
       let alert = DialogsModule.alert(title: options.title, message: options.message)
@@ -73,8 +78,13 @@ public class DialogsModule: Module {
     return alert
   }
 
+  static func visibleWindow(_ windowId: String?) -> NSWindow? {
+    guard let window = windowId.flatMap({ WindowManager.shared.window($0) }), window.isVisible, !window.isMiniaturized else { return nil }
+    return window
+  }
+
   static func present(_ alert: NSAlert, windowId: String?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-    if let window = windowId.flatMap({ WindowManager.shared.window($0) }), window.isVisible {
+    if let window = visibleWindow(windowId) {
       alert.beginSheetModal(for: window, completionHandler: completion)
     } else {
       completion(alert.runModal())

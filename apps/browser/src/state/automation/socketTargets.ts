@@ -3,6 +3,7 @@ import { isIncognitoProfile } from "../browser/model";
 import type { BrowserWindow, Tab } from "../browser/types";
 import { eligibleKind, isEligibleTab, lastFocusedEligibleWindow, ownEntry, type AutomationWindowKind } from "./automationWindows";
 import { OpError } from "./workspaceTargets";
+import { withinBudget } from "./socketWire";
 
 export const now = (): BrowserState => useBrowser.getState();
 
@@ -38,12 +39,12 @@ export function profileArg(id: unknown): string {
   return id as string;
 }
 
-export function page<T>(items: readonly T[], params: Record<string, unknown>, defaultLimit = 100) {
+export function page<T, R = T>(items: readonly T[], params: Record<string, unknown>, row: (item: T) => R = (item) => item as unknown as R) {
   const offset = (params.offset as number | undefined) ?? 0;
-  const limit = (params.limit as number | undefined) ?? defaultLimit;
-  const slice = items.slice(offset, offset + limit);
-  const next = offset + slice.length;
-  return { items: slice, total: items.length, nextOffset: next < items.length ? next : null };
+  const limit = (params.limit as number | undefined) ?? 100;
+  const shown = withinBudget(items.slice(offset, offset + limit).map(row));
+  const next = offset + shown.length;
+  return { items: shown, total: items.length, nextOffset: next < items.length ? next : null };
 }
 
 export function expect(ok: boolean, message: string) {

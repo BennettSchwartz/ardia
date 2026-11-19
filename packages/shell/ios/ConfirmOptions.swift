@@ -8,4 +8,5 @@ struct ConfirmOptions: Record {
   @Field var destructive: Bool = false
   @Field var suppression: String?
   @Field var windowId: String?
+  @Field var onlyIfShown: Bool = false
 }

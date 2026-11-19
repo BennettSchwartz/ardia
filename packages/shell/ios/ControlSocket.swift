@@ -66,10 +66,15 @@ final class ControlSocket {
 
   func broadcast(_ targets: [Int], _ line: String) {
     let data = Self.framed(line)
+    let kept = data.starts(with: Self.decidePrefix)
     queue.async { [self] in
-      for id in targets { connections[id]?.event(data) }
+      for id in targets {
+        if kept { connections[id]?.send(data) } else { connections[id]?.event(data) }
+      }
     }
   }
+
+  private static let decidePrefix = Data("{\"decide\":".utf8)
 
   private static func framed(_ line: String) -> Data {
     var data = Data(line.utf8)
@@ -156,7 +161,7 @@ final class ControlSocket {
   private func stopOnQueue() {
     guard let bound else { return }
     self.bound = nil
-    for connection in Array(connections.values) { connection.close() }
+    for connection in Array(connections.values) { connection.retire() }
     connections.removeAll()
     acceptSource?.cancel()
     acceptSource = nil

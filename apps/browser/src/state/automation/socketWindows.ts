@@ -1,11 +1,12 @@
 import type { BrowserState } from "../browser/store";
 import { activeTabId, sidebarSideOf, tabLayoutOf, tabsShownIn } from "../browser/model";
-import { closeLittleArdia, openInMainWindow, openLittleArdia } from "../littleArdia/actions";
+import { openInMainWindow, openLittleArdia } from "../littleArdia/actions";
 import { focusWindow } from "../windows/nativeWindow";
 import { focusedWindowOf } from "../windows/ui";
-import { eligibleKind, windowTabIds } from "./automationWindows";
+import { eligibleKind, windowTabIds, type AutomationWindowKind } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
-import { closeAfterAsking } from "../windows/windowClose";
+import { closeWindowAsked, type CloseAsk } from "../windows/windowClose";
+import { confirm } from "../../platform/dialogs";
 import { bool, obj, oneOf, PROFILE, text, WINDOW } from "./socketSchema";
 import { expect, now, profileArg, windowOf } from "./socketTargets";
 import { openableUrl } from "./workspaceOps";
@@ -64,17 +65,19 @@ function switchProfile(params: Record<string, unknown>) {
   return windowRow(now(), w.id);
 }
 
-function closeLittle(params: Record<string, unknown>) {
-  const w = windowOf(params.window, ["little"]);
-  closeLittleArdia(w.id);
-  return { ok: true };
-}
+const UNSEEN = "Ardia would have to ask before closing it, and nobody can see that question here (the window isn't on screen, or Ardia runs in the background), so it stayed open.";
 
-async function closeWindow(params: Record<string, unknown>, call: SocketCall) {
-  const w = windowOf(params.window);
-  if (eligibleKind(now(), w.id) === "little") return closeLittle(params);
-  const outcome = await closeAfterAsking(w.id, call.serving);
-  if (outcome === "cancelled") throw new OpError("refused", `Window ${w.id} stayed open: closing it was cancelled when Ardia asked first.`);
+const askWhereSeen: CloseAsk = async (options) => {
+  const answer = await confirm({ ...options, onlyIfShown: true });
+  if (answer.unshown) throw new OpError("refused", `Window ${options.windowId ?? ""} stayed open: ${UNSEEN}`);
+  return answer;
+};
+
+async function closeWindow(params: Record<string, unknown>, call: SocketCall, kinds: readonly AutomationWindowKind[] = ["normal", "little"]) {
+  const w = windowOf(params.window, kinds);
+  const outcome = await closeWindowAsked(w.id, { mayClose: call.serving, ask: askWhereSeen });
+  if (outcome === "busy") throw new OpError("refused", `Window ${w.id} is already closing or asking whether to close.`);
+  if (outcome === "cancelled") throw new OpError("refused", `Window ${w.id} stayed open: closing it was cancelled.`);
   if (outcome === "stopped") call.stillServing();
   return { ok: true };
 }
@@ -107,7 +110,7 @@ export const WINDOW_METHODS: MethodSpec[] = [
   {
     name: "windows.close",
     mutates: true,
-    description: "Close a window as its close button does: Ardia asks first when the user set it to, and the last window is kept to reopen (its tabs go to recently closed)",
+    description: "Close a window as its close button does: Ardia asks first when the user set it to (refused when nobody can see the question), and the last window is kept to reopen (its tabs go to recently closed)",
     params: obj({ window: WINDOW }, ["window"]),
     result: "{ok}",
     run: closeWindow,
@@ -146,6 +149,6 @@ export const WINDOW_METHODS: MethodSpec[] = [
     },
   },
   { name: "littleArdia.open", mutates: true, description: "Open a Little Ardia window", params: obj({ url: text("Its page; a New Tab when left out"), profile: PROFILE }), result: "window", run: openLittle },
-  { name: "littleArdia.close", mutates: true, description: "Close a Little Ardia window", params: obj({ window: WINDOW }, ["window"]), result: "{ok}", run: closeLittle },
+  { name: "littleArdia.close", mutates: true, description: "Close a Little Ardia window; the reply comes once it's closed", params: obj({ window: WINDOW }, ["window"]), result: "{ok}", run: (p, call) => closeWindow(p, call, ["little"]) },
   { name: "littleArdia.toMain", mutates: true, description: "Move a Little Ardia's page into a main window as a tab", params: obj({ window: WINDOW }, ["window"]), result: "{tab, window}", run: littleToMain },
 ];
