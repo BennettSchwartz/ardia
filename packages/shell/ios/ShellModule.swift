@@ -24,6 +24,9 @@ public class ShellModule: Module {
       _ = installOutsidePressMonitor
       _ = installWindowMoveFallback
       _ = installCenteredResize
+      FullScreenLifecycle.shared.stateOf = { window in
+        window.styleMask.contains(.fullScreen) || WindowManager.shared.id(of: window).map { WindowManager.shared.isFullScreen($0) } == true
+      }
       FullScreenLifecycle.shared.start()
       self.lifetime.begin(self) {
         self.appearanceObservation?.invalidate()
