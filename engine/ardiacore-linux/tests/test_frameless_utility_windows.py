@@ -132,6 +132,15 @@ class FramelessUtilityWindowTests(unittest.TestCase):
         self.assertIn('return app_name == "ArdiaSettings" || app_name == "ArdiaImport";', self.host)
         self.assertIn('params.app_name = opening.kind == "settings" ? "ArdiaSettings" : "ArdiaImport";', self.host)
 
+    def test_a_utility_window_rounds_its_page_with_the_frame(self):
+        overlay = self.host[self.host.index('void ShellHostView::LayoutOverlay() {'):self.host.index('void ShellHostView::ShellPainted() {')]
+        self.assertIn('  RoundUtilityCorners();\n', overlay)
+        self.assertIn('if (!is_utility() || !browser_view_->browser_widget()) return;', overlay)
+        self.assertIn('frame ? frame->GetWindowRoundedCorners() : gfx::RoundedCornersF();', overlay)
+        self.assertIn('SetBackground(views::CreateRoundedRectBackground(kColorWebContentsBackground, corners));', overlay)
+        self.assertIn('shell_->holder()->SetNativeViewCornerRadii(corners);', overlay)
+        self.assertIn('if (curtain_) curtain_->layer()->SetRoundedCornerRadius(corners);', overlay)
+
     def test_a_utility_window_opens_over_its_opener(self):
         opening = self.host[self.host.index('if (method == "ArdiaShell.openWindow") {'):self.host.index('if (method == "ArdiaShell.isDarkAppearance") {')]
         self.assertIn('requested = linux_window::RequestedUtilityFrame(', opening)
