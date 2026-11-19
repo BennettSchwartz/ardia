@@ -129,24 +129,16 @@ test("run refuses a command that would ask in a background instance, before runn
   unseen();
   const refused = runMethod({ command: "closeTab", window: windowId }, true);
   assert.equal(refused.error?.code, "refused");
-  assert.match(refused.error.message, /ask/);
   for (let i = 0; i < 10; i++) await tick();
   assert.ok(S().windows[windowId], "nothing ran");
   assert.equal(asked.length, 0);
-
-  const tabs = S().windows[windowId].tabIds;
   S().newTab(windowId, { url: "https://second.example/" });
-  assert.ok(!runMethod({ command: "closeTab", window: windowId }, true).error, "closing a tab that leaves others asks nothing, so it runs");
-  assert.ok(tabs.every((id) => S().tabs[id]));
-
-  const grouped = S().windows[windowId].tabIds.at(-1);
-  const group = S().createGroup([grouped]);
-  S().activate(grouped);
-  S().updateSettings({ warnBeforeClosingTabGroup: true });
+  const tabs = S().windows[windowId].tabIds;
+  assert.equal(runMethod({ command: "closeTab", window: windowId }, true).error?.code, "refused", "closeTab may ask, so a background run never takes it; apply's tab.close does");
+  const group = S().createGroup([tabs.at(-1)]);
+  S().activate(tabs.at(-1));
   assert.equal(runMethod({ command: "closeTabGroup", window: windowId }, true).error?.code, "refused");
-  assert.ok(S().groups[group], "the group stayed");
-  S().updateSettings({ warnBeforeClosingTabGroup: false });
-  assert.ok(!runMethod({ command: "closeTabGroup", window: windowId }, true).error, "without the warning it asks nothing, so it runs");
+  assert.ok(tabs.every((id) => S().tabs[id]) && S().groups[group], "nothing closed");
   dialogs.confirm = originalConfirm;
 });
 

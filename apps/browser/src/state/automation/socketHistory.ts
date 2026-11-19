@@ -11,27 +11,20 @@ import { CLIPPED_STRING_CHARS } from "./socketWire";
 import { OpError } from "./workspaceTargets";
 
 export const HISTORY_SCAN = 20_000;
-export const HISTORY_READ_STEP = 10_000;
 export const MAX_RAW_HISTORY_ROWS = 200_000;
 
 type Visited = { url: string; title: string; visits: number; lastVisit: number };
 type Read = { rows: Visited[]; scanLimited: boolean };
 
-const breathe = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+const visitedOf = (e: { url: string; title: string; visits: number; visitTimes: number[] }): Visited => ({ url: e.url, title: e.title, visits: e.visits, lastVisit: e.visitTimes[0] ?? 0 });
 
 async function engineWebPages(engine: string, count: number): Promise<Read> {
-  let asked = Math.min(MAX_RAW_HISTORY_ROWS, count);
-  for (;;) {
-    const read = await queryHistory(engine, asked, 1);
-    const pages = read.filter((e) => isWebPageUrl(e.url));
-    const ended = read.length < asked;
-    if (pages.length >= count || ended || asked >= MAX_RAW_HISTORY_ROWS) {
-      const rows = pages.slice(0, count).map((e) => ({ url: e.url, title: e.title, visits: e.visits, lastVisit: e.visitTimes[0] ?? 0 }));
-      return { rows, scanLimited: pages.length < count && !ended };
-    }
-    await breathe();
-    asked = Math.min(MAX_RAW_HISTORY_ROWS, Math.max(asked * 2, asked + HISTORY_READ_STEP));
-  }
+  const first = await queryHistory(engine, count, 1);
+  const pages = first.filter((e) => isWebPageUrl(e.url));
+  if (pages.length >= count || first.length < count) return { rows: pages.slice(0, count).map(visitedOf), scanLimited: false };
+  const whole = await queryHistory(engine, MAX_RAW_HISTORY_ROWS + 1, 1);
+  const within = whole.slice(0, MAX_RAW_HISTORY_ROWS).filter((e) => isWebPageUrl(e.url));
+  return { rows: within.slice(0, count).map(visitedOf), scanLimited: whole.length > MAX_RAW_HISTORY_ROWS && within.length < count };
 }
 
 async function newestPages(engine: string, count: number): Promise<Read> {
@@ -56,7 +49,7 @@ async function historySearch(params: Record<string, unknown>, call: SocketCall) 
   const { rows, scanLimited } = await newestPages(engine, read);
   const scanned = rows.slice(0, HISTORY_SCAN);
   const hits = filtered ? scanned.filter((h) => h.lastVisit >= since && h.lastVisit <= until && (!q || h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q))) : scanned;
-  const shown = page(hits, params, (h) => ({ id: historyHandle(call.connection, { url: h.url, profileId, engine }), ...h }));
+  const shown = page(hits, params, (h) => ({ id: historyHandle(call, { url: h.url, profileId, engine }), ...h }));
   const reason = scanLimited ? "scanLimit" : rows.length > HISTORY_SCAN ? "window" : null;
   const complete = rows.length < read && !scanLimited;
   return { items: shown.items, total: complete ? hits.length : null, nextOffset: shown.nextOffset, truncated: !!reason, ...(reason ? { reason } : {}) };

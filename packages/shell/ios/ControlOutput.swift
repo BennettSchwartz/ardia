@@ -8,6 +8,7 @@ struct ControlOutput {
   static let markerRoom = 64
   static let maxWaitingEvents = 1000
   static let maxIdBytes = 256
+  static let releaseWrittenBytes = 65_536
 
   enum WriteResult { case drained, blocked, failed }
   enum Kind { case reply, kept, event }
@@ -21,6 +22,7 @@ struct ControlOutput {
   private var chunks: [Chunk] = []
   private var headStarted = false
   private var offset = 0
+  private var headWritten = 0
   private(set) var bytes = 0
   private(set) var eventBytes = 0
   private(set) var waitingEvents = 0
@@ -28,7 +30,7 @@ struct ControlOutput {
   private var finished: [Int] = []
 
   var isEmpty: Bool { chunks.isEmpty }
-  var midLine: Bool { headStarted && offset > 0 }
+  var midLine: Bool { headStarted && headWritten > 0 }
   var waitingTickets: [Int] { chunks.map(\.ticket).filter { $0 > 0 } }
 
   mutating func takeFinishedTickets() -> [Int] {
@@ -109,13 +111,18 @@ struct ControlOutput {
         return errno == EAGAIN || errno == EWOULDBLOCK ? .blocked : .failed
       }
       offset += written
+      headWritten += written
       bytes -= written
       if chunks[0].kind == .event { eventBytes -= written }
       if offset == data.count {
         if chunks[0].ticket > 0 { finished.append(chunks[0].ticket) }
         chunks.removeFirst()
         offset = 0
+        headWritten = 0
         headStarted = false
+      } else if offset >= Self.releaseWrittenBytes {
+        chunks[0].data = Data(data[(data.startIndex + offset)...])
+        offset = 0
       }
     }
     return .drained
