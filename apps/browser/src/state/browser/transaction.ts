@@ -53,12 +53,11 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
       return creator(set, get, api);
     };
 
-  const open = () => {
+  const transaction = (run: () => void) => {
     depth++;
-    let closed = false;
-    return () => {
-      if (closed) return;
-      closed = true;
+    try {
+      run();
+    } finally {
       if (--depth === 0) {
         try {
           hear();
@@ -66,14 +65,6 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
           afterEach.forEach((listener) => listener());
         }
       }
-    };
-  };
-  const transaction = (run: () => void) => {
-    const close = open();
-    try {
-      run();
-    } finally {
-      close();
     }
   };
   const afterTransactionIdempotent = (listener: () => void) => {
@@ -81,5 +72,5 @@ export function transactional<T>(heardAlone?: (s: T, prev: T) => boolean, settle
     return () => void afterEach.delete(listener);
   };
   const inTransaction = () => depth > 0;
-  return { middleware, transaction, open, afterTransactionIdempotent, inTransaction };
+  return { middleware, transaction, afterTransactionIdempotent, inTransaction };
 }

@@ -1,4 +1,4 @@
-import { openStoreTransaction, useBrowser, type BrowserState } from "../browser/store";
+import { useBrowser, type BrowserState } from "../browser/store";
 import { folderPlace } from "../sharedFolders/engine";
 import { knownNames, localFolder, signatureOf } from "../sharedFolders/local";
 import { boundFolders, folderRef } from "../sharedFolders/store";
@@ -28,7 +28,7 @@ export function changesSharedFolders(before: BrowserState, after: BrowserState):
   return false;
 }
 
-type Segment = { owner: SocketOrigin; before: BrowserState; close: () => void };
+type Segment = { owner: SocketOrigin; before: BrowserState };
 
 let open: Segment | null = null;
 
@@ -36,14 +36,9 @@ function endSegment(owner?: SocketOrigin) {
   const segment = open;
   if (!segment || (owner && segment.owner !== owner)) return;
   open = null;
-  try {
-    if (changesSharedFolders(segment.before, useBrowser.getState())) {
-      useBrowser.setState(segment.before, true);
-      segment.owner.vetoed = true;
-    }
-  } finally {
-    segment.close();
-  }
+  if (!changesSharedFolders(segment.before, useBrowser.getState())) return;
+  useBrowser.setState(segment.before, true);
+  segment.owner.vetoed = true;
 }
 
 export class SocketOrigin {
@@ -51,7 +46,7 @@ export class SocketOrigin {
 
   segment() {
     if (open) return;
-    open = { owner: this, before: useBrowser.getState(), close: openStoreTransaction() };
+    open = { owner: this, before: useBrowser.getState() };
     queueMicrotask(() => endSegment(this));
   }
 

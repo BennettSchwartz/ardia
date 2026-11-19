@@ -302,10 +302,10 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone, with one
   choke point (`socketSharedChokePoint.ts`). Every socket request, `run` and plugin methods included, runs in a
   socket-origin context: each synchronous stretch of it (the call itself, and each resumption after an await, which
-  re-checks control) is one store transaction, so no subscriber, the shared-folder sync included, hears its changes
-  until it ends. Before it ends, the synced projection of every bound group and everything inside it (exactly what the
+  re-checks control) is checked as soon as it ends, before the shared-folder sync, which waits 300 ms for the sidebar to
+  settle, reads the store. At that point the synced projection of every bound group and everything inside it (exactly what the
   shared-folder engine would write: each link's name and URL, their order, nested groups) is compared with what it was;
-  if it changed, the store goes back to its state before that stretch and the request answers `refused` ("shared
+  if it changed, the store goes back to its exact state before that stretch and the request answers `refused` ("shared
   folder groups change only from the sidebar"). Muting, sleeping, activating, colour, icon and collapsing don't touch
   the projection, so they still work, and so do closing or parking a window that shows the folder. Earlier, more
   specific refusals remain where they give a clearer message: `apply`'s per-op check (`workspaceSharedGuard.ts`),

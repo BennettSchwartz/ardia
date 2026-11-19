@@ -99,7 +99,6 @@ const settled = (s: BrowserState, prev: BrowserState) => {
 };
 const transactions = transactional<BrowserState>(pageMoved, settled);
 export const storeTransaction = transactions.transaction;
-export const openStoreTransaction = transactions.open;
 export const afterStoreTransactionIdempotent = transactions.afterTransactionIdempotent;
 export const inStoreTransaction = transactions.inTransaction;
 setHeldReportsTransaction(storeTransaction);
