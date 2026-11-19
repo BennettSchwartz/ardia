@@ -5,10 +5,12 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.view.Gravity
 import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeProvider
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import org.junit.Assert.assertEquals
@@ -176,7 +178,7 @@ class ScreenReaderFocusTest {
     }
 
     @Test
-    fun theSecondAskReturnsFocusOnlyWhenTalkBackResetItToTheFirstNodeOrNothingHoldsItAndNeverUndoesAUserMove() {
+    fun theSecondAskLeavesAMoveToAnotherNodeAndRestoresFocusThatWentToTheFirstStopOrNowhere() {
         val asked = mutableListOf<Int>()
         var focusOn = "none"
         val header = stop("Space, Personal") { focusOn == "header" }
@@ -204,7 +206,7 @@ class ScreenReaderFocusTest {
             assertEquals(0, requests.waiting)
             return asked.size
         }
-        assertEquals("TalkBack's reset to the first node is undone", 2, afterTheFirstAskFocusMovesTo("header"))
+        assertEquals("focus on the first stop is restored, whether TalkBack's reset or, by design, a user's own move there", 2, afterTheFirstAskFocusMovesTo("header"))
         assertEquals("focus held by nothing is returned", 2, afterTheFirstAskFocusMovesTo("none"))
         assertEquals("a user's move to the next node is left alone", 1, afterTheFirstAskFocusMovesTo("next"))
         assertEquals("focus that stayed needs nothing", 1, afterTheFirstAskFocusMovesTo("target"))
@@ -213,17 +215,65 @@ class ScreenReaderFocusTest {
     }
 
     @Test
-    fun theFirstStopIsTheTopLeftNodeOnScreenAsTalkBackReadsItNotTheFirstInTheTreeAsTheDeckLaysItsCardsBeforeItsHeader() {
+    fun firstStopGeometryTakesTheTopmostStopThenTheLeftmostInLeftToRightAndTheRightmostInRightToLeftWhateverTheTreeOrder() {
         val deck = FrameLayout(activity)
         val card = stop("Lisbon - Wikipedia") { false }
-        val header = stop("Space, Personal") { false }
-        val more = stop("More") { false }
-        deck.addView(card, FrameLayout.LayoutParams(200, 100).apply { topMargin = 100 })
-        deck.addView(header, FrameLayout.LayoutParams(100, 40).apply { topMargin = 10; leftMargin = 10 })
-        deck.addView(more, FrameLayout.LayoutParams(60, 40).apply { topMargin = 10; leftMargin = 200 })
+        val left = stop("Space, Personal") { false }
+        val right = stop("More") { false }
+        val at = { top: Int, start: Int, width: Int, height: Int -> FrameLayout.LayoutParams(width, height, Gravity.TOP or Gravity.LEFT).apply { topMargin = top; leftMargin = start } }
+        deck.addView(card, at(100, 0, 200, 100))
+        deck.addView(left, at(10, 10, 100, 40))
+        deck.addView(right, at(10, 200, 60, 40))
         activity.setContentView(deck)
         layOut()
-        assertTrue(ScreenReaderFocus.firstStop(deck) === header)
+        assertTrue("left to right: the card comes first in the tree, the top-left stop is first on screen", ScreenReaderFocus.firstStop(deck) === left)
+        assertTrue("right to left: the top-right stop is first, as Space sits on the right", ScreenReaderFocus.firstStop(deck, rightToLeft = true) === right)
+    }
+
+    @Test
+    fun focusOnAVirtualNodeOfAPageIsTheUsersSoARestoreLeavesItUnlessThePageIsHidden() {
+        val asked = mutableListOf<Int>()
+        var linkFocused = false
+        var hiddenLinkFocused = false
+        val deck = FrameLayout(activity)
+        val header = stop("Space, Personal") { false }
+        var targetHeld = false
+        val target = holding(asked) { targetHeld }
+        val shownPage = page { linkFocused }
+        val closing = FrameLayout(activity).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS }
+        closing.addView(page { hiddenLinkFocused }, 100, 40)
+        val at = { top: Int, start: Int, width: Int, height: Int -> FrameLayout.LayoutParams(width, height, Gravity.TOP or Gravity.LEFT).apply { topMargin = top; leftMargin = start } }
+        deck.addView(header, at(10, 10, 100, 40))
+        deck.addView(target, at(10, 200, 60, 40))
+        deck.addView(shownPage, at(100, 0, 300, 200))
+        deck.addView(closing, at(320, 0, 100, 40))
+        activity.setContentView(deck)
+        layOut()
+        assertFalse("the page's host doesn't report the focus itself", ScreenReaderFocus.holds(shownPage))
+        val looper = shadowOf(Looper.getMainLooper())
+        val focusAction = AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis) { deck }
+        fun restore(): List<Int> {
+            asked.clear()
+            targetHeld = false
+            requests.start(recheck = true) { target }
+            targetHeld = asked.isNotEmpty()
+            looper.idleFor(Duration.ofSeconds(1))
+            return asked.toList()
+        }
+        linkFocused = true
+        assertEquals("a user reading a link on the page is left there", emptyList<Int>(), restore())
+        linkFocused = false
+        hiddenLinkFocused = true
+        assertEquals("a link focused in a hidden layer doesn't hold the user", listOf(focusAction), restore())
+        hiddenLinkFocused = false
+        targetHeld = false
+        asked.clear()
+        requests.start(recheck = true) { target }
+        assertEquals(listOf(focusAction), asked)
+        linkFocused = true
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals("a move into the page after the first ask isn't undone", listOf(focusAction), asked)
     }
 
     @Test
@@ -417,6 +467,19 @@ class ScreenReaderFocusTest {
             super.onInitializeAccessibilityNodeInfo(info)
             if (held()) info.isAccessibilityFocused = true
         }
+    }
+
+    private fun page(linkFocused: () -> Boolean): View = object : View(activity) {
+        private val links = object : AccessibilityNodeProvider() {
+            override fun findFocus(focus: Int): AccessibilityNodeInfo? =
+                if (focus == AccessibilityNodeInfo.FOCUS_ACCESSIBILITY && linkFocused()) AccessibilityNodeInfo().apply { isVisibleToUser = true } else null
+        }
+
+        init {
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+
+        override fun getAccessibilityNodeProvider(): AccessibilityNodeProvider = links
     }
 
     private fun layOut() {

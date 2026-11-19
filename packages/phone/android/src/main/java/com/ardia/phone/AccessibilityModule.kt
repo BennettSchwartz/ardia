@@ -135,7 +135,14 @@ internal object ScreenReaderFocus {
         return true
     }
 
-    fun holds(view: View): Boolean = view.createAccessibilityNodeInfo().isAccessibilityFocused
+    fun holds(view: View): Boolean = view.createAccessibilityNodeInfo()?.isAccessibilityFocused == true
+
+    fun virtualHolder(root: View): View? {
+        if (!root.isShown) return null
+        if (root.accessibilityNodeProvider?.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)?.isVisibleToUser == true) return root
+        if (root is ViewGroup) for (at in 0 until root.childCount) virtualHolder(root.getChildAt(at))?.let { return it }
+        return null
+    }
 
     fun holder(root: View): View? {
         if (!root.isShown) return null
@@ -144,14 +151,15 @@ internal object ScreenReaderFocus {
         return null
     }
 
-    fun firstStop(root: View): View? {
+    fun firstStop(root: View, rightToLeft: Boolean = root.layoutDirection == View.LAYOUT_DIRECTION_RTL): View? {
         var first: View? = null
         val firstRect = Rect()
         val rect = Rect()
+        fun before(now: Rect, best: Rect) = now.top < best.top || (now.top == best.top && if (rightToLeft) now.right > best.right else now.left < best.left)
         fun visit(view: View) {
             if (!view.isShown || view.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) return
             if (isStop(view) && view.getGlobalVisibleRect(rect)) {
-                if (first == null || rect.top < firstRect.top || (rect.top == firstRect.top && rect.left < firstRect.left)) {
+                if (first == null || before(rect, firstRect)) {
                     first = view
                     firstRect.set(rect)
                 }
@@ -163,7 +171,11 @@ internal object ScreenReaderFocus {
     }
 
     fun focusIsFree(target: View, root: View): Boolean {
-        val holding = holder(root) ?: return true
+        val holding = holder(root)
+        if (holding == null) {
+            val virtual = virtualHolder(root) ?: return true
+            return !reachable(virtual)
+        }
         return holding === target || !reachable(holding) || holding === firstStop(root)
     }
 
