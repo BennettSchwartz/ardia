@@ -8,7 +8,7 @@ type Focusable = Parameters<typeof findNodeHandle>[0];
 
 const nativeFocus = () => Platform.OS === "android" && screenReaderFocusIsNative();
 
-export function focusForScreenReader(target: () => Focusable | null | undefined, still: () => boolean = () => true): () => void {
+export function focusForScreenReader(target: () => Focusable | null | undefined, still: () => boolean = () => true, { returning = false }: { returning?: boolean } = {}): () => void {
   let live = true;
   let frame: number | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -29,7 +29,7 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
         AccessibilityInfo.setAccessibilityFocus(handle);
         return;
       }
-      revoke = focusViewNatively(handle);
+      revoke = focusViewNatively(handle, { returning });
     };
     frame = requestAnimationFrame(() => {
       frame = null;

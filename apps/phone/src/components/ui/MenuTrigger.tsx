@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { findNodeHandle, Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
 import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
-import { focusForScreenReader, handFocusOver } from "./coverFocus";
-import { useOverlayAfterClear, useOverlayCovered, useOverlayGeneration, useOverlayOpened } from "./Overlay";
+import { handFocusOver } from "./coverFocus";
+import { useFocusReturn } from "./focusReturn";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
@@ -105,10 +105,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
   const cancelRestore = useRef<() => void>(() => undefined);
-  const covered = useOverlayCovered();
-  const generation = useOverlayGeneration();
-  const onOverlayOpened = useOverlayOpened();
-  const afterClear = useOverlayAfterClear();
+  const returnFocus = useFocusReturn();
   useEffect(() => () => cancelRestore.current(), []);
   const frostAround = useMenuFrost();
   const frost = frostHere === undefined ? frostAround : frostHere;
@@ -142,20 +139,13 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
         handFocusOver(target);
         return;
       }
-      let cancelFocus: () => void = () => undefined;
-      const openedBefore = generation();
-      const stopWaiting = afterClear(() => {
-        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered());
-      });
-      const stopWatching = onOverlayOpened(() => cancelRestore.current());
+      const stopRestore = returnFocus(target);
       cancelRestore.current = () => {
-        stopWaiting();
-        cancelFocus();
-        stopWatching();
+        stopRestore();
         cancelRestore.current = () => undefined;
       };
     },
-    [onClose, restoresAfterChoice, afterClear],
+    [onClose, restoresAfterChoice, returnFocus],
   );
   const held = trigger === "longPress";
   return (

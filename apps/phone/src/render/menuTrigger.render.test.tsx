@@ -624,7 +624,7 @@ test("on Android TalkBack focus goes through the native accessibility-focus acti
   focusForScreenReader(() => 42 as never);
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
-  expect(nativeFocus).toHaveBeenCalledWith(42);
+  expect(nativeFocus).toHaveBeenCalledWith(42, { returning: false });
   expect(rnFocus).not.toHaveBeenCalled();
   announceForScreenReader("Close 3 Tabs? They’ll stay in your Archive.");
   await act(async () => undefined);
@@ -903,7 +903,7 @@ test("on Android cancelling a focus after its native request went out revokes th
   const cancel = focusForScreenReader(() => 42 as never);
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
-  expect(sent).toHaveBeenCalledWith(42);
+  expect(sent).toHaveBeenCalledWith(42, { returning: false });
   expect(revoked).not.toHaveBeenCalled();
   cancel();
   expect(revoked).toHaveBeenCalledTimes(1);
@@ -988,7 +988,7 @@ test("on Android a restore already handed to the native side is revoked the mome
   throughClose();
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 50));
-  expect(sent).toHaveBeenCalledWith(77);
+  expect(sent).toHaveBeenCalledWith(77, { returning: true });
   expect(revoked).not.toHaveBeenCalled();
   updateSurface(root, <Harness asking />);
   expect(revoked).toHaveBeenCalledTimes(1);
@@ -1063,24 +1063,50 @@ test("the app is readable again the moment a menu or a confirmation starts closi
   unmount(root);
 });
 
-test("on Android a restore is asked for once: after it lands nothing asks again, so a swipe the user makes right after is never undone", async () => {
+test("on Android a restore asks the native side to return focus, which re-asks once 300 ms after landing only if the target lost focus; JS sends it once, and a newer overlay revokes it, re-ask included", async () => {
   if (Platform.OS !== "android") return;
   const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
   const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const { updateSurface } = require("../../test/render/harness") as typeof import("../../test/render/harness");
   const { ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
   jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
   jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
-  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => () => undefined);
+  const revoked = jest.fn();
+  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => revoked);
+  function Harness({ asking = false }: { asking?: boolean }) {
+    return (
+      <>
+        <MenuTrigger items={ITEMS} trigger="tap">
+          {({ onPress }) => (
+            <Pressable accessibilityLabel="Trigger" onPress={onPress}>
+              <Text>Trigger</Text>
+            </Pressable>
+          )}
+        </MenuTrigger>
+        {asking ? <ConfirmSheet confirmation={{ title: "Question", message: "", action: "Confirm", run: () => undefined }} onClose={() => undefined} /> : null}
+      </>
+    );
+  }
   const back = pressBack();
-  const root = trigger("tap");
+  const root = renderSurface(<Harness />);
   act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: 77, nativeEvent: {} }));
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
   back();
   throughClose();
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
-  expect(sent.mock.calls.filter(([tag]) => tag === 77)).toHaveLength(1);
+  const restores = () => sent.mock.calls.filter(([tag]) => tag === 77);
+  expect(restores()).toEqual([[77, { returning: true }]]);
   act(() => jest.advanceTimersByTime(3000));
-  expect(sent.mock.calls.filter(([tag]) => tag === 77)).toHaveLength(1);
+  expect(restores()).toHaveLength(1);
+  const others = sent.mock.calls.filter(([tag]) => tag !== 77);
+  expect(others.every(([, options]) => options?.returning === false)).toBe(true);
+  expect(revoked).not.toHaveBeenCalled();
+  updateSurface(root, <Harness asking />);
+  expect(revoked).toHaveBeenCalledTimes(1);
+  updateSurface(root, <Harness />);
   unmount(root);
 });
 

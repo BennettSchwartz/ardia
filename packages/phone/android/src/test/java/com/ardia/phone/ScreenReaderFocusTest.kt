@@ -129,6 +129,52 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun aReturnedFocusIsAskedOnceMoreAfterItLandsOnlyIfTheViewLostItAndNeverAfterACancelOrWithoutALanding() {
+        val asked = mutableListOf<Int>()
+        var held = false
+        val target = holding(asked) { held }
+        activity.setContentView(FrameLayout(activity).apply { addView(target, 200, 100) })
+        layOut()
+        val looper = shadowOf(Looper.getMainLooper())
+        val focusAction = AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
+
+        requests.start(recheck = true) { target }
+        assertEquals("the first ask lands at once", listOf(focusAction), asked)
+        held = true
+        looper.idleFor(Duration.ofMillis(FocusRequests.RECHECK_AFTER_MS + 100))
+        assertEquals("focus stayed, so nothing is asked again", listOf(focusAction), asked)
+        assertEquals(0, requests.waiting)
+
+        asked.clear()
+        held = false
+        requests.start(recheck = true) { target }
+        looper.idleFor(Duration.ofMillis(FocusRequests.RECHECK_AFTER_MS - 50))
+        assertEquals("nothing more before the window ends", listOf(focusAction), asked)
+        looper.idleFor(Duration.ofMillis(100))
+        assertEquals("focus was taken, so it is asked once more", listOf(focusAction, focusAction), asked)
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals("and only once", 2, asked.size)
+        assertEquals(0, requests.waiting)
+
+        asked.clear()
+        val id = requests.start(recheck = true) { target }
+        requests.cancel(id)
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals("a cancel drops the second ask", listOf(focusAction), asked)
+
+        asked.clear()
+        requests.start(recheck = true) { null }
+        looper.idleFor(Duration.ofSeconds(2))
+        assertTrue("a first ask that never landed asks nothing again", asked.isEmpty())
+        assertEquals(0, requests.waiting)
+
+        requests.start { target }
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals("a plain focus never asks again", listOf(focusAction), asked)
+    }
+
+    @Test
     fun aCancelledRequestNeverLooksAgain() {
         val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
         var looked = 0
@@ -226,6 +272,22 @@ class ScreenReaderFocusTest {
         override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
             super.onInitializeAccessibilityNodeInfo(info)
             if (focused) info.isAccessibilityFocused = true
+        }
+
+        override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
+            asked += action
+            return action == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        }
+    }
+
+    private fun holding(asked: MutableList<Int>, held: () -> Boolean): View = object : View(activity) {
+        init {
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+
+        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(info)
+            if (held()) info.isAccessibilityFocused = true
         }
 
         override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {

@@ -25,6 +25,8 @@ class AccessibilityModule : Module() {
 
         AsyncFunction("focusView") { tag: Int -> requests.start { runCatching { appContext.findView<View>(tag) }.getOrNull() } }.runOnQueue(Queues.MAIN)
 
+        AsyncFunction("returnFocus") { tag: Int -> requests.start(recheck = true) { runCatching { appContext.findView<View>(tag) }.getOrNull() } }.runOnQueue(Queues.MAIN)
+
         AsyncFunction("cancelFocus") { request: Int -> requests.cancel(request) }.runOnQueue(Queues.MAIN)
 
         OnDestroy {
@@ -49,6 +51,7 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
     companion object {
         const val RETRY_EVERY_MS = 16L
         const val GIVE_UP_AFTER_MS = 500L
+        const val RECHECK_AFTER_MS = 300L
     }
 
     private var lastId = 0
@@ -60,18 +63,34 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
 
     val waiting: Int get() = pending.size
 
-    fun start(resolve: () -> View?): Int {
+    fun start(recheck: Boolean = false, resolve: () -> View?): Int {
         if (destroyed) return 0
         val id = ++lastId
         val deadline = clock() + GIVE_UP_AFTER_MS
+        val again = object : Runnable {
+            override fun run() {
+                if (destroyed || pending[id] !== this) return
+                pending.remove(id)
+                ScreenReaderFocus.focus(resolve())
+            }
+        }
         val attempt = object : Runnable {
             override fun run() {
                 if (destroyed || pending[id] !== this) return
-                if (clock() >= deadline || ScreenReaderFocus.focus(resolve())) {
+                if (clock() >= deadline) {
                     pending.remove(id)
                     return
                 }
-                handler.postDelayed(this, RETRY_EVERY_MS)
+                if (!ScreenReaderFocus.focus(resolve())) {
+                    handler.postDelayed(this, RETRY_EVERY_MS)
+                    return
+                }
+                if (!recheck) {
+                    pending.remove(id)
+                    return
+                }
+                pending[id] = again
+                handler.postDelayed(again, RECHECK_AFTER_MS)
             }
         }
         pending[id] = attempt
