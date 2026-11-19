@@ -175,7 +175,7 @@ function stackFrames(error: unknown): ExceptionFrame[] {
   return HEADERLESS_FRAME.test(stack.split("\n", 1)[0]!) ? parseStack(stack) : [];
 }
 
-const CODE_FILE = /\.(?:[cm]?jsx?|tsx?|bundle|jsbundle|hbc)$/;
+const CODE_FILE = /\.(?:bundle|jsbundle|hbc)$|^InternalBytecode\.js$/;
 const CODE_FUNCTION = /^(?:async |new )?[\w$.<>#:-]+(?: \[as [\w$]+\])?$/;
 
 export function errorFrames(error: unknown): ExceptionFrame[] {
