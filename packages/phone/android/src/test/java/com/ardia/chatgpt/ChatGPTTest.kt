@@ -158,6 +158,19 @@ class ChatGPTTest {
         assertEquals(connection, ChatGPTConnection.fromJson(connection.toJson()))
     }
 
+    @Test
+    fun pendingRotationPersistsSeparatelyFromTheVerifiedTokens() {
+        val endpoints = ChatGPTEndpoints(issuer, issuer, issuer, null, issuer, ChatGPTEndpoints.OPENAI_API)
+        val original = ChatGPTTokens("access", "refresh", 0, emptyList(), null)
+        val pending = ChatGPTTokens("next access", "next refresh", Long.MAX_VALUE, emptyList(), "unchecked ID token")
+        val connection = ChatGPTConnection("oaiapp_abc", ChatGPTIdentity("user-1", null, null), original, endpoints, pendingTokens = pending)
+
+        val restored = ChatGPTConnection.fromJson(connection.toJson())
+
+        assertEquals(original, restored?.tokens)
+        assertEquals(pending, restored?.pendingTokens)
+    }
+
     private fun keyPair(): KeyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
 
     private fun unsigned(value: java.math.BigInteger): ByteArray = value.toByteArray().dropWhile { it == 0.toByte() }.toByteArray()

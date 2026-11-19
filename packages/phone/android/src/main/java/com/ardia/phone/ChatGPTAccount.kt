@@ -28,8 +28,10 @@ import java.util.concurrent.TimeUnit
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
@@ -61,10 +63,12 @@ internal class ChatGPTAccount(context: Context) {
     private val secrets = KeystoreKeyStore(File(app.noBackupFilesDir, "ChatGPT"), alias = "Ardia ChatGPT Key")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableState = MutableStateFlow(ChatGPTAccountState(connection = loadConnection()))
-    private var refreshing: Deferred<ChatGPTConnection>? = null
+    private var refreshing: Deferred<Unit>? = null
+    private var connectionGeneration = 0L
+    private var disconnecting = false
 
     val state: StateFlow<ChatGPTAccountState> = mutableState.asStateFlow()
-    val isConnected: Boolean get() = state.value.isConnected
+    val isConnected: Boolean get() = !disconnecting && state.value.isConnected
     var onDisconnected: (() -> Unit)? = null
 
     private val connection: ChatGPTConnection? get() = state.value.connection
@@ -97,13 +101,17 @@ internal class ChatGPTAccount(context: Context) {
     fun noteProblem(message: String) = mutableState.update { it.copy(problem = message) }
 
     suspend fun signIn(activity: Activity): Boolean {
-        if (state.value.isSigningIn) return false
+        if (disconnecting || state.value.isSigningIn) return false
+        val generation = connectionGeneration
         mutableState.update { it.copy(isSigningIn = true, problem = null) }
         return try {
             val made = authorize(activity)
+            if (disconnecting || generation != connectionGeneration) return false
+            connectionGeneration++
+            refreshing = null
             save(made)
             loadModels()
-            true
+            isConnected
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: ChatGPTFailure) {
@@ -118,22 +126,34 @@ internal class ChatGPTAccount(context: Context) {
     }
 
     suspend fun disconnect() {
-        refreshing?.let { runCatching { it.await() } }
-        val current = connection ?: return
-        forget()
-        onDisconnected?.invoke()
-        if (!revoke(current)) noteProblem("Disconnected on this phone, but OpenAI didn’t confirm it. You can also remove Ardia in ChatGPT’s settings.")
+        val original = connection ?: return
+        if (disconnecting) return
+        disconnecting = true
+        withContext(NonCancellable) {
+            try {
+                onDisconnected?.invoke()
+                refreshing?.let { runCatching { it.await() } }
+                val current = connection ?: original
+                forget()
+                if (!revoke(current)) noteProblem("Disconnected on this phone, but OpenAI didn’t confirm it. You can also remove Ardia in ChatGPT’s settings.")
+            } finally {
+                disconnecting = false
+            }
+        }
     }
 
     private fun forget() {
+        connectionGeneration++
+        refreshing = null
         secrets.delete(CONNECTION_KEY)
         mutableState.update { it.copy(connection = null) }
     }
 
     private suspend fun revoke(connection: ChatGPTConnection): Boolean {
         val endpoint = connection.endpoints.revocation ?: return false
+        val refreshToken = (connection.pendingTokens ?: connection.tokens).refreshToken
         repeat(2) { attempt ->
-            val request = Request.Builder().url(endpoint).post(ChatGPTAuthorization.revocation(connection.tokens.refreshToken, connection.clientId).toRequestBody(FORM)).build()
+            val request = Request.Builder().url(endpoint).post(ChatGPTAuthorization.revocation(refreshToken, connection.clientId).toRequestBody(FORM)).build()
             val status = runCatching { ChatGPTHttp.send(request, timeoutSeconds = 10).second }.getOrNull()
             if (status == 200) return true
             if (attempt == 1 || (status != null && status < 500)) return false
@@ -143,16 +163,22 @@ internal class ChatGPTAccount(context: Context) {
     }
 
     suspend fun validConnection(forceRefresh: Boolean = false): ChatGPTConnection {
+        if (disconnecting) throw ChatGPTFailure.Expired
         val current = connection ?: throw ChatGPTFailure.Expired
-        if (!forceRefresh && !current.tokens.needsRefresh()) return current
-        refreshing?.let { return it.await() }
-        val task = scope.async { refresh(current) }
-        refreshing = task
-        return try {
-            task.await()
-        } finally {
-            if (refreshing === task) refreshing = null
+        val generation = connectionGeneration
+        val task = refreshing ?: run {
+            if (!forceRefresh && current.pendingTokens == null && !current.tokens.needsRefresh()) return current
+            scope.async(start = CoroutineStart.LAZY) {
+                try {
+                    refresh(current, generation)
+                } finally {
+                    if (generation == connectionGeneration) refreshing = null
+                }
+            }.also { refreshing = it }
         }
+        task.await()
+        if (disconnecting) throw ChatGPTFailure.Expired
+        return currentConnection(generation)
     }
 
     suspend fun currentModel(): ChatGPTModel {
@@ -161,15 +187,16 @@ internal class ChatGPTAccount(context: Context) {
         return connection?.model ?: throw ChatGPTFailure.Unsupported
     }
 
-    fun failed(failure: ChatGPTFailure) {
-        if (failure.requiresSignIn) signOutLocally(failure)
+    private fun failed(failure: ChatGPTFailure, generation: Long) {
+        if (failure.requiresSignIn && !disconnecting && generation == connectionGeneration) signOutLocally(failure)
     }
 
     private suspend fun authorize(activity: Activity): ChatGPTConnection {
         val endpoints = discover()
         val previousSubject = connection?.identity?.subject
-        val server = withContext(Dispatchers.IO) { LoopbackCallbackServer.start() }
+        var started: LoopbackCallbackServer? = null
         try {
+            val server = withContext(Dispatchers.IO) { LoopbackCallbackServer.start().also { started = it } }
             val savedClientId = secrets.load(registrationKey)?.let { String(it) }?.takeIf(ChatGPTAuth::isValidClientId)
             val authorization = ChatGPTAuthorization(server.port, savedClientId, connection?.identity?.email)
             server.expect(authorization.state, savedClientId)
@@ -188,7 +215,7 @@ internal class ChatGPTAccount(context: Context) {
                 returned.stop()
             }
         } finally {
-            withContext(Dispatchers.IO) { server.stop() }
+            withContext(NonCancellable + Dispatchers.IO) { started?.stop() }
         }
     }
 
@@ -229,27 +256,28 @@ internal class ChatGPTAccount(context: Context) {
         return ChatGPTEndpoints.fromDiscovery(body, issuer, api)
     }
 
-    private suspend fun refresh(previous: ChatGPTConnection): ChatGPTConnection {
-        val request = Request.Builder().url(previous.endpoints.token).header("Accept", "application/json").post(ChatGPTAuthorization.refresh(previous.tokens.refreshToken, previous.clientId).toRequestBody(FORM)).build()
-        val (body, status) = ChatGPTHttp.send(request, timeoutSeconds = 30)
+    private fun currentConnection(generation: Long): ChatGPTConnection =
+        connection?.takeIf { generation == connectionGeneration } ?: throw ChatGPTFailure.Expired
+
+    private suspend fun refresh(previous: ChatGPTConnection, generation: Long) {
         try {
-            if (status != 200) throw ChatGPTFailure.api(body, status)
-            val tokens = ChatGPTTokens.parse(body, previous.tokens.scopes)
-            val next = (connection ?: previous).copy(tokens = tokens)
-            save(next)
-            val idToken = tokens.idToken ?: return next
-            val identity = try {
-                verifiedIdentity(idToken, next.endpoints, next.clientId, null)
-            } catch (unavailable: ChatGPTFailure.Unavailable) {
-                return connection ?: next
+            val tokens = previous.pendingTokens ?: run {
+                val request = Request.Builder().url(previous.endpoints.token).header("Accept", "application/json").post(ChatGPTAuthorization.refresh(previous.tokens.refreshToken, previous.clientId).toRequestBody(FORM)).build()
+                val (body, status) = ChatGPTHttp.send(request, timeoutSeconds = 30)
+                if (status != 200) throw ChatGPTFailure.api(body, status)
+                ChatGPTTokens.parse(body, previous.tokens.scopes)
             }
-            val latest = connection
-            if (latest == null || latest.identity.subject != next.identity.subject) return next
-            val confirmed = latest.confirmed(identity)
-            save(confirmed)
-            return confirmed
+            val latest = currentConnection(generation)
+            val idToken = tokens.idToken
+            if (idToken == null) {
+                save(latest.copy(tokens = tokens, pendingTokens = null))
+                return
+            }
+            if (latest.pendingTokens == null) save(latest.copy(pendingTokens = tokens))
+            val identity = verifiedIdentity(idToken, latest.endpoints, latest.clientId, null)
+            save(currentConnection(generation).confirmed(identity).copy(tokens = tokens, pendingTokens = null))
         } catch (failure: ChatGPTFailure) {
-            if (failure.requiresSignIn) signOutLocally(failure)
+            failed(failure, generation)
             throw failure
         }
     }
@@ -272,6 +300,7 @@ internal class ChatGPTAccount(context: Context) {
 
     private suspend fun loadModels() {
         val before = connection ?: return
+        val generation = connectionGeneration
         try {
             val current = validConnection()
             val request = Request.Builder().url(current.endpoints.api.trimEnd('/') + "/models").header("Authorization", "Bearer ${current.tokens.accessToken}").header("Accept", "application/json").build()
@@ -279,12 +308,12 @@ internal class ChatGPTAccount(context: Context) {
             if (status != 200) throw ChatGPTFailure.api(body, status)
             val models = ChatGPTModel.catalog(body)
             val latest = connection ?: return
-            if (latest.identity.subject != before.identity.subject) return
+            if (disconnecting || generation != connectionGeneration || latest.identity.subject != before.identity.subject) return
             save(latest.copy(models = models))
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: ChatGPTFailure) {
-            failed(failure)
+            failed(failure, generation)
         } catch (error: Exception) {
         }
     }
@@ -301,6 +330,7 @@ internal class ChatGPTAccount(context: Context) {
     }
 
     suspend fun streamAnswer(instructions: String, prompt: String, onText: (String) -> Unit): ChatGPTModel {
+        val generation = connectionGeneration
         val model = currentModel()
         var current = validConnection()
         repeat(2) { attempt ->
@@ -311,7 +341,7 @@ internal class ChatGPTAccount(context: Context) {
                 if (failure is ChatGPTFailure.Rejected && failure.status == 401 && attempt == 0) {
                     current = validConnection(forceRefresh = true)
                 } else {
-                    failed(failure)
+                    failed(failure, generation)
                     throw failure
                 }
             }

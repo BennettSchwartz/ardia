@@ -1,6 +1,8 @@
 package com.ardia.phone
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import expo.modules.kotlin.exception.CodedException
 import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.functions.Queues
@@ -13,6 +15,9 @@ class BrowseForMeModule : Module() {
     private val context: Context get() = appContext.reactContext ?: throw CodedException("ERR_NO_CONTEXT", "The app context is gone", null)
 
     private val host: BrowseForMeHost get() = BrowseForMeHost.get(context)
+    private val main = Handler(Looper.getMainLooper())
+    private val sink: EventSink = { event -> sendEvent("onBrowseForMe", event) }
+    private var boundHost: BrowseForMeHost? = null
 
     override fun definition() = ModuleDefinition {
         Name("ArdiaPhoneBrowseForMe")
@@ -20,13 +25,21 @@ class BrowseForMeModule : Module() {
         Events("onBrowseForMe")
 
         OnCreate {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                host.sink = { event -> sendEvent("onBrowseForMe", event) }
+            main.post {
+                val react = appContext.reactContext ?: return@post
+                boundHost = BrowseForMeHost.get(react).also { it.sink = sink }
             }
         }
 
         OnDestroy {
-            android.os.Handler(android.os.Looper.getMainLooper()).post { BrowseForMeHost.get(context).sink = null }
+            main.post {
+                val bound = boundHost
+                if (bound != null && bound.sink === sink) {
+                    bound.sink = null
+                    bound.dismiss()
+                }
+                boundHost = null
+            }
         }
 
         AsyncFunction("isConnected") { -> host.account.isConnected }.runOnQueue(Queues.MAIN)

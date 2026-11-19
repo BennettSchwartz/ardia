@@ -48,6 +48,7 @@ data class ChatGPTConnection(
     val models: List<ChatGPTModel> = emptyList(),
     val chosenModel: String? = null,
     val chosenEffort: String? = null,
+    val pendingTokens: ChatGPTTokens? = null,
 ) {
     val model: ChatGPTModel? get() = models.firstOrNull { it.slug == chosenModel } ?: models.firstOrNull()
 
@@ -61,6 +62,7 @@ data class ChatGPTConnection(
     fun toJson(): String = JSONObject()
         .put("clientId", clientId).put("identity", identity.toJson()).put("tokens", tokens.toJson()).put("endpoints", endpoints.toJson())
         .put("models", JSONArray(models.map { it.toJson() })).put("chosenModel", chosenModel ?: JSONObject.NULL).put("chosenEffort", chosenEffort ?: JSONObject.NULL)
+        .put("pendingTokens", pendingTokens?.toJson() ?: JSONObject.NULL)
         .toString()
 
     companion object {
@@ -71,6 +73,7 @@ data class ChatGPTConnection(
                 ChatGPTEndpoints.fromJson(value.getJSONObject("endpoints")),
                 value.optJSONArray("models")?.let { array -> List(array.length()) { ChatGPTModel.fromJson(array.getJSONObject(it)) } }.orEmpty(),
                 value.optNullable("chosenModel"), value.optNullable("chosenEffort"),
+                value.optJSONObject("pendingTokens")?.let(ChatGPTTokens::fromJson),
             )
         }.getOrNull()
     }
