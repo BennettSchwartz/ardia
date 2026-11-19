@@ -97,21 +97,29 @@ function sample(schema) {
   return null;
 }
 
-const SKIPPED = new Set(["profiles.delete", "extensions.uninstall", "plugins.remove", "plugins.disable", "history.clear", "downloads.open", "downloads.reveal", "windows.merge"]);
-
-test("no handler reads a param its schema doesn't list", async () => {
+test("every method reaches its real handler, and no handler reads a param its schema doesn't list", async () => {
   await freshWindow();
   const list = await ok("methods");
   const unlisted = [];
+  const unhandled = [];
   for (const m of list) {
-    if (SKIPPED.has(m.name)) continue;
     for (const params of [{}, sample(m.params)]) {
       const reply = await call(m.name, params);
       if (/its params schema doesn't list/.test(reply.error?.message ?? "")) unlisted.push(reply.error.message);
+      if (reply.error?.code === "unknown_method") unhandled.push(m.name);
     }
     await controlOn();
   }
   assert.deepEqual(unlisted, []);
+  assert.deepEqual(unhandled, []);
+});
+
+test("plugins.call reads plugin, tool and input, the params the shipped command sends", async () => {
+  await freshWindow();
+  const reply = await call("plugins.call", { plugin: "nobody", tool: "hello", input: { who: "you" } });
+  assert.ok(reply.error, "there's no plugin nobody");
+  assert.doesNotMatch(reply.error.message, /schema doesn't list/);
+  assert.notEqual(reply.error.code, "unknown_method");
 });
 
 test("a handler reading a param outside its schema fails loudly instead of reading it", async () => {
@@ -119,6 +127,15 @@ test("a handler reading a param outside its schema fails loudly instead of readi
   const guarded = listedParams(methodSpec("tabs.get"), { tab: "t1" });
   assert.equal(guarded.tab, "t1");
   assert.throws(() => guarded.window, /tabs.get read window/);
+  assert.throws(() => "window" in guarded, /tabs.get read window/);
+  assert.throws(() => Object.hasOwn(guarded, "window"), /tabs.get read window/);
+  assert.throws(() => Object.getOwnPropertyDescriptor(guarded, "window"), /tabs.get read window/);
+  assert.equal("tab" in guarded, true);
+  assert.deepEqual({ ...guarded }, { tab: "t1" });
+  const nested = listedParams(methodSpec("subscribe"), { events: [], idle: { tab: [60] } });
+  assert.deepEqual(nested.idle.tab, [60]);
+  assert.throws(() => nested.idle.bogus, /subscribe read idle\.bogus/);
+  assert.throws(() => "bogus" in nested.idle, /subscribe read idle\.bogus/);
 });
 
 test("a plugin's session reaches only the methods the dispatcher lets it", () => {

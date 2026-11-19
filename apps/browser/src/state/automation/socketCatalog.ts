@@ -123,15 +123,33 @@ const PROTOTYPE_KEYS = new Set([...Object.getOwnPropertyNames(Object.prototype),
 
 export class UnlistedParamError extends Error {}
 
-export function listedParams(spec: MethodSpec, params: Record<string, unknown>): Record<string, unknown> {
-  const listed = spec.params.properties ?? {};
-  return new Proxy(params, {
+const isClosedObject = (schema: JsonSchema | undefined): schema is JsonSchema => !!schema && schema.additionalProperties === false && typeof schema.properties === "object";
+
+function guarded(method: string, schema: JsonSchema, value: Record<string, unknown>, path: string): Record<string, unknown> {
+  const listed = schema.properties ?? {};
+  const check = (key: string | symbol) => {
+    if (typeof key === "string" && !Object.hasOwn(listed, key) && !PROTOTYPE_KEYS.has(key)) throw new UnlistedParamError(`${method} read ${path}${key}, which its params schema doesn't list.`);
+  };
+  return new Proxy(value, {
     get(target, key, receiver) {
-      if (typeof key === "string" && !Object.hasOwn(listed, key) && !PROTOTYPE_KEYS.has(key)) throw new UnlistedParamError(`${spec.name} read ${key}, which its params schema doesn't list.`);
-      return Reflect.get(target, key, receiver);
+      check(key);
+      const found = Reflect.get(target, key, receiver);
+      const nested = typeof key === "string" ? ownField(listed, key) : undefined;
+      if (isClosedObject(nested) && typeof found === "object" && found !== null && !Array.isArray(found)) return guarded(method, nested, found as Record<string, unknown>, `${path}${key}.`);
+      return found;
+    },
+    has(target, key) {
+      check(key);
+      return Reflect.has(target, key);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      check(key);
+      return Reflect.getOwnPropertyDescriptor(target, key);
     },
   });
 }
+
+export const listedParams = (spec: MethodSpec, params: Record<string, unknown>): Record<string, unknown> => guarded(spec.name, spec.params, params, "");
 
 export function checkedParams(spec: MethodSpec, params: Record<string, unknown>): { params: Record<string, unknown> } | SocketBody {
   const problem = schemaProblem(spec.params, params, "params");

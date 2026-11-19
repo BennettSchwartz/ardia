@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 const { useBrowser } = await import("../../browser/store.ts");
 const { startAutomation } = await import("../controlSocket.ts");
+const { registerPluginSocketMethods } = await import("../../plugins/start.ts");
 const stub = await import("../../../test-native/index.ts");
 
 export const S = () => useBrowser.getState();
@@ -32,6 +33,7 @@ export function socketClient(connection) {
 export async function controlOn() {
   S().updateSettings({ cliControl: true });
   startAutomation();
+  registerPluginSocketMethods();
   for (let i = 0; i < 20 && !stub.controlSocket.running; i++) await tick();
   await tick();
 }
