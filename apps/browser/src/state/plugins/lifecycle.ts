@@ -10,7 +10,7 @@ import { listingOf } from "./appChecks";
 import { applySettingsPatch, planDisable, planEnable, spliceApplied } from "./defaults";
 import { pluginRecordsSaved, writePluginRecords } from "./savedState";
 import { settleInstall } from "./installWaiters";
-import { activeManifest, commitPlugins, currentPlugins, withdrawalsFor, type PluginsCommit, isAlwaysOn, isInstalled, NO_RECORD, recordOf, usePlugins, type PluginListing, type PluginRecord } from "./store";
+import { abandonWithdrawal, activeManifest, commitPlugins, currentPlugins, withdrawalsFor, type PluginsCommit, isAlwaysOn, isInstalled, NO_RECORD, recordOf, usePlugins, type PluginListing, type PluginRecord } from "./store";
 import { stopProcess, superviseProcess, supervisedNames } from "./process";
 import { dropCalls } from "./tools";
 import { sendValues } from "./channel";
@@ -206,7 +206,7 @@ export function turnOffPlugin(name: string, consent: ConsentToken | null): Promi
   if (!withdrawing) return Promise.resolve(disablePlugin(name, consent));
   return withdrawing.then(() => {
     if (disablePlugin(name, consent)) return true;
-    void withdrawBefore({ listings: currentPlugins().listings, records: currentPlugins().records }, consent);
+    abandonWithdrawal(name, consent);
     return false;
   });
 }

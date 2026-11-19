@@ -16,8 +16,18 @@ const HELD_OFF_MIGRATIONS: Migrations = { 0: unchanged };
 
 type HeldOff = { profiles: Set<string>; writable: boolean };
 
-function readHeldOff(): HeldOff {
+let unsaved: string | null = null;
+let lastSaved: string | null = null;
+
+function savedRecord(): string | null {
   const raw = readDocument(HELD_OFF_DOCUMENT);
+  if (unsaved !== null && raw === unsaved) return lastSaved;
+  unsaved = null;
+  return (lastSaved = raw);
+}
+
+function readHeldOff(): HeldOff {
+  const raw = savedRecord();
   if (!raw) return { profiles: new Set(), writable: true };
   try {
     const doc: unknown = JSON.parse(raw);
@@ -58,8 +68,15 @@ function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
     const list = [...profiles].sort();
     if (JSON.stringify(list) !== before) {
       const contents = versionedJson({ offerToSaveHeldOff: list }, HELD_OFF_VERSION);
-      await saveDocument(HELD_OFF_DOCUMENT, contents);
+      try {
+        await saveDocument(HELD_OFF_DOCUMENT, contents);
+      } catch {
+        unsaved = contents;
+        return false;
+      }
       if (readDocument(HELD_OFF_DOCUMENT) !== contents) return false;
+      unsaved = null;
+      lastSaved = contents;
     }
     for (const p of carried) owed.delete(p);
     if (!owed.size && !intents.size) settleRetry();

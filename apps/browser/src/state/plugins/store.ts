@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { PluginManifest } from "../../lib/pluginManifest";
+import type { ConsentToken } from "../telemetry/choice";
 
 export type PluginListing = {
   name: string;
@@ -108,5 +109,16 @@ export function beforePluginsWithdraw(listener: (next: PluginsCommit) => Promise
   withdrawing.add(listener);
   return () => void withdrawing.delete(listener);
 }
+
+const abandoning = new Set<(name: string, consent: ConsentToken | null) => void>();
+
+export function onPluginWithdrawAbandoned(listener: (name: string, consent: ConsentToken | null) => void): () => void {
+  abandoning.add(listener);
+  return () => void abandoning.delete(listener);
+}
+
+export const abandonWithdrawal = (name: string, consent: ConsentToken | null) => {
+  for (const listener of [...abandoning]) listener(name, consent);
+};
 
 export const withdrawalsFor = (next: PluginsCommit): Promise<unknown>[] => [...withdrawing].flatMap((listener) => listener(next) ?? []);

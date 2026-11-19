@@ -6,7 +6,7 @@ import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile } from "../browser/model";
 import { usePages } from "../tabs/pageState";
 import { useShallow } from "zustand/react/shallow";
-import { beforePluginsCommit, beforePluginsWithdraw, usePlugins, recordOf, activeManifest, type PluginsCommit } from "../plugins/store";
+import { beforePluginsCommit, beforePluginsWithdraw, onPluginWithdrawAbandoned, usePlugins, recordOf, activeManifest, type PluginsCommit } from "../plugins/store";
 import { notePasswordManagerChosen, notePasswordPanel } from "../telemetry/passwordManagerCounts";
 import {
   choiceKind,
@@ -129,9 +129,9 @@ const ATTEMPT_MS = 1000;
 const RETRY_FIRST_MS = 1000;
 const RETRY_MAX_MS = 30_000;
 
-let withdrawing: PluginsCommit | null = null;
+const withdrawing = new Set<string>();
 const commitPlugins = (commit: PluginsCommit) => managerPlugins({ ...commit, order: Object.keys(commit.listings).sort() });
-const providerPlugins = (committed: readonly ManagerPlugin[]) => (withdrawing ? commitPlugins(withdrawing) : committed);
+const providerPlugins = (plugins: readonly ManagerPlugin[]) => (withdrawing.size ? plugins.filter((p) => !withdrawing.has(p.name)) : plugins);
 
 function retryPush(consent: ConsentToken | null) {
   clearTimeout(retry);
@@ -247,17 +247,22 @@ export function startPasswordManager() {
 
   beforePluginsCommit((next, before) => {
     if (!ready) return;
-    withdrawing = null;
+    const active = new Set(commitPlugins(next).map((p) => p.name));
+    for (const name of [...withdrawing]) if (!active.has(name) || recordOf(next, name) !== recordOf(before, name)) withdrawing.delete(name);
     for (const name of newlyTurnedOn(next, before)) adoptNeverChosen(name);
-    void pushProviders(commitPlugins(next), consentToken());
+    void pushProviders(providerPlugins(commitPlugins(next)), consentToken());
   });
 
   beforePluginsWithdraw((next) => {
     if (!ready) return undefined;
-    withdrawing = next;
-    const confirmed = pushProviders(commitPlugins(next), consentToken());
-    void confirmed.then(() => withdrawing === next && (withdrawing = null));
-    return confirmed;
+    const staying = new Set(commitPlugins(next).map((p) => p.name));
+    for (const p of currentManagerPlugins()) if (!staying.has(p.name)) withdrawing.add(p.name);
+    return pushProviders(providerPlugins(commitPlugins(next)), consentToken());
+  });
+
+  onPluginWithdrawAbandoned((name, consent) => {
+    if (!withdrawing.delete(name) || !ready) return;
+    void pushProviders(providerPlugins(currentManagerPlugins()), consent);
   });
 
   const begin = () => {

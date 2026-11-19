@@ -115,6 +115,7 @@ test("b: plugin → Ardia → plugin whose compensating record write fails keeps
 
 test("c: a record from a newer Ardia is never overwritten; offer to save is left alone and the failure counted once", async () => {
   const newer = JSON.stringify({ version: 2, offerToSaveHeldOff: ["somewhere"], more: true });
+  stub.stagedDocs.delete("password-manager.json");
   stub.docs.set("password-manager.json", newer);
   takePasswordManagerCounts();
   const before = offerToSave(work);

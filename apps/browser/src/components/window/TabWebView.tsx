@@ -30,7 +30,7 @@ import { zoomChangedByUser } from "../../state/site/zoomBubble";
 import { markTabReady, patchPage, pageOf } from "../../state/tabs/pageState";
 import { popupBlocked, showAutofillPrompt, showExternalApp, showPasswordPrompt } from "../../state/site/prompts";
 import { fieldProviderOpened, verificationCodeFound, type VerificationCodeFound } from "../../state/site/passwordManager";
-import { verificationCodeDocument, verificationCodeTabGone } from "../../state/site/verificationCodes";
+import { hoverStatus, verificationCodeDocument, verificationCodeTabGone } from "../../state/site/verificationCodes";
 import { leftPage, pageAskedToClose, pageEnded } from "../../state/tabs/pageEvents";
 import { copyLinkToSelection, searchSelection, setPageSelection } from "../../state/site/selection";
 import { shareFromPage } from "../../state/site/share";
@@ -258,7 +258,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onStatus={(status, fromBottom) => {
         const statusAtTop = !!status && fromBottom !== null && fromBottom < STATUS_FLIP_BAND;
         if (statusAtTop) notePageOverlay("statusAtTop");
-        patchPage(tabId, status ? { status, statusAtTop } : { status });
+        patchPage(tabId, status ? { status: hoverStatus(status), statusAtTop } : { status });
       }}
       onCrashed={(crashed) => {
         if (!isQuitting()) {
