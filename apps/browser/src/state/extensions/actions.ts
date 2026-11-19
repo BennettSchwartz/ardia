@@ -1,7 +1,5 @@
 import {
   configureExtension,
-  discardStagedExtension,
-  inspectUnpackedExtension,
   extensionActionStates,
   reloadExtension,
   setExtensionEnabled,
@@ -29,9 +27,7 @@ import { consentToken, type ConsentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { refreshExtensions, refreshExtensionsAfterChange } from "./lists";
-import { cancelInstall, confirmInstall, reviewOf, showInstallSheet } from "./installSheet";
-import { errorText } from "../../lib/errors";
-import { noteSourceReload } from "../telemetry/exportCounts";
+import { cancelInstall, confirmInstall, showInstallSheet } from "./installSheet";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
 export * from "./sidePanels";
@@ -76,7 +72,7 @@ export async function removeExtension(profile: string, ext: InstalledExtension, 
   if (!confirmed || !mayRemove()) return;
   if (useExtensions.getState().popup?.extensionId === ext.id) closeExtensionPopup();
   closeSidePanelsOf(ext.id);
-  await changeThenRefresh(profile, "remove", () => uninstallExtension(ext.id, profile, ext.managedSource ? ext.path : null));
+  await changeThenRefresh(profile, "remove", () => uninstallExtension(ext.id, profile));
 }
 
 export async function setEnabled(profile: string, id: string, enabled: boolean) {
@@ -122,26 +118,6 @@ export async function reload(profile: string, id: string) {
   await changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
 }
 
-export async function reloadFromSource(windowId: string, profile: string, ext: InstalledExtension): Promise<boolean> {
-  const consent = consentToken();
-  if (!ext.managedSource) return false;
-  let pkg;
-  try {
-    pkg = await inspectUnpackedExtension(ext.managedSource, profile);
-  } catch (error) {
-    showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "error", error: errorText(error) });
-    return true;
-  }
-  const changedSince = !pkg.digest || pkg.digest !== ext.managedDigest;
-  noteSourceReload(changedSince, consent);
-  if (!changedSince) {
-    discardStagedExtension(pkg);
-    await reload(profile, ext.id);
-    return false;
-  }
-  const review = await reviewOf(pkg, profile).catch(() => ({}));
-  return showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "ready", pkg, review });
-}
 
 async function changed(what: string, change: () => Promise<void>, consent: ConsentToken | null): Promise<boolean> {
   try {

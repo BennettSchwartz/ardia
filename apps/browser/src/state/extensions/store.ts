@@ -17,11 +17,9 @@ export const extensionPageUrl = (extensionId: string, path: string) => `chrome-e
 let installKeys = 0;
 export const nextInstallKey = () => ++installKeys;
 
-export type InstallReview = { replaces?: { id: string; name: string; path: string | null }; leaves?: { id: string; name: string } };
-
 export type InstallRequest = { key: number; windowId: string; profile: string; source: "webStore" | "unpacked" } & (
   | { status: "error"; error: string }
-  | { status: "ready" | "installing"; pkg: ExtensionPackage; review?: InstallReview }
+  | { status: "ready" | "installing"; pkg: ExtensionPackage }
   | { status: "prompt"; prompt: ExtensionInstallPrompt }
 );
 

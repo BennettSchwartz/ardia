@@ -20,8 +20,6 @@ export type InstalledExtension = {
   incognito: boolean;
   incognitoSplit?: boolean;
   incognitoAllowed?: boolean;
-  managedSource?: string | null;
-  managedDigest?: string | null;
   fileAccess: boolean;
   userScriptsAvailable?: boolean;
   userScripts?: boolean;
@@ -56,10 +54,6 @@ export type ExtensionPackage = {
   optionsPage: string | null;
   sidePanel: string | null;
   path: string;
-  digest?: string;
-  staged?: string;
-  installId?: string;
-  installPath?: string;
 };
 
 export type ActionState = {

@@ -50,21 +50,15 @@ typedef void (^ArdiaServiceReply)(id _Nullable value, NSString *_Nullable error)
 + (void)setZoom:(double)zoom profile:(NSString *)profile host:(NSString *)host NS_SWIFT_NAME(setZoom(_:profile:host:));
 
 + (void)listExtensions:(NSString *)profile reply:(ArdiaServiceReply)reply NS_SWIFT_NAME(listExtensions(profile:reply:));
-+ (NSDictionary<NSString *, id> *)inspectUnpacked:(NSString *)path profile:(NSString *)profile NS_SWIFT_NAME(inspectUnpacked(_:profile:));
-+ (void)installExtension:(NSString *)path
-                  digest:(nullable NSString *)digest
-                  staged:(nullable NSString *)staged
-                 profile:(NSString *)profile
-                   reply:(ArdiaServiceReply)reply NS_SWIFT_NAME(installExtension(path:digest:staged:profile:reply:));
-+ (void)discardStagedExtension:(NSString *)staged NS_SWIFT_NAME(discardStagedExtension(_:));
++ (NSDictionary<NSString *, id> *)inspectUnpacked:(NSString *)path;
++ (void)installExtension:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply
+    NS_SWIFT_NAME(installExtension(path:profile:reply:));
 + (void)installCrx:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply
     NS_SWIFT_NAME(installCrx(path:profile:reply:));
 + (void)setExtension:(NSString *)extensionId enabled:(BOOL)enabled profile:(NSString *)profile reply:(ArdiaServiceReply)reply
     NS_SWIFT_NAME(setExtension(_:enabled:profile:reply:));
-+ (void)uninstallExtension:(NSString *)extensionId
-                    managed:(nullable NSString *)managed
-                    profile:(NSString *)profile
-                      reply:(ArdiaServiceReply)reply NS_SWIFT_NAME(uninstallExtension(_:managed:profile:reply:));
++ (void)uninstallExtension:(NSString *)extensionId profile:(NSString *)profile reply:(ArdiaServiceReply)reply
+    NS_SWIFT_NAME(uninstallExtension(_:profile:reply:));
 + (void)reloadExtension:(NSString *)extensionId profile:(NSString *)profile reply:(ArdiaServiceReply)reply
     NS_SWIFT_NAME(reloadExtension(_:profile:reply:));
 + (void)configureExtension:(NSString *)extensionId profile:(NSString *)profile options:(NSDictionary<NSString *, id> *)options

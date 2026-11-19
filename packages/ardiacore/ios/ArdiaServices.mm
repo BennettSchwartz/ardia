@@ -4,7 +4,6 @@
 #import "ArdiaEngineBridge.h"
 #import "ArdiaInternal.h"
 #import "ArdiaExtensionPackage.h"
-#import "ArdiaExtensionStaging.h"
 #import "ArdiaWebViewInternal.h"
 #import "ArdiaRuntime.h"
 
@@ -296,9 +295,6 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
         if (manifest[key]) item[key] = manifest[key];
       item[@"incognitoSplit"] = @([manifest[@"incognitoSplit"] boolValue]);
       item[@"incognitoAllowed"] = @(manifest[@"incognitoAllowed"] ? [manifest[@"incognitoAllowed"] boolValue] : YES);
-      NSDictionary *managed = path ? ardia_extensions::ManagedInfo(path, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory)) : nil;
-      item[@"managedSource"] = managed[@"source"] ?: NSNull.null;
-      item[@"managedDigest"] = managed[@"digest"] ?: NSNull.null;
       for (NSString *key in @[ @"siteAccess", @"optionsUrl", @"path", @"homepageUrl" ])
         if (!item[key]) item[key] = NSNull.null;
       const BOOL fromStore = [info[@"location"] isEqual:@"FROM_STORE"];
@@ -310,14 +306,10 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   }];
 }
 
-+ (NSDictionary *)inspectUnpacked:(NSString *)path profile:(NSString *)profile {
-  return ardia_extensions::StageUnpacked(path, profile, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory));
-}
-
-+ (void)discardStagedExtension:(NSString *)staged {
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-    ardia_extensions::DiscardStaged(staged, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory));
-  });
++ (NSDictionary *)inspectUnpacked:(NSString *)path {
+  NSMutableDictionary *info = [ardia_extensions::ReadManifest(path) mutableCopy];
+  if (!info[@"error"]) info[@"path"] = path;
+  return info;
 }
 
 + (void)run:(NSString *)name profile:(NSString *)profile args:(NSDictionary *)args event:(NSString *)event reply:(ArdiaServiceReply)reply {
@@ -328,28 +320,7 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   }];
 }
 
-+ (void)installExtension:(NSString *)path digest:(NSString *)digest staged:(NSString *)staged profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
-  if (!digest.length && !staged.length) return [self installUnpacked:path profile:profile reply:reply];
-  if (!digest.length || !staged.length) return reply(nil, @"An unpacked extension installs from the copy Ardia showed, with its digest.");
-  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-    NSString *error = nil;
-    NSString *live = ardia_extensions::BeginPromotion(staged, digest, profile, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory), &error);
-    dispatch_async(dispatch_get_main_queue(), ^{
-      if (!live) return reply(nil, error);
-      [self installUnpacked:live profile:profile reply:^(id result, NSString *failure) {
-        const bool accepted = !failure && [result isKindOfClass:NSDictionary.class] && [result[@"id"] isKindOfClass:NSString.class];
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-          ardia_extensions::FinishPromotion(live, accepted);
-          dispatch_async(dispatch_get_main_queue(), ^{
-            reply(result, failure);
-          });
-        });
-      }];
-    });
-  });
-}
-
-+ (void)installUnpacked:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
++ (void)installExtension:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
   [self callBase:@"ac_extensions_install" profile:profile args:@{@"path" : path ?: @""} completion:^(NSDictionary *result) {
     if ([result[@"id"] isKindOfClass:NSString.class]) Changed(profile, result[@"id"], @"installed");
     Answer(result, reply);
@@ -368,14 +339,8 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
       event:enabled ? @"enabled" : @"disabled" reply:reply];
 }
 
-+ (void)uninstallExtension:(NSString *)extensionId managed:(NSString *)managed profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
-  [self run:@"ac_extensions_uninstall" profile:profile args:@{@"id" : extensionId} event:@"uninstalled" reply:^(id result, NSString *failure) {
-    if (!failure && managed.length)
-      dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        ardia_extensions::RemoveManaged(managed, profile, ardia_extensions::StagingRoot(ArdiaHost.dataDirectory));
-      });
-    reply(result, failure);
-  }];
++ (void)uninstallExtension:(NSString *)extensionId profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
+  [self run:@"ac_extensions_uninstall" profile:profile args:@{@"id" : extensionId} event:@"uninstalled" reply:reply];
 }
 
 + (void)reloadExtension:(NSString *)extensionId profile:(NSString *)profile reply:(ArdiaServiceReply)reply {

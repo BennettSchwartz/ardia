@@ -1,56 +1,10 @@
 #import "ArdiaExtensionPackage.h"
 
 #import <CommonCrypto/CommonDigest.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace ardia_extensions {
 
 namespace {
-
-constexpr unsigned long long kMaxReadBytes = 4ull << 20;
-
-NSData *ReadRegular(NSString *path, unsigned long long limit) {
-  int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
-  if (fd < 0) return nil;
-  struct stat info;
-  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || (unsigned long long)info.st_size > limit) {
-    close(fd);
-    return nil;
-  }
-  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)info.st_size + 1];
-  size_t used = 0;
-  for (ssize_t got; used < data.length && (got = read(fd, (char *)data.mutableBytes + used, data.length - used)) > 0;) used += (size_t)got;
-  close(fd);
-  if (used != (size_t)info.st_size) return nil;
-  data.length = used;
-  return data;
-}
-
-bool IsLocaleName(id name) {
-  if (![name isKindOfClass:NSString.class]) return false;
-  NSString *s = name;
-  return s.length && ![s containsString:@"/"] && ![s isEqualToString:@"."] && ![s isEqualToString:@".."];
-}
-
-NSSet<NSString *> *SystemRoots() {
-  static NSSet<NSString *> *roots = [NSSet setWithArray:@[
-    @"/", @"/Applications", @"/Library", @"/System", @"/Users", @"/Volumes", @"/bin", @"/cores", @"/dev", @"/etc", @"/opt",
-    @"/private", @"/private/etc", @"/private/tmp", @"/private/var", @"/sbin", @"/tmp", @"/usr", @"/usr/local", @"/var"
-  ]];
-  return roots;
-}
-
-bool IsSystemFolder(NSString *folder) {
-  if ([SystemRoots() containsObject:folder]) return true;
-  NSArray<NSString *> *parts = folder.pathComponents;
-  if (parts.count == 3 && [parts[1] isEqualToString:@"Users"]) return true;
-  NSString *within = [folder stringByAppendingString:@"/"];
-  for (NSString *tree in @[ @"/System/", @"/bin/", @"/dev/", @"/etc/", @"/private/etc/", @"/sbin/", @"/usr/bin/", @"/usr/lib/", @"/usr/libexec/", @"/usr/sbin/", @"/usr/share/" ])
-    if ([within hasPrefix:tree]) return true;
-  return [folder isEqualToString:NSHomeDirectory()];
-}
 
 NSData *SHA256(NSData *data) {
   NSMutableData *out = [NSMutableData dataWithLength:CC_SHA256_DIGEST_LENGTH];
@@ -67,7 +21,7 @@ NSString *IdForKeyData(NSData *key) {
 }
 
 NSDictionary *LoadJSON(NSString *path) {
-  NSData *data = ReadRegular(path, kMaxReadBytes);
+  NSData *data = [NSData dataWithContentsOfFile:path];
   if (!data) return nil;
   id object = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingJSON5Allowed error:nil];
   return [object isKindOfClass:NSDictionary.class] ? object : nil;
@@ -103,12 +57,12 @@ NSDictionary *Messages(NSString *folder, NSDictionary *manifest, NSString **erro
     NSRange sep = [uiLocale rangeOfString:@"_"];
     if (sep.location != NSNotFound) [candidates addObject:[uiLocale substringToIndex:sep.location]];
   }
-  if (manifest[@"default_locale"]) [candidates addObject:manifest[@"default_locale"]];
+  if ([manifest[@"default_locale"] isKindOfClass:NSString.class]) [candidates addObject:manifest[@"default_locale"]];
   [candidates addObjectsFromArray:@[ @"en", @"en_US" ]];
   NSMutableDictionary *merged = [NSMutableDictionary dictionary];
   NSMutableSet<NSString *> *loaded = [NSMutableSet set];
   for (NSString *locale in candidates) {
-    if (!IsLocaleName(locale) || [loaded containsObject:locale]) continue;
+    if ([loaded containsObject:locale]) continue;
     [loaded addObject:locale];
     NSDictionary *messages = LoadJSON([[locales stringByAppendingPathComponent:locale] stringByAppendingPathComponent:@"messages.json"]);
     if (!messages) continue;
@@ -172,7 +126,7 @@ NSString *DataURL(NSString *folder, NSString *relativePath) {
   NSArray *root = folder.stringByStandardizingPath.pathComponents;
   NSArray *parts = path.pathComponents;
   if (parts.count <= root.count || ![[parts subarrayWithRange:NSMakeRange(0, root.count)] isEqualToArray:root]) return nil;
-  NSData *data = ReadRegular(path, kMaxReadBytes);
+  NSData *data = [NSData dataWithContentsOfFile:path];
   if (!data.length) return nil;
   NSDictionary *types = @{@"png" : @"image/png", @"jpg" : @"image/jpeg", @"jpeg" : @"image/jpeg", @"gif" : @"image/gif",
                           @"svg" : @"image/svg+xml", @"webp" : @"image/webp", @"ico" : @"image/x-icon", @"bmp" : @"image/bmp"};
@@ -184,13 +138,6 @@ NSString *DataURL(NSString *folder, NSString *relativePath) {
 NSDictionary *ReadManifest(NSString *folder) {
   NSDictionary *m = LoadJSON([folder stringByAppendingPathComponent:@"manifest.json"]);
   if (!m) return @{@"error" : @"Manifest file is missing or unreadable"};
-  id defaultLocale = m[@"default_locale"];
-  if (defaultLocale) {
-    struct stat info;
-    NSString *localeFolder = IsLocaleName(defaultLocale) ? [[folder stringByAppendingPathComponent:@"_locales"] stringByAppendingPathComponent:defaultLocale] : nil;
-    if (!localeFolder || lstat(localeFolder.fileSystemRepresentation, &info) != 0 || !S_ISDIR(info.st_mode))
-      return @{@"error" : @"default_locale isn't the name of a folder in _locales"};
-  }
   NSString *localeError = nil;
   NSDictionary *messages = Messages(folder, m, &localeError);
   if (!messages) return @{@"error" : localeError};
@@ -232,25 +179,6 @@ NSDictionary *ReadManifest(NSString *folder) {
   out[@"homepageUrl"] = [m[@"homepage_url"] isKindOfClass:NSString.class] ? m[@"homepage_url"] : nil;
   out[@"id"] = [m[@"key"] isKindOfClass:NSString.class] ? IdForKey(m[@"key"]) : nil;
   return out;
-}
-
-NSString *CanonicalFolder(NSString *path, NSString **error) {
-  char resolved[PATH_MAX];
-  if (![path hasPrefix:@"/"] || !realpath(path.fileSystemRepresentation, resolved)) {
-    *error = @"The folder doesn't exist";
-    return nil;
-  }
-  NSString *folder = [NSFileManager.defaultManager stringWithFileSystemRepresentation:resolved length:strlen(resolved)];
-  struct stat info;
-  if (stat(resolved, &info) != 0 || !S_ISDIR(info.st_mode)) {
-    *error = @"That isn't a folder";
-    return nil;
-  }
-  if (IsSystemFolder(folder)) {
-    *error = @"That's a system or home folder, not an extension's own folder";
-    return nil;
-  }
-  return folder;
 }
 
 }

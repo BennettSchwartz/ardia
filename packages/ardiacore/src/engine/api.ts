@@ -114,12 +114,11 @@ export type EngineCalls = {
   "autofill.showSuggestions": [{ tabId: string; passwords: boolean }, boolean];
 
   "extensions.list": [Profile, { extensions: InstalledExtension[] }];
-  "extensions.inspectUnpacked": [Profile & { path: string }, ExtensionPackage];
-  "extensions.install": [Profile & { path: string; digest?: string; staged?: string }, { id: string }];
-  "extensions.discardStaged": [{ staged: string }, null];
+  "extensions.inspectUnpacked": [{ path: string }, ExtensionPackage];
+  "extensions.install": [Profile & { path: string }, { id: string }];
   "extensions.installCrx": [Profile & { path: string }, { id: string }];
   "extensions.setEnabled": [Profile & { id: string; enabled: boolean }, { ok: true }];
-  "extensions.uninstall": [Profile & { id: string; managed?: string }, { ok: true }];
+  "extensions.uninstall": [Profile & { id: string }, { ok: true }];
   "extensions.reload": [Profile & { id: string }, { ok: true }];
   "extensions.configure": [Profile & { id: string; options: Record<string, unknown> }, { ok: true }];
   "extensions.chooseFolder": [{}, string | null];

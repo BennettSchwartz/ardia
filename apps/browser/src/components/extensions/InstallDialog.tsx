@@ -1,7 +1,6 @@
-import { useEffect } from "react";
 import { permissionWarnings } from "@ardia/core";
 import { Image, Pressable, ScrollView } from "react-native";
-import { cancelInstall, closePinDialog, confirmInstall, setPinned, sheetMounted, useWindowExtensions, type InstallRequest } from "../../state/extensions/actions";
+import { cancelInstall, closePinDialog, confirmInstall, setPinned, useWindowExtensions, type InstallRequest } from "../../state/extensions/actions";
 import { useExtensionProfile } from "../../state/extensions/hooks";
 import type { InstalledExtension } from "../../state/extensions/store";
 import { currentShownPageId } from "../../state/peek/actions";
@@ -17,8 +16,6 @@ function focusShownPage(windowId: string) {
 
 export function InstallDialog({ request }: { request: InstallRequest }) {
   const pkg = request.status === "ready" || request.status === "installing" ? request.pkg : null;
-  const review = request.status === "ready" || request.status === "installing" ? request.review : undefined;
-  useEffect(() => sheetMounted(request.key), [request.key]);
   const prompt = request.status === "prompt" ? request.prompt : null;
   const name = pkg?.name ?? prompt?.name ?? "Extension";
   const icon = pkg?.icon ?? (prompt?.icon || null);
@@ -59,16 +56,6 @@ export function InstallDialog({ request }: { request: InstallRequest }) {
         {request.source === "unpacked" ? (
           <Text numberOfLines={2} ellipsizeMode="middle" size="caption" tone="textTertiary" style={{ marginTop: space.ml }}>
             {`Loaded from ${pkg?.path ?? ""}`}
-          </Text>
-        ) : null}
-        {review?.replaces ? (
-          <Text tone="textSecondary" style={{ marginTop: space.s }}>
-            {`Replaces “${review.replaces.name}”${review.replaces.path ? `, loaded from ${review.replaces.path}` : ""}.`}
-          </Text>
-        ) : null}
-        {review?.leaves ? (
-          <Text tone="textSecondary" style={{ marginTop: space.s }}>
-            {`“${review.leaves.name}” stays as it is, loaded straight from this folder. This copy gets a new id and starts without its data.`}
           </Text>
         ) : null}
       </>

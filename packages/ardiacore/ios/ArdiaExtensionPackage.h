@@ -12,6 +12,4 @@ NSString *IdForKey(NSString *base64Key);
 
 NSString *DataURL(NSString *folder, NSString *relativePath);
 
-NSString *CanonicalFolder(NSString *path, NSString **error);
-
 }

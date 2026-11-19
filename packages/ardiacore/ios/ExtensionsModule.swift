@@ -24,37 +24,21 @@ public class ExtensionsModule: Module {
     panel.begin { response in reply.ok(response == .OK ? panel.url?.path : nil) }
   }
 
-  static let packageReads = DispatchQueue(label: "ardia.extensions.package", qos: .userInitiated)
-
   static func inspectUnpacked(_ args: CallArgs, _ reply: CallReply) throws {
-    let path = try args.text("path")
-    let profile = args.profile
-    packageReads.async {
-      let info = ArdiaServices.inspectUnpacked(path, profile: profile)
-      DispatchQueue.main.async {
-        if let error = info["error"] { return reply.fail("ERR_ENGINE", error as? String ?? "\(error)") }
-        reply.ok(info)
-      }
-    }
+    let info = ArdiaServices.inspectUnpacked(try args.text("path"))
+    if let error = info["error"] { return reply.fail("ERR_ENGINE", error as? String ?? "\(error)") }
+    reply.ok(info)
   }
 
   static let calls = CallTable(domain: "extensions", handlers: [
     "list": { args, reply in ArdiaServices.listExtensions(profile: args.profile) { reply.service($0, $1) } },
     "inspectUnpacked": inspectUnpacked,
-    "install": { args, reply in
-      ArdiaServices.installExtension(path: try args.text("path"), digest: try args.optionalText("digest"), staged: try args.optionalText("staged"), profile: args.profile) { reply.service($0, $1) }
-    },
-    "discardStaged": { args, reply in
-      ArdiaServices.discardStagedExtension(try args.text("staged"))
-      reply.ok(nil)
-    },
+    "install": { args, reply in ArdiaServices.installExtension(path: try args.text("path"), profile: args.profile) { reply.service($0, $1) } },
     "installCrx": { args, reply in ArdiaServices.installCrx(path: try args.text("path"), profile: args.profile) { reply.service($0, $1) } },
     "setEnabled": { args, reply in
       ArdiaServices.setExtension(try args.text("id"), enabled: try args.bool("enabled"), profile: args.profile) { reply.service($0, $1) }
     },
-    "uninstall": { args, reply in
-      ArdiaServices.uninstallExtension(try args.text("id"), managed: try args.optionalText("managed"), profile: args.profile) { reply.service($0, $1) }
-    },
+    "uninstall": { args, reply in ArdiaServices.uninstallExtension(try args.text("id"), profile: args.profile) { reply.service($0, $1) } },
     "reload": { args, reply in ArdiaServices.reloadExtension(try args.text("id"), profile: args.profile) { reply.service($0, $1) } },
     "configure": { args, reply in
       ArdiaServices.configureExtension(try args.text("id"), profile: args.profile, options: try args.dict("options")) { reply.service($0, $1) }

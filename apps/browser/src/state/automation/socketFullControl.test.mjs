@@ -107,35 +107,21 @@ function fakeExtensions() {
     },
     inspect: async (path) => {
       if (!path.endsWith("/ext")) throw new Error("Manifest file is missing or unreadable");
-      return { ...pkg, path, digest: "fixture", staged: `/data/stage${path}`, installId: "folderext", installPath: `/data/live${path}` };
+      return { ...pkg, path };
     },
   };
   globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };
   return list;
 }
 
-test("extensions: a folder shows the install sheet and answers with the user's choice; configure changes only what the details page offers", async () => {
+test("extensions: folders are refused, the Web Store opens its page, and configure changes only what the details page offers", async () => {
   const { windowId } = await setup();
   const list = fakeExtensions();
   assert.equal(await code("extensions.install", {}), "bad_request");
-  assert.equal(await code("extensions.install", { folder: "relative/ext" }), "bad_request");
-  assert.equal(await code("extensions.install", { folder: "/tmp/nothing" }), "bad_request");
+  for (const folder of ["relative/ext", "/tmp/nothing", "/tmp/one/ext"]) assert.equal(await code("extensions.install", { folder }), "refused", "socket folder installs are refused");
   assert.equal(await code("extensions.install", { webStore: "https://example.com/not-a-store" }), "bad_request");
-
-  const cancelled = call("extensions.install", { folder: "/tmp/one/ext" });
-  for (let i = 0; i < 20 && !useExtensions.getState().install; i++) await tick();
-  assert.equal(useExtensions.getState().install?.status, "ready");
-  assert.equal(useExtensions.getState().install?.windowId, windowId, "in the window showing that profile");
-  cancelInstall();
-  assert.deepEqual((await cancelled).result, { installed: false, extensions: [] });
-
-  const confirmed = call("extensions.install", { folder: "/tmp/two/ext" });
-  for (let i = 0; i < 20 && !useExtensions.getState().install; i++) await tick();
-  const { confirmInstall } = await import("../extensions/actions.ts");
-  await confirmInstall();
-  const done = (await confirmed).result;
-  assert.equal(done.installed, true);
-  assert.deepEqual(done.extensions.map((x) => x.id), ["folderext"]);
+  assert.equal(useExtensions.getState().install, null, "no sheet shows for a refused folder");
+  list.push({ id: "folderext", name: "Folder Ext", version: "1.0", description: "", enabled: true, state: "ENABLED", icon: "", permissions: [], siteAccess: null, sites: [], optionsUrl: null, pinned: false, incognito: false, fileAccess: false, mayModify: true, errors: [] });
 
   const tabsBefore = Object.keys(S().tabs).length;
   const store = await ok("extensions.install", { webStore: "https://chromewebstore.google.com/detail/name/abcdefghijklmnopabcdefghijklmnop" });

@@ -236,7 +236,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
 | search | `search.engines` (`default` is the engine searches use, an extension's when one controls it, with `controlledBy`) | `search.setDefault {id}` (`refused` while an extension controls it, as Settings disables the picker; so is `settings.set {searchEngine}`), `search.add`, `search.update`, `search.remove` |
 | sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {site}` |
-| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore? \| folder?}` (the user confirms), `extensions.configure {id, siteAccess?, incognito?, userScripts?}`, `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
+| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore}` (the user adds it on the store page; `folder` is refused), `extensions.configure {id, siteAccess?, incognito?, userScripts?}`, `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status`, `sync.devices {profile?}` | `sync.now`, `sync.setType {type, on}`, `sync.setProfile {profile, on}`, `sync.setOpenTabs {profile, on}`, `sync.sendTab {tab, device}` |
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
@@ -298,71 +298,34 @@ folder and show or ask for the phrase, which is the user's to see.
 
 ### Extensions
 
-`extensions.install` follows the two ways Settings › Profiles › Extensions adds one, and nothing more: `webStore`
-(a link or id, checked as Add from a Link checks it) opens the extension's Chrome Web Store page in a window of
-that profile, where the user adds it, and answers `{waiting: true, id}` (or `{installed: true}` when it's already
-there); `folder` (an absolute path, as Load Unpacked Extension… picks) shows Ardia's install sheet in a window of
-that profile and answers when the user decides: `{installed, extensions}`, naming the extension this request added
-(a reinstall of the same id counts), or `{installed: false}` when the user cancels or another sheet replaces it.
-Nothing installs without the user's click. A `folder` request on a platform that can't make Ardia's own copy (Linux
-and Windows today, `PLATFORM_FEATURES.stagesUnpackedFolders`) is `refused` before the path is checked or read.
+`extensions.install` takes a Chrome Web Store link or id (`webStore`, checked as Add from a Link checks it) and
+opens the extension's store page in a window of that profile, where the user adds it; it answers `{waiting: true, id}`,
+or `{installed: true, extensions}` when the profile already has it. Each step after an await re-checks that control
+is still on and the profile still exists, and answers `failed` or `no_window` without changing anything otherwise;
+that covers the store tab and the already-installed answer.
 
-The folder path is refused before anything is read when it isn't absolute, holds `.` or `..`, or is a system root
-or a home folder. macOS then resolves it (`realpath`), opens it once, and from then on reads only relative to
-descriptors it opened (`ArdiaExtensionWalk.mm`): every entry is checked with `fstatat` and opened with `openat` and
-`O_NOFOLLOW | O_NONBLOCK`, and each opened descriptor must be the same file or folder `fstatat` saw, so swapping a
-folder for a link mid-walk can't point the read anywhere else. Only regular files and folders are accepted: a link
-anywhere in the folder, a FIFO, a device or a socket refuses it, as does any entry that can't be read. Hardlinks are
-allowed; the copy and its digest are of what was read. One walk streams every file into the copy and hashes the same
-bytes, up to 50,000 entries and 512 MB in all, with no limit per file. Only `.git`, `.hg`, `.svn`, `.DS_Store` and a
-top-level `_metadata` (Chromium's own) are left out of both the copy and the digest. The manifest, locales and icons are
-then read from the copy, each through a descriptor and at most 4 MB, and `default_locale` must name a folder in
-`_locales`. So the sheet, the `digest` and what Chromium loads are the same bytes. One sheet shows at a time: a second
-`folder` request while any install sheet is up is `refused`. Each sheet carries its request's key, so its Add button
-and Return confirm that request only.
+Installing an unpacked folder from the socket isn't supported, on any platform: a request with `folder` is `refused`
+("installing an unpacked folder from the socket isn't supported; use Settings › Extensions › Load Unpacked") before
+the path is checked or anything is read. Earlier rounds of this change tried to make it safe by copying the folder
+into a private, hashed staging copy and loading that, but Chromium rereads an unpacked extension's manifest from its
+folder whenever it loads (on every start too) and identifies an unkeyed extension by its path, so a copy Ardia
+manages can't guarantee that what the user approved is what Chromium runs. That needs the engine to load from a
+snapshot it owns. Settings › Extensions › Load Unpacked is unchanged: Chromium loads the chosen folder in place, as on
+`main`.
 
-Ardia's copies live in `<data dir>/Ardia Unpacked Extensions/p-<profile hash>/<source hash>/` (`ArdiaExtensionStaging.mm`),
-one folder per profile, so approving a newer copy in one profile never touches the files another profile runs. The
-root is created 0700 and checked (a folder, not a link, owned by the user, private) before every use. Inspection
-stages into `<time>-<uuid>.stage` beside the installed copy, `live`. Add hashes the stage again with the same rules
-and swaps it into `live` (`renamex_np` with `RENAME_SWAP`, so the previous copy moves aside intact), and only then asks
-Chromium to load `live`. When Chromium accepts, the previous copy is deleted and `source.json` records the source
-folder and the digest; when it refuses, the previous copy is swapped back untouched and the new one deleted. The
-installed path stays `…/live` across reinstalls because Chromium derives an unkeyed extension's id from its path:
-a per-install path would give the extension a new id, and lose its data, each time.
-
-Identity is checked apart from that storage key. Inspection also answers `installId`, the id Chromium will assign
-(from the manifest's `key`, or from the `live` path, as Chromium hashes it), and `installPath`. When the profile
-already has that id from a different place, the sheet says which extension it replaces and where it came from, and a
-socket `folder` request needs `replace: true` or it is `refused` (its copy deleted). An extension added before this
-change was loaded straight from its folder, so its id came from that path: loading the same folder now adds Ardia's
-copy under a new id beside it, and the sheet says the old one stays and the copy starts without its data.
-
-Reinstall policy: a socket-approved install, like one from Settings, runs Ardia's copy, and Reload on the extension's
-page reloads that copy. Settings adds **Reload from Source** for these: it stages the source folder again and, when
-the digest matches `source.json`, deletes that stage and reloads quietly; when anything changed, it shows a fresh
-review sheet, and only Add replaces the copy (counted as `unpacked_source_reloads_unchanged` and
-`unpacked_source_reloads_changed`). Removing the extension deletes its copy for that profile once nothing is being
-added or staged there; the source folder is never touched. Every staged copy is tracked while its sheet lives and is
-deleted on every way the sheet ends: Cancel, a replaced sheet, its browser window closing, Settings' sheet unmounting,
-or a failed Add (deleted before the error is dismissed). A sweep at each inspection deletes only stages that match the
-exact generated name, aren't tracked, and are over a day old.
-
-Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it: a Web Store prompt
-that arrives meanwhile waits and shows after. A socket request settles only on Chromium's answer from then on, even
-if its window closes (then no error sheet is left behind). Pressing Add on a socket's sheet first re-checks that
-control is still on (the same socket generation) and that the profile still exists and maps to the same engine
-profile; otherwise nothing installs and the request answers `failed`. Closing the window before Add answers
-`failed`. Each step after an await re-checks control and the profile the same way, and answers `failed` or
-`no_window` without changing anything otherwise; that covers the Web Store tab and its already-installed answer too.
+The install sheet that Settings and Web Store prompts show keys each request, so its Add button and Return confirm
+that request only. Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it:
+a Web Store prompt that arrives meanwhile waits and shows after. If the window under a sheet closes before Chromium
+answers a failed add, no error sheet is left behind for it.
 
 `extensions.configure` sets what an extension's page in Settings offers: site access (only for an extension that
 asks for sites), Allow in Incognito (not for one whose manifest says `"incognito": "not_allowed"`), and Allow User
 Scripts (only when the extension uses them); a policy-installed one is `refused`. The whole call is checked before
-anything changes, against a list read from Chromium for the call, never the cached row: Incognito against
-`incognitoAllowed`, which the list reads from the loaded extension's own manifest (Chromium's own eligibility flag,
-`incognito_access.is_enabled`, isn't exported by `ac_extensions_list`; reading it needs an `engine/` change). Then site
-access, the one change Chromium can
+anything changes, against a list read from Chromium for the call, never the cached row. Allow in Incognito is
+`refused` ("needs engine support") for an unpacked extension: its manifest on disk can differ from the one Chromium
+loaded, and Chromium's own eligibility flag (`incognito_access.is_enabled`) isn't exported by `ac_extensions_list`.
+For a packed or Web Store extension it is checked against `incognitoAllowed`, read from the installed manifest. Then
+site access, the one change Chromium can
 still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
 and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
 `sites`) as success. The reply reads the list again with a request started after the write, never one that was
@@ -384,13 +347,13 @@ by the native call itself, and the socket also bounds every coordinate to ±100,
 green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
 finished, not when it starts. `FullScreenLifecycle.swift` tracks every window's transitions, whoever starts them (a
 call, the green button, the menu or a keyboard shortcut): `willEnter`/`willExit` opens one and gives it a generation
-number, and `didEnter`, `didExit`, the window closing, or a failure ends it. AppKit reports failures only to the
-window's delegate, so Ardia forwards Chromium's delegate's `windowDidFailToEnterFullScreen:` and
-`windowDidFailToExitFullScreen:` as notifications. While a transition is open, a call answers `transition: "busy"`
-(the socket's `refused`), with no takeover after any time. A call is settled only by a transition whose generation is
-newer than the last one when it toggled, so a late notification can't answer a newer call. After 6 s it answers
-`transition: "timeout"` (the socket's `failed`, "Timed out…"), and the window stays busy until AppKit ends that
-transition. The socket runs one full-screen change at a time per window, checks the final geometry
+number, and `didEnter`, `didExit` or the window closing ends it. Chromium's failure callbacks don't end one (its
+exit-failure callback arrives before `didExit`). A transition with no ending notification is checked against the
+window's real full-screen state from 6 s on, once a second: it ends when two checks agree, whichever side that is,
+and after 30 s it ends regardless and is logged. While a transition is open, a call answers `transition: "busy"` (the
+socket's `refused`). A call is settled only by a transition whose generation is newer than the last one when it
+toggled, so a late notification can't answer a newer call. After 6 s a call answers `transition: "timeout"` (the
+socket's `failed`, "Timed out…"), and the window stays busy until that transition ends. The socket runs one full-screen change at a time per window, checks the final geometry
 against the request, waits for the store to follow (`failed` if it doesn't within 4 s), and answers `refused` while a
 page is full screen in the window, `failed` if the window didn't get there. None of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
 window events they already listen to. `PLATFORM_FEATURES.windowGeometry` is on for macOS only: Linux needs the same

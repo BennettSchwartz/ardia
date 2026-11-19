@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 const { useBrowser } = await import("../browser/store.ts");
 const { startAutomation } = await import("./controlSocket.ts");
-const { useExtensions, confirmInstall, cancelInstall, showInstallPrompt, refreshExtensions, installWatchCount, showInstallSheet, nextInstallKey } = await import("../extensions/actions.ts");
+const { useExtensions, confirmInstall, cancelInstall, showInstallPrompt, loadUnpacked, refreshExtensions } = await import("../extensions/actions.ts");
+const { SETTINGS_WINDOW_ID } = await import("../settings/settingsWindows.ts");
 const stub = await import("../../test-native/index.ts");
 const { extensionWorld, gate, row } = await import("./fixtures/extensionWorld.mjs");
 
 const S = () => useBrowser.getState();
 after(() => S().updateSettings({ cliControl: false }));
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+const settle = async (n = 20) => {
+  for (let i = 0; i < n; i++) await tick();
+};
 let nextId = 0;
 const CONNECTION = 62;
 
@@ -17,30 +21,22 @@ function send(method, params) {
   const before = stub.controlSocket.replies.length;
   stub.emitControlRequest({ connection: CONNECTION, generation: stub.controlSocket.generation, line: JSON.stringify({ id, method, ...(params ? { params } : {}) }) });
   const mine = () => stub.controlSocket.replies.slice(before).find((r) => r.connection === CONNECTION && JSON.parse(r.line).id === id);
-  const reply = async () => {
+  return async () => {
     for (let i = 0; i < 400 && !mine(); i++) await tick();
     assert.ok(mine(), `a reply to ${method}`);
     return JSON.parse(mine().line);
   };
-  reply.answered = () => !!mine();
-  return reply;
 }
+const call = (method, params) => send(method, params)();
 const ok = async (method, params) => {
-  const reply = await send(method, params)();
+  const reply = await call(method, params);
   assert.ok(!reply.error, `${method}: ${JSON.stringify(reply.error)}`);
   return reply.result;
-};
-const sheet = async () => {
-  for (let i = 0; i < 50 && useExtensions.getState().install?.status !== "ready"; i++) await tick();
-  return useExtensions.getState().install;
-};
-const settle = async () => {
-  for (let i = 0; i < 20; i++) await tick();
 };
 
 async function setup() {
   cancelInstall();
-  useExtensions.setState({ install: null });
+  useExtensions.setState({ install: null, lists: {} });
   S().hydrate({});
   S().updateSettings({ cliControl: true });
   startAutomation();
@@ -50,100 +46,87 @@ async function setup() {
   return { windowId, ...extensionWorld() };
 }
 
-test("once Add is pressed, Cancel and a competing prompt leave the install alone and the reply waits for Chromium", async () => {
-  const { folders, gates, installs } = await setup();
-  folders.set("/tmp/h/ext", { id: "hhh", digest: "d-h" });
-  const pending = send("extensions.install", { folder: "/tmp/h/ext" });
-  const shown = await sheet();
+async function loadFromSettings(folder, profile = "") {
+  stub.chosenExtensionFolder.next = folder;
+  try {
+    assert.equal(await loadUnpacked(SETTINGS_WINDOW_ID, profile), true);
+  } finally {
+    stub.chosenExtensionFolder.next = null;
+  }
+  return useExtensions.getState().install;
+}
+
+test("a socket folder install is refused on every platform, before any path check or read", async () => {
+  const { folders } = await setup();
+  folders.set("/tmp/x/ext", { id: "x" });
+  let inspected = 0;
+  const engine = globalThis.acTestUserScripts.engine;
+  const inspect = engine.inspect;
+  engine.inspect = async (...args) => (inspected++, inspect(...args));
+  try {
+    for (const params of [{ folder: "/tmp/x/ext" }, { folder: "relative" }, { folder: "/tmp/x/ext", webStore: "abcdefghijklmnopabcdefghijklmnop" }]) {
+      const reply = await call("extensions.install", params);
+      assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+      assert.equal(reply.error.message, "installing an unpacked folder from the socket isn't supported; use Settings › Extensions › Load Unpacked");
+    }
+    assert.equal(inspected, 0);
+    assert.equal(useExtensions.getState().install, null);
+  } finally {
+    engine.inspect = inspect;
+  }
+});
+
+test("Settings' Load Unpacked inspects and installs the chosen folder in place, as on main", async () => {
+  const { folders, installs, list } = await setup();
+  folders.set("/Users/me/dev/ext", { id: "inplace", version: "1.0" });
+  const shown = await loadFromSettings("/Users/me/dev/ext");
+  assert.deepEqual([shown.status, shown.pkg.path, shown.windowId], ["ready", "/Users/me/dev/ext", SETTINGS_WINDOW_ID]);
+  assert.deepEqual(Object.keys(shown.pkg).filter((k) => ["digest", "staged", "installId", "installPath"].includes(k)), []);
+  await confirmInstall(shown.key);
+  assert.deepEqual(installs, [{ path: "/Users/me/dev/ext", id: "inplace", version: "1.0" }]);
+  assert.equal(list[0].path, "/Users/me/dev/ext");
+  assert.equal(useExtensions.getState().install, null);
+});
+
+test("once Add is pressed, Cancel and a competing prompt leave the install alone, and the prompt shows after", async () => {
+  const { folders, gates, installs, windowId } = await setup();
+  folders.set("/tmp/h/ext", { id: "hhh" });
+  const shown = await loadFromSettings("/tmp/h/ext");
   const held = gate();
   gates.install = held.shut;
   void confirmInstall(shown.key);
   await settle();
   cancelInstall(shown.key);
-  showInstallPrompt(shown.windowId, { requestId: "r1", profile: shown.profile, type: "install", name: "Other", icon: "", permissions: [] });
+  showInstallPrompt(windowId, { requestId: "r1", profile: "", type: "install", name: "Other", icon: "", permissions: [] });
   await settle();
   assert.equal(useExtensions.getState().install?.status, "installing", "the sheet stays on Adding…");
-  assert.equal(pending.answered(), false, "no answer before Chromium's");
   held.open();
-  const reply = await pending();
-  assert.equal(reply.result?.installed, true, JSON.stringify(reply));
+  await settle();
   assert.equal(installs.length, 1);
   assert.equal(useExtensions.getState().install?.status, "prompt", "the prompt that came in meanwhile shows once the install is done");
   cancelInstall();
   gates.install = null;
 });
 
-test("closing the window while Adding… waits for Chromium's answer", async () => {
-  const { folders, gates, windowId } = await setup();
-  folders.set("/tmp/i/ext", { id: "iii", digest: "d-i" });
-  const pending = send("extensions.install", { folder: "/tmp/i/ext" });
-  const shown = await sheet();
-  const held = gate();
-  gates.install = held.shut;
-  void confirmInstall(shown.key);
-  await settle();
-  S().closeWindow(windowId);
-  await settle();
-  assert.equal(pending.answered(), false);
-  held.open();
-  assert.equal((await pending()).result?.installed, true);
-
+test("closing the window while Adding… leaves no error sheet behind for a window that's gone", async () => {
+  const { folders, gates } = await setup();
   const other = S().createWindow({ url: "https://b.example/" });
-  folders.set("/tmp/i2/ext", { id: "iii2", digest: "d-i2" });
-  const failing = send("extensions.install", { folder: "/tmp/i2/ext" });
-  const next = await sheet();
-  assert.equal(next.windowId, other);
+  folders.set("/tmp/i/ext", { id: "iii" });
+  stub.chosenExtensionFolder.next = "/tmp/i/ext";
+  await loadUnpacked(other, "");
+  stub.chosenExtensionFolder.next = null;
+  const shown = useExtensions.getState().install;
   const refusal = gate();
   gates.install = refusal.shut.then(() => {
     throw new Error("Chromium refused it");
   });
-  void confirmInstall(next.key);
+  void confirmInstall(shown.key);
   await settle();
   S().closeWindow(other);
-  await settle();
-  assert.equal(failing.answered(), false);
   refusal.open();
-  assert.equal((await failing()).error?.code, "failed");
   await settle();
-  assert.equal(useExtensions.getState().install, null, "no error sheet left behind for a window that's gone");
-  gates.install = null;
-});
-
-test("an install from Settings keeps no result nobody reads", async () => {
-  const { folders, windowId } = await setup();
-  folders.set("/tmp/j/ext", { id: "jjj", digest: "d-j" });
-  const { inspectUnpackedExtension } = await import("../../platform/extensions.ts");
-  const pkg = await inspectUnpackedExtension("/tmp/j/ext");
-  const key = nextInstallKey();
-  showInstallSheet({ key, windowId, profile: "", source: "unpacked", status: "ready", pkg });
-  await confirmInstall(key);
   assert.equal(useExtensions.getState().install, null);
-  assert.equal(installWatchCount(), 0);
-});
-
-test("Add re-checks control and the profile for a socket's sheet, and installs nothing when either is gone", async () => {
-  const { folders, list } = await setup();
-  folders.set("/tmp/k/ext", { id: "kkk", digest: "d-k" });
-  const off = send("extensions.install", { folder: "/tmp/k/ext" });
-  const first = await sheet();
-  S().updateSettings({ cliControl: false });
-  await confirmInstall(first.key);
-  assert.equal((await off()).error?.code, "failed");
-  assert.equal(list.length, 0);
-  assert.ok(stub.discardedStages.includes(first.pkg.staged));
-  cancelInstall();
-  S().updateSettings({ cliControl: true });
-  await settle();
-
-  const work = await ok("profiles.create", { name: "Work" });
-  const lost = send("extensions.install", { folder: "/tmp/k/ext", profile: work.id });
-  const second = await sheet();
-  S().deleteProfile(work.id);
-  await confirmInstall(second.key);
-  const reply = await lost();
-  assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
-  assert.equal(list.length, 0);
-  cancelInstall();
+  gates.install = null;
 });
 
 test("the Web Store fast path checks control after the list it waited on", async () => {
@@ -159,27 +142,37 @@ test("the Web Store fast path checks control after the list it waited on", async
   gates.list = null;
 });
 
-test("configure refuses Incognito before any write when the extension can't run there", async () => {
+test("configure refuses Incognito for an unpacked extension, before changing anything", async () => {
   const { list } = await setup();
-  list.push(row("noinc", { siteAccess: "ON_CLICK", incognitoAllowed: false }));
-  await ok("extensions.list");
-  assert.equal((await send("extensions.configure", { id: "noinc", siteAccess: "allSites", incognito: true })()).error?.code, "refused");
-  assert.equal(list[0].siteAccess, "ON_CLICK", "site access didn't change first");
+  list.push(row("unpacked", { path: "/Users/me/dev/ext", siteAccess: "ON_CLICK", incognitoAllowed: true }));
+  const reply = await call("extensions.configure", { id: "unpacked", siteAccess: "allSites", incognito: true });
+  assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+  assert.match(reply.error.message, /needs engine support/);
+  assert.deepEqual([list[0].siteAccess, list[0].incognito], ["ON_CLICK", false], "site access didn't change first");
+  assert.equal((await ok("extensions.configure", { id: "unpacked", siteAccess: "allSites" })).siteAccess, "ON_ALL_SITES", "other settings still change");
 });
 
-test("configure reads back with a list started after its write, not one already in flight", async () => {
+test("configure checks a packed extension's Incognito against the list Chromium gives now, not the cached row", async () => {
+  const { list } = await setup();
+  list.push(row("packed", { siteAccess: "ON_CLICK", incognitoAllowed: true }));
+  await refreshExtensions("");
+  list[0].incognitoAllowed = false;
+  const reply = await call("extensions.configure", { id: "packed", siteAccess: "allSites", incognito: true });
+  assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+  assert.equal(list[0].siteAccess, "ON_CLICK");
+  list[0].incognitoAllowed = true;
+  assert.equal((await ok("extensions.configure", { id: "packed", incognito: true })).incognito, true);
+});
+
+test("configure answers failed when the readback after its write fails, never the cached row", async () => {
   const { list, gates } = await setup();
-  list.push(row("fresh"));
-  await ok("extensions.list");
-  const held = gate();
-  gates.list = held.shut;
-  const stale = refreshExtensions("");
-  const pending = send("extensions.configure", { id: "fresh", incognito: true });
-  for (let i = 0; i < 50 && !list[0].incognito; i++) await tick();
-  gates.list = null;
-  held.open();
-  await stale;
-  const reply = await pending();
-  assert.ok(!reply.error, JSON.stringify(reply.error));
-  assert.equal(reply.result.incognito, true);
+  list.push(row("rb"));
+  await refreshExtensions("");
+  gates.breakListsOnWrite = true;
+  const reply = await call("extensions.configure", { id: "rb", incognito: true });
+  gates.breakListsOnWrite = false;
+  gates.listFails = false;
+  assert.equal(list[0].incognito, true, "the write happened");
+  assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
+  assert.match(reply.error.message, /couldn't read the profile's extensions/);
 });

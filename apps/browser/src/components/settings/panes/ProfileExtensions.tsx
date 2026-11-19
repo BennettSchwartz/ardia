@@ -6,7 +6,6 @@ import {
   openInExtensionProfile,
   openWebStoreFor,
   reload,
-  reloadFromSource,
   removeExtension,
   setEnabled,
   setPinned,
@@ -180,13 +179,8 @@ function ExtensionDetails({ ext, profile }: { ext: InstalledExtension; profile: 
           </Row>
         ) : null}
         {!ext.fromWebStore ? (
-          <Row title="Reload" description={ext.managedSource ? "Ardia's copy, as you added it" : (ext.path ?? undefined)}>
+          <Row title="Reload" description={ext.path ?? undefined}>
             <Button title="Reload" onPress={() => void reload(profile, ext.id)} />
-          </Row>
-        ) : null}
-        {ext.managedSource ? (
-          <Row title="Reload from Source" description={ext.managedSource}>
-            <Button title="Reload" onPress={() => void reloadFromSource(SETTINGS_WINDOW_ID, profile, ext).then((shown) => shown && showInstall())} />
           </Row>
         ) : null}
         {ext.errors.length ? <Row title="Errors" description={ext.errors.slice(0, 5).join("\n")} /> : null}
