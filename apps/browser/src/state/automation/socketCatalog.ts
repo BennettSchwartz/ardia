@@ -6,13 +6,15 @@ import { OpError } from "./workspaceTargets";
 
 export type SocketBody = { result: unknown } | { error: MethodError };
 
+export type SocketCall = { serving: () => boolean; stillServing: () => void };
+
 export type MethodSpec = {
   name: string;
   mutates: boolean;
   description: string;
   params: JsonSchema;
   result: string;
-  run?: (params: Record<string, unknown>) => unknown;
+  run?: (params: Record<string, unknown>, call: SocketCall) => unknown;
 };
 
 export type MethodEntry = { name: string; area: string; mutates: boolean; description: string; params: JsonSchema; result: string };
@@ -95,13 +97,22 @@ export const methodsCatalog = (): MethodEntry[] =>
 
 const asBody = (thrown: unknown): SocketBody => (thrown instanceof OpError ? failure(thrown.code, thrown.message) : failure("failed", errorText(thrown)));
 
-export function runSocketMethod(name: string, params: Record<string, unknown>): SocketBody | Promise<SocketBody> | null {
+export function servingWhile(stillOn: () => boolean): SocketCall {
+  return {
+    serving: stillOn,
+    stillServing: () => {
+      if (!stillOn()) throw new OpError("failed", "Control was turned off before Ardia made the change, so nothing changed.");
+    },
+  };
+}
+
+export function runSocketMethod(name: string, params: Record<string, unknown>, call: SocketCall = servingWhile(() => true)): SocketBody | Promise<SocketBody> | null {
   const spec = byName.get(name);
   if (!spec?.run) return null;
   const problem = schemaProblem(spec.params, params, "params");
   if (problem) return failure("bad_request", `${name}: ${problem}`);
   try {
-    const out = spec.run(params);
+    const out = spec.run(params, call);
     if (out instanceof Promise) return out.then((result) => ({ result }), asBody);
     return { result: out };
   } catch (thrown) {

@@ -29,7 +29,7 @@ import { launchToReplay, recordLaunch, runLaunchActions } from "./lifecycleEvent
 import { startDecideHooks } from "./decideHooks";
 import { offscreenMethod } from "./offscreen";
 import { applyMethod, workspaceMethod } from "./workspaceMethods";
-import { familyOf, methodsCatalog, runSocketMethod } from "./socketCatalog";
+import { familyOf, methodsCatalog, runSocketMethod, servingWhile } from "./socketCatalog";
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 
@@ -184,6 +184,8 @@ function subscribe(connection: number, params: Record<string, unknown>): Body {
 }
 
 function answer(connection: number, method: string, params: Record<string, unknown>): Body | Promise<Body> {
+  const serving = generation;
+  const stillOn = () => generation === serving && controlOn();
   switch (method) {
     case "hello": {
       const tooOld = clientProtocolProblem(params, systemInfo().appVersion);
@@ -207,10 +209,8 @@ function answer(connection: number, method: string, params: Record<string, unkno
       return workspaceMethod(params);
     case "offscreen":
       return offscreenMethod(params);
-    case "apply": {
-      const serving = generation;
-      return applyMethod(params, () => generation === serving && controlOn());
-    }
+    case "apply":
+      return applyMethod(params, stillOn);
     case "subscribe":
       return subscribe(connection, params);
     case "answer": {
@@ -220,7 +220,7 @@ function answer(connection: number, method: string, params: Record<string, unkno
     case "run":
       return runMethod(params);
   }
-  const area = runSocketMethod(method, params);
+  const area = runSocketMethod(method, params, servingWhile(stillOn));
   if (area) return area;
   const plugin = pluginMethods?.(method, params);
   if (plugin) return plugin;
