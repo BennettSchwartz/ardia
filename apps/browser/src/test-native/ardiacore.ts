@@ -1,5 +1,6 @@
 import type {
   ActionState,
+  SiteSettings,
   BookmarkOp,
   CallArgs,
   CallName,
@@ -94,6 +95,14 @@ export const emitDownload = (download: EngineEvents["downloads.changed"]) => emi
 export const emitPermission = (request: EngineEvents["permissions.requested"]) => emitEvent("permissions.requested", request);
 
 export const current = { device: null as string | null };
+
+export const siteSettingsDb = new Map<string, Record<string, string>>();
+export const siteZoomDb = new Map<string, number>();
+const SITE_SETTING_TYPES = ["popups", "camera", "microphone", "location", "notifications", "sound", "autoplay", "javascript", "images", "clipboard", "automaticDownloads", "cookies", "midi", "sensors", "windowManagement", "localFonts", "idleDetection", "storageAccess", "fileSystem", "keyboardLock", "pointerLock", "cameraPanTiltZoom"];
+const siteSettingsOf = (profile: string, origin: string) => {
+  const own = siteSettingsDb.get(`${profile}\n${origin}`) ?? {};
+  return Object.fromEntries(SITE_SETTING_TYPES.map((t) => [t, own[t] && own[t] !== "default" ? { value: own[t], isDefault: false } : { value: "ask", isDefault: true }]));
+};
 
 type Login = { origin: string; url: string; username: string; password: string; created: number };
 export const passwordStores = new Map<string | null, Map<string, Login>>();
@@ -412,12 +421,13 @@ const fakeModules = {
     clearBrowsingData: () => null,
   }),
   ArdiaSites: domain("sites", {
-    setSetting: () => null,
-    origins: () => [],
-    reset: () => null,
+    settings: ({ profile, origin }) => siteSettingsOf(profile, origin) as SiteSettings,
+    setSetting: ({ profile, origin, type, value }) => (siteSettingsDb.set(`${profile}\n${origin}`, { ...(siteSettingsDb.get(`${profile}\n${origin}`) ?? {}), [type]: value }), null),
+    origins: ({ profile }) => [...siteSettingsDb.keys()].filter((k) => k.startsWith(`${profile}\n`)).map((k) => k.slice(profile.length + 1)),
+    reset: ({ profile, origin }) => (siteSettingsDb.delete(`${profile}\n${origin}`), null),
     clearData: () => ({ cookies: 0, storage: true }),
-    zoomLevels: () => ({}),
-    setZoom: () => null,
+    zoomLevels: ({ profile }) => Object.fromEntries([...siteZoomDb].filter(([k]) => k.startsWith(`${profile}\n`)).map(([k, v]) => [k.slice(profile.length + 1), v])),
+    setZoom: ({ profile, host, zoom }) => (siteZoomDb.set(`${profile}\n${host}`, zoom), null),
     preloadPages: () => false,
     setPreloadPages: () => null,
   }),

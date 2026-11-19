@@ -21,6 +21,8 @@ UI update still happens.
   prints it and `ardia call <method> [params]` calls any of them.
 - **Store actions only.** Writes call the domain's own actions (`storeAction(…)` on `useBrowser`, or the domain's
   exported functions for the stores outside it). Nothing calls `setState` on another domain's store.
+- **Irreversible data loss asks the user.** `profiles.delete` and `extensions.uninstall` call the same actions the UI
+  does, which show Ardia's confirmation; the reply waits for the answer (`{deleted}` / `{removed}`).
 - **Private stays private.** Private windows, incognito profiles and Peek's own tabs are invisible and untouchable, as
   in `windows` and `workspace` (`eligibleKind`, `isEligibleTab`).
 - **Ids, not indexes.** Tabs, windows, groups, splits, bookmarks, downloads and profiles are named by the app's ids
@@ -44,7 +46,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 
 | Area | What it holds | Where it persists | Socket |
 | --- | --- | --- | --- |
-| Windows | kind, profile shown, frame, maximized, full screen, tab layout, auto-hide, sidebar, focus order | `session.json` (`windows`, `windowOrder`), `launch-layout.json` | ✅ `windows`, `windows.*` |
+| Windows | kind, profile shown, frame, maximized, full screen, tab layout, auto-hide, sidebar, focus order | `session.json` (`windows`, `windowOrder`), `launch-layout.json` | ✅ `windows`, `windows.*`; 🗺️ frame, maximize, full screen |
 | Tabs | url, title, custom title and icon, pin, muted, zoom, page state, opener, created, last active | `session.json` (`tabs`), Chrome's tab restore | ✅ `apply` ops, `tabs.*` |
 | Groups and folders | name, icon, colour, collapsed, pinned, nesting, members | `session.json` (`groups`), sync (`groupLooks`) | ✅ `apply` `group.*`, `workspace` |
 | Pinned (Top Apps tiles, pinned rows, tile folders) | pin kind, pinned URL, tile folders, Top Apps sharing | `session.json` (`pinChoices`, `pinSync`, `parkedPins`), sync | ✅ `apply` `tab.pin`/`tab.unpin`, `tabs.setPinnedUrl`, `tabs.returnToPinnedUrl`; 🗺️ tile folders |
@@ -104,19 +106,19 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Area | Read | Write |
 | --- | --- | --- |
 | tabs | `tabs.list {window?, profile?}`, `tabs.get {tab}` | `tabs.navigate {tab, url}`, `tabs.reload`, `tabs.back`, `tabs.forward`, `tabs.duplicate`, `tabs.setPinnedUrl {tab, url?}`, `tabs.returnToPinnedUrl` |
-| windows | `windows.get {window}` | `windows.create {profile?, url?, layout?}`, `windows.close`, `windows.setFrame {window, frame}`, `windows.setMaximized`, `windows.setFullScreen`, `windows.setLayout {window, layout?, sidebar?}`, `windows.switchProfile`, `windows.merge` |
+| windows | `windows.get {window}` | `windows.create {profile?, url?, layout?}`, `windows.close`, `windows.focus`, `windows.setLayout {window, layout?, tabsShown?}`, `windows.switchProfile`, `windows.merge` |
 | closed | `closed.list {window?}` | `closed.restore {id, window?}`, `closed.clear {window?}` |
-| profiles | `profiles.list` | `profiles.create`, `profiles.update`, `profiles.setLook`, `profiles.reorder`, `profiles.setDefault`, `profiles.delete {profile, confirm: "delete"}` |
+| profiles | `profiles.list` | `profiles.create`, `profiles.update`, `profiles.setLook`, `profiles.reorder`, `profiles.setDefault`, `profiles.delete {profile}` (Ardia asks the user first) |
 | splits | `splits.list {window?}` | `splits.create {tabs, orientation?}`, `splits.separate`, `splits.removeTab`, `splits.resize {split, sizes}`, `splits.flip`, `splits.setOrientation` |
 | peek | `peek.list` | `peek.open {tab, url}`, `peek.close {tab}`, `peek.toTab {window}` |
 | littleArdia | (in `windows`) | `littleArdia.open {url?, profile?}`, `littleArdia.close`, `littleArdia.toMain` |
 | bookmarks | `bookmarks.tree {profile?, folder?, depth?}`, `bookmarks.search {profile?, query, limit?, offset?}`, `bookmarks.get {id}` | `bookmarks.add`, `bookmarks.addFolder`, `bookmarks.update`, `bookmarks.move {ids, parent, index?}`, `bookmarks.remove {ids}` |
-| history | `history.search {profile?, query?, since?, until?, limit?, offset?}` | `history.remove {profile?, urls}`, `history.clear {profile?, since?, until?}` |
+| history | `history.search {profile?, query?, since?, until?, limit?, offset?}` | `history.remove {profile?, urls}`, `history.clear {profile?, since?}` |
 | downloads | `downloads.list {profile?, state?}`, `downloads.settings {profile?}` | `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.keep`, `downloads.open`, `downloads.reveal`, `downloads.remove`, `downloads.clear`, `downloads.setSettings` |
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
 | search | `search.engines` | `search.setDefault {id}`, `search.add`, `search.update`, `search.remove` |
 | sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {origin}` |
-| extensions | `extensions.list {profile?}` | `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` |
+| extensions | `extensions.list {profile?}` | `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status` | none yet |
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
@@ -154,6 +156,10 @@ the user's live sessions on every site. Both are a different consent than "contr
 ## Next
 
 Designed, not built in this round, each in its own file under `state/automation/socket<Area>.ts`:
+
+- **Window geometry:** `windows.setFrame {window, frame}`, `windows.setMaximized`, `windows.setFullScreen`. The store's
+  `frame`, `maximized` and `fullScreen` follow the native window (`windows/windowSync.ts`), so these need a native
+  call that moves the window (`ArdiaWindows`), which doesn't exist yet; `run` covers full screen through its command.
 
 - **Tile folders:** `pins.folders {profile?}`, `pins.createFolder {tabs, name}`, `pins.renameFolder`, `pins.removeFolder`
   through `state/pins/tileFolders.ts`.

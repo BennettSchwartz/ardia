@@ -34,9 +34,10 @@ export function noteCliPillShown(compact: boolean) {
   counts.cli_pill_shows++;
   if (compact) counts.cli_pill_compact_shows++;
 }
-export function noteSocketCall(family: SocketFamily, failed: boolean) {
-  counts[`cli_socket_calls_${family}`]++;
-  if (failed) counts.cli_socket_call_failures++;
+export function noteSocketCall(family: SocketFamily, failed: boolean, consent?: ConsentToken | null) {
+  const field = `cli_socket_calls_${family}` as const;
+  countFor(consent, () => void counts[field]++, { [field]: 1 });
+  if (failed) countFor(consent, () => void counts.cli_socket_call_failures++, { cli_socket_call_failures: 1 });
 }
 export const noteCliAutoEnabled = () => void counts.cli_auto_enables++;
 

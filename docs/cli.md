@@ -64,6 +64,12 @@ Settings › Advanced.
   Ardia"), before it sends anything else. A side raises its minimum only when it needs the other's newer behaviour, so a
   newer command against an older Ardia, or the reverse, either works or says which one to update. `ardia --version`
   reports the command's own version.
+- **Methods.** `methods` lists every method the socket answers: `name`, `area`, `mutates`, `description`, `params` (a
+  JSON Schema subset the socket checks before it runs anything) and `result`. The command's `ardia methods` prints it
+  and `ardia call <method> [params]` calls any method, so a method Ardia adds is usable from the shell without a new
+  command release. Adding methods doesn't change the protocol: a command that calls one an older Ardia lacks gets
+  `unknown_method`. Every area, what it reads and changes, and what stays out of reach (passwords, card numbers,
+  cookie values) is in `docs/control-socket.md`.
 - **The plugin schema.** `docs/plugin.schema.json` is the manifest schema Ardia writes (`apps/browser/scripts/
   write-plugin-schema.mjs`; a test keeps it current). The command ships a copy for `ardia plugins check` offline, and the
   plugins repo's CI compares that copy with ardia main's.

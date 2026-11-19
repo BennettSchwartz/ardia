@@ -220,7 +220,9 @@ profile goes where the store puts moved tabs.
   characters without control characters.
 - **Telemetry:** `usage_counts` carries `cli_tab_edits`, `cli_group_edits` (operations applied),
   `cli_edit_failures` (batches refused or stopped) and `cli_pill_shows` (times the control pill appeared: `run` and
-  DevTools sessions only, never `apply`); the CLI's `cli_command` has the subcommand and `batch_steps`.
+  DevTools sessions only, never `apply`); the CLI's `cli_command` has the subcommand and `batch_steps`. Every socket
+  request also counts once in `cli_socket_calls_<family>` and, when it answers an error, in `cli_socket_call_failures`
+  (`docs/control-socket.md`).
 
 ### Which commands
 

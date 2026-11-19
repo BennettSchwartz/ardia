@@ -135,8 +135,9 @@ export function handleControlRequest({ connection, generation: tagged, line }: C
     body = failure("failed", errorText(error));
   }
   const family = familyOf(method);
+  const consent = consentToken();
   const reply = (settled: Body) => {
-    noteSocketCall(family, "error" in settled);
+    noteSocketCall(family, "error" in settled, consent);
     try {
       send(connection, id, settled, ticket);
     } catch (error) {
