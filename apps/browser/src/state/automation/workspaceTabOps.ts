@@ -72,8 +72,9 @@ async function attachment(view: WebViewHandle): Promise<boolean | null> {
   }
 }
 
-async function reloadChecked(view: WebViewHandle): Promise<string> {
+async function reloadChecked(view: WebViewHandle, stillOn: () => boolean): Promise<string> {
   if ((await attachment(view)) === false) return "no_view";
+  if (!stillOn()) throw new OpError("failed", "The client left or control was turned off before the reload, so nothing reloaded.");
   const reloaded = await view.reload().then(
     () => true,
     () => false,
@@ -93,7 +94,7 @@ export async function wake(results: OpResult[], op: Op, stillOn: () => boolean =
     const t = store().tabs[id];
     if (!t) outcomes[id] = "gone";
     else if (isSleeping(id) && !webviews.get(id)) outcomes[id] = "no_view";
-    else if (isSleeping(id)) outcomes[id] = await settled(reloadChecked(webviews.get(id)!), id, "waking", done, stillOn, owner);
+    else if (isSleeping(id)) outcomes[id] = await settled(reloadChecked(webviews.get(id)!, stillOn), id, "waking", done, stillOn, owner);
     else if (needsPage(t)) {
       store().updateTab(id, { page: wokenPage(t) });
       outcomes[id] = "loading";
