@@ -27,7 +27,7 @@ export function noteLoginPasswordCheck(result: unknown) {
   else if (result === "cancelled") checks.passwordCancelled += 1;
 }
 
-export const noteSlideFrameHeld = () => void (checks.slideFramesHeld += 1);
+export const noteSlideFrameKept = (consent?: ConsentToken | null) => countFor(consent, () => void (checks.slideFramesHeld += 1), { toolbar_slide_frames_held: 1 });
 
 export function takeUpdateCounts() {
   const taken = {

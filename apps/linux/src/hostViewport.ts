@@ -1,6 +1,7 @@
 import type { TabViewport } from "./hostTab";
 import { PAGE_STACK_ATTRIBUTE } from "./pageHoles.ts";
-import { noteSlideFrameHeld } from "../../browser/src/state/telemetry/updateCounts.ts";
+import { noteSlideFrameKept } from "../../browser/src/state/telemetry/updateCounts.ts";
+import { consentToken, type ConsentToken } from "../../browser/src/state/telemetry/consentPeriod.ts";
 
 export type { TabViewport };
 
@@ -32,7 +33,7 @@ function slideOf(transform: string) {
   return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : { x: 0, y: 0 };
 }
 
-export function heldInPane(element: HTMLElement, rect: DOMRectReadOnly): DOMRectReadOnly {
+export function heldInPane(element: HTMLElement, rect: DOMRectReadOnly, consent?: ConsentToken | null): DOMRectReadOnly {
   const group = element.closest?.(TOOLBAR_SLIDE);
   const pane = group?.parentElement?.getBoundingClientRect();
   if (!group || !pane) return rect;
@@ -41,7 +42,7 @@ export function heldInPane(element: HTMLElement, rect: DOMRectReadOnly): DOMRect
   const top = Math.max(rect.top - slide.y, pane.top);
   const right = Math.max(Math.min(rect.right - slide.x, pane.right), left);
   const bottom = Math.max(Math.min(rect.bottom - slide.y, pane.bottom), top);
-  if (rect.left < pane.left || rect.top < pane.top || rect.right > pane.right || rect.bottom > pane.bottom) noteSlideFrameHeld();
+  if (rect.left < pane.left || rect.top < pane.top || rect.right > pane.right || rect.bottom > pane.bottom) noteSlideFrameKept(consent);
   return { x: left, y: top, left, top, right, bottom, width: right - left, height: bottom - top, toJSON: () => ({}) };
 }
 
@@ -73,11 +74,12 @@ function plainViewport(element: HTMLElement, rect: DOMRectReadOnly, viewport: Ta
 export type OverlayCover = { overlayAt: (x: number, y: number) => boolean; overlayElements: () => readonly Element[] };
 
 export function watchTabViewport(element: HTMLElement, visible: () => boolean, report: (viewport: TabViewport, covered: boolean) => void, cover: OverlayCover) {
+  const consent = consentToken();
   let frame = 0;
   let stopped = false;
   const measure = () => {
     if (stopped) return;
-    const rect = heldInPane(element, element.getBoundingClientRect());
+    const rect = heldInPane(element, element.getBoundingClientRect(), consent);
     const viewport = tabViewport(rect, { width: window.innerWidth, height: window.innerHeight }, visible() && !document.hidden && element.isConnected);
     const plain = plainViewport(element, rect, viewport, cover);
     report(plain.viewport, plain.covered);

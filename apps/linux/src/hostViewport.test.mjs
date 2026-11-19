@@ -196,6 +196,8 @@ test("a page rect off the window or not finite is reported hidden", () => {
 test("while the auto-hide toolbar slides the page group, the page keeps one size from the first frame to the last", async () => {
   const { TOOLBAR_SLIDE } = await import("./hostViewport.ts");
   const { takeUpdateCounts } = await import("../../browser/src/state/telemetry/updateCounts.ts");
+  const { setConsentPeriod } = await import("../../browser/src/state/telemetry/consentPeriod.ts");
+  setConsentPeriod(true, "toolbar-slide-test");
   takeUpdateCounts();
   const window = { width: 1018, height: 800 };
   const pane = box(9, 60, 1000, 731);
@@ -235,6 +237,7 @@ test("while the auto-hide toolbar slides the page group, the page keeps one size
       s.restore();
     }
   }
+  setConsentPeriod(false, null);
 });
 
 test("a page that stops drawing because shell UI covers it is reported once, and a page hidden any other way or sampled off the window is not", async () => {
