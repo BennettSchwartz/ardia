@@ -198,8 +198,9 @@ if [ -x "$built_in_cli" ]; then
   "$root/scripts/release/cli-bootstrap-smoke.sh" "$app" "$version" || status=1
   mkdir -p "$work/cli" && ditto "$app/Contents/Resources/Plugins/cli" "$work/cli/built-in"
   ARDIA_CLI_HOME="$work/cli-home" "$root/scripts/release/token-smoke.sh" "$app" "$work/cli/built-in/bin/ardia" || status=1
-elif [ -n "$engine_suffix" ]; then
-  echo "      no ardia CLI check: $(basename "$dmg") bundles no Command Line plugin (none is pinned for macos-x64)"
+elif ! python3 -I "$root/scripts/release/official-plugins.py" bundled cli; then
+  [ ! -e "$app/Contents/Resources/Plugins/cli" ] && ok=1 || ok=0
+  check "no Command Line plugin: official-plugins.json pins none for ${ARDIA_ARCH:-arm64}" $ok
 elif [ -z "${SMOKE_APP:-}" ]; then
   check "the release bundles the pinned Command Line plugin" 0
 fi

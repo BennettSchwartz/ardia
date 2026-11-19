@@ -194,7 +194,12 @@ if [ "$phase" = sign ] && [ -n "$build_input" ]; then
   [ -d "$build_input/plugins" ] || die "no plugins in $build_input"
   ditto "$build_input/plugins" "$dist/plugins"
 fi
-[ -f "$dist/plugins/cli/plugin.json" ] || die "no official plugins in $dist/plugins from --phase build"
+if python3 -I "$stages/official-plugins.py" bundled cli; then
+  [ -f "$dist/plugins/cli/plugin.json" ] || die "no official plugins in $dist/plugins from --phase build"
+else
+  [ ! -e "$dist/plugins/cli" ] || die "$dist/plugins has a Command Line plugin this platform pins none of"
+  echo "note: apps/browser/official-plugins.json pins no Command Line folder for ${ARDIA_ARCH:-arm64}: this build ships without it"
+fi
 
 "$stages/export-sign.sh" "$dist" "$archive" "$identity" ${provisioning_profile:+"$provisioning_profile"}
 "$stages/verify.sh" "$app" "$archive" "$version" "$release_build"
