@@ -9,15 +9,10 @@ import { OpError } from "./workspaceTargets";
 import { runMethod } from "./controlSocket";
 import { backgroundInstance } from "../app/appSettings";
 
-const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page"]);
+export const NO_SUCH_MENU = "There's no open menu with that id; menus.open lists them.";
 export const CAPTURED_PICK_NEEDS_ENGINE =
   "A captured page menu is listed only: picking from it waits for engine support that runs the item for the frame the menu came from (runContextMenuCommand in ac_context_menu.mm).";
 export const PRIVATE_WINDOW_OPEN = "A private window is open, so the ardia command doesn't use the menu bar until it closes.";
-export const PAGE_PICK_REFUSED =
-  "Picking from a page's menu or <select> popup is refused: its items run page and app actions (Share among them) outside run's policy. Run a menu bar item from menus.bar with menus.runBar instead.";
-export const LIVE_PAGE_MENU_REFUSED =
-  "A page's context menu on screen isn't used: nothing in the menu says which tab and window it came from, so the ardia command can't tell whose it is.";
-export const TRACKED_BAR_REFUSED = "The ardia command doesn't use the menu bar while it tracks; run an item from menus.bar with menus.runBar instead.";
 export const NATIVE_ITEMS_NEED_VISIBLE = "A background Ardia runs no native menu item (Minimize, Zoom and the like), and run refuses every command there, so menus.runBar runs nothing in it.";
 export const DYNAMIC_ROW_REFUSED = "That row stands for a menu built from open windows, profiles, pages or history, which the ardia command doesn't read or run.";
 
@@ -40,13 +35,11 @@ function catalogItem(items: SurfaceItem[], ref: string): SurfaceItem | undefined
 }
 
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
-  if (surface.kind === "menuBar" || (surface.kind === "page" && !surface.captured)) return null;
+  if (surface.kind !== "page" || surface.captured !== true) return null;
   const window = surface.window;
-  if (!window || !eligibleKind(s, window)) return null;
-  if (surface.tab) {
-    if (!isEligibleTab(s, surface.tab) || s.tabs[surface.tab]?.windowId !== window) return null;
-  } else if (PAGE_KINDS.has(surface.kind)) return null;
-  return { ...surface, window, tab: surface.tab ?? null };
+  const tab = surface.tab;
+  if (!window || !tab || !eligibleKind(s, window) || !isEligibleTab(s, tab) || s.tabs[tab]?.windowId !== window) return null;
+  return { ...surface, window, tab };
 }
 
 async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
@@ -63,18 +56,14 @@ async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
 
 async function surfaceOf(menuId: string) {
   const raw = (await openSurfaces()).find((m) => m.id === menuId);
-  if (raw?.kind === "menuBar") throw new OpError("refused", TRACKED_BAR_REFUSED);
-  if (raw?.kind === "page" && !raw.captured) throw new OpError("refused", LIVE_PAGE_MENU_REFUSED);
   const found = raw && visibleSurface(now(), raw);
-  if (!found) throw new OpError("no_window", `There's no open menu ${menuId}; menus.open lists them.`);
+  if (!found) throw new OpError("no_window", NO_SUCH_MENU);
   return found;
 }
 
 async function choose(params: Record<string, unknown>) {
-  const surface = await surfaceOf(params.menu as string);
-  if (surface.captured) throw new OpError("refused", CAPTURED_PICK_NEEDS_ENGINE);
-  if (PAGE_KINDS.has(surface.kind)) throw new OpError("refused", PAGE_PICK_REFUSED);
-  throw new OpError("refused", "Ardia's own menus stay with you; run a menu bar item from menus.bar with menus.runBar instead.");
+  await surfaceOf(params.menu as string);
+  throw new OpError("refused", CAPTURED_PICK_NEEDS_ENGINE);
 }
 
 async function dismiss(params: Record<string, unknown>, call: SocketCall) {
@@ -120,7 +109,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.open",
     mutates: false,
-    description: "Menus open now (a page's <select> popup, a page's context menu captured in a hidden Ardia, an Ardia menu) with their items and their enabled and checked state; never the menu bar or a context menu on screen, whose source isn't known",
+    description: "Page context menus captured in a hidden Ardia, each with the tab and window it came from and its items' enabled and checked state. No other menu is listed: one on screen (a page's, a <select> popup's, Ardia's own, WebKit's) has no proven source",
     params: obj({}),
     result: "[{id, kind, window, tab, items}]",
     run: async () => {
@@ -132,7 +121,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
     name: "menus.choose",
     mutates: true,
     hidden: true,
-    description: "Refused for every open menu: picks from a page's menu, a <select> popup, a captured page menu, Ardia's own menus or a tracking menu bar don't run; run a menu bar item from menus.bar with menus.runBar instead",
+    description: "Hidden from methods. Refused for a captured page menu until the engine runs its items; any other id is unknown",
     params: obj({ menu: MENU, path: PATH, ref: REF }, ["menu", "path"]),
     result: "{ok, menu, kind, title}",
     run: choose,
@@ -140,7 +129,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.dismiss",
     mutates: true,
-    description: "Close an open page or Ardia menu without choosing, as Escape or a click away does",
+    description: "Drop a captured page menu from the list; any other id is unknown",
     params: obj({ menu: MENU }, ["menu"]),
     result: "{ok}",
     run: dismiss,

@@ -18,20 +18,18 @@ final class OpenSurfaces: NSObject {
   private final class Tracked {
     let id: String
     let kind: String
-    let menu: NSMenu?
-    let captured: Captured?
+    let captured: Captured
     let tab: String?
     let window: String?
     let openedAt = Date()
-    init(id: String, kind: String, menu: NSMenu?, captured: Captured?, tab: String?, window: String?) {
+    init(id: String, kind: String, captured: Captured, tab: String?, window: String?) {
       self.id = id
       self.kind = kind
-      self.menu = menu
       self.captured = captured
       self.tab = tab
       self.window = window
     }
-    var expired: Bool { captured != nil && Date().timeIntervalSince(openedAt) > OpenSurfaces.capturedLifetime }
+    var expired: Bool { Date().timeIntervalSince(openedAt) > OpenSurfaces.capturedLifetime }
   }
 
   var send: ((String, [String: Any]) -> Void)?
@@ -46,8 +44,6 @@ final class OpenSurfaces: NSObject {
     guard observers.isEmpty else { return }
     let center = NotificationCenter.default
     observers = [
-      center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] in self?.began($0.object as? NSMenu) },
-      center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] in self?.ended($0.object as? NSMenu) },
       center.addObserver(forName: Notification.Name("ArdiaPageMenuCaptured"), object: nil, queue: nil) { [weak self] in
         self?.captured($0.object as? [String: Any])
       },
@@ -59,71 +55,8 @@ final class OpenSurfaces: NSObject {
     return "\(prefix)\(next)"
   }
 
-  private static func targetClass(_ menu: NSMenu) -> String {
-    for item in menu.items where !item.isSeparatorItem {
-      if let target = item.target { return NSStringFromClass(type(of: target)) }
-    }
-    return ""
-  }
-
-  static func inMenuBar(_ menu: NSMenu) -> Bool {
-    var current: NSMenu? = menu
-    while let m = current {
-      if m === NSApp.mainMenu { return true }
-      current = m.supermenu
-    }
-    return false
-  }
-
-  private static func kind(of menu: NSMenu) -> String {
-    let target = targetClass(menu)
-    if target.contains("WebMenuRunner") { return "select" }
-    if target.contains("MenuController") { return "page" }
-    if target.contains("MenuChoice") { return "app" }
-    return "other"
-  }
-
-  private static func selectOwner() -> (tab: String, window: String)? {
-    for window in NSApp.windows where window.isVisible {
-      if let anchor = selectAnchor(in: window.contentView), let tab = ArdiaWebView.appTabId(containing: anchor),
-         let id = WindowManager.shared.id(of: anchor.window) {
-        return (tab, id)
-      }
-    }
-    return nil
-  }
-
-  private static func selectAnchor(in view: NSView?) -> NSView? {
-    guard let view else { return nil }
-    if NSStringFromClass(type(of: view)).contains("RenderWidgetHostViewCocoa"),
-       view.subviews.contains(where: { type(of: $0) == NSView.self }) {
-      return view
-    }
-    for sub in view.subviews { if let found = selectAnchor(in: sub) { return found } }
-    return nil
-  }
-
-  private func began(_ menu: NSMenu?) {
-    guard let menu, menu.supermenu == nil, !Self.inMenuBar(menu), !open.contains(where: { $0.menu === menu }) else { return }
-    let kind = Self.kind(of: menu)
-    let owner: (tab: String?, window: String?) = switch kind {
-    case "select": Self.selectOwner().map { ($0.tab, $0.window) } ?? (nil, nil)
-    case "page": (nil, nil)
-    default: (nil, WindowManager.shared.id(of: NSApp.keyWindow))
-    }
-    let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window)
-    open.append(tracked)
-    send?("menuOpened", describe(tracked))
-  }
-
-  private func ended(_ menu: NSMenu?) {
-    guard let menu, let index = open.firstIndex(where: { $0.menu === menu }) else { return }
-    let tracked = open.remove(at: index)
-    send?("menuClosed", ["id": tracked.id, "kind": tracked.kind])
-  }
-
   private func dropCaptured(_ matching: (Tracked) -> Bool) {
-    let dropped = open.filter { $0.captured != nil && matching($0) }
+    let dropped = open.filter(matching)
     open.removeAll { tracked in dropped.contains { $0 === tracked } }
     for tracked in dropped { send?("menuDropped", ["id": tracked.id, "kind": tracked.kind]) }
   }
@@ -132,7 +65,7 @@ final class OpenSurfaces: NSObject {
     guard let box, capturesPageMenus, let tab = box["tab"] as? String, let window = WindowManager.shared.id(of: box["window"] as? NSWindow) else { return }
     dropCaptured { _ in true }
     let menu = Captured(link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
-    let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, captured: menu, tab: tab, window: window)
+    let tracked = Tracked(id: newId("m"), kind: "page", captured: menu, tab: tab, window: window)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
   }
@@ -159,17 +92,6 @@ final class OpenSurfaces: NSObject {
     (item as? CommandItem)?.defaultTitle ?? (item as? StandardItem)?.defaultTitle ?? item.title
   }
 
-  private static func rows(_ menu: NSMenu, path: [Int]) -> [[String: Any]] {
-    menu.items.enumerated().compactMap { index, item in
-      guard !item.isHidden else { return nil }
-      var row: [String: Any] = [
-        "path": path + [index], "title": item.title, "enabled": item.isEnabled, "checked": item.state == .on, "separator": item.isSeparatorItem,
-      ]
-      if let submenu = item.submenu { row["submenu"] = rows(submenu, path: path + [index]) }
-      return row
-    }
-  }
-
   private static func capturedRows(_ items: [Any], path: [Int]) -> [[String: Any]] {
     items.enumerated().compactMap { index, raw in
       guard let item = raw as? [String: Any], item["hidden"] as? Bool != true else { return nil }
@@ -186,13 +108,9 @@ final class OpenSurfaces: NSObject {
     var out: [String: Any] = ["id": tracked.id, "kind": tracked.kind, "openedAt": tracked.openedAt.timeIntervalSince1970 * 1000]
     if let tab = tracked.tab { out["tab"] = tab }
     if let window = tracked.window { out["window"] = window }
-    if let menu = tracked.menu {
-      out["items"] = Self.rows(menu, path: [])
-    } else if let captured = tracked.captured {
-      out["items"] = Self.capturedRows(captured.items, path: [])
-      out["link"] = captured.link
-      out["captured"] = true
-    }
+    out["items"] = Self.capturedRows(tracked.captured.items, path: [])
+    out["link"] = tracked.captured.link
+    out["captured"] = true
     return out
   }
 
@@ -203,7 +121,7 @@ final class OpenSurfaces: NSObject {
 
   private func find(_ id: String) throws -> Tracked {
     dropCaptured { $0.expired }
-    guard let tracked = open.first(where: { $0.id == id }) else { throw Problem.missing("There's no open menu \(id); menus.open lists them.") }
+    guard let tracked = open.first(where: { $0.id == id }) else { throw Problem.missing("There's no open menu with that id; menus.open lists them.") }
     return tracked
   }
 
@@ -213,8 +131,7 @@ final class OpenSurfaces: NSObject {
 
   func dismiss(_ id: String) throws {
     let tracked = try find(id)
-    if tracked.captured != nil { return dropCaptured { $0 === tracked } }
-    tracked.menu?.cancelTracking()
+    dropCaptured { $0 === tracked }
   }
 }
 
