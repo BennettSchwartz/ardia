@@ -22,7 +22,9 @@ test("a background instance refuses downloads.open, which launches another app",
     assert.equal(reply.error?.code, "refused");
     assert.match(reply.error.message, /opening a download needs the person/);
     assert.deepEqual(opened, []);
-    assert.ok(!(await socketClient(232).call("downloads.reveal", { id: "bg1" })).error, "revealing in Finder isn't launching an app");
+    const reveal = await socketClient(232).call("downloads.reveal", { id: "bg1" });
+    assert.equal(reveal.error?.code, "refused", "a background instance only logs a reveal, so it can't claim one");
+    assert.match(reveal.error.message, /revealing a download needs the person/);
   } finally {
     Object.assign(system, { openFile, revealFile });
   }
