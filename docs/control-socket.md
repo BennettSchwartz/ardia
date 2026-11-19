@@ -31,7 +31,7 @@ UI update still happens.
   `unknown_method`, `no_window` (no such window, tab, profile, group, split, bookmark or download the command may use),
   `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen). A new code needs a new
   protocol number; none was needed for this work.
-- **Big lists page.** History and bookmark searches take `limit` (default 100, at most 1000) and `offset`, and answer
+- **Big lists page.** History and bookmark searches and `live.items` take `limit` (default 100, at most 1000) and `offset`, and answer
   `{ items, total, nextOffset }`.
 - **Telemetry.** Each call counts once in its method family (`cli_socket_calls_<family>`) and once in
   `cli_socket_call_failures` when it answers an error: counts only, never which method's params
@@ -125,7 +125,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | pins (tile folders) | `pins.folders {window?}` | `pins.createFolder {tabs, name?}`, `pins.renameFolder {folder, name}`, `pins.removeFolder {folder}`, `pins.addToFolder {folder, tabs}`, `pins.removeFromFolder {tabs}` |
 | favicons | `favicons.get {url, profile?}` | none |
 | sharedFolders | `sharedFolders.list` | `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`, `sharedFolders.sync {group}`, `sharedFolders.stop {group}` |
-| live | `live.list {profile?}`, `live.items {folder}` | `live.create {kind, profile?, sources?, name?}`, `live.update`, `live.remove`, `live.refresh`, `live.hide {folder, items}`, `live.unhide`, `live.markRead {folder, items?}`, `live.setRepoHidden {folder, repo, hidden}`, `live.open {folder, item, window?}` |
+| live | `live.list {profile?}`, `live.items {folder, limit?, offset?}` | `live.create {kind, profile?, sources?, name?}`, `live.update`, `live.remove`, `live.refresh`, `live.hide {folder, items}`, `live.unhide`, `live.markRead {folder, items?}`, `live.setRepoHidden {folder, repo, hidden}`, `live.open {folder, item, window?}` |
 | presets | `presets.describe {code}` | `presets.apply {code, window?}` |
 | airTraffic | `airTraffic.rules`, `airTraffic.test {url, from?}` | `airTraffic.addRule`, `airTraffic.updateRule {id, …}`, `airTraffic.removeRule {id}`, `airTraffic.moveRule {id, index}`, `airTraffic.setFallback {open, profile?, group?}` |
 
@@ -142,12 +142,15 @@ listed under Next.
 
 Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFolders.ts`, `socketLive.ts`,
 `socketPresets.ts`, `socketAirTraffic.ts`, and counts in its own family (`pins`, `favicons`, `shared_folders`, `live`,
-`presets`, `air_traffic`).
+`presets`, `air_traffic`). A method that awaits gets the request's control generation (`SocketCall` in
+`socketCatalog.ts`) and checks it before each change that follows an await, so switching control off stops it there.
 
 - **Tile folders** (`state/pins/tileFolders.ts`, the same transforms the sidebar's drag and Rename/Remove Folder menu
   apply). A folder lives in one window's Top Apps for the profile the window shows, so `pins.folders` takes a window;
   `pins.createFolder` pins its tabs as tiles, and every tab must be in one main window and its profile. Removing a
   folder, or a tab from it, leaves the tabs pinned as tiles, as the menu does; a folder left with one tab dissolves.
+  `createFolder` and `addToFolder` refuse a split's pane (its panes pin together as rows, so the sidebar's folder drop
+  leaves them out) and the last tab of a shared sidebar folder, with apply's own checks, before anything changes.
 - **Favicons.** `favicons.get` answers from the app's icon cache (`resolveFavicon`) and otherwise from the profile's
   icon database (`faviconsFor`), with `{found, mime, data}` (base64). It never fetches from the network, so reading
   icons can't tell a site the page is open.
@@ -155,15 +158,28 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   when iCloud Drive is off) and syncs it once; instead of the macOS share sheet, the reply carries the folder's path and
   file URL for the command to share. `add` binds a folder someone shared as a new pinned folder, as Add Shared Folder
   does without its folder picker. `stop` is Stop Syncing: the group and the files stay.
+  Paths are resolved once to the real folder (`resolve` in `SharedFoldersModule.swift`): the binding stores that path and
+  the folder's device and inode, and the native layer reads and writes only while the path still leads to that folder,
+  so a re-pointed symlink can't redirect a sync, and two spellings of one folder are one binding. `/`, system folders and
+  home folders are refused; `parent` must already exist. `add` reads the folder before saving anything, so a missing,
+  unreadable or too big folder (over 20,000 items or 32 MB of links) answers an error and adds nothing. Requests for one
+  group run one at a time; `share` re-checks the group after making the folder and removes the folder it made when the
+  group changed or control went off. When the first sync fails, `share` answers `failed` with the reason instead of the
+  URL, as the sidebar shows a toast instead of the share sheet; the binding stays, as it does there.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
-  menu does. Account tokens are never read.
+  menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no
+  `sources` takes the connected ones of its kind, refusing when none is. A refresh asked for while one runs with other
+  sources or filters fetches again after it, and a pass whose sources or filters changed under it drops its results.
+  `live.items` lists the folder's listed, then hidden, then recently completed items as `{item, shown, unread,
+  completed}`, a page at a time.
 - **Presets.** `presets.apply` is Settings › Apply a setup code (`applySetupCode`): the code's settings, and its colour
   and pinned apps on the given or focused main window's profile. `presets.describe` decodes a code without applying it.
 - **Air Traffic Control** (`state/airTraffic/store.ts`). Rules are `{from, when, profile, open, group}`: `from` an app
   (`{name, bundleId?}`, any app when null), `when` a condition (`any`, `site` with `host`, `pattern`, `contains` or
   `equals` with `text`) checked as the Settings pane checks it, `profile` null for the profile used last, `group` a key
-  from `airTraffic.rules` and only with `open: "tab"`. `moveRule` takes the new index; `setFallback {open: null}`
+  from `airTraffic.rules` and only with `open: "tab"`. `moveRule` takes the new index and saves the new order in one
+  write; `setFallback {open: null}`
   puts Everything Else back to Ardia's usual choice; `test` is the pane's link tester.
 
 ### Events
