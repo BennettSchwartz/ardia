@@ -161,7 +161,6 @@ export const surfaces = {
   bar: [] as SurfaceItem[],
   holds: false,
   chosen: [] as { id: string; path: number[] }[],
-  colors: [] as { id: string; hex: string; close: boolean }[],
   performed: [] as number[][],
   emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
 };
@@ -185,11 +184,6 @@ const menus: Modules["ArdiaMenus"] = {
   dismissSurface: async (id) => {
     surfaceOf(id);
     surfaces.open = surfaces.open.filter((s) => s.id !== id);
-  },
-  chooseColor: async (id, hex, close) => {
-    surfaceOf(id);
-    surfaces.colors.push({ id, hex, close });
-    return hex;
   },
   menuBar: () => Promise.resolve(surfaces.bar),
   performMenuBarItem: async (path) => {

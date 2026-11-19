@@ -68,17 +68,16 @@ export type SurfaceItem = {
 
 export type OpenSurface = {
   id: string;
-  kind: "select" | "page" | "app" | "menuBar" | "other" | "color";
+  kind: "select" | "page" | "app" | "menuBar" | "other";
   tab?: string;
   openedAt?: number;
   link?: string;
-  color?: string;
   items?: SurfaceItem[];
 };
 
 export type SurfaceEvent =
-  | (OpenSurface & { type: "menuOpened" | "colorPanelOpened" })
-  | { type: "menuClosed" | "colorPanelClosed"; id: string; kind: OpenSurface["kind"] };
+  | (OpenSurface & { type: "menuOpened" })
+  | { type: "menuClosed"; id: string; kind: OpenSurface["kind"] };
 
 export type MenusNative = {
   addListener(name: "onCommand", listener: (e: CommandEvent | MenuPickEvent) => void): EventSubscription;
@@ -87,7 +86,6 @@ export type MenusNative = {
   holdPageMenus(holds: boolean): Promise<void>;
   chooseSurfaceItem(id: string, path: number[]): Promise<string>;
   dismissSurface(id: string): Promise<void>;
-  chooseColor(id: string, hex: string, close: boolean): Promise<string>;
   menuBar(): Promise<SurfaceItem[]>;
   performMenuBarItem(path: number[]): Promise<string>;
   showMenu(items: MenuItem[]): Promise<string | null>;

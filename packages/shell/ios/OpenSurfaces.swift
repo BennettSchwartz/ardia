@@ -29,8 +29,6 @@ final class OpenSurfaces: NSObject {
   var holdsPageMenus = false
   private var open: [Tracked] = []
   private var next = 0
-  private var colorPanelId: String?
-  private var colorPanelTab: String?
   private var observers: [NSObjectProtocol] = []
 
   func start() {
@@ -41,9 +39,6 @@ final class OpenSurfaces: NSObject {
       center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] in self?.ended($0.object as? NSMenu) },
       center.addObserver(forName: Notification.Name("ArdiaPageMenuOpened"), object: nil, queue: nil) { [weak self] in self?.heldOpened($0.object as? NSMutableDictionary) },
       center.addObserver(forName: Notification.Name("ArdiaPageMenuClosed"), object: nil, queue: nil) { [weak self] in self?.heldClosed($0.object as? NSMutableDictionary) },
-      center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { [weak self] in self?.colorPanelShown($0.object as? NSWindow) },
-      center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main) { [weak self] in self?.colorPanelShown($0.object as? NSWindow) },
-      center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] in self?.colorPanelClosed($0.object as? NSWindow) },
     ]
   }
 
@@ -172,11 +167,7 @@ final class OpenSurfaces: NSObject {
     return out
   }
 
-  func list() -> [[String: Any]] {
-    var all = open.map(describe)
-    if let panel = colorPanel() { all.append(panel) }
-    return all
-  }
+  func list() -> [[String: Any]] { open.map(describe) }
 
   private func find(_ id: String) throws -> Tracked {
     guard let tracked = open.first(where: { $0.id == id }) else { throw Problem.missing("There's no open menu \(id); menus.open lists them.") }
@@ -214,71 +205,21 @@ final class OpenSurfaces: NSObject {
   }
 
   func dismiss(_ id: String) throws {
-    if id == colorPanelId {
-      NSColorPanel.shared.close()
-      return
-    }
     let tracked = try find(id)
     if let held = tracked.held { held["done"] = true } else { tracked.menu?.cancelTracking() }
   }
 
-  private static var chromiumListener: AnyObject? {
-    guard let listener = NSClassFromString("ColorPanelListener") as? NSObject.Type else { return nil }
-    let instance = Selector(("instance"))
-    guard listener.responds(to: instance) else { return nil }
-    return listener.perform(instance)?.takeUnretainedValue()
-  }
-
-  private static var chromiumPanel: NSColorPanel? {
-    guard NSColorPanel.sharedColorPanelExists, NSClassFromString("ColorPanelListener") != nil else { return nil }
-    return NSColorPanel.shared
-  }
-
-  private func colorPanelShown(_ window: NSWindow?) {
-    guard let window, window === Self.chromiumPanel, colorPanelId == nil, window.isVisible || window.isKeyWindow else { return }
-    colorPanelId = newId("c")
-    colorPanelTab = Self.pageTab()
-    if let panel = colorPanel() { send?("colorPanelOpened", panel) }
-  }
-
-  private func colorPanelClosed(_ window: NSWindow?) {
-    guard let window, window is NSColorPanel, let id = colorPanelId else { return }
-    colorPanelId = nil
-    colorPanelTab = nil
-    send?("colorPanelClosed", ["id": id, "kind": "color"])
-  }
-
-  private func colorPanel() -> [String: Any]? {
-    guard let id = colorPanelId, let panel = Self.chromiumPanel else { return nil }
-    var out: [String: Any] = ["id": id, "kind": "color", "color": Self.hex(panel.color)]
-    if let tab = colorPanelTab { out["tab"] = tab }
-    return out
-  }
-
-  static func hex(_ color: NSColor) -> String {
-    guard let rgb = color.usingColorSpace(.genericRGB) else { return "#000000" }
-    let part = { (v: CGFloat) in String(format: "%02x", Int((min(max(v, 0), 1) * 255).rounded())) }
-    return "#" + part(rgb.redComponent) + part(rgb.greenComponent) + part(rgb.blueComponent)
-  }
-
-  func chooseColor(_ id: String, hex: String, close: Bool) throws -> String {
-    guard id == colorPanelId, let panel = Self.chromiumPanel else { throw Problem.missing("There's no open color panel \(id); menus.open lists it.") }
-    guard let rgb = Self.components(hex) else { throw Problem.refused("color is # and six hex digits.") }
-    guard let listener = Self.chromiumListener else { throw Problem.missing("The page's color chooser closed.") }
-    panel.color = NSColor(calibratedRed: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1)
-    NSApp.sendAction(Selector(("didChooseColor:")), to: listener, from: panel)
-    if close { panel.close() }
-    return hex.lowercased()
-  }
-
-  static func components(_ hex: String) -> [CGFloat]? {
-    guard hex.count == 7, hex.first == "#", let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }
-    return [16, 8, 0].map { CGFloat((value >> $0) & 0xff) / 255 }
   }
 }
 
 enum MenuBarAction {
-  static let refusedActions: Set<String> = ["terminate:", "hide:", "hideOtherApplications:", "orderFrontCharacterPalette:", "startDictation:"]
+  static let allowedActions: Set<String> = [
+    "undo:", "redo:", "cut:", "copy:", "paste:", "pasteAndMatchStyle:", "pasteAsPlainText:", "delete:", "selectAll:",
+    "performMiniaturize:", "performZoom:", "toggleFullScreen:", "miniaturizeAll:", "arrangeWindowsInFront:", "arrangeInFront:", "toggleKeepOnTop:",
+    "toggleContinuousSpellChecking:", "toggleGrammarChecking:", "toggleAutomaticSpellingCorrection:", "toggleSmartInsertDelete:",
+    "toggleAutomaticQuoteSubstitution:", "toggleAutomaticDashSubstitution:", "toggleAutomaticLinkDetection:", "toggleAutomaticDataDetection:",
+    "toggleAutomaticTextReplacement:", "uppercaseWord:", "lowercaseWord:", "capitalizeWord:", "startSpeaking:", "stopSpeaking:",
+  ]
 
   static func perform(_ path: [Int]) throws -> String {
     guard var menu = NSApp.mainMenu, let last = path.last else { throw OpenSurfaces.Problem.missing("path names a menu bar item.") }
@@ -291,7 +232,9 @@ enum MenuBarAction {
       throw OpenSurfaces.Problem.missing("There's no menu bar item at that path.")
     }
     if item is CommandItem { throw OpenSurfaces.Problem.refused("That item runs an Ardia command; run it with run.") }
-    if refusedActions.contains(NSStringFromSelector(action)) { throw OpenSurfaces.Problem.refused("\(item.title) would quit, hide Ardia or open system input, so the ardia command can't choose it.") }
+    if !allowedActions.contains(NSStringFromSelector(action)) {
+      throw OpenSurfaces.Problem.refused("\(item.title) isn't an editing or window item the ardia command may choose (quitting, hiding, closing windows and updates have their own paths or stay with you).")
+    }
     guard item.isEnabled else { throw OpenSurfaces.Problem.refused("\(item.title) is turned off.") }
     menu.performActionForItem(at: last)
     return item.title

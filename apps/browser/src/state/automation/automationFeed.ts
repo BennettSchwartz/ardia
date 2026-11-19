@@ -49,7 +49,7 @@ export function updateFeed(needs: FeedNeeds, send: EventSend) {
   });
   const prompts = ["permission.prompted", "password.prompted"].filter((name) => needs.events.has(name as AutomationEventName));
   keep("prompts", prompts.length ? prompts.join(",") : null, () => startPromptEvents(send, needs.events));
-  const surfaces = ["menu.opened", "menu.closed", "colorPanel.opened", "colorPanel.closed"].filter((name) => needs.events.has(name as AutomationEventName));
+  const surfaces = ["menu.opened", "menu.closed"].filter((name) => needs.events.has(name as AutomationEventName));
   keep("surfaces", surfaces.length ? surfaces.join(",") : null, () => startSurfaceEvents(send, needs.events));
   keep("userIdle", needs.userIdle.size ? `${sorted(needs.events)}|${sorted(needs.userIdle)}` : null, () => startUserIdleEvents(send, needs.events, needs.userIdle));
 }

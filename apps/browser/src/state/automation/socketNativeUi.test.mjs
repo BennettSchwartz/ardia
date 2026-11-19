@@ -79,22 +79,20 @@ test("password and autofill prompts are answered with their own buttons, never s
   webviews.delete(tab);
 });
 
-test("open menus and the color panel are listed, chosen from and closed through the native menu", async () => {
+test("open menus are listed, chosen from and closed through the native menu", async () => {
   const { windowId, tab } = await freshWindow();
   stub.surfaces.open = [
     { id: "m1", kind: "select", tab, items: [{ path: [0], title: "apple", enabled: true, checked: true, separator: false }] },
-    { id: "c2", kind: "color", tab, color: "#000000" },
+    { id: "m2", kind: "page", tab, items: [] },
     { id: "m3", kind: "menuBar", items: [] },
   ];
   const open = await ok("menus.open");
-  assert.deepEqual(open.map((m) => [m.id, m.window]), [["m1", windowId], ["c2", windowId], ["m3", null]]);
-  assert.equal((await call("menus.choose", { menu: "c2", path: [0] })).error.code, "bad_request");
+  assert.deepEqual(open.map((m) => [m.id, m.window]), [["m1", windowId], ["m2", windowId], ["m3", null]]);
+  assert.equal((await call("menus.choose", { menu: "m1", path: [] })).error.code, "bad_request");
   assert.deepEqual(await ok("menus.choose", { menu: "m1", path: [1] }), { ok: true, menu: "m1", kind: "select", title: "chosen" });
   assert.deepEqual(stub.surfaces.chosen.at(-1), { id: "m1", path: [1] });
-  assert.equal((await call("menus.chooseColor", { menu: "c2", color: "red" })).error.code, "bad_request");
-  assert.deepEqual(await ok("menus.chooseColor", { menu: "c2", color: "#1E90FF" }), { ok: true, color: "#1e90ff" });
-  assert.deepEqual(stub.surfaces.colors.at(-1), { id: "c2", hex: "#1e90ff", close: true });
-  await ok("menus.dismiss", { menu: "c2" });
+  await ok("menus.dismiss", { menu: "m2" });
+  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m3"]);
   assert.equal((await call("menus.choose", { menu: "m1", path: [0] })).error.code, "no_window");
 });
 
@@ -151,7 +149,7 @@ test("menu and prompt events reach subscribers", async () => {
 
 test("plugin sessions can't reach the native UI methods, and each family counts", async () => {
   await freshWindow();
-  for (const name of ["permissions.prompts", "permissions.respond", "passwords.respond", "autofill.respond", "menus.open", "menus.choose", "menus.chooseColor", "menus.bar", "menus.runBar"]) {
+  for (const name of ["permissions.prompts", "permissions.respond", "passwords.respond", "autofill.respond", "menus.open", "menus.choose", "menus.dismiss", "menus.bar", "menus.runBar"]) {
     assert.equal(accessProblem("plugin", methodSpec(name))?.code, "refused", name);
   }
   assert.equal(familyOf("menus.open"), "menus");

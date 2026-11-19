@@ -62,9 +62,6 @@ public class MenusModule: Module {
     AsyncFunction("holdPageMenus") { (holds: Bool) in OpenSurfaces.shared.holdsPageMenus = holds }.runOnQueue(.main)
     AsyncFunction("chooseSurfaceItem") { (id: String, path: [Int]) throws -> String in try MenusModule.surfaceCall { try OpenSurfaces.shared.choose(id, path: path) } }.runOnQueue(.main)
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
-    AsyncFunction("chooseColor") { (id: String, hex: String, close: Bool) throws -> String in
-      try MenusModule.surfaceCall { try OpenSurfaces.shared.chooseColor(id, hex: hex, close: close) }
-    }.runOnQueue(.main)
     AsyncFunction("menuBar") { () -> [[String: Any]] in NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? [] }.runOnQueue(.main)
     AsyncFunction("performMenuBarItem") { (path: [Int]) throws -> String in try MenusModule.surfaceCall { try MenuBarAction.perform(path) } }.runOnQueue(.main)
 

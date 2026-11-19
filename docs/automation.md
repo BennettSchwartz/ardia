@@ -274,8 +274,6 @@ clipboard writes, internal pages). That is the point of it, and it is opt-in beh
 | `password.prompted` * | `windowId`, `tabId`, `origin`, `state`, `username`, `usernames` |
 | `menu.opened` | `id`, `kind` (`select`/`page`/`app`/`menuBar`/`other`), `windowId`, `tabId`, `items` (a count) |
 | `menu.closed` | `id`, `kind` |
-| `colorPanel.opened` | `id`, `kind` (`color`), `windowId`, `tabId` |
-| `colorPanel.closed` | `id`, `kind` |
 
 \* Named-only: `"*"` never includes them; a subscriber names each one. Notification text never goes into a hook's
 environment (no `ARDIA_TITLE`, no `ARDIA_URL`) and the runner never logs it.

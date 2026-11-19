@@ -1,14 +1,14 @@
-import { chooseColor, chooseSurfaceItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
+import { chooseSurfaceItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
 import type { BrowserState } from "../browser/store";
 import { isEligibleTab } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
-import { bool, id, obj, text } from "./socketSchema";
+import { id, obj, text } from "./socketSchema";
 import { now } from "./socketTargets";
 import type { EventSend } from "./storeEvents";
 import { OpError } from "./workspaceTargets";
 import { runMethod } from "./controlSocket";
 
-const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page", "color"]);
+const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page"]);
 
 const privateOpen = (s: BrowserState) => Object.values(s.windows).some((w) => w.kind === "private");
 
@@ -33,13 +33,12 @@ async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
 async function surfaceOf(menuId: string) {
   const s = now();
   const found = (await openSurfaces()).map((m) => visibleSurface(s, m)).find((m) => m?.id === menuId);
-  if (!found) throw new OpError("no_window", `There's no open menu or color panel ${menuId}; menus.open lists them.`);
+  if (!found) throw new OpError("no_window", `There's no open menu ${menuId}; menus.open lists them.`);
   return found;
 }
 
 async function choose(params: Record<string, unknown>, call: SocketCall) {
   const surface = await surfaceOf(params.menu as string);
-  if (surface.kind === "color") throw new OpError("bad_request", "That's the color panel; choose with menus.chooseColor.");
   call.stillServing();
   const title = await nativeCall(() => chooseSurfaceItem(surface.id, params.path as number[]));
   return { ok: true, menu: surface.id, kind: surface.kind, title };
@@ -50,14 +49,6 @@ async function dismiss(params: Record<string, unknown>, call: SocketCall) {
   call.stillServing();
   await nativeCall(() => dismissSurface(surface.id));
   return { ok: true };
-}
-
-async function pickColor(params: Record<string, unknown>, call: SocketCall) {
-  const surface = await surfaceOf(params.menu as string);
-  if (surface.kind !== "color") throw new OpError("bad_request", "That's a menu; choose an item with menus.choose.");
-  call.stillServing();
-  const color = await nativeCall(() => chooseColor(surface.id, (params.color as string).toLowerCase(), params.close !== false));
-  return { ok: true, color };
 }
 
 function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
@@ -88,16 +79,16 @@ async function runBarItem(params: Record<string, unknown>, call: SocketCall) {
   return { ok: true, title, action: item.action ?? null };
 }
 
-const MENU = id("A menu or color panel id from menus.open");
+const MENU = id("A menu id from menus.open");
 const PATH = { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, maxItems: 8, description: "The item's path, as menus.open or menus.bar gives it" } as const;
 
 export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.open",
     mutates: false,
-    description: "Menus open now (a page's <select> popup or context menu, an Ardia menu, the menu bar) and the color panel a page opened, with their items",
+    description: "Menus open now (a page's <select> popup or context menu, an Ardia menu, the menu bar) with their items",
     params: obj({}),
-    result: "[{id, kind, window, tab, items | color}]",
+    result: "[{id, kind, window, tab, items}]",
     run: async () => {
       const s = now();
       return (await openSurfaces()).flatMap((m) => visibleSurface(s, m) ?? []);
@@ -114,18 +105,10 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.dismiss",
     mutates: true,
-    description: "Close an open menu or the color panel without choosing, as Escape or a click away does",
+    description: "Close an open menu without choosing, as Escape or a click away does",
     params: obj({ menu: MENU }, ["menu"]),
     result: "{ok}",
     run: dismiss,
-  },
-  {
-    name: "menus.chooseColor",
-    mutates: true,
-    description: "Choose a color in the color panel a page's color input opened; the page gets input and, when the panel closes, change",
-    params: obj({ menu: MENU, color: { type: "string", pattern: "^#[0-9a-fA-F]{6}$", description: "A hex color: # and six hex digits" }, close: bool("Close the panel after choosing (default true)") }, ["menu", "color"]),
-    result: "{ok, color}",
-    run: pickColor,
   },
   {
     name: "menus.bar",
@@ -138,26 +121,21 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.runBar",
     mutates: true,
-    description: "Run a menu bar item: an Ardia command goes through run, an editing or window item (Copy, Paste, Undo, Minimize) through the menu itself",
+    description: "Run a menu bar item: an Ardia command goes through run, an editing or window item (Copy, Paste, Undo, Minimize) through the menu itself; Quit, Hide, Close Window and updates are refused",
     params: obj({ path: PATH, window: text("For an Ardia command, the window to run it in; the focused one when left out") }, ["path"]),
     result: "{ok, title, command? | action?}",
     run: runBarItem,
   },
 ];
 
-const EVENT_OF: Record<SurfaceEvent["type"], "menu.opened" | "menu.closed" | "colorPanel.opened" | "colorPanel.closed"> = {
-  menuOpened: "menu.opened",
-  menuClosed: "menu.closed",
-  colorPanelOpened: "colorPanel.opened",
-  colorPanelClosed: "colorPanel.closed",
-};
+const EVENT_OF: Record<SurfaceEvent["type"], "menu.opened" | "menu.closed"> = { menuOpened: "menu.opened", menuClosed: "menu.closed" };
 
 export function startSurfaceEvents(send: EventSend, wants: ReadonlySet<string>) {
   const shown = new Set<string>();
   const sub = onSurface((event) => {
     const name = EVENT_OF[event.type];
     if (!name) return;
-    if (event.type === "menuOpened" || event.type === "colorPanelOpened") {
+    if (event.type === "menuOpened") {
       const visible = visibleSurface(now(), event);
       if (!visible) return;
       shown.add(event.id);
