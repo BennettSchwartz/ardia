@@ -331,6 +331,13 @@ try {
   const ownerDrag = await dragWith(cli, csOne, dragPath(280, 135, 185));
   const ownerLog = await logOf(csOne);
   check("cli: the owner's drag over the same elements still drags and drops on the drop element", ownerDrag.every((r) => !refused(r)) && /^dragstart:drag,.*dragenter:drop.*dragover:drop.*drop:drop,dragend:drag$/.test(ownerLog ?? ""), `${ownerLog}; ${ownerDrag.map(text).join(" | ")}`);
+  const csTwo = cliTwo.result?.sessionId;
+  await logOf(csTwo);
+  const refusedBeforeUnmarked = await dragsRefused();
+  const unknownBeforeUnmarked = await unknownDrags();
+  const unmarkedDrag = await dragWith(cli, csTwo, dragPath(280, 135, 185));
+  const unmarkedLog = await logOf(csTwo);
+  check("cli: on a widget no plugin has touched (window 2's tab) the drag gate doesn't run: the owner's drag drops on the drop element and no drag is refused, known or unknown", unmarkedDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(unmarkedLog ?? "") && (await dragsRefused()) === refusedBeforeUnmarked && (await unknownDrags()) === unknownBeforeUnmarked && unknownBeforeUnmarked === 0, `${unmarkedLog}; unknown ${unknownBeforeUnmarked}; ${unmarkedDrag.map(text).join(" | ")}`);
   await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
   const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
   const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));

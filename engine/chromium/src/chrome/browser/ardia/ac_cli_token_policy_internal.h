@@ -109,6 +109,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   void Revoke();
   bool MayInputTo(content::RenderFrameHost* frame);
   bool MaySessionInput(const std::string& session);
+  bool PluginSessionLive(const std::string& session);
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;

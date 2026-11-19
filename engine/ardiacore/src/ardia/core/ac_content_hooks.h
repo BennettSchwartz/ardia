@@ -181,6 +181,10 @@ extern bool (*g_ardia_devtools_session_may_input)(
     content::DevToolsAgentHostClient* root_client,
     const std::string& session_id);
 
+extern bool (*g_ardia_devtools_plugin_session_live)(
+    content::DevToolsAgentHostClient* root_client,
+    const std::string& session_id);
+
 extern void (*g_ardia_devtools_session_attached)(
     content::DevToolsAgentHostClient* root_client,
     content::DevToolsAgentHost* host,

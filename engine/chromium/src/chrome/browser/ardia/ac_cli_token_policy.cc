@@ -452,9 +452,18 @@ bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
   return it->second->MaySessionInput(session);
 }
 
+bool TokenClientPluginSessionLive(content::DevToolsAgentHostClient* root_client,
+                                  const std::string& session) {
+  auto it = cli_token_policy_internal::Registry().find(root_client);
+  return it != cli_token_policy_internal::Registry().end() &&
+         it->second->kind() == TokenKind::kPlugin &&
+         it->second->PluginSessionLive(session);
+}
+
 void InstallTokenClientInputHooks() {
   g_ardia_devtools_may_input = &TokenClientMayInput;
   g_ardia_devtools_session_may_input = &TokenClientSessionMayInput;
+  g_ardia_devtools_plugin_session_live = &TokenClientPluginSessionLive;
 }
 
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client) {
