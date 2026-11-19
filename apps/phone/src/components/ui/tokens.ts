@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 export const ink = { white: "#FFFFFF", black: "#000000", clear: "#00000000", knobShadow: "rgba(0,0,0,0.25)" } as const;
 
+const ANDROID_DARK_SURFACE = "#1E1B1D";
+
 export const toggleLayout = { width: 51, height: 31, knob: 27, inset: 2 } as const;
 
 export type ProfileColor = "plum" | "blue" | "purple" | "pink" | "red" | "orange" | "yellow" | "green" | "neutral";
@@ -300,13 +302,13 @@ const androidMenuInk: typeof iPhoneMenuInk = {
     dim: ink.clear,
   },
   dark: {
-    fill: "#3A3337",
-    solid: "#3A3337",
+    fill: ANDROID_DARK_SURFACE,
+    solid: ANDROID_DARK_SURFACE,
     label: "#EBE0E4",
     icon: "#D3C2C8",
     destructive: "#FFB4AB",
     highlight: "rgba(235,224,228,0.1)",
-    divider: "#5A4F54",
+    divider: "#3D3539",
     rim: "rgba(255,255,255,0.12)",
     specular: ink.clear,
     heading: "#D3C2C8",
@@ -360,7 +362,7 @@ export const materialDialogLook = {
 
 export const materialDialogInk = {
   light: { surface: "#EDE7EA", title: "#1F1A1D", message: "#4F4449", dismiss: "#4F4449", action: "#894A67", destructive: "#BA1A1A", ripple: "rgba(137,74,103,0.12)", scrim: "rgba(0,0,0,0.32)" },
-  dark: { surface: "#362F33", title: "#EBE0E4", message: "#D3C2C8", dismiss: "#D3C2C8", action: "#FFB0D0", destructive: "#FFB4AB", ripple: "rgba(255,176,208,0.12)", scrim: "rgba(0,0,0,0.32)" },
+  dark: { surface: ANDROID_DARK_SURFACE, title: "#EBE0E4", message: "#D3C2C8", dismiss: "#D3C2C8", action: "#FFB0D0", destructive: "#FFB4AB", ripple: "rgba(255,176,208,0.12)", scrim: "rgba(0,0,0,0.32)" },
 } as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;
@@ -515,7 +517,7 @@ export const chromeLayout = { edge: 0.5, shadowRadius: 10, shadowY: 2, barSideIn
 
 export const chromeInk = {
   light: { surface: "#FFFFFF", edge: "rgba(0,0,0,0.12)", shadow: "rgba(0,0,0,0.12)", foreground: "rgba(14,15,16,0.9)", secondary: "rgba(0,0,0,0.5)", notSecure: lightRoles.destructive },
-  dark: { surface: "#000000", edge: "rgba(255,255,255,0.12)", shadow: "rgba(0,0,0,0.4)", foreground: "rgba(255,255,255,0.8)", secondary: "rgba(255,255,255,0.5)", notSecure: darkRoles.destructive },
+  dark: { surface: Platform.OS === "android" ? ANDROID_DARK_SURFACE : "#000000", edge: "rgba(255,255,255,0.12)", shadow: "rgba(0,0,0,0.4)", foreground: "rgba(255,255,255,0.8)", secondary: "rgba(255,255,255,0.5)", notSecure: darkRoles.destructive },
 } as const;
 
 export const syncSketch = {

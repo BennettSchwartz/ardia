@@ -150,7 +150,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const checks = rows.some((item) => typeof item === "object" && !("heading" in item) && !isSubmenu(item) && item.checked === true);
   const leading = menuLook.iconSide === "leading";
   const shift = checks ? CHECK_SHIFT : 0;
-  const iconGutter = MATERIAL && rows.some((item) => typeof item === "object" && !("heading" in item) && item.icon !== undefined);
+  const iconsShown = !MATERIAL || page !== null || rows.every((item) => typeof item !== "object" || "heading" in item || item.icon !== undefined);
+  const iconGutter = MATERIAL && page !== null;
   const labelLeft = (icon: boolean) => ((icon || iconGutter) && leading ? menuLook.labelInsetIcon : menuLook.labelInset) + shift - PRESS;
   const iconLeft = menuLook.iconCentre + shift - PRESS - menuLook.iconSlot / 2;
   const pressed = (on: boolean, disabled?: boolean) => [styles.row, on && !MATERIAL ? { backgroundColor: paint.highlight } : null, disabled ? styles.disabled : null];
@@ -173,7 +174,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
           {item.heading}
         </Text>
       );
-    const icon = leading && item.icon ? item.icon : null;
+    const icon = leading && iconsShown && item.icon ? item.icon : null;
     if (isSubmenu(item))
       return (
         <Pressable
