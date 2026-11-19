@@ -5,6 +5,7 @@ import { profileAccent } from "../ui/theme";
 import { typeFace } from "../ui/tokens";
 import type { Profile } from "../../state/browser/types";
 import { profileBadge, profileColors, profileSwitcher } from "./tokens";
+import { switcherFit } from "./switcherInk";
 import { iconSymbol } from "../../lib/customIcon";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { snappedToGrid } from "../../lib/interfaceScale";
@@ -61,7 +62,18 @@ export const PROFILE_SYMBOLS: { name: string; title: string }[] = [
 export function SwitcherMark({ icon, color, scale = 1 }: { icon: string | null; color: string; scale?: number }) {
   const { iconCell, icon: size, dot } = profileSwitcher;
   const symbol = iconSymbol(icon);
-  if (symbol) return <Symbol name={symbol} size={size * scale} weight="semibold" color={color} style={{ width: iconCell * scale, height: iconCell * scale }} />;
+  if (symbol) {
+    const fit = switcherFit(symbol);
+    return (
+      <Symbol
+        name={symbol}
+        size={size * scale * fit.scale}
+        weight="semibold"
+        color={color}
+        style={{ width: iconCell * scale, height: iconCell * scale, left: snappedToDevicePixels(fit.dx * scale), top: snappedToDevicePixels(fit.dy * scale) }}
+      />
+    );
+  }
   if (icon)
     return (
       <Text numberOfLines={1} style={{ width: iconCell * scale, fontSize: size * scale, lineHeight: iconCell * scale, textAlign: "center", color }}>
