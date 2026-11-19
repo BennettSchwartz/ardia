@@ -63,13 +63,15 @@ import {
   openSpaces,
   openTab,
   reopenLastClosed,
+  stopOpeningTab,
   unveilOpeningPage,
+  useBrowse,
   whenPageCoverHidden,
   whenPageLaidOut,
 } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useHasArchivedTabs, useIncognito, usePrivateCount, useShownSpace } from "../../state/tabs/hooks";
-import { archiveCardLayout, ConfirmDialog, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, moveTo, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
+import { archiveCardLayout, chromeLayout, ConfirmDialog, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, moveTo, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
 import { openSettings } from "../../state/settings/hooks";
 import { confirmInSheet, nativeMenus } from "../ui/MenuTrigger";
 import { useSyncEnabled } from "../../state/sync/hooks";
@@ -142,6 +144,7 @@ export const TabDeck = memo(function TabDeck() {
   const gridChosen = useDeckGrid();
   const grid = gridAvailable && gridChosen;
   const column = useColumn();
+  const chromeSideInset = column ? deckChromeLayout.headerSide : chromeLayout.barSideInset;
   const pulls = redesigned && !column && Platform.OS === "ios";
   const deckWidth = column ? columnContentWidth(column, width) : width;
   const contentLeft = column ? columnContentLeft(column) : 0;
@@ -651,7 +654,7 @@ export const TabDeck = memo(function TabDeck() {
     const id = order[index];
     if (!id || phase.kind !== "settled" || dragIndex.value === index) return;
     if (redesigned) Keyboard.dismiss();
-    if (reduceMotion || grid) {
+    if (grid || (reduceMotion && !pulls)) {
       settledOpen(id);
       return;
     }
@@ -668,9 +671,9 @@ export const TabDeck = memo(function TabDeck() {
     handedOver.current = null;
     prepared.current = null;
     if (path === "pulledCard") {
-      grown.current = { id, opened: false };
-      growDeckPull(stackPullTarget(g, id, index, scroll.value, redesigned ? cardsShift.value : 0), barBackWithPage);
-      setTimeout(() => handOver(id), criticalSpringLandsMs(OPENING_CARD_RESPONSE, CARD_LANDED) + GROWN_SLACK_MS);
+      grown.current = { id, opened: false, steady: reduceMotion };
+      growDeckPull(stackPullTarget(g, id, index, scroll.value, redesigned ? cardsShift.value : 0), barBackWithPage, reduceMotion);
+      setTimeout(() => handOver(id), reduceMotion ? 0 : criticalSpringLandsMs(OPENING_CARD_RESPONSE, CARD_LANDED) + GROWN_SLACK_MS);
       return;
     }
     if (path !== "deckCard") setOpeningCard({ id, x: deckLeading(g, index - scroll.value) + g.cardWidth / 2, y: g.cardCenterY + (redesigned ? cardsShift.value : 0), path });
@@ -685,7 +688,7 @@ export const TabDeck = memo(function TabDeck() {
     });
   };
 
-  const grown = useRef<{ id: string; opened: boolean } | null>(null);
+  const grown = useRef<{ id: string; opened: boolean; steady: boolean } | null>(null);
   const endGrown = () => {
     grown.current = null;
     scaleProgress.value = 0;
@@ -693,13 +696,18 @@ export const TabDeck = memo(function TabDeck() {
     endDeckPull();
   };
   const barBackWithPage = (id: string) => {
-    if (grown.current?.id === id) endGrown();
-    else if (deckPullGrowing() === id) endDeckPull();
+    const now = grown.current;
+    if (now?.id === id) {
+      if (now.steady && now.opened && useBrowse.getState().opening === id && currentTabs().selectedId === id) settledOpen(id);
+      else if (currentTabs().selectedId !== id) stopOpeningTab(id);
+      endGrown();
+    } else if (deckPullGrowing() === id) endDeckPull();
   };
   const openGrown = (id: string) => {
     const now = grown.current;
     if (now?.id === id) now.opened = true;
     showGrowingPage(id);
+    if (now?.id === id && now.steady) return;
     settledOpen(id);
   };
 
@@ -881,6 +889,7 @@ export const TabDeck = memo(function TabDeck() {
   const barBand = { bottom: g.barCenterY - tabsLayout.barTouchClearance - g.height };
   const pan = Gesture.Pan()
     .withTestId("deckPan")
+    .enabled(!(pulls && reduceMotion && phase.kind === "closing"))
     .hitSlop(barBand)
     .minDistance(10)
     .onBegin((e) => {
@@ -1041,10 +1050,10 @@ export const TabDeck = memo(function TabDeck() {
   const plusItems: MenuItem[] = incognito
     ? [
         { label: "New Tab", icon: "plus", onPress: newRegularTab },
-        { label: "New Incognito Tab", icon: "eyes", onPress: newTab },
+        { label: "New Incognito Tab", icon: "eyeglassesThin", onPress: newTab },
       ]
     : [
-        { label: "New Incognito Tab", icon: "eyes", onPress: newIncognitoTab },
+        { label: "New Incognito Tab", icon: "eyeglassesThin", onPress: newIncognitoTab },
         ...(canReopen ? [{ label: "Reopen Closed Tab", icon: "arrowUturnBackward" as const, onPress: reopenLastClosed }] : []),
       ];
   if (count)
@@ -1082,6 +1091,7 @@ export const TabDeck = memo(function TabDeck() {
           canScrollForward={deckScrollActionTarget(anchor, count, "forward") !== null}
           canScrollBackward={deckScrollActionTarget(anchor, count, "backward") !== null}
           onScrollAction={(direction) => {
+            if (pulls && reduceMotion && phase.kind === "closing") return;
             const target = deckScrollActionTarget(anchor, count, direction);
             if (target === null) return;
             setAnchor(target);
@@ -1137,7 +1147,7 @@ export const TabDeck = memo(function TabDeck() {
         {!count && !leavingCards.length && phase.kind === "settled" ? <DeckEmpty centerY={g.cardCenterY} showsArchive={hasArchive} onArchive={openArchive} searching={needle !== ""} incognito={side} /> : null}
         {archiveCard && phase.kind === "settled" && !grid ? (
           redesigned ? (
-            <ArchiveCapsule centerY={g.safeTop + deckChromeLayout.archiveCenter} safeSide={g.safeSide} />
+            <ArchiveCapsule centerY={g.safeTop + deckChromeLayout.archiveCenter} safeSide={g.safeSide} sideInset={chromeSideInset} />
           ) : (
             <ArchiveIntervalCard edgeY={archiveCardEdgeY(g, archiveCardLayout.aboveBarCenter)} />
           )
@@ -1155,6 +1165,7 @@ export const TabDeck = memo(function TabDeck() {
                   <DeckHeader
                     safeTop={g.safeTop}
                     safeSide={g.safeSide}
+                    sideInset={chromeSideInset}
                     privateCount={privateCount}
                     hasTabs={allTabs.length > 0}
                     menusShown={shown && phase.kind === "settled"}
