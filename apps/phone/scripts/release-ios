@@ -19,7 +19,7 @@
 # the Release strip phase; the archive keeps the dSYMs.
 #
 # Checks before anything leaves the machine: the bundle id, every target's version and build, the release
-# version, three extensions, the stamp, Hermes bytecode, the lab off, the stripped frameworks, the app's
+# version, three extensions and the Talk to Me asset-pack downloader, the stamp, Hermes bytecode, the lab off, the stripped frameworks, the app's
 # dSYM matching its binary, the default browser flag and, when signed, the entitlements (the app group,
 # and the web-browser entitlement only with --default-browser).
 #
@@ -152,7 +152,7 @@ app="$archive/Products/Applications/Ardia.app"
 [ -d "$app" ] || die "the archive has no Ardia.app"
 plist_value() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Info.plist" 2>/dev/null; }
 [ "$(plist_value "$app" CFBundleIdentifier)" = com.ardia.browser.ios ] || die "the archive is $(plist_value "$app" CFBundleIdentifier)"
-for bundle in "$app" "$app"/PlugIns/*.appex; do
+for bundle in "$app" "$app"/PlugIns/*.appex "$app"/Extensions/*.appex; do
   [ "$(plist_value "$bundle" CFBundleVersion)" = "$build" ] || die "$(basename "$bundle") is build $(plist_value "$bundle" CFBundleVersion), not $build"
   [ "$(plist_value "$bundle" CFBundleShortVersionString)" = "$version" ] || die "$(basename "$bundle") is version $(plist_value "$bundle" CFBundleShortVersionString), not $version"
 done
@@ -163,6 +163,9 @@ for extension in com.ardia.browser.ios.share com.ardia.browser.ios.widgets com.a
   [ "$found" = YES ] || die "the archive has no $extension"
 done
 [ "$(find "$app/PlugIns" -maxdepth 1 -name '*.appex' | wc -l | tr -d ' ')" = 3 ] || die "the archive should hold three extensions"
+[ "$(plist_value "$app/Extensions/ArdiaTalkToMe.appex" CFBundleIdentifier)" = com.ardia.browser.ios.talktome ] || die "the archive has no Talk to Me downloader extension (Extensions/ArdiaTalkToMe.appex)"
+[ "$(plist_value "$app/Extensions/ArdiaTalkToMe.appex" EXAppExtensionAttributes:EXExtensionPointIdentifier)" = com.apple.background-asset-downloader-extension ] || die "ArdiaTalkToMe.appex is not a Background Assets downloader"
+[ "$(plist_value "$app" BAUsesAppleHosting)" = true ] && [ "$(plist_value "$app" BAAppGroupID)" = group.com.ardia.browser.ios ] || die "the app's Background Assets keys are missing (BAUsesAppleHosting, BAAppGroupID)"
 [ "$(plist_value "$app" ArdiaDefaultBrowser)" = "$default_browser" ] || die "the app offers the default browser steps: $(plist_value "$app" ArdiaDefaultBrowser), expected $default_browser"
 [ "$(plist_value "$app" ArdiaTestBuild)" = NO ] || die "the app is a test build: ArdiaTestBuild $(plist_value "$app" ArdiaTestBuild)"
 [ "$(plist_value "$app" ArdiaBuildCommit)" = "$commit" ] || die "the app's stamp says JS ${commit:-none}: $(plist_value "$app" ArdiaBuildCommit)"
@@ -183,6 +186,7 @@ dsymUUID="$(dwarfdump --uuid "$dsym" | awk '{print $2}' | sort)"
 if [ "$unsigned" = 0 ]; then
   entitlements="$(codesign -d --entitlements - --xml "$app" 2>/dev/null)"
   plutil -extract 'com\.apple\.security\.application-groups' xml1 -o - - <<<"$entitlements" | grep -q 'group.com.ardia.browser.ios' || die "the app's signature lacks the app group group.com.ardia.browser.ios"
+  codesign -d --entitlements - --xml "$app/Extensions/ArdiaTalkToMe.appex" 2>/dev/null | plutil -extract 'com\.apple\.security\.application-groups' xml1 -o - - | grep -q 'group.com.ardia.browser.ios' || die "the Talk to Me downloader's signature lacks the app group Background Assets needs"
   signed=NO
   if plutil -extract 'com\.apple\.developer\.web-browser' raw -o - - <<<"$entitlements" 2>/dev/null | grep -qx true; then signed=YES; fi
   [ "$signed" = "$default_browser" ] || die "the app's signature carries the default browser entitlement: $signed, expected $default_browser"

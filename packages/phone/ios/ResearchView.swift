@@ -10,6 +10,7 @@ struct ResearchView: View {
   @State private var copiedAnswer = 0
   @State private var showsCopied = false
   private var host: BrowseForMeHost { .shared }
+  private var talk: TalkToMe { .shared }
 
   var body: some View {
     NavigationStack {
@@ -39,6 +40,9 @@ struct ResearchView: View {
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) { moreMenu }
+        if talk.canRead(session) || talk.isReading(session) {
+          ToolbarItem(placement: .topBarTrailing) { talkButton }
+        }
         ToolbarItem(placement: .confirmationAction) {
           Button("Done", role: .close) { host.dismiss() }
         }
@@ -51,7 +55,27 @@ struct ResearchView: View {
       try? await Task.sleep(for: .seconds(1.5))
       withAnimation(reduceMotion ? nil : Motion.smooth) { showsCopied = false }
     }
+    .onAppear { talk.follow(session) }
+    .onChange(of: session.answer) { talk.follow(session) }
+    .onChange(of: session.phase) { talk.follow(session) }
+    .onChange(of: talk.isReady) { talk.follow(session) }
     .onDisappear { host.closed(session) }
+  }
+
+  private var talkButton: some View {
+    let reading = talk.isReading(session)
+    return Button {
+      talk.toggle(session)
+    } label: {
+      if talk.readingSessionID == session.id, talk.reading == .preparing {
+        ProgressView()
+      } else {
+        Label(reading ? "Stop Reading" : "Read Aloud", systemImage: reading ? "stop.fill" : "speaker.wave.2")
+          .contentTransition(.symbolEffect(.replace))
+      }
+    }
+    .accessibilityLabel(Text(reading ? "Stop Reading" : "Read Answer Aloud"))
+    .accessibilityHint(Text(reading ? "Stops Talk to Me" : "Talk to Me reads the answer on this iPhone"))
   }
 
   private var moreMenu: some View {

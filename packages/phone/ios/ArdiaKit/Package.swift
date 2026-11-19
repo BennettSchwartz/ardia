@@ -9,15 +9,18 @@ let package = Package(
     .library(name: "ArdiaSync", targets: ["ArdiaSync"]),
     .library(name: "ArdiaBrowser", targets: ["ArdiaBrowser"]),
     .library(name: "ArdiaDesign", targets: ["ArdiaDesign"]),
+    .library(name: "ArdiaTalk", targets: ["ArdiaTalk"]),
   ],
   dependencies: [
     .package(name: "ArdiaSyncCore", path: "../../../sync"),
+    .package(url: "https://github.com/gradium-ai/xn-ptts.git", exact: "0.7.1"),
   ],
   targets: [
     .target(name: "ArdiaShared", resources: [.copy("Scripts")]),
     .target(name: "ArdiaSync", dependencies: ["ArdiaShared", .product(name: "ArdiaSyncCore", package: "ArdiaSyncCore")]),
     .target(name: "ArdiaBrowser", dependencies: ["ArdiaShared", "ArdiaSync"], resources: [.copy("Blocking/FilterListCatalog.json")]),
     .target(name: "ArdiaDesign", dependencies: ["ArdiaBrowser", "ArdiaSync"]),
+    .target(name: "ArdiaTalk", dependencies: [.product(name: "ptts", package: "xn-ptts")]),
     .testTarget(name: "ArdiaSharedTests", dependencies: ["ArdiaShared"]),
     .testTarget(name: "ArdiaSyncTests", dependencies: ["ArdiaSync", .product(name: "ArdiaSyncCore", package: "ArdiaSyncCore")]),
     .testTarget(name: "ArdiaBrowserTests", dependencies: ["ArdiaBrowser"]),
