@@ -371,7 +371,10 @@ declare one, and each group of profiles that shares browser data picks at most o
 - `verificationCodeSetup` (`system`): when a page in a profile using this plugin shows an `otpauth://` link, or a QR code
   on a Chromium page, Ardia offers "Set Up Verification Code in <app>?" and opens it with macOS's handler for `otpauth:`
   (the Passwords app on a stock Mac). QR codes are found on Chromium pages only: WebKit has no `BarcodeDetector`, so a
-  WebKit page that shows its setup code only as a QR image gets no offer; its `otpauth://` links still do. The URL, which holds the code's secret, stays in native code: the page script, JS and the prompt see
+  WebKit page that shows its setup code only as a QR image gets no offer; its `otpauth://` links still do. The search
+  is bounded so it costs pages little: the first 8 `otpauth` links each time the page changes, and QR codes only on a
+  page with a text field (a setup page asks for a code to confirm it), at most 12 decodes per page until the provider
+  set changes. A setup step that shows its QR code before any text field gets no offer for it. The URL, which holds the code's secret, stays in native code: the page script, JS and the prompt see
   an opaque token, single use, bound to the tab, frame, document, profile, provider generation and handler app.
 - `passkeys` (`system`): the plugin's Settings page shows whether Ardia may use the passkeys saved on this Mac, with
   macOS's access request. It says plainly when the build lacks Apple's browser passkey entitlement (every build today).
