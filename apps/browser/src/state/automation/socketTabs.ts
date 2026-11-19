@@ -10,7 +10,7 @@ import { recentlyClosedIn } from "../windows/recentlyClosedList";
 import { eligibleKind, isEligibleTab, shownPage, windowTabIds } from "./automationWindows";
 import type { MethodSpec } from "./socketCatalog";
 import { bool, id, obj, PROFILE, TAB, text, WINDOW } from "./socketSchema";
-import { expect, now, profileArg, tabOf, windowOf } from "./socketTargets";
+import { expect, now, profileArg, tabOf, windowOf, windowOrFocused } from "./socketTargets";
 import { openableUrl } from "./workspaceOps";
 import { OpError } from "./workspaceTargets";
 
@@ -85,13 +85,13 @@ function closedRow(c: Closed) {
   return { id: c.id, kind: c.kind, closedAt: c.closedAt, name: c.group.name, tabs: c.tabs.length, profile: c.tabs[0]?.profileId ?? null };
 }
 
-function closedList(params: Record<string, unknown>) {
+function closedOf(params: Record<string, unknown>) {
   const s = now();
-  const w = params.window !== undefined ? windowOf(params.window, ["normal"]) : undefined;
-  const list = recentlyClosedIn(s, w);
-  const rows = [...list.tabs, ...list.windows, ...list.groups].filter((c) => c.kind !== "tab" || !isIncognitoProfile(c.tab.profileId));
-  return rows.sort((a, b) => b.closedAt - a.closedAt).map(closedRow);
+  const list = recentlyClosedIn(s, windowOrFocused(params.window, ["normal"]));
+  return [...list.tabs, ...list.windows, ...list.groups].filter((c) => c.kind !== "tab" || !isIncognitoProfile(c.tab.profileId));
 }
+
+const closedList = (params: Record<string, unknown>) => closedOf(params).sort((a, b) => b.closedAt - a.closedAt).map(closedRow);
 
 function closedRestore(params: Record<string, unknown>) {
   const s = now();
@@ -107,9 +107,12 @@ function closedRestore(params: Record<string, unknown>) {
 }
 
 function closedClear(params: Record<string, unknown>) {
-  const windowId = params.window !== undefined ? windowOf(params.window, ["normal"]).id : null;
-  now().clearRecentlyClosed(windowId);
-  return { ok: true };
+  const w = windowOrFocused(params.window, ["normal"]);
+  const listed = closedOf(params).length;
+  now().clearRecentlyClosed(w.id);
+  const left = closedOf({ window: w.id }).length;
+  expect(left === 0, `${left} recently closed item${left === 1 ? " is" : "s are"} still there.`);
+  return { cleared: listed };
 }
 
 export const TAB_METHODS: MethodSpec[] = [
@@ -145,7 +148,21 @@ export const TAB_METHODS: MethodSpec[] = [
       return tabRow(now(), t.id);
     },
   },
-  { name: "closed.list", mutates: false, description: "Recently closed tabs, windows and groups, newest first", params: obj({ window: id("Only what that window's profile closed") }), result: "[{id, kind, closedAt, …}]", run: closedList },
+  {
+    name: "closed.list",
+    mutates: false,
+    description: "Recently closed tabs, windows and groups of a window's profile, newest first, as its History menu lists them",
+    params: obj({ window: id("A window; the last focused main window when left out") }),
+    result: "[{id, kind, closedAt, …}]",
+    run: closedList,
+  },
   { name: "closed.restore", mutates: true, description: "Reopen a closed tab, window or group", params: obj({ id: id("An id from closed.list"), window: WINDOW }, ["id"]), result: "{tabs}", run: closedRestore },
-  { name: "closed.clear", mutates: true, description: "Forget recently closed tabs, windows and groups", params: obj({ window: id("Only that window's profile's") }), result: "{ok}", run: closedClear },
+  {
+    name: "closed.clear",
+    mutates: true,
+    description: "Forget what closed.list lists for the same window: a window's profile's recently closed tabs, windows and groups",
+    params: obj({ window: id("A window; the last focused main window when left out") }),
+    result: "{cleared}",
+    run: closedClear,
+  },
 ];

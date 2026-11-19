@@ -5,6 +5,8 @@ const { startAutomation } = await import("./controlSocket.ts");
 const { takeCliCounts } = await import("../telemetry/cliCounts.ts");
 const { schemaProblem } = await import("./socketSchema.ts");
 const stub = await import("../../test-native/index.ts");
+const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
+setConsentPeriod(true, "socket-workspace-test");
 
 const S = () => useBrowser.getState();
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -116,7 +118,9 @@ test("windows: create, get, layout, switch profile, close", async () => {
   const switched = await ok("windows.switchProfile", { window: made.id, profile: work.id });
   assert.equal(switched.profile, work.id);
   assert.equal((await call("windows.create", { url: "chrome://flags" })).error.code, "refused");
+  S().updateSettings({ warnBeforeClosingWindow: false });
   await ok("windows.close", { window: made.id });
+  for (let i = 0; i < 50 && S().windows[made.id]; i++) await tick();
   assert.equal(S().windows[made.id], undefined);
   assert.equal((await call("windows.get", { window: made.id })).error.code, "no_window");
 });

@@ -66,7 +66,8 @@ test("history: search pages, remove a page, clear", async () => {
   db.set("https://one.example/", { title: "One", visits: [1000, 2000] });
   db.set("https://two.example/", { title: "Two", visits: [3000] });
   const all = await ok("history.search", { limit: 1 });
-  assert.equal(all.total, 2);
+  assert.equal(all.total, null, "the engine was asked for one page, so it didn't count the rest");
+  assert.equal((await ok("history.search", {})).total, 2);
   assert.equal(all.items[0].url, "https://two.example/");
   assert.equal(all.nextOffset, 1);
   assert.deepEqual((await ok("history.search", { query: "one" })).items.map((h) => h.url), ["https://one.example/"]);
@@ -85,8 +86,8 @@ test("downloads: list, pause, cancel, refuse what doesn't fit, remove, settings"
   S().upsertDownload(download({ id: "d2", state: "finished", received: 100 }));
   S().upsertDownload(download({ id: "p1", offTheRecord: true }));
   const list = await ok("downloads.list");
-  assert.deepEqual(list.map((d) => d.id).sort(), ["d1", "d2"]);
-  assert.deepEqual((await ok("downloads.list", { state: "finished" })).map((d) => d.id), ["d2"]);
+  assert.deepEqual(list.items.map((d) => d.id).sort(), ["d1", "d2"]);
+  assert.deepEqual((await ok("downloads.list", { state: "finished" })).items.map((d) => d.id), ["d2"]);
   await ok("downloads.pause", { id: "d1" });
   assert.equal((await call("downloads.resume", { id: "d1" })).error.code, "refused");
   assert.equal((await call("downloads.pause", { id: "p1" })).error.code, "no_window");

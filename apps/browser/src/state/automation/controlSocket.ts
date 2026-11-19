@@ -29,7 +29,7 @@ import { launchToReplay, recordLaunch, runLaunchActions } from "./lifecycleEvent
 import { startDecideHooks } from "./decideHooks";
 import { offscreenMethod } from "./offscreen";
 import { applyMethod, workspaceMethod } from "./workspaceMethods";
-import { familyOf, methodsCatalog, runSocketMethod, servingWhile } from "./socketCatalog";
+import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, runSpec, servingWhile, type ConnectionAccess } from "./socketCatalog";
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 
@@ -47,8 +47,18 @@ let nextTicket = 0;
 
 const controlOn = () => useBrowser.getState().settings.cliControl;
 
+export const REPLY_BYTE_LIMIT = 3 * 1024 * 1024;
+
+const utf8 = new TextEncoder();
+
+export function replyLine(id: RequestId, body: Body) {
+  const line = JSON.stringify({ id, ...body });
+  if (line.length * 3 <= REPLY_BYTE_LIMIT || utf8.encode(line).length <= REPLY_BYTE_LIMIT) return line;
+  return JSON.stringify({ id, ...failure("failed", `The reply would be over ${REPLY_BYTE_LIMIT / 1024 / 1024} MiB; ask for less (a smaller limit, a folder, or a lower depth).`) });
+}
+
 function send(connection: number, id: RequestId, body: Body, ticket = 0) {
-  replyOnControlSocket(connection, JSON.stringify({ id, ...body }), ticket);
+  replyOnControlSocket(connection, replyLine(id, body), ticket);
 }
 
 function runWritten(tickets: readonly number[]) {
@@ -183,7 +193,16 @@ function subscribe(connection: number, params: Record<string, unknown>): Body {
   return { result: { ok: true, served: served.served, ...(sub.hooks === undefined || sub.hooks === null ? {} : { revisions: served.revisions }) } };
 }
 
-function answer(connection: number, method: string, params: Record<string, unknown>): Body | Promise<Body> {
+const connectionAccess = (_connection: number): ConnectionAccess => "owner";
+
+function answer(connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
+  const spec = methodSpec(method);
+  if (!spec) return failure("unknown_method", `There's no method ${method}.`);
+  const refused = accessProblem(connectionAccess(connection), spec);
+  if (refused) return { error: refused };
+  const checked = checkedParams(spec, given);
+  if (!("params" in checked)) return checked;
+  const { params } = checked;
   const serving = generation;
   const stillOn = () => generation === serving && controlOn();
   switch (method) {
@@ -202,7 +221,7 @@ function answer(connection: number, method: string, params: Record<string, unkno
     case "commands":
       return { result: commands() };
     case "methods":
-      return Object.keys(params).length ? failure("bad_request", "methods takes no params.") : { result: methodsCatalog() };
+      return { result: methodsCatalog() };
     case "windows":
       return windowsWithTargets(automationWindows(useBrowser.getState())).then((result) => ({ result }));
     case "workspace":
@@ -220,7 +239,7 @@ function answer(connection: number, method: string, params: Record<string, unkno
     case "run":
       return runMethod(params);
   }
-  const area = runSocketMethod(method, params, servingWhile(stillOn));
+  const area = runSpec(spec, params, servingWhile(stillOn));
   if (area) return area;
   const plugin = pluginMethods?.(method, params);
   if (plugin) return plugin;

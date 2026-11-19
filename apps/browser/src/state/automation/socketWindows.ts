@@ -4,7 +4,8 @@ import { closeLittleArdia, openInMainWindow, openLittleArdia } from "../littleAr
 import { focusWindow } from "../windows/nativeWindow";
 import { focusedWindowOf } from "../windows/ui";
 import { eligibleKind, windowTabIds } from "./automationWindows";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
+import { closeAfterAsking } from "../windows/windowClose";
 import { bool, obj, oneOf, PROFILE, text, WINDOW } from "./socketSchema";
 import { expect, now, profileArg, windowOf } from "./socketTargets";
 import { openableUrl } from "./workspaceOps";
@@ -63,10 +64,18 @@ function switchProfile(params: Record<string, unknown>) {
   return windowRow(now(), w.id);
 }
 
-function closeWindow(params: Record<string, unknown>) {
+function closeLittle(params: Record<string, unknown>) {
+  const w = windowOf(params.window, ["little"]);
+  closeLittleArdia(w.id);
+  return { ok: true };
+}
+
+async function closeWindow(params: Record<string, unknown>, call: SocketCall) {
   const w = windowOf(params.window);
-  if (eligibleKind(now(), w.id) === "little") closeLittleArdia(w.id);
-  else now().closeWindow(w.id);
+  if (eligibleKind(now(), w.id) === "little") return closeLittle(params);
+  const outcome = await closeAfterAsking(w.id, call.serving);
+  if (outcome === "cancelled") throw new OpError("refused", `Window ${w.id} stayed open: closing it was cancelled when Ardia asked first.`);
+  if (outcome === "stopped") call.stillServing();
   return { ok: true };
 }
 
@@ -95,7 +104,14 @@ export const WINDOW_METHODS: MethodSpec[] = [
     result: "window",
     run: createWindow,
   },
-  { name: "windows.close", mutates: true, description: "Close a window (its tabs go to recently closed)", params: obj({ window: WINDOW }, ["window"]), result: "{ok}", run: closeWindow },
+  {
+    name: "windows.close",
+    mutates: true,
+    description: "Close a window as its close button does: Ardia asks first when the user set it to, and the last window is kept to reopen (its tabs go to recently closed)",
+    params: obj({ window: WINDOW }, ["window"]),
+    result: "{ok}",
+    run: closeWindow,
+  },
   {
     name: "windows.focus",
     mutates: true,
@@ -130,6 +146,6 @@ export const WINDOW_METHODS: MethodSpec[] = [
     },
   },
   { name: "littleArdia.open", mutates: true, description: "Open a Little Ardia window", params: obj({ url: text("Its page; a New Tab when left out"), profile: PROFILE }), result: "window", run: openLittle },
-  { name: "littleArdia.close", mutates: true, description: "Close a Little Ardia window", params: obj({ window: WINDOW }, ["window"]), result: "{ok}", run: (p) => closeWindow({ window: windowOf(p.window, ["little"]).id }) },
+  { name: "littleArdia.close", mutates: true, description: "Close a Little Ardia window", params: obj({ window: WINDOW }, ["window"]), result: "{ok}", run: closeLittle },
   { name: "littleArdia.toMain", mutates: true, description: "Move a Little Ardia's page into a main window as a tab", params: obj({ window: WINDOW }, ["window"]), result: "{tab, window}", run: littleToMain },
 ];
