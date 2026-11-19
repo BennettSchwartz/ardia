@@ -1,5 +1,6 @@
 import { registerSocketMethods } from "./socketCatalog";
 import { DOWNLOAD_METHODS } from "./socketDownloads";
+import { HISTORY_METHODS } from "./socketHistory";
 import { LIBRARY_METHODS } from "./socketLibrary";
 import { MISC_METHODS } from "./socketMisc";
 import { SITE_METHODS } from "./socketSites";
@@ -14,5 +15,5 @@ let registered = false;
 export function registerSocketAreas() {
   if (registered) return;
   registered = true;
-  registerSocketMethods([...TAB_METHODS, ...WINDOW_METHODS, ...PROFILE_METHODS, ...SPLIT_METHODS, ...LIBRARY_METHODS, ...DOWNLOAD_METHODS, ...SETTINGS_METHODS, ...SITE_METHODS, ...MISC_METHODS]);
+  registerSocketMethods([...TAB_METHODS, ...WINDOW_METHODS, ...PROFILE_METHODS, ...SPLIT_METHODS, ...LIBRARY_METHODS, ...HISTORY_METHODS, ...DOWNLOAD_METHODS, ...SETTINGS_METHODS, ...SITE_METHODS, ...MISC_METHODS]);
 }
