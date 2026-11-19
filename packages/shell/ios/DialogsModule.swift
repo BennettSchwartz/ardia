@@ -12,6 +12,10 @@ public class DialogsModule: Module {
         promise.resolve(["confirmed": words.contains("confirm"), "suppressed": words.contains("suppress")])
         return
       }
+      if options.onlyIfShown && (LaunchConfig.shared.background || DialogsModule.visibleWindow(options.windowId) == nil) {
+        promise.resolve(["confirmed": false, "suppressed": false, "unshown": true])
+        return
+      }
       let alert = DialogsModule.alert(title: options.title, message: options.message)
       alert.addButton(withTitle: options.confirmTitle)
       alert.addButton(withTitle: options.cancelTitle)
@@ -73,8 +77,13 @@ public class DialogsModule: Module {
     return alert
   }
 
+  static func visibleWindow(_ windowId: String?) -> NSWindow? {
+    guard let window = windowId.flatMap({ WindowManager.shared.window($0) }), window.isVisible, !window.isMiniaturized else { return nil }
+    return window
+  }
+
   static func present(_ alert: NSAlert, windowId: String?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
-    if let window = windowId.flatMap({ WindowManager.shared.window($0) }), window.isVisible {
+    if let window = visibleWindow(windowId) {
       alert.beginSheetModal(for: window, completionHandler: completion)
     } else {
       completion(alert.runModal())
