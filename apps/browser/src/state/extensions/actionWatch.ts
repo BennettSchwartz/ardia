@@ -42,7 +42,7 @@ function showsAction(profile: string, extensionId: string) {
 function flushActionChanges() {
   flushTimer = null;
   if (AppState.currentState !== "active") return;
-  for (const profile of dirtyLists) if (loadedProfiles.has(profile)) void refreshExtensionsAfterChange(profile);
+  for (const profile of dirtyLists) if (loadedProfiles.has(profile)) void refreshExtensionsAfterChange(profile, consentToken());
   dirtyLists.clear();
   if (dirtyActions.size) {
     const profiles = [...dirtyActions];
