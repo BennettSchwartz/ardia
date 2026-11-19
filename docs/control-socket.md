@@ -180,20 +180,33 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   file URL for the command to share. `add` binds a folder someone shared as a new pinned folder, as Add Shared Folder
   does without its folder picker. `stop` is Stop Syncing: the group and the files stay.
   Paths are resolved once to the real folder (`resolve` in `SharedFoldersModule.swift`): the binding stores that path and
-  the folder's device and inode, and the native layer reads and writes only while the path still leads to that folder,
-  so a re-pointed symlink can't redirect a sync, and two spellings of one folder are one binding. `/`, system folders and
-  home folders are refused; `parent` must already exist. `add` reads the folder before saving anything, so a missing,
-  unreadable or too big folder (over 20,000 items or 32 MB of links) answers an error and adds nothing. Requests for one
-  group run one at a time; `share` re-checks the group after making the folder and removes the folder it made when the
-  group changed or control went off. When the first sync fails, `share` answers `failed` with the reason instead of the
-  URL, as the sidebar shows a toast instead of the share sheet; the binding stays, as it does there.
+  the folder's device and inode. The native layer (`SharedFolderDirectory.swift`) opens the root once with `O_NOFOLLOW`,
+  checks its device and inode, and does every scan, read, write, rename, mkdir and unlink relative to folder descriptors
+  it holds while descending (`openat`, `fstatat`, `renameatx_np`, `unlinkat`), so a root or subfolder swapped after the
+  check is never followed, and two spellings of one folder are one binding. `/`, system folders and home folders are
+  refused (`resolve` rejects with `ERR_SHARED_FOLDER_REFUSED`, answered as `refused`); `parent` must already exist and is
+  held by descriptor and checked against its identity through creation, never recreated. `create` returns the new
+  folder's identity in the same call, and a folder `share` made but couldn't use is removed only while it is still that
+  empty folder. A binding made before identities existed (from the sidebar, or an older Ardia) is upgraded to its real
+  path and identity the first time it syncs or `add` looks for it. Binding is compare-and-set for the sidebar and the
+  socket alike: whichever finishes making a folder second keeps the first one's binding and removes its own. `add` reads
+  the folder before saving anything, so a missing, unreadable or too big folder (over 20,000 items or 32 MB of links and
+  order files, counted while listing) answers an error and adds nothing. Requests for one group run one at a time;
+  `share` re-checks the group after making the folder and removes the folder it made when the group changed or control
+  went off. A sync started by the socket stops before writing once control is off, its retries keep that check, and a
+  write already under way when control goes off commits nothing. When the first sync fails, `share` answers `failed`
+  with the reason instead of the URL, as the sidebar shows a toast instead of the share sheet; the binding stays, as it
+  does there.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
   menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no
   `sources` takes the connected ones of its kind, refusing when none is. A refresh asked for while one runs with other
   sources or filters fetches again after it, and a pass whose sources or filters changed under it drops its results.
-  `live.items` lists the folder's listed, then hidden, then recently completed items as `{item, shown, unread,
-  completed}`, a page at a time.
+  A socket refresh joins only a pass started by the same request; otherwise it waits for the running pass and then
+  fetches for itself, so a refresh after control went off and on never returns a revoked pass's old state. A pass checks
+  control before it fetches. `live.items` lists the folder's listed, then hidden, then recently completed items as
+  `{item, shown, unread, completed}`, each item once (an item still animating out counts as completed), a page at a
+  time, building rows only for the page.
 - **Presets.** `presets.apply` is Settings › Apply a setup code (`applySetupCode`): the code's settings, and its colour
   and pinned apps on the given or focused main window's profile. `presets.describe` decodes a code without applying it.
 - **Air Traffic Control** (`state/airTraffic/store.ts`). Rules are `{from, when, profile, open, group}`: `from` an app
