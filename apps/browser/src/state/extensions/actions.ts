@@ -1,5 +1,7 @@
 import {
   configureExtension,
+  discardStagedExtension,
+  inspectUnpackedExtension,
   extensionActionStates,
   reloadExtension,
   setExtensionEnabled,
@@ -23,11 +25,13 @@ import { goToSettingsPane, openSettings, replaceSettingsPlace, SETTINGS_DETAIL, 
 import { closeSidePanelsOf, toggleSidePanel } from "./sidePanels";
 import { notePrivateWindowExtensionOpen, noteExtensionProfilePageOpen, noteToolbarExtensionMove } from "../telemetry/usage";
 import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, nextInstallKey, pageProfile, shownIn, useExtensions, windowExtensions, readyTabOf, tabProfile, type Anchor } from "./store";
-import { consentToken } from "../telemetry/client";
+import { consentToken, type ConsentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { refreshExtensions, refreshExtensionsAfterChange } from "./lists";
-import { cancelInstall, confirmInstall, showInstallSheet } from "./installSheet";
+import { cancelInstall, confirmInstall, reviewOf, showInstallSheet } from "./installSheet";
+import { errorText } from "../../lib/errors";
+import { noteSourceReload } from "../telemetry/exportCounts";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
 export * from "./sidePanels";
@@ -72,7 +76,7 @@ export async function removeExtension(profile: string, ext: InstalledExtension, 
   if (!confirmed || !mayRemove()) return;
   if (useExtensions.getState().popup?.extensionId === ext.id) closeExtensionPopup();
   closeSidePanelsOf(ext.id);
-  await changeThenRefresh(profile, "remove", () => uninstallExtension(ext.id, profile));
+  await changeThenRefresh(profile, "remove", () => uninstallExtension(ext.id, profile, ext.managedSource ? ext.path : null));
 }
 
 export async function setEnabled(profile: string, id: string, enabled: boolean) {
@@ -82,8 +86,9 @@ export async function setEnabled(profile: string, id: string, enabled: boolean) 
 
 export async function setPinned(profile: string, id: string, pinned: boolean) {
   patchExtension(profile, id, { pinned });
-  const done = await changed(pinned ? "pin" : "unpin", () => configureExtension(id, profile, { pinned }));
-  if (!done) await refreshExtensions(profile);
+  const consent = consentToken();
+  const done = await changed(pinned ? "pin" : "unpin", () => configureExtension(id, profile, { pinned }), consent);
+  if (!done) await refreshExtensions(profile, consent);
 }
 
 export const setToolbarDrag = (windowId: string, drag: ToolbarDrag | null) => useExtensions.setState({ toolbarDrag: drag && { ...drag, windowId } });
@@ -104,8 +109,9 @@ export async function moveToolbarExtension(windowId: string, id: string, to: num
     lists: { ...e.lists, [profile]: (e.lists[profile] ?? EMPTY).map((x) => (slots.has(x.id) ? { ...x, pinnedIndex: slots.get(x.id) } : x)) },
   }));
   noteToolbarExtensionMove(via);
-  const done = await changed("move", () => configureExtension(id, profile, { pinnedIndex: moved.pinnedIndex }));
-  if (!done) await refreshExtensions(profile);
+  const consent = consentToken();
+  const done = await changed("move", () => configureExtension(id, profile, { pinnedIndex: moved.pinnedIndex }), consent);
+  if (!done) await refreshExtensions(profile, consent);
 }
 
 export async function configure(profile: string, id: string, options: Parameters<typeof configureExtension>[2]): Promise<boolean> {
@@ -116,20 +122,41 @@ export async function reload(profile: string, id: string) {
   await changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
 }
 
-async function changed(what: string, change: () => Promise<void>): Promise<boolean> {
+export async function reloadFromSource(windowId: string, profile: string, ext: InstalledExtension): Promise<boolean> {
   const consent = consentToken();
+  if (!ext.managedSource) return false;
+  let pkg;
+  try {
+    pkg = await inspectUnpackedExtension(ext.managedSource, profile);
+  } catch (error) {
+    showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "error", error: errorText(error) });
+    return true;
+  }
+  const changedSince = !pkg.digest || pkg.digest !== ext.managedDigest;
+  noteSourceReload(changedSince, consent);
+  if (!changedSince) {
+    discardStagedExtension(pkg);
+    await reload(profile, ext.id);
+    return false;
+  }
+  const review = await reviewOf(pkg, profile).catch(() => ({}));
+  return showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "ready", pkg, review });
+}
+
+async function changed(what: string, change: () => Promise<void>, consent: ConsentToken | null): Promise<boolean> {
   try {
     await change();
     return true;
   } catch (error) {
-    warnFor(consent, `[extensions] ${what} failed`, error);
+    if (consent) warnFor(consent, `[extensions] ${what} failed`, error);
     return false;
   }
 }
 
 async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>) {
-  const done = await changed(what, change);
-  await refreshExtensionsAfterChange(profile);
+  const consent = consentToken();
+  const done = await changed(what, change, consent);
+  await refreshExtensionsAfterChange(profile, consent);
   return done;
 }
 

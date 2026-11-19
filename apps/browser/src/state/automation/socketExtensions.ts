@@ -4,8 +4,10 @@ import { errorText } from "../../lib/errors";
 import { engineProfile } from "../browser/model";
 import {
   abandonInstall,
+  freshExtensions,
+  reviewOf,
+  SHEET_CLOSED,
   configure,
-  findExtension,
   openInExtensionProfile,
   refreshExtensions,
   refreshExtensionsAfterChange,
@@ -15,7 +17,8 @@ import {
   type InstallOutcome,
 } from "../extensions/actions";
 import { focusWindow } from "../windows/nativeWindow";
-import { extensionProfile, nextInstallKey, type InstallRequest, type InstalledExtension } from "../extensions/store";
+import { extensionProfile, nextInstallKey, type InstallRequest, type InstallReview, type InstalledExtension } from "../extensions/store";
+import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { useBrowser } from "../browser/store";
 import { eligibleKind, ownEntry } from "./automationWindows";
 import { folderProblem } from "./extensionFolders";
@@ -35,12 +38,6 @@ function stillThere(call: SocketCall, profileId: string, engine: string) {
   if (!ownEntry(now().profiles, profileId) || engineProfile(now(), profileId) !== engine) throw new OpError("no_window", `Profile ${profileId} closed before Ardia made the change, so nothing changed.`);
 }
 
-async function extensionIn(engine: string, extensionId: unknown): Promise<InstalledExtension> {
-  const known = findExtension(engine, extensionId as string) ?? (await refreshExtensions(engine)).find((x) => x.id === extensionId);
-  if (!known) throw new OpError("no_window", `There's no extension ${String(extensionId)} in that profile.`);
-  return known;
-}
-
 function windowShowing(engine: string, profileId: string): string {
   const s = now();
   const shows = (w: string) => eligibleKind(s, w) === "normal" && extensionProfile(s, w) === engine;
@@ -50,8 +47,6 @@ function windowShowing(engine: string, profileId: string): string {
   expect(!!made && !!now().windows[made], "no window opened to show the install sheet.");
   return made;
 }
-
-const SHEET_CLOSED = "The window showing the install sheet closed before the user answered.";
 
 function addTimeProblem(call: SocketCall, profileId: string, engine: string): string | null {
   try {
@@ -85,28 +80,36 @@ function refuseWhileSheetShows() {
   if (useExtensions.getState().install) throw new OpError("refused", "An install sheet is already showing; the user answers it first.");
 }
 
-async function installFolder(call: SocketCall, engine: string, profileId: string, folder: string) {
+const NO_STAGING = "Ardia can't make its own copy of an unpacked extension on this platform yet, so it can't be sure the user adds what the sheet shows.";
+
+async function installFolder(call: SocketCall, engine: string, profileId: string, folder: string, replace: boolean) {
   const problem = folderProblem(folder);
   if (problem) throw new OpError("bad_request", problem);
   refuseWhileSheetShows();
   let pkg;
   try {
-    pkg = await inspectUnpackedExtension(folder);
+    pkg = await inspectUnpackedExtension(folder, engine);
   } catch (error) {
     throw new OpError("bad_request", `${folder} isn't an extension Ardia can load: ${errorText(error)}`);
   }
+  let review: InstallReview;
   try {
     stillThere(call, profileId, engine);
     const canonical = folderProblem(pkg.path);
     if (canonical) throw new OpError("bad_request", canonical);
-    if (!pkg.digest || !pkg.staged) throw new OpError("refused", "Ardia can't pin an unpacked extension's files on this platform, so it can't be sure the user adds what the sheet shows.");
+    if (!pkg.digest || !pkg.staged) throw new OpError("refused", NO_STAGING);
+    review = await reviewOf(pkg, engine);
+    stillThere(call, profileId, engine);
+    if (review.replaces && !replace) {
+      throw new OpError("refused", `This would replace ${review.replaces.name} (${review.replaces.id})${review.replaces.path ? `, loaded from ${review.replaces.path}` : ""}; pass replace: true to show the sheet anyway.`);
+    }
     refuseWhileSheetShows();
   } catch (error) {
     discardStagedExtension(pkg);
     throw error;
   }
   const windowId = windowShowing(engine, profileId);
-  const request: InstallRequest = { key: nextInstallKey(), windowId, profile: engine, source: "unpacked", status: "ready", pkg };
+  const request: InstallRequest = { key: nextInstallKey(), windowId, profile: engine, source: "unpacked", status: "ready", pkg, review };
   if (!showInstallSheet(request)) throw new OpError("refused", "An install sheet is already showing; the user answers it first.");
   const outcome = settled(request, () => addTimeProblem(call, profileId, engine));
   void focusWindow(windowId);
@@ -119,9 +122,10 @@ async function installFolder(call: SocketCall, engine: string, profileId: string
 
 async function install(params: Record<string, unknown>, call: SocketCall) {
   if ((params.webStore === undefined) === (params.folder === undefined)) throw new OpError("bad_request", "extensions.install takes webStore or folder, one of them.");
+  if (params.folder !== undefined && !PLATFORM_FEATURES.stagesUnpackedFolders) throw new OpError("refused", NO_STAGING);
   const profileId = profileArg(params.profile);
   const engine = engineProfile(now(), profileId);
-  if (params.folder !== undefined) return installFolder(call, engine, profileId, params.folder as string);
+  if (params.folder !== undefined) return installFolder(call, engine, profileId, params.folder as string, params.replace === true);
   const extensionId = webStoreExtensionId(params.webStore as string);
   if (!extensionId) throw new OpError("bad_request", "webStore is a Chrome Web Store link or extension id.");
   const already = (await refreshExtensions(engine)).find((x) => x.id === extensionId);
@@ -147,10 +151,19 @@ function plannedChanges(ext: InstalledExtension, params: Record<string, unknown>
 export const siteAccessAfter = (asked: SiteAccess, grantedSites: readonly string[]) =>
   asked === "allSites" ? "ON_ALL_SITES" : asked === "specificSites" && grantedSites.length ? "ON_SPECIFIC_SITES" : "ON_CLICK";
 
+async function loaded(engine: string): Promise<InstalledExtension[]> {
+  try {
+    return await freshExtensions(engine);
+  } catch (error) {
+    throw new OpError("failed", `Ardia couldn't read the profile's extensions from Chromium: ${errorText(error)}`);
+  }
+}
+
 async function configureExtension(params: Record<string, unknown>, call: SocketCall) {
   const profileId = profileArg(params.profile);
   const engine = engineOf(params);
-  const ext = await extensionIn(engine, params.id);
+  const ext = (await loaded(engine)).find((x) => x.id === params.id);
+  if (!ext) throw new OpError("no_window", `There's no extension ${String(params.id)} in that profile.`);
   const { siteAccess, rest } = plannedChanges(ext, params);
   stillThere(call, profileId, engine);
   if (siteAccess !== undefined && !(await configure(engine, ext.id, { siteAccess }))) {
@@ -158,9 +171,9 @@ async function configureExtension(params: Record<string, unknown>, call: SocketC
   }
   if (Object.keys(rest).length) {
     if (siteAccess !== undefined) stillThere(call, profileId, engine);
-    await configure(engine, ext.id, rest);
+    if (!(await configure(engine, ext.id, rest))) throw new OpError("failed", `Chromium refused ${ext.name}'s ${Object.keys(rest).join(" and ")} change.`);
   }
-  const after = (await refreshExtensionsAfterChange(engine)).find((x) => x.id === ext.id);
+  const after = (await loaded(engine)).find((x) => x.id === ext.id);
   if (!after) throw new OpError("no_window", `${ext.name} is gone from that profile.`);
   expect(
     (rest.incognito === undefined || after.incognito === rest.incognito) &&
@@ -177,7 +190,12 @@ export const EXTENSION_METHODS: MethodSpec[] = [
     mutates: true,
     description:
       "Add an extension, as Settings › Profiles › Extensions does: webStore opens its Chrome Web Store page, where the user adds it ({waiting}); folder shows Ardia's install sheet for an unpacked extension and answers once the user decides",
-    params: obj({ profile: PROFILE, webStore: text("A Chrome Web Store link or extension id"), folder: text("The absolute path of an unpacked extension's folder") }),
+    params: obj({
+      profile: PROFILE,
+      webStore: text("A Chrome Web Store link or extension id"),
+      folder: text("The absolute path of an unpacked extension's folder"),
+      replace: bool("Show the sheet even when the folder would replace an extension the profile already has from somewhere else"),
+    }),
     result: "{waiting, id} | {installed, extensions}",
     run: install,
   },

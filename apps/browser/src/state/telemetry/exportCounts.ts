@@ -4,6 +4,8 @@ import { countFor } from "./countFor";
 let bookmarkExports = 0;
 let passwordExports = 0;
 let unpackedInstalls = 0;
+let sourceReloadsUnchanged = 0;
+let sourceReloadsChanged = 0;
 let bookmarkExportFailures = 0;
 let passwordExportFailures = 0;
 let passwordListShows = 0;
@@ -16,6 +18,8 @@ const SLOW_PASSWORD_LIST_MS = 1000;
 export const noteBookmarkExport = (consent?: ConsentToken | null) => countFor(consent, () => void (bookmarkExports += 1), { bookmark_html_exports: 1 });
 export const notePasswordExport = (consent?: ConsentToken | null) => countFor(consent, () => void (passwordExports += 1), { password_exports: 1 });
 export const noteUnpackedInstall = (consent?: ConsentToken | null) => countFor(consent, () => void (unpackedInstalls += 1), { unpacked_extension_installs: 1 });
+export const noteSourceReload = (changed: boolean, consent?: ConsentToken | null) =>
+  countFor(consent, () => void (changed ? (sourceReloadsChanged += 1) : (sourceReloadsUnchanged += 1)), changed ? { unpacked_source_reloads_changed: 1 } : { unpacked_source_reloads_unchanged: 1 });
 export const noteBookmarkExportFailure = (consent?: ConsentToken | null) => countFor(consent, () => void (bookmarkExportFailures += 1), { bookmark_html_export_failures: 1 });
 export const notePasswordExportFailure = (consent?: ConsentToken | null) => countFor(consent, () => void (passwordExportFailures += 1), { password_export_failures: 1 });
 
@@ -30,6 +34,8 @@ export function takeExportCounts() {
     bookmark_html_exports: bookmarkExports,
     password_exports: passwordExports,
     unpacked_extension_installs: unpackedInstalls,
+    unpacked_source_reloads_unchanged: sourceReloadsUnchanged,
+    unpacked_source_reloads_changed: sourceReloadsChanged,
     bookmark_html_export_failures: bookmarkExportFailures,
     password_export_failures: passwordExportFailures,
     password_list_shows: passwordListShows,
@@ -39,6 +45,8 @@ export function takeExportCounts() {
   bookmarkExports = 0;
   passwordExports = 0;
   unpackedInstalls = 0;
+  sourceReloadsUnchanged = 0;
+  sourceReloadsChanged = 0;
   bookmarkExportFailures = 0;
   passwordExportFailures = 0;
   passwordListShows = 0;
