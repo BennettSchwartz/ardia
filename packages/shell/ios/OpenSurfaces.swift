@@ -200,9 +200,9 @@ final class OpenSurfaces: NSObject {
     if let window = (item.target as? NSWindow) ?? (item.representedObject as? NSWindow) {
       return WindowManager.shared.id(of: window) ?? ""
     }
-    if let command = item as? CommandItem, let arg = command.arg, WindowManager.shared.window(arg) != nil { return arg }
-    if let command = item as? CommandItem, command.command == "moveTabToWindow" { return "" }
-    return nil
+    guard let command = item as? CommandItem, let arg = command.arg else { return nil }
+    if WindowManager.shared.window(arg) != nil { return arg }
+    return command.command == "moveTabToWindow" ? "" : nil
   }
 
   static func rows(_ menu: NSMenu, path: [Int], validate: Bool) -> [[String: Any]] {
