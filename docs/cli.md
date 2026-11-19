@@ -113,10 +113,11 @@ TypeScript browse client), not to #2808. It must:
   control server stops or restarts (mint again after turning control back on) and when the browser quits. A profile
   holds at most 16 live credentials; past that, minting answers `too many plugin credentials for this profile`.
 - **What a plugin connection may do** is an exact allowlist (`docs/engine-build.md` › `chromium-devtools-control-token.patch`):
-  DOM and accessibility reads, page navigation and screenshots, input, and Runtime only in an isolated world it created.
-  When its tab leaves the window, its session is detached and commands in flight answer `ardia: tab_out_of_scope`.
-  Its isolated world can't use the clipboard or reach another page's window (no opener, no `window.open`). Script it
-  writes into the page's own markup still runs there, so the allowlist is not a sandbox for main-world script.
+  plain-data DOM and accessibility reads, focus and scroll on its own nodes, page navigation and screenshots, and
+  input. It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
+  response to its input (a link that opens in another window) counts as the person acting, but the plugin still can't
+  reach that window. When its tab leaves the window, its session is detached, commands in flight answer
+  `ardia: tab_out_of_scope`, and input it queued before the move never lands.
 - **Handing it to the CLI child.** The app creates a pipe, writes the credential to it and closes its write end, and
   passes the read end to the child as an inherited fd (`posix_spawn_file_actions_adddup2`; with
   `POSIX_SPAWN_CLOEXEC_DEFAULT` nothing else leaks). It sets `ARDIA_PLUGIN_CREDENTIAL_FD=<n>`, the fd number only, and

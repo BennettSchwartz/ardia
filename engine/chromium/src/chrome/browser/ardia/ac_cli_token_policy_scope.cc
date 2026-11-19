@@ -51,29 +51,6 @@ content::DevToolsAgentHost* TokenClient::HostOf(const std::string& session) {
              : content::ArdiaDevToolsAgentHostForId(it->second);
 }
 
-int TokenClient::ProcessOf(const std::string& session) {
-  content::DevToolsAgentHost* host = HostOf(session);
-  content::RenderProcessHost* process = host ? host->GetProcessHost() : nullptr;
-  return process ? process->GetDeprecatedID() : -1;
-}
-
-void TokenClient::AllowContext(const std::string& session, int context) {
-  const int process = ProcessOf(session);
-  if (process >= 0) {
-    contexts_[session].ids[context] = process;
-  }
-}
-
-bool TokenClient::ContextAllowed(const std::string& session,
-                                 std::optional<int> context) {
-  auto found = contexts_.find(session);
-  if (!context || found == contexts_.end()) {
-    return false;
-  }
-  auto it = found->second.ids.find(*context);
-  return it != found->second.ids.end() && it->second == ProcessOf(session);
-}
-
 bool TokenClient::SessionInScope(const std::string& session) {
   if (left_.contains(session)) {
     return false;
@@ -87,15 +64,18 @@ bool TokenClient::MayInputTo(content::RenderFrameHost* frame) {
       !PluginMayAttachToFrame(*scope_, frame)) {
     return false;
   }
-  content::WebContents* contents =
-      content::WebContents::FromRenderFrameHost(frame);
-  for (const std::string& session : left_) {
-    content::DevToolsAgentHost* host = HostOf(session);
-    if (host && host->GetWebContents() == contents) {
-      return false;
-    }
-  }
   return true;
+}
+
+bool TokenClient::MaySessionInput(const std::string& session) {
+  if (revoked_ || wedged_ || draining_ || !RootInScope()) {
+    return false;
+  }
+  if (session.empty()) {
+    return !IsBrowserHost(root_host_.get());
+  }
+  return targets_.contains(session) && !detaching_.contains(session) &&
+         SessionInScope(session);
 }
 
 bool TokenClient::RootInScope() {
@@ -210,17 +190,11 @@ bool TokenClient::PluginCommandAllowed(int id,
   }
   PluginCommandContext context;
   context.on_root_session = session.empty();
-  context.context_allowed = base::BindRepeating(
-      [](TokenClient* self, std::string session, int value) {
-        return self->ContextAllowed(session, value);
-      },
-      base::Unretained(this), session);
   context.session_known = base::BindRepeating(
       [](TokenClient* self, const std::string& value) {
         return self->targets_.contains(value);
       },
       base::Unretained(this));
-  context.isolated_world_name = isolated_world_name_;
   context.viewport =
       base::BindRepeating(&TokenClient::ViewportOf, base::Unretained(this),
                           session);
@@ -280,8 +254,10 @@ void TokenClient::DetachOutOfScope(const std::string& session) {
   auto parent = parents_.find(session);
   const std::string parent_session =
       parent == parents_.end() ? std::string() : parent->second;
+  for (const std::string& gone : Subtree(session)) {
+    detaching_[gone] = session;
+  }
   DropSubtree(session);
-  detaching_.insert(session);
   SendInternal(parent_session, "Target.detachFromTarget",
                base::DictValue().Set("sessionId", session));
 }
@@ -375,47 +351,7 @@ bool TokenClient::FilterPluginEvent(std::string_view method,
     ForgetSessionOf(message);
     return true;
   }
-  if (method.starts_with("Runtime.")) {
-    return FilterPluginRuntimeEvent(method, message);
-  }
   return PluginForwardsEvent(method);
-}
-
-bool TokenClient::FilterPluginRuntimeEvent(std::string_view method,
-                                           const std::string& message) {
-  std::optional<base::Value> parsed =
-      base::JSONReader::Read(message, base::JSON_PARSE_RFC);
-  if (!parsed || !parsed->is_dict()) {
-    return false;
-  }
-  const std::string* session_id = parsed->GetDict().FindString("sessionId");
-  const std::string session = session_id ? *session_id : std::string();
-  const base::DictValue* params = parsed->GetDict().FindDict("params");
-  if (!params) {
-    return false;
-  }
-  if (method == "Runtime.executionContextCreated") {
-    const base::DictValue* context = params->FindDict("context");
-    return context && ContextAllowed(session, context->FindInt("id"));
-  }
-  if (method == "Runtime.executionContextDestroyed") {
-    const std::optional<int> context = params->FindInt("executionContextId");
-    if (!ContextAllowed(session, context)) {
-      return false;
-    }
-    contexts_[session].ids.erase(*context);
-    return true;
-  }
-  if (method == "Runtime.executionContextsCleared") {
-    contexts_.erase(session);
-    return true;
-  }
-  if (method == "Runtime.exceptionThrown") {
-    const base::DictValue* details = params->FindDict("exceptionDetails");
-    return details &&
-           ContextAllowed(session, details->FindInt("executionContextId"));
-  }
-  return false;
 }
 
 }

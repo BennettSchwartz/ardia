@@ -169,7 +169,6 @@ void TokenClient::DropSubtree(const std::string& session) {
     left_.erase(gone);
     targets_.erase(gone);
     parents_.erase(gone);
-    contexts_.erase(gone);
     ForgetSession(gone);
   }
 }
@@ -192,7 +191,9 @@ bool TokenClient::FilterTargetEvent(std::string_view method,
     }
     const bool known = targets_.contains(*child) || detaching_.contains(*child);
     DropSubtree(*child);
-    detaching_.erase(*child);
+    std::erase_if(detaching_, [&](const auto& entry) {
+      return entry.first == *child || entry.second == *child;
+    });
     return kind_ == TokenKind::kCli || known;
   }
   const base::DictValue* info = params->FindDict("targetInfo");
@@ -203,7 +204,7 @@ bool TokenClient::FilterTargetEvent(std::string_view method,
   const std::string* parent = event->FindString("sessionId");
   if (kind_ == TokenKind::kPlugin &&
       !PluginMayAttachToTargetId(*scope_, target_id)) {
-    detaching_.insert(*child);
+    detaching_[*child] = *child;
     SendInternal(parent ? *parent : std::string(), "Target.detachFromTarget",
                  base::DictValue().Set("sessionId", *child));
     return false;

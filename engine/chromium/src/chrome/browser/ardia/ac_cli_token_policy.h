@@ -45,6 +45,11 @@ bool TokenClientMayAttach(content::DevToolsAgentHostClient* root_client,
 bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
                          content::RenderFrameHost* frame);
 
+bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
+                                const std::string& session);
+
+void InstallTokenClientInputHooks();
+
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client);
 
 bool PluginMayConnectTo(const PluginScope& scope,

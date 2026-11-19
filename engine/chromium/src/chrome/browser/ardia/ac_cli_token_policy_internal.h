@@ -65,7 +65,6 @@ bool IsOffscreenTarget(const std::string* target_id);
 
 bool IsWebUrl(const GURL& url);
 bool IsWebDestination(std::string_view spec);
-std::optional<int> ContextOfObjectId(std::string_view object_id);
 bool PluginTargetInScope(const PluginScope& scope,
                          content::DevToolsAgentHost* host);
 bool PluginMayAttachToFrame(const PluginScope& scope,
@@ -76,9 +75,7 @@ bool PluginForwardsEvent(std::string_view method);
 
 struct PluginCommandContext {
   bool on_root_session = false;
-  base::RepeatingCallback<bool(int)> context_allowed;
   base::RepeatingCallback<bool(const std::string&)> session_known;
-  std::string isolated_world_name;
   base::RepeatingCallback<std::optional<std::pair<double, double>>()> viewport;
 };
 
@@ -111,6 +108,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   content::DevToolsAgentHost* root_host() const { return root_host_.get(); }
   void Revoke();
   bool MayInputTo(content::RenderFrameHost* frame);
+  bool MaySessionInput(const std::string& session);
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;
@@ -125,10 +123,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                   base::RepeatingCallback<void(std::string)> to_client) override;
 
  private:
-  struct Contexts {
-    std::map<int, int> ids;
-  };
-
   bool AnswerFilePickerCommand(int id,
                                const std::string& session,
                                const base::DictValue* params,
@@ -150,8 +144,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   bool FilterPluginEvent(std::string_view method,
                          std::string_view session,
                          std::string& message);
-  bool FilterPluginRuntimeEvent(std::string_view method,
-                                const std::string& message);
   bool FilterPluginReply(int id,
                          const std::string& session,
                          std::string& message);
@@ -168,9 +160,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                     const std::string& method,
                     base::DictValue params);
   content::DevToolsAgentHost* HostOf(const std::string& session);
-  int ProcessOf(const std::string& session);
-  void AllowContext(const std::string& session, int context);
-  bool ContextAllowed(const std::string& session, std::optional<int> context);
 
   const raw_ptr<content::DevToolsAgentHostClient> client_;
   const scoped_refptr<content::DevToolsAgentHost> root_host_;
@@ -178,7 +167,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   const std::optional<PluginScope> scope_;
   std::map<std::string, std::string> targets_;
   std::map<std::string, std::string> parents_;
-  std::set<std::string> detaching_;
+  std::map<std::string, std::string> detaching_;
   std::set<std::string> told_targets_;
   std::set<std::string> left_;
   bool root_left_ = false;
@@ -188,8 +177,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   };
   std::map<std::string, TabWatch> tab_watches_;
   TabWatch root_tab_watch_;
-  std::string isolated_world_name_;
-  std::map<std::string, Contexts> contexts_;
   std::map<std::pair<std::string, int>, std::string> outstanding_;
   base::RepeatingCallback<void(bool drop_queued)> closer_;
   base::RepeatingCallback<void(std::string)> to_browser_;

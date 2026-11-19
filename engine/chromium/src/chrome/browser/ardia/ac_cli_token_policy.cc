@@ -65,8 +65,7 @@ std::array<int, static_cast<size_t>(CommandDomain::kCount)>& CommandCounts() {
 
 bool NeedsResponse(const std::string& method) {
   return method == "Target.getTargets" || method == "Target.getTargetInfo" ||
-         method == "Target.createTarget" ||
-         method == "Page.createIsolatedWorld";
+         method == "Target.createTarget";
 }
 
 std::vector<TokenClient*> ClientsOf(const std::string& credential_id) {
@@ -145,8 +144,6 @@ TokenClient::TokenClient(content::DevToolsAgentHostClient* client,
   CHECK_EQ(kind_ == TokenKind::kPlugin, scope_.has_value());
   Registry()[client_] = this;
   if (kind_ == TokenKind::kPlugin) {
-    isolated_world_name_ = base::StrCat(
-        {"ardia-plugin-", base::HexEncode(base::RandBytesAsVector(16))});
     scope_timer_.Start(FROM_HERE, kScopeCheckInterval,
                        base::BindRepeating(&TokenClient::CheckScope,
                                            base::Unretained(this)));
@@ -334,12 +331,6 @@ bool TokenClient::FilterResponse(const std::string& method,
     }
     return true;
   }
-  if (method == "Page.createIsolatedWorld") {
-    if (std::optional<int> context = result->FindInt("executionContextId")) {
-      AllowContext(session, *context);
-    }
-    return true;
-  }
   if (method == "Target.getTargets") {
     base::ListValue* infos = result->FindList("targetInfos");
     if (!infos) {
@@ -431,6 +422,21 @@ bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
     return true;
   }
   return it->second->MayInputTo(frame);
+}
+
+bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
+                                const std::string& session) {
+  auto it = cli_token_policy_internal::Registry().find(root_client);
+  if (it == cli_token_policy_internal::Registry().end() ||
+      it->second->kind() == TokenKind::kCli) {
+    return true;
+  }
+  return it->second->MaySessionInput(session);
+}
+
+void InstallTokenClientInputHooks() {
+  g_ardia_devtools_may_input = &TokenClientMayInput;
+  g_ardia_devtools_session_may_input = &TokenClientSessionMayInput;
 }
 
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client) {

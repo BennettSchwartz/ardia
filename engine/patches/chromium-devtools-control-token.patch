@@ -613,7 +613,7 @@ diff --git a/content/browser/devtools/devtools_agent_host_impl.cc b/content/brow
 diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browser/devtools/protocol/input_handler.cc
 --- a/content/browser/devtools/protocol/input_handler.cc
 +++ b/content/browser/devtools/protocol/input_handler.cc
-@@ -58,10 +58,54 @@
+@@ -58,10 +58,62 @@
  #include "ui/gfx/geometry/point_f.h"
  #include "ui/gfx/range/range.h"
  
@@ -623,6 +623,10 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +#include "content/public/browser/web_contents.h"
 +#include "third_party/blink/public/mojom/drag/drag.mojom.h"
 +#include "ui/latency/latency_info.h"
++
++bool (*g_ardia_devtools_session_may_input)(
++    content::DevToolsAgentHostClient* root_client,
++    const std::string& session_id) = nullptr;
 +
 +bool (*g_ardia_devtools_may_input)(content::DevToolsAgentHostClient* root_client,
 +                                   content::RenderFrameHost* frame) = nullptr;
@@ -642,6 +646,10 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    return false;
 +  }
 +  DevToolsAgentHostClient* client = session->GetRootSession()->GetClient();
++  if (g_ardia_devtools_session_may_input &&
++      !g_ardia_devtools_session_may_input(client, session->ArdiaSessionId())) {
++    return false;
++  }
 +  bool found = false;
 +  bool allowed = true;
 +  contents->ForEachRenderFrameHost([&](RenderFrameHost* frame) {
@@ -668,7 +676,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
  gfx::PointF CssPixelsToPointF(double x, double y, float scale_factor) {
    return gfx::PointF(x * scale_factor, y * scale_factor);
  }
-@@ -753,6 +797,10 @@ class InputHandler::InputInjector
+@@ -753,6 +805,10 @@ class InputHandler::InputInjector
        return;
      }
  
@@ -679,7 +687,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
      if (owner_->drag_controller_.HandleMouseEvent(*widget_host_, mouse_event,
                                                    callback)) {
        return;
-@@ -764,10 +812,23 @@ class InputHandler::InputInjector
+@@ -764,10 +820,23 @@ class InputHandler::InputInjector
      // This may destroy the injector if the events get discarded.
      base::WeakPtr<InputHandler::InputInjector> weak_this =
          weak_ptr_factory_.GetWeakPtr();
@@ -704,7 +712,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
      if (!input_queued_) {
        pending_mouse_callbacks_.back()->sendSuccess();
        pending_mouse_callbacks_.pop_back();
-@@ -842,6 +903,16 @@ class InputHandler::InputInjector
+@@ -842,6 +911,16 @@ class InputHandler::InputInjector
      input_queued_ = true;
    }
  
@@ -721,7 +729,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    void OnInputEventAck(const RenderWidgetHost& widget,
                         blink::mojom::InputEventResultSource source,
                         blink::mojom::InputEventResultState state,
-@@ -892,6 +963,9 @@ class InputHandler::InputInjector
+@@ -892,6 +971,9 @@ class InputHandler::InputInjector
    // Callbacks for calls to Input.dispatchKey/MouseEvent that have been sent to
    // the renderer, but that we haven't yet received an ack for.
    bool input_queued_ = false;
@@ -731,7 +739,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    base::circular_deque<std::unique_ptr<DispatchKeyEventCallback>>
        pending_key_callbacks_;
    base::circular_deque<std::unique_ptr<DispatchMouseEventCallback>>
-@@ -1134,6 +1208,12 @@ void InputHandler::DragController::EndDraggingWithRenderWidgetHostAtPoint(
+@@ -1134,6 +1216,12 @@ void InputHandler::DragController::EndDraggingWithRenderWidgetHostAtPoint(
      return;
    }
    auto* host = RenderWidgetHostImpl::From(view->GetRenderWidgetHost());
@@ -744,7 +752,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    auto point = *maybe_point;
  
    host->DragTargetDrop(drag_state_->data, point, point, event->GetModifiers(),
-@@ -1277,6 +1357,11 @@ void InputHandler::DispatchKeyEvent(
+@@ -1277,6 +1365,11 @@ void InputHandler::DispatchKeyEvent(
        widget_host = target_host;
    }
  
@@ -756,7 +764,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    // We do not pass events to browser if there is no native key event
    // due to Mac needing the actual os_event.
    if (event.native_key_code && allow_sending_input_to_browser_)
-@@ -1304,6 +1389,11 @@ void InputHandler::InsertText(const std::string& text,
+@@ -1304,6 +1397,11 @@ void InputHandler::InsertText(const std::string& text,
        widget_host = target_host;
    }
  
@@ -768,7 +776,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    base::OnceClosure closure =
        base::BindOnce(&InsertTextCallback::sendSuccess, std::move(callback));
  
-@@ -1488,6 +1578,10 @@ void InputHandler::OnWidgetForDispatchDragEvent(
+@@ -1488,6 +1586,10 @@ void InputHandler::OnWidgetForDispatchDragEvent(
    auto point = *maybe_point;
    RenderWidgetHostImpl* widget_host =
        RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
@@ -779,7 +787,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    auto mask =
        static_cast<blink::DragOperationsMask>(data->GetDragOperationsMask());
    std::unique_ptr<DropData> drop_data =
-@@ -1583,10 +1677,26 @@ float InputHandler::ScaleFactor() {
+@@ -1583,10 +1685,26 @@ float InputHandler::ScaleFactor() {
    return scale_factor;
  }
  
@@ -810,7 +818,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    // Only allow when Input.setInterceptDrags is disabled.
    if (!intercept_drags_) {
      // If `last_mouse_move_` exists, then CDP is the currently handling mouse
-@@ -1651,6 +1761,10 @@ void InputHandler::OnWidgetForDispatchMouseEvent(
+@@ -1651,6 +1769,10 @@ void InputHandler::OnWidgetForDispatchMouseEvent(
  
    RenderWidgetHostImpl* widget_host =
        RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
@@ -821,7 +829,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    if (event->GetType() == blink::WebInputEvent::Type::kMouseWheel) {
      EnsureInjector(widget_host)
          ->InjectWheelEvent(static_cast<blink::WebMouseWheelEvent*>(event.get()),
-@@ -1667,6 +1781,13 @@ void InputHandler::DispatchTouchEvent(
+@@ -1667,6 +1789,13 @@ void InputHandler::DispatchTouchEvent(
      std::optional<double> timestamp,
      std::unique_ptr<DispatchTouchEventCallback> callback) {
    if (base::FeatureList::IsEnabled(features::kSyntheticPointerActions)) {
@@ -835,7 +843,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
      DispatchSyntheticPointerActionTouch(
          event_type, std::move(touch_points), std::move(modifiers),
          std::move(timestamp), std::move(callback));
-@@ -1751,6 +1872,10 @@ void InputHandler::OnWidgetForDispatchWebTouchEvent(
+@@ -1751,6 +1880,10 @@ void InputHandler::OnWidgetForDispatchWebTouchEvent(
    }
    RenderWidgetHostImpl* widget_host =
        RenderWidgetHostImpl::From(target->GetRenderWidgetHost());
@@ -846,7 +854,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
  
    RenderWidgetHostViewBase* root_view = target->GetRootView();
    if (!root_view) {
-@@ -2312,6 +2437,7 @@ void InputHandler::SynthesizeTapGesture(
+@@ -2312,6 +2445,7 @@ void InputHandler::SynthesizeTapGesture(
  }
  
  void InputHandler::ClearInputState() {
@@ -1017,3 +1025,13 @@ diff --git a/net/server/http_server.cc b/net/server/http_server.cc
  HttpConnection* HttpServer::FindConnection(int connection_id) {
    auto it = id_to_connection_.find(connection_id);
    if (it == id_to_connection_.end())
+diff --git a/content/browser/devtools/devtools_session.h b/content/browser/devtools/devtools_session.h
+--- a/content/browser/devtools/devtools_session.h
++++ b/content/browser/devtools/devtools_session.h
+@@ -100,5 +100,6 @@
+   content::DevToolsAgentHostClient* GetClient() override;
+ 
+   DevToolsSession* GetRootSession();
++  const std::string& ArdiaSessionId() const { return session_id_; }
+ 
+   // Browser-only sessions do not talk to mojom::DevToolsAgent, but instead
