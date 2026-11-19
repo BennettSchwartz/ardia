@@ -76,7 +76,7 @@ test("every registered command is classified, and background run allows only the
   for (const command of ["print", "cast", "newProfile", "pinExtensions", "clearBrowsingData", "bookmarkPage", "openProfileMenu"]) {
     assert.equal(runMethod({ command, window: windowId }, true).error?.code, "refused", command);
   }
-  assert.ok(!runMethod({ command: "toggleSidebar", window: windowId }, true).error, "a quiet command runs");
+  assert.equal(runMethod({ command: "toggleSidebar", window: windowId }, true).error?.code, "refused", "no command runs in the background");
 });
 
 test("a close refused because nobody could see the question still drops a stale last-window marker", async () => {

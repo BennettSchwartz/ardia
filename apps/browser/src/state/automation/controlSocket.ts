@@ -33,7 +33,6 @@ import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, run
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 import { fittedEvent, fittedReply } from "./socketWire";
-import { BACKGROUND_RUN_COMMANDS } from "./backgroundRun";
 import { dismissSocketAsks } from "./socketAsk";
 import { dropAllHistoryHandles, dropHistoryHandles } from "./historyHandles";
 import { dropLateResults, forgetTabCalls } from "./tabCalls";
@@ -171,11 +170,9 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
 }
 
 export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
+  if (background) return failure("refused", "run isn't available in background instances; use the dedicated methods (apply, tabs.*, windows.*, closed.restore, …).");
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
-  if (background && !BACKGROUND_RUN_COMMANDS.has(plan.command)) {
-    return failure("refused", `${plan.command} isn't one of the commands a background Ardia runs, since it may open something only a person can answer; use the matching socket method instead (apply's tab.close, tabs.back, tabs.reload, …).`);
-  }
   try {
     runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId });
   } catch (error) {
