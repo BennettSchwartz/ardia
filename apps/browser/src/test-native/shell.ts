@@ -156,6 +156,15 @@ const focus: Modules["ArdiaFocus"] = {
   pressRepeated: () => Promise.resolve(pressRepeated.earlier),
 };
 
+export const filePicks = {
+  held: false,
+  waiting: [] as ((urls: string[]) => void)[],
+  release(urls: string[]) {
+    const waiting = filePicks.waiting.splice(0);
+    for (const resolve of waiting) resolve(urls);
+  },
+};
+
 export const surfaces = {
   open: [] as OpenSurface[],
   bar: [] as SurfaceItem[],
@@ -165,6 +174,7 @@ export const surfaces = {
   checked: [] as { menu: string | null; path: number[]; ref: string }[],
   dismissed: [] as string[],
   checkHook: null as (() => void) | null,
+  barReflectsPrivate: false,
   emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
 };
 
@@ -198,7 +208,10 @@ const menus: Modules["ArdiaMenus"] = {
     surfaces.dismissed.push(id);
     surfaces.open = surfaces.open.filter((s) => s.id !== id);
   },
-  menuBar: () => Promise.resolve(surfaces.bar),
+  menuBar: () =>
+    surfaces.barReflectsPrivate
+      ? Promise.reject(Object.assign(new Error("The menu bar currently reflects a private window."), { code: "refused" }))
+      : Promise.resolve(surfaces.bar),
   performMenuBarItem: async (menu, path, ref, windowId) => {
     surfaces.performed.push({ menu, path, ref, windowId });
     return "performed";
@@ -223,7 +236,7 @@ const dialogs: Modules["ArdiaDialogs"] = {
   confirm: () => Promise.resolve({ confirmed: false, suppressed: false }),
   dismissShownOnly: () => Promise.resolve(),
   prompt: () => Promise.resolve(null),
-  pickFiles: () => Promise.resolve([]),
+  pickFiles: () => (filePicks.held ? new Promise<string[]>((resolve) => filePicks.waiting.push(resolve)) : Promise.resolve([])),
   pickFolder: () => Promise.resolve(null),
 };
 
