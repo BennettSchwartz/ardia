@@ -205,6 +205,27 @@ test("a held store prompt never goes to a closing window: it takes another open 
   gates.install = null;
 });
 
+test("a held store prompt aimed at a private window shows in a main window instead", async () => {
+  const { folders, gates, windowId } = await setup();
+  folders.set("/tmp/p/ext", { id: "ppp" });
+  const privateWindow = S().createWindow({ kind: "private", url: "https://p.example/" });
+  assert.equal(S().windows[privateWindow]?.kind, "private");
+  const host = utilitySheetHost(SETTINGS_WINDOW_ID);
+  const shown = await loadFromSettings("/tmp/p/ext");
+  const held = gate();
+  gates.install = held.shut;
+  void confirmInstall(shown.key);
+  await settle();
+  showInstallPrompt(privateWindow, { requestId: "held-p", profile: "", type: "install", name: "Held", icon: "", permissions: [] });
+  held.open();
+  await settle();
+  const now = useExtensions.getState().install;
+  assert.deepEqual([now?.status, now?.windowId], ["prompt", windowId]);
+  cancelInstall();
+  host();
+  gates.install = null;
+});
+
 test("a held store prompt can go to an open Little Ardia when the main window is closing", async () => {
   const { folders, gates, windowId } = await setup();
   const { startClosingWindow, stopClosingWindow } = await import("../windows/closingWindows.ts");
@@ -258,34 +279,27 @@ test("configure changes one setting per call: site access with incognito, or any
   assert.deepEqual([list[0].siteAccess, list[0].incognito, list[0].sites], ["ON_CLICK", false, ["https://a.example/*"]], "no grant lost");
 });
 
-test("specificSites without hosts, or with nothing named at all, fails validation before anything is read", async () => {
-  const { list, writes, listCalls } = await setup();
-  list.push(row("sites", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*"] }));
-  const before = listCalls.count;
-  for (const params of [{ id: "sites", siteAccess: "specificSites" }, { id: "sites", siteAccess: "specificSites", hosts: [] }, { id: "sites" }, { id: "sites", siteAccess: "onClick", hosts: ["https://a.example/*"] }]) {
-    assert.equal((await call("extensions.configure", params)).error?.code, "bad_request", JSON.stringify(params));
-  }
-  assert.deepEqual([writes, listCalls.count - before], [[], 0]);
-});
-
-test("unrestricted to specificSites with every grant revoked is refused before the write, never reported as done", async () => {
+test("specificSites is refused before anything is written, even naming exactly the granted sites; other site access still changes", async () => {
   const { list, writes } = await setup();
-  list.push(row("broad", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*"] }));
-  const reply = await call("extensions.configure", { id: "broad", siteAccess: "specificSites", hosts: ["https://a.example/*"] });
-  assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
-  assert.match(reply.error.message, /granting other sites needs engine support/);
-  assert.deepEqual(writes, [], "no write, so no grant was revoked");
-  assert.deepEqual([list[0].siteAccess, list[0].sites], ["ON_ALL_SITES", ["https://*/*"]]);
+  list.push(row("specific", { siteAccess: "ON_SPECIFIC_SITES", sites: ["https://a.example/*"] }), row("broad", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*"] }));
+  for (const id of ["specific", "broad"]) {
+    const reply = await call("extensions.configure", { id, siteAccess: "specificSites" });
+    assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+    assert.equal(reply.error.message, "changing to specific sites needs engine support");
+  }
+  assert.equal((await call("extensions.configure", { id: "specific", siteAccess: "specificSites", hosts: ["https://a.example/*"] })).error?.code, "bad_request", "hosts is no longer a parameter");
+  assert.equal((await call("extensions.configure", { id: "specific" })).error?.code, "bad_request", "nothing named");
+  assert.deepEqual(writes, []);
+  assert.deepEqual(list.map((x) => [x.siteAccess, x.sites]), [["ON_SPECIFIC_SITES", ["https://a.example/*"]], ["ON_ALL_SITES", ["https://*/*"]]]);
+  assert.equal((await ok("extensions.configure", { id: "broad", siteAccess: "onClick" })).siteAccess, "ON_CLICK");
 });
 
-test("specificSites answers failed when Chromium leaves different sites than the request named", async () => {
+test("an extension missing from the readback after the write answers failed, not no_window", async () => {
   const { list } = await setup();
-  list.push(row("kept", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*", "https://a.example/*"], revokeAllOnWithhold: true }));
-  const reply = await call("extensions.configure", { id: "kept", siteAccess: "specificSites", hosts: ["https://a.example/*"] });
+  list.push(row("vanishes", { siteAccess: "ON_ALL_SITES", vanishOnWrite: true }));
+  const reply = await call("extensions.configure", { id: "vanishes", siteAccess: "onClick" });
   assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
-  list.push(row("fine", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*", "https://b.example/*"] }));
-  const ok2 = await ok("extensions.configure", { id: "fine", siteAccess: "specificSites", hosts: ["https://b.example/*"] });
-  assert.deepEqual([ok2.siteAccess, ok2.sites], ["ON_SPECIFIC_SITES", ["https://b.example/*"]]);
+  assert.match(reply.error.message, /read them back after the change/);
 });
 
 test("a successful configure reads the list exactly once after its write", async () => {

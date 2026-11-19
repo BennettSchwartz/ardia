@@ -31,7 +31,7 @@ export function utilitySheetHost(windowId: string): () => void {
 }
 
 function shownWindowFor(windowId: string): string | null {
-  if (windowCanShow(windowId)) return windowId;
+  if (windowCanShow(windowId) && useBrowser.getState().windows[windowId]?.kind !== "private") return windowId;
   const s = useBrowser.getState();
   return [...s.ui.focusOrder, ...s.windowOrder].find((id) => isOpenRegularWindow(s.windows[id]) || (isSmallWindow(s.windows[id]) && !isWindowClosing(id))) ?? null;
 }
