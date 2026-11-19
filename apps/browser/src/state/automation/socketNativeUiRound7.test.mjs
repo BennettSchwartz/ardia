@@ -51,22 +51,26 @@ test("a dynamic row can't be run", async () => {
   }
 });
 
-test("menus.open keeps a <select> popup's and a page menu's enabled and checked state", async () => {
+test("menus.open keeps a captured page menu's enabled and checked state, and lists no <select> popup", async () => {
   const { windowId, tab } = await freshWindow();
-  const options = [
-    { path: [0], title: "apple", enabled: true, checked: false, separator: false },
-    { path: [1], title: "banana", enabled: false, checked: false, separator: false },
-    { path: [2], title: "cherry", enabled: true, checked: true, separator: false },
-  ];
   stub.surfaces.open = [
-    { id: "sel1", kind: "select", tab, window: windowId, items: options },
-    { id: "pg1", kind: "page", captured: true, tab, window: windowId, items: [{ path: [0], title: "Copy", enabled: false, checked: false, separator: false, command: 50150 }] },
+    { id: "sel1", kind: "select", tab, window: windowId, items: [{ path: [0], title: "apple", enabled: true, checked: true, separator: false }] },
+    {
+      id: "pg1",
+      kind: "page",
+      captured: true,
+      tab,
+      window: windowId,
+      items: [
+        { path: [0], title: "Copy", enabled: false, checked: false, separator: false, command: 50150 },
+        { path: [1], title: "Spelling", enabled: true, checked: true, separator: false, command: 3 },
+      ],
+    },
   ];
-  const [select, page] = await ok("menus.open");
-  assert.deepEqual(select.items.map((i) => [i.title, i.enabled, i.checked]), [["apple", true, false], ["banana", false, false], ["cherry", true, true]]);
-  assert.deepEqual([page.items[0].enabled, page.items[0].checked], [false, false]);
+  const listed = await ok("menus.open");
+  assert.deepEqual(listed.map((m) => m.id), ["pg1"]);
+  assert.deepEqual(listed[0].items.map((i) => [i.title, i.enabled, i.checked]), [["Copy", false, false], ["Spelling", true, true]]);
 });
-
 test("commands that need the person to finish them are left out of commands and refused before any window is resolved", async () => {
   await freshWindow();
   const need = ["exportBookmarks", "savePage", "print", "printWithSystemDialog", "newProfile", "openFile", "clearBrowsingData", "importBrowserData", "share", "cast"];

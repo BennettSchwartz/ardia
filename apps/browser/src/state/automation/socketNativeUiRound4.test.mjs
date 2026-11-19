@@ -21,7 +21,7 @@ test("the menu bar is refused while a private window is open, and a tracked bar 
   const bar = await call("menus.bar");
   assert.equal(bar.error?.code, "refused");
   assert.match(bar.error.message, /private window is open/);
-  assert.equal((await call("menus.choose", { menu: "pb1", path: minimize.path, ref: minimize.ref })).error?.code, "refused");
+  assert.equal((await call("menus.choose", { menu: "pb1", path: minimize.path, ref: minimize.ref })).error?.code, "no_window");
   assert.equal((await call("menus.runBar", { path: minimize.path, ref: minimize.ref, window: windowId })).error?.code, "refused");
 });
 test("Arrange in Front runs with no private window open and is refused with one", async () => {

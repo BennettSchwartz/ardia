@@ -37,11 +37,10 @@ test("a tracking menu bar isn't listed, and nothing is chosen from it", async ()
   assert.deepEqual(await ok("menus.open"), []);
   for (const it of [quit, appleEvents, selectAll]) {
     const reply = await call("menus.choose", { menu: "bar1", path: it.path, ref: it.ref });
-    assert.equal(reply.error?.code, "refused", it.title);
-    assert.match(reply.error.message, /menus.runBar instead/);
+    assert.equal(reply.error?.code, "no_window", it.title);
   }
   assert.deepEqual(stub.surfaces.performed, []);
-  assert.equal((await call("menus.dismiss", { menu: "bar1" })).error?.code, "refused");
+  assert.equal((await call("menus.dismiss", { menu: "bar1" })).error?.code, "no_window");
 });
 test("Ardia's own menus and unknown menus are refused, and runBar needs a ref", async () => {
   const { windowId } = await freshWindow();
@@ -49,8 +48,8 @@ test("Ardia's own menus and unknown menus are refused, and runBar needs a ref", 
     { id: "app1", kind: "app", window: windowId, items: [item([0], "Copy Recovery Code")] },
     { id: "oth1", kind: "other", window: windowId, items: [item([0], "Something")] },
   ];
-  assert.equal((await call("menus.choose", { menu: "app1", path: [0] })).error.code, "refused");
-  assert.equal((await call("menus.choose", { menu: "oth1", path: [0] })).error.code, "refused");
+  assert.equal((await call("menus.choose", { menu: "app1", path: [0] })).error.code, "no_window");
+  assert.equal((await call("menus.choose", { menu: "oth1", path: [0] })).error.code, "no_window");
   assert.equal((await call("menus.runBar", { path: [2, 4] })).error.code, "bad_request");
 });
 

@@ -7,7 +7,7 @@ setConsentPeriod(true, "socket-native-ui-round8-test");
 
 const { call, ok } = socketClient(39);
 
-test("a page's context menu on screen isn't listed and can't be dismissed, while a captured one is", async () => {
+test("a page's context menu on screen isn't listed, and dismissing it answers as an unknown id does, while a captured one is listed", async () => {
   const { windowId, tab } = await freshWindow();
   stub.surfaces.open = [
     { id: "lv1", kind: "page", tab, window: windowId, items: [{ path: [0], title: "Copy", enabled: true, checked: false, separator: false }] },
@@ -15,12 +15,12 @@ test("a page's context menu on screen isn't listed and can't be dismissed, while
   ];
   stub.surfaces.dismissed.length = 0;
   assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["cp1"]);
-  const reply = await call("menus.dismiss", { menu: "lv1" });
-  assert.equal(reply.error?.code, "refused");
-  assert.match(reply.error.message, /which tab and window it came from/);
+  const live = await call("menus.dismiss", { menu: "lv1" });
+  const unknown = await call("menus.dismiss", { menu: "zz9" });
+  assert.equal(live.error?.code, "no_window");
+  assert.deepEqual(live.error, unknown.error);
   assert.deepEqual(stub.surfaces.dismissed, []);
 });
-
 test("Bookmark All Tabs and Rename Tab need the person: absent from commands and refused by run", async () => {
   const { windowId } = await freshWindow();
   const listed = new Set((await ok("commands")).map((c) => c.id));
@@ -46,6 +46,6 @@ test("menus.runBar applies the command policy before it resolves the window, as 
 test("menus.choose isn't advertised in methods, and calling it is still refused", async () => {
   const { windowId, tab } = await freshWindow();
   assert.equal((await ok("methods")).some((m) => m.name === "menus.choose"), false);
-  stub.surfaces.open = [{ id: "s9", kind: "select", tab, window: windowId, items: [] }];
+  stub.surfaces.open = [{ id: "s9", kind: "page", captured: true, tab, window: windowId, items: [] }];
   assert.equal((await call("menus.choose", { menu: "s9", path: [0] })).error?.code, "refused");
 });

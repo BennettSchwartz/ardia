@@ -78,12 +78,12 @@ test("open menus are listed and closed through the native menu, and page menus a
     { id: "m3", kind: "menuBar", window: windowId, items: [] },
   ];
   const open = await ok("menus.open");
-  assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m1", windowId, tab], ["m2", windowId, tab]], "a tracking menu bar isn't listed");
+  assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m2", windowId, tab]], "only a captured page menu is listed");
   assert.equal((await call("menus.choose", { menu: "m1", path: [] })).error.code, "bad_request");
-  for (const menu of ["m1", "m2"]) assert.equal((await call("menus.choose", { menu, path: [0] })).error.code, "refused", menu);
-  assert.match((await call("menus.choose", { menu: "m1", path: [0] })).error.message, /menus.runBar instead/);
+  assert.equal((await call("menus.choose", { menu: "m1", path: [0] })).error.code, "no_window");
+  assert.equal((await call("menus.choose", { menu: "m2", path: [0] })).error.code, "refused");
   await ok("menus.dismiss", { menu: "m2" });
-  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m1"]);
+  assert.deepEqual(await ok("menus.open"), []);
 });
 
 test("a page's menu in a private window is not listed", async () => {
@@ -129,8 +129,8 @@ test("menu and prompt events reach subscribers", async () => {
   const { windowId, tab } = await freshWindow("https://cam.example/");
   await ok("subscribe", { events: ["menu.opened", "menu.closed", "permission.prompted"] });
   stub.controlSocket.broadcasts.length = 0;
-  stub.surfaces.emit({ type: "menuOpened", id: "m9", kind: "select", tab, window: windowId, items: [{ path: [0] }, { path: [1] }] });
-  stub.surfaces.emit({ type: "menuClosed", id: "m9", kind: "select" });
+  stub.surfaces.emit({ type: "menuOpened", id: "m9", kind: "page", captured: true, tab, window: windowId, items: [{ path: [0] }, { path: [1] }] });
+  stub.surfaces.emit({ type: "menuClosed", id: "m9", kind: "page" });
   await promptOn(tab, "p40", ["camera"]);
   const events = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line));
   assert.deepEqual(events.map((e) => e.event), ["menu.opened", "menu.closed", "permission.prompted"]);

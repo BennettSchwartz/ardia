@@ -19,10 +19,9 @@ test("the socket never starts Open File, through run, menus.runBar or a menu bar
     await call("run", { command: "openFile", window: windowId }),
     await call("run", { command: "openFile" }),
     await call("menus.runBar", { path: openFile.path, ref: openFile.ref, window: windowId }),
-    await call("menus.choose", { menu: "of1", path: openFile.path, ref: openFile.ref }),
   ];
   for (const reply of replies) assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
-  for (const reply of replies.slice(0, 3)) assert.match(reply.error.message, /needs the person to finish it/);
+  for (const reply of replies) assert.match(reply.error.message, /needs the person to finish it/);
 });
 
 test("the menu bar is refused while a private window is open in the background behind a regular key window", async () => {
@@ -35,7 +34,7 @@ test("the menu bar is refused while a private window is open in the background b
   assert.equal(bar.error?.code, "refused");
   assert.match(bar.error.message, /private window is open/);
   assert.deepEqual(await ok("menus.open"), [], "no tracked bar is listed");
-  assert.equal((await call("menus.choose", { menu: "bg1", path: minimize.path, ref: minimize.ref })).error?.code, "refused");
+  assert.equal((await call("menus.choose", { menu: "bg1", path: minimize.path, ref: minimize.ref })).error?.code, "no_window");
   assert.equal((await call("menus.runBar", { path: minimize.path, ref: minimize.ref, window: regular })).error?.code, "refused");
   assert.ok(priv && windowId);
 });
@@ -61,8 +60,7 @@ test("picks from a page's menu or a <select> popup are refused on every route, a
     { id: "sl1", kind: "select", tab, window: windowId, items: [item([0], "apple")] },
   ];
   stub.surfaces.chosen.length = 0;
-  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["sl1"], "a select popup stays listed; a context menu on screen has no known source");
-  for (const menu of ["pg1", "sl1"]) assert.equal((await call("menus.choose", { menu, path: [0] })).error?.code, "refused", menu);
-  assert.match((await call("menus.choose", { menu: "sl1", path: [0] })).error.message, /menus.runBar instead/);
+  assert.deepEqual(await ok("menus.open"), [], "neither a context menu on screen nor a select popup has a proven source");
+  for (const menu of ["pg1", "sl1"]) assert.equal((await call("menus.choose", { menu, path: [0] })).error?.code, "no_window", menu);
   assert.deepEqual(stub.surfaces.chosen, []);
 });
