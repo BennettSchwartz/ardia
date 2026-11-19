@@ -11,6 +11,8 @@ import { chromeLayout, LookBackdrop, LookBackdropBase, space, startLayout, start
 import { GlassCircleButton } from "../tabs/ChromeButtons";
 import { PlusMenuButton } from "../tabs/DeckBottomBar";
 import { StartSpaces, startBarCenterY, type StartGeometry } from "./StartSpaces";
+import { useBottomBarSpan } from "../ui/useBottomBarSpan";
+import { barSpanCenter } from "../../lib/bottomBarSpan";
 
 export function StartPage() {
   const insets = useSafeAreaInsets();
@@ -32,6 +34,8 @@ export function StartPage() {
   const barStyle = useAnimatedStyle(() => ({ opacity: shown.value }));
   const hidden = { pointerEvents: trayUp ? ("none" as const) : ("box-none" as const), importantForAccessibility: trayUp ? ("no-hide-descendants" as const) : ("auto" as const), accessibilityElementsHidden: trayUp };
   const barTop = geometry.barCenterY - startLayout.barCircle / 2;
+  const barSpan = useBottomBarSpan(width, chromeLayout.barSideInset);
+  const plusMenuLeft = Math.min(Math.max(barSpanCenter(width, barSpan) - tabsLayout.menuWidth / 2, space.l), width - tabsLayout.menuWidth - space.l);
   return (
     <View testID="startPage" style={StyleSheet.absoluteFill}>
       <LookBackdropBase themed={!incognito} incognito={incognito} />
@@ -39,7 +43,7 @@ export function StartPage() {
       <Animated.View testID="startContent" {...hidden} style={[StyleSheet.absoluteFill, contentStyle]}>
         <StartSpaces geometry={geometry} dark={dark} incognito={incognito} />
       </Animated.View>
-      <Animated.View testID="startBar" {...hidden} style={[styles.bar, { top: barTop, paddingHorizontal: geometry.safeSide + chromeLayout.barSideInset }, barStyle]}>
+      <Animated.View testID="startBar" {...hidden} style={[styles.bar, { top: barTop, paddingLeft: barSpan.left, paddingRight: barSpan.right }, barStyle]}>
         <GlassCircleButton icon="squareOnSquare" label="Tabs" testID="startBarTabs" dark={dark} incognito={incognito} onPress={showDeck} />
         <PlusMenuButton
           width={startLayout.barPlus.width}
@@ -47,7 +51,7 @@ export function StartPage() {
           testID="startBarPlus"
           dark={dark}
           incognito={incognito}
-          place={{ bottom: height - barTop + space.s, left: (width - tabsLayout.menuWidth) / 2, width: tabsLayout.menuWidth }}
+          place={{ bottom: height - barTop + space.s, left: plusMenuLeft, width: tabsLayout.menuWidth }}
           menusShown={!trayUp}
         />
         <GlassCircleButton icon="gearshape" label="Settings" testID="startBarSettings" dark={dark} incognito={incognito} onPress={() => openSettings()} />

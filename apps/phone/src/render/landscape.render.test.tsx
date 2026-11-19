@@ -3,6 +3,7 @@ import { act, type ReactTestInstance } from "react-test-renderer";
 import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { FloatingBar } from "../components/browsing/FloatingBar";
 import { SearchTray } from "../components/search/SearchTray";
+import { StartScreen } from "../components/search/StartScreen";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { deckArchiveBottom, deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { DesignProvider } from "../components/ui";
@@ -13,6 +14,7 @@ import * as deckGrid from "../state/browse/deckGrid";
 import { writePreference } from "../state/store/browserDatabase";
 import { browserDatabase } from "../state/store/database";
 import { setRootSize } from "../state/app/rootSize";
+import { useScreenLayout, type ScreenHinge } from "../state/app/screenLayout";
 import * as browse from "../state/browse/store";
 import { presentSearch } from "../state/search/store";
 import { currentTabs } from "../state/tabs/store";
@@ -39,6 +41,7 @@ afterEach(() => {
   writePreference(browserDatabase(), deckGrid.DECK_GRID_KEY, null);
   act(() => deckGrid.forgetDeckGrid());
   Dimensions.set({ window: PORTRAIT, screen: PORTRAIT });
+  act(() => useScreenLayout.setState({ hinge: "none" }));
   jest.useRealTimers();
   jest.restoreAllMocks();
 });
@@ -62,7 +65,7 @@ test("an iPhone 17 Pro on its side gets main's landscape deck: a 520.3 by 240 ca
 test("in landscape the deck's header and its bottom bar pad by the wider side inset plus the bars' 24 on both sides, and on iPhone the grid by it plus 16", () => {
   act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
   const root = redesigned(<TabDeck />);
-  expect(flat(hosts(root, "deckBottomBar")[0]!).paddingHorizontal).toBe(59 + 24);
+  expect(flat(hosts(root, "deckBottomBar")[0]!)).toMatchObject({ paddingLeft: 59 + 24, paddingRight: 59 + 24 });
   const header = root.root.findAll((node) => typeof node.type === "string" && typeof node.props.testID === "string" && node.props.testID.startsWith("deckHeader"));
   expect(header.length).toBeGreaterThan(0);
   const sides = header.map(flat).flatMap((style) => [style.paddingHorizontal, style.left, style.right, style.paddingLeft, style.paddingRight]).filter((value) => typeof value === "number");
@@ -82,12 +85,48 @@ test("in landscape the page bar stays one centred row: the wider side inset on b
   const bar = root.root.findAll((node) => node.type === FloatingBar)[0]!;
   let controls: ReactTestInstance | null = bar.parent;
   while (controls && (typeof controls.type !== "string" || flat(controls).bottom === undefined)) controls = controls.parent;
-  expect(flat(controls!).paddingHorizontal).toBe(59);
+  expect(flat(controls!)).toMatchObject({ left: 59, right: 59 });
   const row = bar.findAll((node) => typeof node.type === "string" && flat(node).flexDirection === "row" && flat(node).paddingHorizontal === 24)[0]!;
   const { gap, height } = flat(row) as { gap: number; height: number };
   expect(LANDSCAPE.width - 2 * (59 + 24) - 2 * height - 2 * gap).toBe(574);
   unmount(root);
 });
+
+const DUO_POSES = [
+  { name: "closed", width: 466, height: 678, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "closed", span: { left: 24, right: 24 } },
+  { name: "open", width: 951, height: 669, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "fullyOpen", span: { left: 455, right: 96 } },
+] as const satisfies readonly { name: string; width: number; height: number; insets: typeof INSETS; hinge: ScreenHinge; span: { left: number; right: number } }[];
+
+function onDuo(pose: (typeof DUO_POSES)[number]) {
+  Dimensions.set({ window: { ...PORTRAIT, width: pose.width, height: pose.height }, screen: { ...PORTRAIT, width: pose.width, height: pose.height } });
+  act(() => setRootSize(pose.width, pose.height));
+  jest.spyOn(safeArea, "useSafeAreaInsets").mockImplementation(() => pose.insets);
+  act(() => useScreenLayout.setState({ hinge: pose.hinge }));
+}
+
+for (const pose of DUO_POSES) {
+  test(`on the ${pose.name} Duo the page bar, the deck's bottom bar and the start bar take the Duo's span, ${pose.span.left} from the left and ${pose.span.right} from the right, and the deck's plus menu follows the bar's right edge`, () => {
+    onDuo(pose);
+    act(() => browse.useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null }));
+    const page = redesigned(<BrowsingScreen tab={currentTabs().open[0]!} />);
+    const bar = page.root.findAll((node) => node.type === FloatingBar)[0]!;
+    let controls: ReactTestInstance | null = bar.parent;
+    while (controls && (typeof controls.type !== "string" || flat(controls).bottom === undefined)) controls = controls.parent;
+    expect(flat(controls!)).toMatchObject({ left: pose.span.left - 24, right: pose.span.right - 24 });
+    unmount(page);
+    act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
+    const deck = redesigned(<TabDeck />);
+    expect(flat(hosts(deck, "deckBottomBar")[0]!)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
+    const plus = deck.root.findAll((node) => node.props.testID === "deckBarPlus" && node.props.place)[0]!;
+    expect(plus.props.place).toMatchObject({ right: pose.span.right });
+    unmount(deck);
+    act(() => browse.useBrowse.setState({ surface: "start", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
+    const start = redesigned(<StartScreen />);
+    expect(flat(hosts(start, "startBar")[0]!)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
+    expect(pose.width - pose.span.left - pose.span.right).toBe(pose.name === "closed" ? 418 : 400);
+    unmount(start);
+  });
+}
 
 test("in landscape the search panel spans the safe width less 8 on each side, so it clears the island", () => {
   act(() => presentSearch("page"));
@@ -166,7 +205,8 @@ test("in landscape the original design's deck bar pads by the wider side inset, 
   const root = renderSurface(<DesignProvider design="original"><TabDeck /></DesignProvider>);
   const settings = root.root.findAll((node) => node.props.accessibilityLabel === "Settings" && typeof node.props.onPress === "function")[0]!;
   let bar: ReactTestInstance | null = settings.parent;
-  while (bar && (typeof bar.type !== "string" || flat(bar).paddingHorizontal === undefined)) bar = bar.parent;
-  expect(flat(bar!).paddingHorizontal).toBeGreaterThanOrEqual(59);
+  while (bar && (typeof bar.type !== "string" || flat(bar).paddingLeft === undefined)) bar = bar.parent;
+  expect(flat(bar!).paddingLeft).toBeGreaterThanOrEqual(59);
+  expect(flat(bar!).paddingRight).toBeGreaterThanOrEqual(59);
   unmount(root);
 });

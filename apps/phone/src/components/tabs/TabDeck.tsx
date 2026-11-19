@@ -88,6 +88,7 @@ import { hideArchiveCard, offerArchiveCard, offerArchiveCardNow, showArchiveCard
 import { takeDeckCommand, useDeckCommand } from "../../state/browse/deckCommands";
 import { ArchiveCapsule, ArchiveIntervalCard } from "./ArchiveIntervalCard";
 import { DeckBottomBar } from "./DeckBottomBar";
+import { useBottomBarSpan } from "../ui/useBottomBarSpan";
 import { deckArchiveBottom, DeckHeader, deckHeaderBottom } from "./DeckHeader";
 import { DeckEmpty, IncognitoChip } from "./DeckChrome";
 import { PageBarGhost } from "../browsing/PageBarGhost";
@@ -134,6 +135,7 @@ export const TabDeck = memo(function TabDeck() {
   const root = useHeldRootSize();
   const { width, height } = measuredOr(root, window);
   const design = useDesign();
+  const deckBarSpan = useBottomBarSpan(width, design === "redesigned" ? chromeLayout.barSideInset : tabsLayout.barSideInset - 4);
   const redesigned = design === "redesigned";
   const glassChrome = redesigned && usesGlass();
   const gridAvailable = redesigned;
@@ -1214,7 +1216,7 @@ export const TabDeck = memo(function TabDeck() {
                     shown={shown}
                     barCenterY={g.barCenterY}
                     deckHeight={deckHeight}
-                    safeSide={g.safeSide}
+                    span={deckBarSpan}
                     incognito={incognito}
                     onQuery={setNeedle}
                     menusShown={shown && phase.kind === "settled"}
@@ -1235,7 +1237,7 @@ export const TabDeck = memo(function TabDeck() {
         {redesigned ? null : (
           <Animated.View
             pointerEvents={phase.kind === "settled" ? "box-none" : "none"} collapsable={false} importantForAccessibility={phase.kind === "settled" ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={phase.kind !== "settled"}
-            style={[styles.bar, { top: g.barCenterY - tabsLayout.barPlus.height / 2 - 2, paddingHorizontal: g.safeSide + tabsLayout.barSideInset - 4 }, chromeStyle]}
+            style={[styles.bar, { top: g.barCenterY - tabsLayout.barPlus.height / 2 - 2, paddingLeft: deckBarSpan.left, paddingRight: deckBarSpan.right }, chromeStyle]}
           >
             <DeckBar
               leading={

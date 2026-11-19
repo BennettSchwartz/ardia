@@ -100,7 +100,7 @@ test("the redesigned start page has no logo and no deck bar; its own bar holds T
   expect(root.root.findAll((node) => node.type === DeckBar)).toHaveLength(0);
   const bar = style(root, "startBar");
   expect(bar.top + bar.height / 2).toBe(BAR_CENTER_Y);
-  expect(bar).toMatchObject({ height: 48, paddingHorizontal: 24 });
+  expect(bar).toMatchObject({ height: 48, paddingLeft: 24, paddingRight: 24 });
   expect(style(root, "startBarTabs")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(style(root, "startBarSettings")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(style(root, "startBarPlus")).toMatchObject({ width: 77, height: 48, borderRadius: 24 });

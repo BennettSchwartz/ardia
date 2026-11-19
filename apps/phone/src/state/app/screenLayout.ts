@@ -1,10 +1,11 @@
 import { create } from "zustand";
+import type { ScreenHinge } from "../../lib/bottomBarSpan";
+
+export type { ScreenHinge };
 
 export type ScreenFold = { top: number; bottom: number };
 
 export type ScreenLayout = { name: "phone" } | { name: "wide" } | { name: "split"; fold: ScreenFold };
-
-export type ScreenHinge = "none" | "closed" | "partiallyOpen" | "fullyOpen";
 
 export type ScreenLayoutSource = {
   layout: "phone" | "wide" | "split";
