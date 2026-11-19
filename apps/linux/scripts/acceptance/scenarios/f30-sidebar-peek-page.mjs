@@ -4,6 +4,7 @@ import { sessionSeed } from "../lib/seed.mjs";
 import { js, pause } from "../lib/util.mjs";
 
 const EDGE_PATHS = { left: [600, 300, 100, 40, 10, 2], right: [300, 600, 800, 860, 890, 898] };
+const PAGE_SHOWN = "(ardiaLinux.inputRegions()?.status().sent?.pages.length ?? 0) > 0";
 const CASES = [
   { side: "left", addressBar: "toolbar" },
   { side: "right", addressBar: "toolbar" },
@@ -29,6 +30,7 @@ export default {
         await pause(1200);
         const width = await shell.eval("window.innerWidth");
         const path = side === "left" ? EDGE_PATHS.left : EDGE_PATHS.right.map((x) => width - (900 - x));
+        await shell.waitFor(PAGE_SHOWN, { label: "the page shown before the peek" });
         await shell.eval(`(() => {
           const record = globalThis.sidebarPeekRecord = { sent: [], regionRequests: 0, peekFrames: 0, opens: 0, closes: 0, handleFrames: 0, handleUncovered: 0, stopped: false };
           const send = chrome.send.bind(chrome);
@@ -84,6 +86,7 @@ export default {
         assert.equal(record.handleFrames, record.peekFrames, "the resize handle must be found beside the peek on every frame");
         assert.equal(record.handleUncovered, 0, "the peek's input region must cover the resize handle on every frame");
         assert.ok(!record.sent.includes(false), `the page was hidden during the peek: ${js(record.sent)}`);
+        assert.ok(await shell.eval(PAGE_SHOWN), "the page must still be shown after the peeks");
         return { viewports: record.sent.length, peekFrames: record.peekFrames };
       });
     }
