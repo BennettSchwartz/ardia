@@ -651,6 +651,8 @@
   const QR_MIN = 64;
   const QR_MAX = 640;
   const QR_DETECTIONS = 12;
+  const QR_CANVAS_SCANS = 3;
+  const QR_CANVAS_RETRY_MS = 1500;
   const typedLogin = new WeakSet();
   let applePasswords = false;
   let appleKey = false;
@@ -664,6 +666,7 @@
   let qrDetector = null;
   let qrDetections = 0;
   const qrChecked = new WeakMap();
+  const qrCanvasScans = new WeakMap();
   const qrSent = new Set();
   const hideKey = () => {
     if (keyHost) keyHost.style.display = "none";
@@ -734,15 +737,19 @@
     if (!applePasswords || !Detector || document.visibilityState !== "visible" || !document.querySelector("input")) return;
     for (const el of document.querySelectorAll("img, canvas")) {
       if (qrDetections >= QR_DETECTIONS) return;
+      const canvas = el.localName === "canvas";
       const src = el.currentSrc || el.src || "";
-      if (qrChecked.get(el) === src) continue;
+      if (canvas ? (qrCanvasScans.get(el) ?? 0) >= QR_CANVAS_SCANS : qrChecked.get(el) === src) continue;
       const candidate = qrCandidate(el);
-      if (candidate !== "later") qrChecked.set(el, src);
+      if (!canvas && candidate !== "later") qrChecked.set(el, src);
       if (candidate !== "yes") continue;
       qrDetections++;
+      if (canvas) qrCanvasScans.set(el, (qrCanvasScans.get(el) ?? 0) + 1);
       if (!qrDetector) qrDetector = new Detector({ formats: ["qr_code"] });
       qrDetector.detect(el).then(
         guard((codes) => {
+          if (canvas && codes.length) qrCanvasScans.set(el, QR_CANVAS_SCANS);
+          else if (canvas && qrCanvasScans.get(el) < QR_CANVAS_SCANS) setTimeout(scanQRSoon, QR_CANVAS_RETRY_MS);
           for (const code of codes) noteVerificationSetup(code.rawValue);
         }),
         () => {},
@@ -754,6 +761,7 @@
     if (applePasswordsListening) return;
     applePasswordsListening = true;
     document.addEventListener("focusin", updateKey, true);
+    document.addEventListener("focusin", () => applePasswords && scanQRSoon(), true);
     document.addEventListener(
       "focusout",
       guard((e) => {

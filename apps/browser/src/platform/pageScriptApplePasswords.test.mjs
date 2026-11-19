@@ -55,7 +55,7 @@ function image(attrs = {}) {
 
 const KEY_BOX = { left: 286, top: 47, size: 24, width: 34, color: "black" };
 
-function frame({ barcodes = true } = {}) {
+function frame({ barcodes = true, timers = null } = {}) {
   const sent = [];
   const listeners = {};
   const buttons = [];
@@ -128,7 +128,7 @@ function frame({ barcodes = true } = {}) {
     fieldButton,
     () => (barcodes ? BarcodeDetector : undefined),
     MutationObserver,
-    (fn) => fn(),
+    timers ? (fn, ms) => timers.push({ fn, ms }) : (fn) => fn(),
     () => {},
     () => {},
   );
@@ -334,4 +334,40 @@ test("verification code setup QR codes are reported once per link", async () => 
   await page.settle();
   assert.equal(page.detected.length, 5);
   assert.equal(page.sent.length, 2);
+});
+
+test("a QR code drawn into a canvas after its first scan is found later, with a bounded number of tries", async () => {
+  const timers = [];
+  const page = frame({ timers });
+  const totp = "otpauth://totp/Site:me?secret=JBSWY3DPEHPK3PXP";
+  const canvas = image({ localName: "canvas", src: "" });
+  const field = input({ autocomplete: "one-time-code" });
+  page.document.images = [canvas];
+  page.handlers.applePasswords(true);
+  await page.settle();
+  assert.equal(page.detected.length, 1, "the blank canvas is scanned once");
+  assert.deepEqual(page.sent, []);
+
+  canvas.qr = totp;
+  page.focus(field);
+  await page.settle();
+  assert.deepEqual(page.sent, [{ kind: "verificationCodeSetup", data: { url: totp } }], "focusing a field on the page scans the drawn canvas again");
+  const scans = page.detected.length;
+  page.focus(field);
+  await page.settle();
+  assert.equal(page.detected.length, scans, "once found, the canvas isn't scanned again");
+});
+
+test("a canvas that never shows a QR code is scanned at most three times", async () => {
+  const timers = [];
+  const page = frame({ timers });
+  page.document.images = [image({ localName: "canvas", src: "" })];
+  page.handlers.applePasswords(true);
+  await page.settle();
+  for (let i = 0; i < 6; i++) {
+    for (const timer of timers.splice(0)) timer.fn();
+    page.focus(input({ autocomplete: "one-time-code" }));
+    await page.settle();
+  }
+  assert.equal(page.detected.length, 3);
 });
