@@ -2,7 +2,7 @@ import type { BrowserCommand } from "../../platform/commands";
 import { COMMANDS, commandBarTitle, UNAVAILABLE_COMMANDS } from "../commands/commandCatalog";
 import { isConfigSettingKey } from "../settings/configAllowlist";
 
-export type AutomationDecision = "run" | "endsApp" | "changesEngine" | "leftOutSetting" | "control" | "needsArgument";
+export type AutomationDecision = "run" | "endsApp" | "changesEngine" | "leftOutSetting" | "control" | "needsArgument" | "needsPerson";
 
 export const AUTOMATION: Readonly<Record<BrowserCommand, AutomationDecision>> = {
   newTab: "run",
@@ -108,7 +108,7 @@ export const AUTOMATION: Readonly<Record<BrowserCommand, AutomationDecision>> = 
   manageExtensions: "run",
   pinExtensions: "run",
   autofill: "run",
-  openFile: "run",
+  openFile: "needsPerson",
   savePage: "run",
   emailPageLocation: "run",
   printWithSystemDialog: "run",
