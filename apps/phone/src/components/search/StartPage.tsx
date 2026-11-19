@@ -11,8 +11,8 @@ import { chromeLayout, LookBackdrop, LookBackdropBase, space, startLayout, start
 import { GlassCircleButton } from "../tabs/ChromeButtons";
 import { PlusMenuButton } from "../tabs/DeckBottomBar";
 import { StartSpaces, startBarCenterY, type StartGeometry } from "./StartSpaces";
-import { useBottomBarSpan } from "../ui/useBottomBarSpan";
-import { barSpanCenter } from "../../lib/bottomBarSpan";
+import { useBottomBarLayout } from "../ui/useBottomBarLayout";
+import { barSpanCenter, besideStrip, DUO_BAR, DUO_PLUS_ABOVE } from "../../lib/bottomBarSpan";
 
 export function StartPage() {
   const insets = useSafeAreaInsets();
@@ -34,8 +34,21 @@ export function StartPage() {
   const barStyle = useAnimatedStyle(() => ({ opacity: shown.value }));
   const hidden = { pointerEvents: trayUp ? ("none" as const) : ("box-none" as const), importantForAccessibility: trayUp ? ("no-hide-descendants" as const) : ("auto" as const), accessibilityElementsHidden: trayUp };
   const barTop = geometry.barCenterY - startLayout.barCircle / 2;
-  const barSpan = useBottomBarSpan(width, chromeLayout.barSideInset);
+  const { span: barSpan, strip } = useBottomBarLayout(width, chromeLayout.barSideInset);
   const plusMenuLeft = Math.min(Math.max(barSpanCenter(width, barSpan) - tabsLayout.menuWidth / 2, space.l), width - tabsLayout.menuWidth - space.l);
+  const stripX = strip ? strip.centerX - DUO_BAR.button / 2 : 0;
+  const tabs = <GlassCircleButton icon="squareOnSquare" label="Tabs" testID="startBarTabs" dark={dark} incognito={incognito} onPress={showDeck} />;
+  const plus = (
+    <PlusMenuButton
+      width={strip ? DUO_BAR.button : startLayout.barPlus.width}
+      label={incognito ? "New Incognito Tab" : "New Tab"}
+      testID="startBarPlus"
+      dark={dark}
+      incognito={incognito}
+      place={strip ? { bottom: height - barTop - startLayout.barCircle + DUO_PLUS_ABOVE, ...besideStrip(strip, width, tabsLayout.menuWidth, space.l) } : { bottom: height - barTop + space.s, left: plusMenuLeft, width: tabsLayout.menuWidth }}
+      menusShown={!trayUp}
+    />
+  );
   return (
     <View testID="startPage" style={StyleSheet.absoluteFill}>
       <LookBackdropBase themed={!incognito} incognito={incognito} />
@@ -44,22 +57,25 @@ export function StartPage() {
         <StartSpaces geometry={geometry} dark={dark} incognito={incognito} />
       </Animated.View>
       <Animated.View testID="startBar" {...hidden} style={[styles.bar, { top: barTop, paddingLeft: barSpan.left, paddingRight: barSpan.right }, barStyle]}>
-        <GlassCircleButton icon="squareOnSquare" label="Tabs" testID="startBarTabs" dark={dark} incognito={incognito} onPress={showDeck} />
-        <PlusMenuButton
-          width={startLayout.barPlus.width}
-          label={incognito ? "New Incognito Tab" : "New Tab"}
-          testID="startBarPlus"
-          dark={dark}
-          incognito={incognito}
-          place={{ bottom: height - barTop + space.s, left: plusMenuLeft, width: tabsLayout.menuWidth }}
-          menusShown={!trayUp}
-        />
+        {strip ? null : tabs}
+        {strip ? null : plus}
         <GlassCircleButton icon="gearshape" label="Settings" testID="startBarSettings" dark={dark} incognito={incognito} onPress={() => openSettings()} />
       </Animated.View>
+      {strip ? (
+        <>
+          <Animated.View testID="startStripPlus" {...hidden} style={[styles.strip, { left: stripX, top: barTop - DUO_PLUS_ABOVE }, barStyle]}>
+            {plus}
+          </Animated.View>
+          <Animated.View testID="startStripTabs" {...hidden} style={[styles.strip, { left: stripX, top: barTop }, barStyle]}>
+            {tabs}
+          </Animated.View>
+        </>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   bar: { position: "absolute", left: 0, right: 0, height: startLayout.barCircle, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: startLayout.barGap },
+  strip: { position: "absolute", width: DUO_BAR.button, height: DUO_BAR.button, alignItems: "center", justifyContent: "center" },
 });

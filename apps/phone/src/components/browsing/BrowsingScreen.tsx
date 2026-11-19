@@ -63,7 +63,7 @@ import { PagerBackdrop, PagerNeighbour, useTabPager } from "./TabPager";
 import { launchArguments } from "../../state/app/launchFlags";
 import { labTrace } from "../../platform/lab";
 import { shownTone } from "../../lib/pageTone";
-import { bottomBarSpan } from "../../lib/bottomBarSpan";
+import { besideStrip, bottomBarLayout, DUO_BAR } from "../../lib/bottomBarSpan";
 import { useScreenLayout } from "../../state/app/screenLayout";
 
 export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: BrowserTab }) {
@@ -74,9 +74,10 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const { width, height } = useWindowDimensions();
   const hinge = useScreenLayout((s) => s.hinge);
   const barSide = design === "redesigned" ? chromeLayout.barSideInset : browseLayout.barSideInset - 4;
-  const barSpan = bottomBarSpan(width, insets, hinge, barSide);
+  const { span: barSpan, strip } = bottomBarLayout(width, insets, hinge, barSide);
   const controlsSpan = { left: barSpan.left - barSide, right: barSpan.right - barSide };
-  const tabsMenuLeft = hinge === "none" ? space.l : controlsSpan.left + space.l;
+  const duoStrip = design === "redesigned" ? strip : null;
+  const stripLeft = duoStrip ? duoStrip.centerX - DUO_BAR.button / 2 - controlsSpan.left : null;
   const menuOpen = useMenuOpen();
   const finding = useFindOpen();
   const readerId = useReaderTabId();
@@ -197,6 +198,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                     dark={barDark}
                     showsPlus={staged || !searching}
                     anchors={!collapse.collapsed}
+                    stripLeft={stripLeft}
                     onTabs={showDeck}
                     onTabsMenu={openTabsMenu}
                     onStep={stepTab}
@@ -234,7 +236,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
       {tabsMenu ? (
         <Menu
           items={tabsMenuItems(barOrder)}
-          place={{ bottom: barHeight(insets.bottom, design) + space.xs, left: tabsMenuLeft, width: Math.min(tabsLayout.menuWidth, width - tabsMenuLeft - space.l) }}
+          place={duoStrip ? { bottom: barCenterFromBottom(insets.bottom, design) - DUO_BAR.button / 2, ...besideStrip(duoStrip, width, tabsLayout.menuWidth, space.l) } : { bottom: barHeight(insets.bottom, design) + space.xs, left: space.l, width: Math.min(tabsLayout.menuWidth, width - space.l * 2) }}
           frost={null}
           onDismiss={() => setTabsMenu(false)}
         />

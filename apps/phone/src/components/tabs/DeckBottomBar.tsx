@@ -11,13 +11,14 @@ import { capsule, ChromeSurface, deckChromeLayout, deckChromeMotion, font, ink, 
 import { MenuTrigger } from "../ui/MenuTrigger";
 import { useKeyboardTopFromBottom } from "../search/useKeyboardHeight";
 import { FadingGlyphs, GlassPlusButton, type ChromeFade } from "./ChromeButtons";
-import type { BarSpan } from "../../lib/bottomBarSpan";
+import { besideStrip, DUO_BAR, type BottomBarLayout } from "../../lib/bottomBarSpan";
 
 type Props = {
   shown: boolean;
   barCenterY: number;
   deckHeight: number;
-  span: BarSpan;
+  width: number;
+  layout: BottomBarLayout;
   incognito: boolean;
   onQuery: (needle: string) => void;
   menusShown?: boolean;
@@ -126,7 +127,7 @@ export function SearchTabsField({ search, testID = "deckSearchTabs", style, glas
   );
 }
 
-export function DeckBottomBar({ shown, barCenterY, deckHeight, span, incognito, onQuery, menusShown = true, onMenu, glassShown, glassShownMs, glyphFade }: Props) {
+export function DeckBottomBar({ shown, barCenterY, deckHeight, width, layout, incognito, onQuery, menusShown = true, onMenu, glassShown, glassShownMs, glyphFade }: Props) {
   const fade = { glassShown, glassShownMs, glyphFade };
   const roles = useTheme();
   const dark = roles.dark;
@@ -140,6 +141,9 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, span, incognito, 
     rise.value = withTiming(-lift, { duration: deckChromeMotion.keyboard, easing: tabsCurve.easeOut });
   }, [lift]);
   const riseStyle = useAnimatedStyle(() => ({ transform: [{ translateY: rise.value }] }));
+  const { span, strip } = layout;
+  const plusPlace = strip ? { bottom: deckHeight - barCenterY - deckChromeLayout.barCircle / 2, ...besideStrip(strip, width, tabsLayout.menuWidth, deckChromeLayout.menuGap) } : { bottom: deckHeight - barCenterY + deckChromeLayout.barCircle / 2 + deckChromeLayout.menuGap, right: span.right, width: tabsLayout.menuWidth };
+  const plus = <PlusMenuButton width={deckChromeLayout.barCircle} label={incognito ? "New Incognito Tab" : "New Tab"} testID="deckBarPlus" dark={dark} place={plusPlace} menusShown={menusShown} onMenu={onMenu} {...fade} />;
   const measure = () =>
     row.current?.measureInWindow((_x, y, _width, height) => {
       if (height > 0) noteDeckBarTop(y);
@@ -153,8 +157,9 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, span, incognito, 
       <View ref={row} testID="deckBottomBar" onLayout={measure} pointerEvents="box-none" style={[styles.bar, { paddingLeft: span.left, paddingRight: span.right }]}>
         <IncognitoSwitch incognito={incognito} dark={dark} {...fade} />
         <SearchTabsField search={search} style={styles.searchHit} {...fade} />
-        <PlusMenuButton width={deckChromeLayout.barCircle} label={incognito ? "New Incognito Tab" : "New Tab"} testID="deckBarPlus" dark={dark} place={{ bottom: deckHeight - barCenterY + deckChromeLayout.barCircle / 2 + deckChromeLayout.menuGap, right: span.right, width: tabsLayout.menuWidth }} menusShown={menusShown} onMenu={onMenu} {...fade} />
+        {strip ? null : plus}
       </View>
+      {strip ? <View testID="deckStripPlus" pointerEvents="box-none" style={[styles.strip, { left: strip.centerX - DUO_BAR.button / 2 }]}>{plus}</View> : null}
     </Animated.View>
   );
 }
@@ -164,6 +169,7 @@ const styles = StyleSheet.create({
   centered: { alignItems: "center", justifyContent: "center" },
   switchOn: { position: "absolute", width: deckChromeLayout.barCircle, height: deckChromeLayout.barCircle, borderRadius: capsule(deckChromeLayout.barCircle) },
   bar: { height: deckChromeLayout.barCircle, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.barGap },
+  strip: { position: "absolute", top: 0, width: DUO_BAR.button, height: DUO_BAR.button },
   searchHit: { flex: 1, height: deckChromeLayout.barCircle },
   search: { flex: 1, paddingLeft: deckChromeLayout.searchLead },
   searchRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.searchSpacing },

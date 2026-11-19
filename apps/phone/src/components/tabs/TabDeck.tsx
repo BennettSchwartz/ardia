@@ -88,7 +88,7 @@ import { hideArchiveCard, offerArchiveCard, offerArchiveCardNow, showArchiveCard
 import { takeDeckCommand, useDeckCommand } from "../../state/browse/deckCommands";
 import { ArchiveCapsule, ArchiveIntervalCard } from "./ArchiveIntervalCard";
 import { DeckBottomBar } from "./DeckBottomBar";
-import { useBottomBarSpan } from "../ui/useBottomBarSpan";
+import { useBottomBarLayout } from "../ui/useBottomBarLayout";
 import { deckArchiveBottom, DeckHeader, deckHeaderBottom } from "./DeckHeader";
 import { DeckEmpty, IncognitoChip } from "./DeckChrome";
 import { PageBarGhost } from "../browsing/PageBarGhost";
@@ -135,7 +135,8 @@ export const TabDeck = memo(function TabDeck() {
   const root = useHeldRootSize();
   const { width, height } = measuredOr(root, window);
   const design = useDesign();
-  const deckBarSpan = useBottomBarSpan(width, design === "redesigned" ? chromeLayout.barSideInset : tabsLayout.barSideInset - 4);
+  const deckBarLayout = useBottomBarLayout(width, design === "redesigned" ? chromeLayout.barSideInset : tabsLayout.barSideInset - 4);
+  const deckBarSpan = deckBarLayout.span;
   const redesigned = design === "redesigned";
   const glassChrome = redesigned && usesGlass();
   const gridAvailable = redesigned;
@@ -1216,7 +1217,8 @@ export const TabDeck = memo(function TabDeck() {
                     shown={shown}
                     barCenterY={g.barCenterY}
                     deckHeight={deckHeight}
-                    span={deckBarSpan}
+                    width={width}
+                    layout={deckBarLayout}
                     incognito={incognito}
                     onQuery={setNeedle}
                     menusShown={shown && phase.kind === "settled"}

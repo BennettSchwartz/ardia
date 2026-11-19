@@ -1,9 +1,9 @@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { bottomBarSpan, type BarSpan } from "../../lib/bottomBarSpan";
+import { bottomBarLayout, type BottomBarLayout } from "../../lib/bottomBarSpan";
 import { useScreenLayout } from "../../state/app/screenLayout";
 
-export function useBottomBarSpan(width: number, side: number): BarSpan {
+export function useBottomBarLayout(width: number, side: number): BottomBarLayout {
   const insets = useSafeAreaInsets();
   const hinge = useScreenLayout((s) => s.hinge);
-  return bottomBarSpan(width, insets, hinge, side);
+  return bottomBarLayout(width, insets, hinge, side);
 }

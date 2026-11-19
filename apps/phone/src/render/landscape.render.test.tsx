@@ -93,9 +93,9 @@ test("in landscape the page bar stays one centred row: the wider side inset on b
 });
 
 const DUO_POSES = [
-  { name: "closed", width: 466, height: 678, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "closed", span: { left: 24, right: 24 } },
-  { name: "open", width: 951, height: 669, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "fullyOpen", span: { left: 455, right: 96 } },
-] as const satisfies readonly { name: string; width: number; height: number; insets: typeof INSETS; hinge: ScreenHinge; span: { left: number; right: number } }[];
+  { name: "closed", width: 466, height: 678, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "closed", span: { left: 24, right: 96 }, stripX: 418 },
+  { name: "open", width: 951, height: 669, insets: { top: 0, bottom: 34, left: 0, right: 84 }, hinge: "fullyOpen", span: { left: 455, right: 96 }, stripX: 903 },
+] as const satisfies readonly { name: string; width: number; height: number; insets: typeof INSETS; hinge: ScreenHinge; span: { left: number; right: number }; stripX: number }[];
 
 function onDuo(pose: (typeof DUO_POSES)[number]) {
   Dimensions.set({ window: { ...PORTRAIT, width: pose.width, height: pose.height }, screen: { ...PORTRAIT, width: pose.width, height: pose.height } });
@@ -104,29 +104,69 @@ function onDuo(pose: (typeof DUO_POSES)[number]) {
   act(() => useScreenLayout.setState({ hinge: pose.hinge }));
 }
 
+const holds = (node: ReactTestInstance, id: string) => node.findAll((inner) => inner.props.testID === id).length > 0;
+
 for (const pose of DUO_POSES) {
-  test(`on the ${pose.name} Duo the page bar, the deck's bottom bar and the start bar take the Duo's span, ${pose.span.left} from the left and ${pose.span.right} from the right, and the deck's plus menu follows the bar's right edge`, () => {
+  test(`on the ${pose.name} Duo the page bar holds only the address capsule, ${pose.span.left} from the left to ${pose.span.right} from the right, with Tabs on the bar's line and + 55 above it in the strip, ${pose.stripX} across`, () => {
     onDuo(pose);
     act(() => browse.useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null }));
     const page = redesigned(<BrowsingScreen tab={currentTabs().open[0]!} />);
     const bar = page.root.findAll((node) => node.type === FloatingBar)[0]!;
     let controls: ReactTestInstance | null = bar.parent;
     while (controls && (typeof controls.type !== "string" || flat(controls).bottom === undefined)) controls = controls.parent;
+    const { left } = flat(controls!) as { left: number };
     expect(flat(controls!)).toMatchObject({ left: pose.span.left - 24, right: pose.span.right - 24 });
+    const row = hosts(page, "floatingBar")[0]!;
+    expect(flat(row).paddingHorizontal).toBe(24);
+    expect(holds(row, "floatingBarAddress")).toBe(true);
+    expect(holds(row, "floatingBarTabs")).toBe(false);
+    expect(holds(row, "floatingBarPlus")).toBe(false);
+    const tabs = flat(hosts(page, "floatingBarLeading")[0]!) as { left: number; top: number };
+    const plus = flat(hosts(page, "floatingBarTrailing")[0]!) as { left: number; top: number; width: number };
+    expect(left + tabs.left + 24).toBe(pose.stripX);
+    expect(left + plus.left + plus.width / 2).toBe(pose.stripX);
+    expect(tabs.top).toBe(0);
+    expect(plus.top).toBe(-55);
     unmount(page);
+  });
+
+  test(`on the ${pose.name} Duo the deck's + moves to the strip on the bar's line, the Incognito switch and Search Tabs fill the capsule span, and the start page's Tabs and + stack in the strip`, () => {
+    onDuo(pose);
     act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
     const deck = redesigned(<TabDeck />);
-    expect(flat(hosts(deck, "deckBottomBar")[0]!)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
+    const deckBar = hosts(deck, "deckBottomBar")[0]!;
+    expect(flat(deckBar)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
+    expect(holds(deckBar, "deckBarIncognito")).toBe(true);
+    expect(holds(deckBar, "deckBarPlus")).toBe(false);
+    const stripPlus = hosts(deck, "deckStripPlus")[0]!;
+    expect(flat(stripPlus)).toMatchObject({ top: 0, left: pose.stripX - 24, width: 48 });
     const plus = deck.root.findAll((node) => node.props.testID === "deckBarPlus" && node.props.place)[0]!;
-    expect(plus.props.place).toMatchObject({ right: pose.span.right });
+    expect(plus.props.place).toMatchObject({ right: pose.width - pose.stripX + 32 });
     unmount(deck);
     act(() => browse.useBrowse.setState({ surface: "start", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
     const start = redesigned(<StartScreen />);
-    expect(flat(hosts(start, "startBar")[0]!)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
-    expect(pose.width - pose.span.left - pose.span.right).toBe(pose.name === "closed" ? 418 : 400);
+    const startBar = hosts(start, "startBar")[0]!;
+    const { top } = flat(startBar) as { top: number };
+    expect(flat(startBar)).toMatchObject({ paddingLeft: pose.span.left, paddingRight: pose.span.right });
+    expect(holds(startBar, "startBarSettings")).toBe(true);
+    expect(holds(startBar, "startBarTabs")).toBe(false);
+    expect(holds(startBar, "startBarPlus")).toBe(false);
+    expect(flat(hosts(start, "startStripTabs")[0]!)).toMatchObject({ left: pose.stripX - 24, top, width: 48 });
+    expect(flat(hosts(start, "startStripPlus")[0]!)).toMatchObject({ left: pose.stripX - 24, top: top - 55, width: 48 });
+    expect(holds(hosts(start, "startStripPlus")[0]!, "startBarPlus")).toBe(true);
+    expect(holds(hosts(start, "startStripTabs")[0]!, "startBarTabs")).toBe(true);
     unmount(start);
   });
 }
+
+test("with no hinge the page bar keeps Tabs and + in its row", () => {
+  act(() => browse.useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null }));
+  const page = redesigned(<BrowsingScreen tab={currentTabs().open[0]!} />);
+  const row = hosts(page, "floatingBar")[0]!;
+  expect(holds(row, "floatingBarTabs")).toBe(true);
+  expect(holds(row, "floatingBarPlus")).toBe(true);
+  unmount(page);
+});
 
 test("in landscape the search panel spans the safe width less 8 on each side, so it clears the island", () => {
   act(() => presentSearch("page"));
