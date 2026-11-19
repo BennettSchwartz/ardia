@@ -28,6 +28,8 @@ struct BrowserDefinition {
   bool under_config;
   const char* path;
   bool root_is_profile;
+  bool xdg_under_config;
+  const char* xdg_path;
 };
 
 const BrowserDefinition* FindBrowser(std::string_view id);

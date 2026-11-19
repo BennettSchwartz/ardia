@@ -44,29 +44,32 @@ constexpr size_t kMaxFaviconTotalBytes = 6u * 1024 * 1024;
 constexpr int64_t kPreferredFaviconWidth = 32;
 
 constexpr BrowserDefinition kBrowsers[] = {
-    {"chrome", "Google Chrome", Family::kChromium, true, "google-chrome", false},
-    {"chromeBeta", "Google Chrome Beta", Family::kChromium, true, "google-chrome-beta", false},
-    {"chromeDev", "Google Chrome Dev", Family::kChromium, true, "google-chrome-unstable", false},
-    {"chromeFlatpak", "Google Chrome (Flatpak)", Family::kChromium, false, ".var/app/com.google.Chrome/config/google-chrome", false},
-    {"chromium", "Chromium", Family::kChromium, true, "chromium", false},
-    {"chromiumFlatpak", "Chromium (Flatpak)", Family::kChromium, false, ".var/app/org.chromium.Chromium/config/chromium", false},
-    {"chromiumSnap", "Chromium (Snap)", Family::kChromium, false, "snap/chromium/common/chromium", false},
-    {"brave", "Brave", Family::kChromium, true, "BraveSoftware/Brave-Browser", false},
-    {"braveBeta", "Brave Beta", Family::kChromium, true, "BraveSoftware/Brave-Browser-Beta", false},
-    {"braveNightly", "Brave Nightly", Family::kChromium, true, "BraveSoftware/Brave-Browser-Nightly", false},
-    {"braveFlatpak", "Brave (Flatpak)", Family::kChromium, false, ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser", false},
-    {"edge", "Microsoft Edge", Family::kChromium, true, "microsoft-edge", false},
-    {"edgeBeta", "Microsoft Edge Beta", Family::kChromium, true, "microsoft-edge-beta", false},
-    {"edgeDev", "Microsoft Edge Dev", Family::kChromium, true, "microsoft-edge-dev", false},
-    {"vivaldi", "Vivaldi", Family::kChromium, true, "vivaldi", false},
-    {"vivaldiSnapshot", "Vivaldi Snapshot", Family::kChromium, true, "vivaldi-snapshot", false},
-    {"opera", "Opera", Family::kChromium, true, "opera", true},
-    {"helium", "Helium", Family::kChromium, true, "net.imput.helium", false},
-    {"firefox", "Firefox", Family::kFirefox, false, ".mozilla/firefox", false},
-    {"firefoxFlatpak", "Firefox (Flatpak)", Family::kFirefox, false, ".var/app/org.mozilla.firefox/.mozilla/firefox", false},
-    {"firefoxSnap", "Firefox (Snap)", Family::kFirefox, false, "snap/firefox/common/.mozilla/firefox", false},
-    {"librewolf", "LibreWolf", Family::kFirefox, false, ".librewolf", false},
-    {"zen", "Zen", Family::kFirefox, false, ".zen", false},
+    {"chrome", "Google Chrome", Family::kChromium, true, "google-chrome", false, false, nullptr},
+    {"chromeBeta", "Google Chrome Beta", Family::kChromium, true, "google-chrome-beta", false, false, nullptr},
+    {"chromeDev", "Google Chrome Dev", Family::kChromium, true, "google-chrome-unstable", false, false, nullptr},
+    {"chromeFlatpak", "Google Chrome (Flatpak)", Family::kChromium, false, ".var/app/com.google.Chrome/config/google-chrome", false, false, nullptr},
+    {"chromium", "Chromium", Family::kChromium, true, "chromium", false, false, nullptr},
+    {"chromiumFlatpak", "Chromium (Flatpak)", Family::kChromium, false, ".var/app/org.chromium.Chromium/config/chromium", false, false, nullptr},
+    {"chromiumSnap", "Chromium (Snap)", Family::kChromium, false, "snap/chromium/common/chromium", false, false, nullptr},
+    {"brave", "Brave", Family::kChromium, true, "BraveSoftware/Brave-Browser", false, false, nullptr},
+    {"braveBeta", "Brave Beta", Family::kChromium, true, "BraveSoftware/Brave-Browser-Beta", false, false, nullptr},
+    {"braveNightly", "Brave Nightly", Family::kChromium, true, "BraveSoftware/Brave-Browser-Nightly", false, false, nullptr},
+    {"braveFlatpak", "Brave (Flatpak)", Family::kChromium, false, ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser", false, false, nullptr},
+    {"edge", "Microsoft Edge", Family::kChromium, true, "microsoft-edge", false, false, nullptr},
+    {"edgeBeta", "Microsoft Edge Beta", Family::kChromium, true, "microsoft-edge-beta", false, false, nullptr},
+    {"edgeDev", "Microsoft Edge Dev", Family::kChromium, true, "microsoft-edge-dev", false, false, nullptr},
+    {"vivaldi", "Vivaldi", Family::kChromium, true, "vivaldi", false, false, nullptr},
+    {"vivaldiSnapshot", "Vivaldi Snapshot", Family::kChromium, true, "vivaldi-snapshot", false, false, nullptr},
+    {"opera", "Opera", Family::kChromium, true, "opera", true, false, nullptr},
+    {"helium", "Helium", Family::kChromium, true, "net.imput.helium", false, false, nullptr},
+    {"firefox", "Firefox", Family::kFirefox, false, ".mozilla/firefox", false, true, "mozilla/firefox"},
+    {"firefoxFlatpak", "Firefox (Flatpak)", Family::kFirefox, false, ".var/app/org.mozilla.firefox/.mozilla/firefox", false,
+     false, ".var/app/org.mozilla.firefox/config/mozilla/firefox"},
+    {"firefoxSnap", "Firefox (Snap)", Family::kFirefox, false, "snap/firefox/common/.mozilla/firefox", false, false, nullptr},
+    {"librewolf", "LibreWolf", Family::kFirefox, false, ".librewolf", false, false, nullptr},
+    {"zen", "Zen", Family::kFirefox, false, ".zen", false, true, "zen"},
+    {"zenFlatpak", "Zen (Flatpak)", Family::kFirefox, false, ".var/app/app.zen_browser.zen/.zen", false, false,
+     ".var/app/app.zen_browser.zen/config/zen"},
 };
 
 constexpr const char* kKindOrder[] = {"bookmarks", "history", "tabs", "passwords", "cookies",
@@ -809,7 +812,12 @@ Environment MakeEnvironment(const char* home, const char* config_home, const cha
 
 std::string DataDirectory(const Environment& environment, const BrowserDefinition& browser) {
   const std::string& base = browser.under_config ? environment.config_home : environment.home;
-  return base.empty() ? std::string() : Join(base, browser.path);
+  if (base.empty()) return std::string();
+  const std::string legacy = Join(base, browser.path);
+  const std::string& xdg_base = browser.xdg_under_config ? environment.config_home : environment.home;
+  if (!browser.xdg_path || xdg_base.empty() || IsFile(Join(legacy, "profiles.ini"))) return legacy;
+  const std::string xdg = Join(xdg_base, browser.xdg_path);
+  return IsFile(Join(xdg, "profiles.ini")) ? xdg : legacy;
 }
 
 std::optional<std::string> ProfileDirectory(const Environment& environment, const BrowserDefinition& browser,
