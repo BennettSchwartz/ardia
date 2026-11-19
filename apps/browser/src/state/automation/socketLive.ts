@@ -3,7 +3,7 @@ import { isIncognitoProfile } from "../browser/model";
 import type { GroupColor } from "../browser/types";
 import { connectedSourcesOf, deleteLiveFolder, manualRefresh, newProfileLiveFolder, openLiveItem, refreshFolderWhile } from "../live/engine";
 import { hideItems, live, markRead, setRepoHidden, unhide, updateFolder } from "../live/store";
-import type { LiveFolder, LiveFolderKind, LiveSourceId } from "../live/types";
+import type { CompletedItem, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId } from "../live/types";
 import { ownEntry } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, ids, obj, oneOf, PAGE, PROFILE, text, WINDOW } from "./socketSchema";
@@ -57,16 +57,33 @@ function list(params: Record<string, unknown>) {
   return { folders, accounts };
 }
 
+type Entry = { shown: "listed" | "hidden"; item: LiveItem } | { shown: "completed"; done: CompletedItem };
+
+const itemOf = (entry: Entry) => (entry.shown === "completed" ? entry.done.item : entry.item);
+
 function items(params: Record<string, unknown>) {
   const folder = folderOf(params.folder);
   const l = live();
+  const done = l.completed[folder.id] ?? [];
+  const completedIds = new Set(done.map((c) => c.item.id));
+  const seen = new Set<string>();
+  const entries: Entry[] = [
+    ...(l.items[folder.id] ?? []).filter((item) => !completedIds.has(item.id)).map((item) => ({ shown: "listed" as const, item })),
+    ...(l.hidden[folder.id] ?? []).filter((item) => !completedIds.has(item.id)).map((item) => ({ shown: "hidden" as const, item })),
+    ...done.map((c) => ({ shown: "completed" as const, done: c })),
+  ].filter((entry) => {
+    const id = itemOf(entry).id;
+    return !seen.has(id) && !!seen.add(id);
+  });
   const unread = new Set(l.unread[folder.id] ?? []);
-  const rows = [
-    ...(l.items[folder.id] ?? []).map((item) => ({ item, shown: "listed" as const, unread: unread.has(item.id), completed: null })),
-    ...(l.hidden[folder.id] ?? []).map((item) => ({ item, shown: "hidden" as const, unread: unread.has(item.id), completed: null })),
-    ...(l.completed[folder.id] ?? []).map((c) => ({ item: c.item, shown: "completed" as const, unread: unread.has(c.item.id), completed: { state: c.state, at: c.at } })),
-  ];
-  return page(rows, params);
+  const shown = page(entries, params);
+  return {
+    ...shown,
+    items: shown.items.map((entry) => {
+      const item = itemOf(entry);
+      return { item, shown: entry.shown, unread: unread.has(item.id), completed: entry.shown === "completed" ? { state: entry.done.state, at: entry.done.at } : null };
+    }),
+  };
 }
 
 function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] {

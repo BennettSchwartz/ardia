@@ -239,8 +239,8 @@ test("changing a live folder's filters during a refresh fetches again and never 
     assert.ok(!(await send("live.update", { folder: made.id, filters: { authored: false } })).error);
     first.open();
     await refreshing;
-    await until(() => asked.length === 3 && live().status[made.id]?.state !== "updating");
-    assert.deepEqual(asked.slice(1), [true, false]);
+    await until(() => asked.length === 4 && live().status[made.id]?.state !== "updating");
+    assert.deepEqual(asked.slice(1), [true, false, false], "the update's own refresh runs after the pass it can't join");
     assert.deepEqual(live().items[made.id].map((it) => it.id), ["new"], "the old filters' results were dropped");
     await ok("live.remove", { folder: made.id });
   } finally {

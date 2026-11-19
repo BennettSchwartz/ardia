@@ -27,6 +27,7 @@ export const COMPLETION_MS = 2600;
 const inflight = new Map<string, Promise<void>>();
 const fetchingWith = new Map<string, string>();
 const followUps = new Map<string, () => boolean>();
+const passGuards = new Map<string, () => boolean>();
 const always = () => true;
 const settingsOf = (folder: LiveFolder | undefined) => (folder ? JSON.stringify([folder.sources, folder.filters], sortedKeys) : "");
 const fetchedSources = new Map<string, Set<LiveSourceId>>();
@@ -61,17 +62,22 @@ export function refreshFolder(folderId: string, interactive = false): Promise<vo
 
 export function refreshFolderWhile(folderId: string, interactive: boolean, allowed: () => boolean): Promise<void> {
   const running = inflight.get(folderId);
+  if (running && passGuards.get(folderId) !== allowed) {
+    return running.catch(() => undefined).then(() => (allowed() ? refreshFolderWhile(folderId, interactive, allowed) : undefined));
+  }
   if (running) {
     if (fetchingWith.has(folderId) && settingsOf(live().folders[folderId]) !== fetchingWith.get(folderId)) queueFollowUp(folderId, allowed);
     return running;
   }
-  const task = during("liveFolders", () => runUntilCurrent(folderId, interactive, allowed)).finally(() => [inflight, fetchingWith, followUps].forEach((m) => m.delete(folderId)));
+  passGuards.set(folderId, allowed);
+  const task = during("liveFolders", () => runUntilCurrent(folderId, interactive, allowed)).finally(() => [inflight, fetchingWith, followUps, passGuards].forEach((m) => m.delete(folderId)));
   inflight.set(folderId, task);
   return task;
 }
 
 async function runUntilCurrent(folderId: string, interactive: boolean, allowed: () => boolean) {
   for (let guard: (() => boolean) | undefined = allowed; guard && live().folders[folderId]; ) {
+    passGuards.set(folderId, guard);
     await run(folderId, interactive, guard);
     fetchingWith.delete(folderId);
     guard = followUps.get(folderId);
@@ -114,6 +120,7 @@ async function run(folderId: string, interactive: boolean, allowed: () => boolea
   if (fence === null) return;
   const folder = live().folders[folderId];
   if (!folder) return;
+  if (!allowed()) return setStatus(folderId, { state: "idle" });
   fetchingWith.set(folderId, settingsOf(folder));
   const before = live();
   setStatus(folderId, { state: before.status[folderId]?.lastFetch ? "updating" : "initializing" });
