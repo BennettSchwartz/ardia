@@ -7,6 +7,7 @@ import type { CompletedItem, LiveFolder, LiveFolderKind, LiveItem, LiveSourceId 
 import { ownEntry } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, ids, obj, oneOf, PAGE, PROFILE, text, WINDOW } from "./socketSchema";
+import { PAGE_BYTE_BUDGET } from "./socketWire";
 import { expect, now, page, profileArg, windowOrFocused } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
 
@@ -60,6 +61,9 @@ function list(params: Record<string, unknown>) {
 type Entry = { shown: "listed" | "hidden"; item: LiveItem } | { shown: "completed"; done: CompletedItem };
 
 const itemOf = (entry: Entry) => (entry.shown === "completed" ? entry.done.item : entry.item);
+const utf8 = new TextEncoder();
+const MAX_ITEM_BYTES = PAGE_BYTE_BUDGET / 2;
+const sendable = (item: LiveItem) => (utf8.encode(JSON.stringify(item)).length <= MAX_ITEM_BYTES ? item : { id: item.id, source: item.source, oversized: true });
 
 function items(params: Record<string, unknown>) {
   const folder = folderOf(params.folder);
@@ -78,7 +82,7 @@ function items(params: Record<string, unknown>) {
   const unread = new Set(l.unread[folder.id] ?? []);
   return page(entries, params, (entry) => {
     const item = itemOf(entry);
-    return { item, shown: entry.shown, unread: unread.has(item.id), completed: entry.shown === "completed" ? { state: entry.done.state, at: entry.done.at } : null };
+    return { item: sendable(item), shown: entry.shown, unread: unread.has(item.id), completed: entry.shown === "completed" ? { state: entry.done.state, at: entry.done.at } : null };
   });
 }
 

@@ -104,7 +104,7 @@ function claimRefresh(folderId: string) {
 function staleRun(folderId: string, folder: LiveFolder, allowed: () => boolean): boolean {
   if (!allowed()) return (setStatus(folderId, { state: "idle" }), true);
   if (settingsOf(live().folders[folderId]) === settingsOf(folder)) return false;
-  if (!followUps.has(folderId)) queueFollowUp(folderId, always);
+  queueFollowUp(folderId, allowed);
   return true;
 }
 

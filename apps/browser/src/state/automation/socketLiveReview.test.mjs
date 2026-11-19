@@ -121,3 +121,36 @@ test("live.items lists an item once while its completion animates, and pages bef
     assert.equal(built, 0, "no completed row was built for a page that doesn't show one");
   });
 });
+
+test("a follow-up pass queued by a settings change keeps the socket's guard and never commits once control is off", async () => {
+  let calls = 0;
+  const held = gated();
+  const late = gated();
+  await withGithub(async () => (++calls === 2 ? (await held.gate, [pr("held", 2)]) : calls === 3 ? (await late.gate, [pr("late", 3)]) : [pr("any", calls)]), async (folder) => {
+    const refreshing = send("live.refresh", { folder });
+    await until(() => calls === 2);
+    assert.ok(!(await send("live.update", { folder, filters: { reviewRequests: false } })).error);
+    held.open();
+    await until(() => calls === 3);
+    S().updateSettings({ cliControl: false });
+    await settle();
+    late.open();
+    await refreshing.catch(() => undefined);
+    await settle();
+    assert.ok(!live().items[folder].some((it) => it.id === "late"), "the follow-up's results never landed after control went off");
+  });
+});
+
+test("live.items pages past a single item too big for a line", async () => {
+  await withGithub(async () => [pr("a", 1), pr("b", 2)], async (folder) => {
+    await ok("live.refresh", { folder });
+    const huge = { ...pr("huge", 9), pr: { number: 9, repo: "o/r", headRef: "x".repeat(2 * 1024 * 1024), baseRef: "main" } };
+    useLive.setState((s) => ({ items: { ...s.items, [folder]: [huge, ...s.items[folder]] } }));
+    const first = await ok("live.items", { folder });
+    assert.equal(first.items[0].item.id, "huge");
+    assert.equal(first.items[0].item.oversized, true);
+    assert.equal(first.total, 3);
+    assert.deepEqual(first.items.map((r) => r.item.id), live().items[folder].map((it) => it.id));
+    assert.equal(first.nextOffset, null);
+  });
+});
