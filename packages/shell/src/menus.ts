@@ -50,8 +50,46 @@ export type MenuState = {
 
 export type MenuBookmarkKey = "bookmarkFolders" | "recentBookmarks" | "bookmarksBar" | "otherBookmarks";
 
+export type SurfaceItem = {
+  path: number[];
+  title: string;
+  enabled: boolean;
+  checked: boolean;
+  mixed?: boolean;
+  separator: boolean;
+  hidden?: boolean;
+  alternate?: boolean;
+  key?: string;
+  command?: string | number;
+  arg?: string;
+  action?: string;
+  submenu?: SurfaceItem[];
+};
+
+export type OpenSurface = {
+  id: string;
+  kind: "select" | "page" | "app" | "menuBar" | "other" | "color";
+  tab?: string;
+  openedAt?: number;
+  link?: string;
+  color?: string;
+  items?: SurfaceItem[];
+};
+
+export type SurfaceEvent =
+  | (OpenSurface & { type: "menuOpened" | "colorPanelOpened" })
+  | { type: "menuClosed" | "colorPanelClosed"; id: string; kind: OpenSurface["kind"] };
+
 export type MenusNative = {
   addListener(name: "onCommand", listener: (e: CommandEvent | MenuPickEvent) => void): EventSubscription;
+  addListener(name: "onSurface", listener: (e: SurfaceEvent) => void): EventSubscription;
+  openSurfaces(): Promise<OpenSurface[]>;
+  holdPageMenus(holds: boolean): Promise<void>;
+  chooseSurfaceItem(id: string, path: number[]): Promise<string>;
+  dismissSurface(id: string): Promise<void>;
+  chooseColor(id: string, hex: string, close: boolean): Promise<string>;
+  menuBar(): Promise<SurfaceItem[]>;
+  performMenuBarItem(path: number[]): Promise<string>;
   showMenu(items: MenuItem[]): Promise<string | null>;
   updateMenu(items: MenuItem[]): Promise<void>;
   setMenuState(state: Omit<MenuState, MenuBookmarkKey>): Promise<void>;

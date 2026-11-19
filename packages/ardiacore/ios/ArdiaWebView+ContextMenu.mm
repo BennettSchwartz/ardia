@@ -183,6 +183,44 @@ NSURL *SharedImageFile(NSData *image, NSString *mimeType, NSString *source) {
   return file;
 }
 
+constexpr NSTimeInterval kHeldMenuSeconds = 60;
+
+NSArray *HeldItems(NSArray *items) {
+  NSMutableArray *out = [NSMutableArray array];
+  for (NSDictionary *item in items) {
+    if (![item isKindOfClass:NSDictionary.class]) continue;
+    NSMutableDictionary *row = [@{
+      @"id" : Field<NSNumber>(item, @"id") ?: @0,
+      @"title" : MenuTitle(Field<NSString>(item, @"label") ?: @""),
+      @"enabled" : @(Flag(item, @"enabled")),
+      @"hidden" : @(Field<NSNumber>(item, @"visible") ? !Flag(item, @"visible") : NO),
+      @"separator" : @(MenuItemType(item) == kMenuSeparator),
+      @"checked" : @(Flag(item, @"checked")),
+    } mutableCopy];
+    if (NSArray *submenu = Field<NSArray>(item, @"submenu")) row[@"submenu"] = HeldItems(submenu);
+    [out addObject:row];
+  }
+  return out;
+}
+
+NSDictionary *HoldForChoice(ArdiaCoreTab *tab, NSDictionary *menu, NSArray *items) {
+  NSMutableDictionary *box = [@{
+    @"kind" : @"page",
+    @"tab" : ardia_host::AppTabIdOf(tab) ?: @"",
+    @"url" : Field<NSString>(menu, @"url") ?: tab.url ?: @"",
+    @"link" : Field<NSString>(menu, @"link") ?: @"",
+    @"items" : HeldItems(items),
+  } mutableCopy];
+  [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuOpened" object:box];
+  if (![box[@"held"] boolValue]) return nil;
+  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:kHeldMenuSeconds];
+  while (!box[@"pick"] && !box[@"done"] && deadline.timeIntervalSinceNow > 0)
+    [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+  box[@"done"] = @YES;
+  [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuClosed" object:box];
+  return [box[@"pick"] isKindOfClass:NSDictionary.class] ? box[@"pick"] : nil;
+}
+
 NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   for (NSUInteger i = 0; i < items.count; i++) {
     NSDictionary *item = items[i];
@@ -269,6 +307,7 @@ NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   NoteEvent(ardia_host::BrowserId(tab), @"contextMenu", @{@"items" : items});
   ArdiaLaunchConfig *config = ArdiaLaunchConfig.shared;
   if (![config testFlag:@"contextMenu"]) {
+    if (NSDictionary *held = ardia_host::Background() ? HoldForChoice(tab, menu, items) : nil) return held;
     if (ardia_host::Background()) {
       NSMutableArray<NSString *> *titles = [NSMutableArray array];
       for (NSDictionary *item in items)

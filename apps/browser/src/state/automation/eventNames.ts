@@ -31,13 +31,22 @@ export const AUTOMATION_EVENTS = [
   "user.idle",
   "user.active",
   "page.error",
+  "permission.prompted",
+  "password.prompted",
+  "menu.opened",
+  "menu.closed",
+  "colorPanel.opened",
+  "colorPanel.closed",
 ] as const;
 export type AutomationEventName = (typeof AUTOMATION_EVENTS)[number];
 
-export const PLUGIN_EVENTS: readonly AutomationEventName[] = AUTOMATION_EVENTS.filter((name) => name !== "notification.shown");
+export const NATIVE_UI_EVENTS: ReadonlySet<AutomationEventName> = new Set(["permission.prompted", "password.prompted", "menu.opened", "menu.closed", "colorPanel.opened", "colorPanel.closed"]);
+
+export const PLUGIN_EVENTS: readonly AutomationEventName[] = AUTOMATION_EVENTS.filter((name) => name !== "notification.shown" && !NATIVE_UI_EVENTS.has(name));
 
 export const NAMED_ONLY_EVENTS: ReadonlySet<AutomationEventName> = new Set([
   "notification.shown",
+  "password.prompted",
   "app.activated",
   "app.deactivated",
   "system.sleep",

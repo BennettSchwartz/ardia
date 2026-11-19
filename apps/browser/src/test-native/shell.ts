@@ -6,8 +6,11 @@ import type {
   DiagnosticsSample,
   HardwareInfo,
   LaunchConfig,
+  OpenSurface,
   OpenWindowOptions,
   ShellNativeModules,
+  SurfaceEvent,
+  SurfaceItem,
   SystemInfo,
   SystemSignal,
   UserScriptsFolder,
@@ -153,8 +156,46 @@ const focus: Modules["ArdiaFocus"] = {
   pressRepeated: () => Promise.resolve(pressRepeated.earlier),
 };
 
+export const surfaces = {
+  open: [] as OpenSurface[],
+  bar: [] as SurfaceItem[],
+  holds: false,
+  chosen: [] as { id: string; path: number[] }[],
+  colors: [] as { id: string; hex: string; close: boolean }[],
+  performed: [] as number[][],
+  emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
+};
+
+function surfaceOf(id: string) {
+  const found = surfaces.open.find((s) => s.id === id);
+  if (!found) throw Object.assign(new Error(`There's no open menu ${id}.`), { code: "no_window" });
+  return found;
+}
+
 const menus: Modules["ArdiaMenus"] = {
   addListener: shellEvents.addListener,
+  openSurfaces: () => Promise.resolve(surfaces.open),
+  holdPageMenus: (holds) => Promise.resolve(void (surfaces.holds = holds)),
+  chooseSurfaceItem: async (id, path) => {
+    surfaceOf(id);
+    surfaces.chosen.push({ id, path });
+    surfaces.open = surfaces.open.filter((s) => s.id !== id);
+    return "chosen";
+  },
+  dismissSurface: async (id) => {
+    surfaceOf(id);
+    surfaces.open = surfaces.open.filter((s) => s.id !== id);
+  },
+  chooseColor: async (id, hex, close) => {
+    surfaceOf(id);
+    surfaces.colors.push({ id, hex, close });
+    return hex;
+  },
+  menuBar: () => Promise.resolve(surfaces.bar),
+  performMenuBarItem: async (path) => {
+    surfaces.performed.push(path);
+    return "performed";
+  },
   showMenu: () => Promise.resolve(null),
   updateMenu: () => Promise.resolve(),
   setMenuState: () => Promise.resolve(),

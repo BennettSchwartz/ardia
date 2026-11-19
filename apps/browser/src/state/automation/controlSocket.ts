@@ -32,6 +32,7 @@ import { applyMethod, workspaceMethod } from "./workspaceMethods";
 import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, runSpec, servingWhile, type ConnectionAccess } from "./socketCatalog";
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
+import { holdPageMenus } from "../../platform/surfaces";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
 
@@ -273,12 +274,14 @@ async function start(consent: ConsentToken | null) {
   useControlSocket.setState({ status });
   generation = status.state === "on" ? status.generation : null;
   noteSocketServing(generation !== null && controlOn());
+  void holdPageMenus(generation !== null).catch(() => undefined);
   if (status.state !== "on") warnFor(consent, `[automation] the control socket is off: ${status.reason ?? "unknown"}`);
 }
 
 async function stop() {
   generation = null;
   noteSocketServing(false);
+  void holdPageMenus(false).catch(() => undefined);
   subscriptions.clear();
   launchSent.clear();
   callers.clear();
@@ -296,6 +299,7 @@ function sync() {
   if (!on) {
     generation = null;
     noteSocketServing(false);
+    void holdPageMenus(false).catch(() => undefined);
     stopResponders();
     runWritten([...unwrittenRuns]);
   }
