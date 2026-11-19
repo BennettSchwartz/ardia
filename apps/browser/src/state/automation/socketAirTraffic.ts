@@ -1,6 +1,8 @@
 import type { JsonSchema } from "../../lib/jsonSchema";
 import { isIncognitoProfile } from "../browser/model";
 import { routeGroups } from "../airTraffic/groups";
+import { sharedFolderOf } from "../sharedFolders/store";
+import { SHARED_GROUPS_SIDEBAR_ONLY } from "./workspaceSharedGuard";
 import { previewLink } from "../airTraffic/preview";
 import { cleanRule, cleanTarget, linkTextProblem, sameTarget, MAX_AIR_TRAFFIC_RULES, OPEN_AS, patternProblem, siteHost, sourceAppOf, type AirTrafficRule, type AirTrafficTarget, type LinkCondition, type OpenAs } from "../airTraffic/rules";
 import { currentAirTraffic, placeAirTrafficRule, removeAirTrafficRule, setAirTrafficFallback, targetUsableNow, tryAddAirTrafficRule, updateAirTrafficRule, type RuleDraft } from "../airTraffic/store";
@@ -55,6 +57,7 @@ function targetOf(params: Record<string, unknown>, base: AirTrafficTarget): AirT
   if (groupKey) {
     if (open !== "tab") throw new OpError("bad_request", "Only links opened as a tab go into a group.");
     if (profileId === null || !targetUsableNow(profileId, groupKey)) throw new OpError("no_window", `There's no group ${groupKey} in that profile; airTraffic.rules lists them.`);
+    if (params.group !== undefined && sharedFolderOf(profileId, groupKey)) throw new OpError("refused", `Group ${groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here.`);
   }
   return { profileId, open, groupKey: groupKey ?? undefined };
 }
