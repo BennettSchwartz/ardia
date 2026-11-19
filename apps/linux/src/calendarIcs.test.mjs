@@ -88,8 +88,6 @@ test("exceptions, extra dates and events that straddle the range edge", () => {
   ]);
 });
 
-// How many periods an expansion visits. expandRule asks `beyond` about every period it walks (and every candidate in one), so
-// counting those calls measures the work done without reading the clock, which a busy machine can stretch.
 const visited = (start, rule, from, end) => {
   let calls = 0;
   expandRule(start, false, parseRule(rule), (w) => (calls++, wallMs(w) >= end), () => false, (w) => wallMs(w) >= from, { from });
@@ -102,7 +100,6 @@ test("a long-running daily rule walks only the periods near the range", () => {
   const found = occurrences(objects, Date.UTC(2026, 10, 2), Date.UTC(2026, 10, 3, 12), (tzid) => ianaZone(tzid), budget);
   assert.deepEqual(found.map((o) => new Date(o.start).toISOString()), ["2026-11-02T07:00:00.000Z", "2026-11-03T07:00:00.000Z"]);
   assert.deepEqual(budget.truncated, []);
-  // Walking all 9,800 days from 2000 takes about 20,000 calls; jumping to the range takes 9.
   assert.ok(visited(wall(2000, 1, 1, 8), "FREQ=DAILY", Date.UTC(2026, 10, 2), Date.UTC(2026, 10, 3, 12)) < 100);
 });
 
@@ -123,9 +120,7 @@ test("sub-daily rules from years ago jump to the range instead of walking every 
   assert.ok(starts(minutely).every((start, i, all) => !i || start - all[i - 1] === step));
   const hourly = occurrences(single(["UID:h", "DTSTART:20000101T000000Z", "RRULE:FREQ=HOURLY;INTERVAL=5"]), RANGE_START, RANGE_END, () => null);
   assert.ok(hourly.length >= 7 && starts(hourly).every((start) => (start - Date.UTC(2000, 0, 1)) % (5 * 3600000) === 0));
-  // Without the jump the minutely series needs about 510,000 periods and stops at MAX_PERIODS, which it reports here.
   assert.deepEqual(budget.truncated, []);
-  // The hourly one needs about 47,000 periods without it (94,000 calls), under that cap: count the work instead.
   assert.ok(visited(wall(2000, 1, 1), "FREQ=HOURLY;INTERVAL=5", RANGE_START, RANGE_END) < 200);
 });
 
@@ -144,7 +139,6 @@ test("fifty old minutely series fit in one refresh", () => {
   const objects = Array.from({ length: 50 }, (_, i) => single([`UID:m${i}`, "DTSTART:20200101T000000Z", "RRULE:FREQ=MINUTELY;INTERVAL=7"])[0]);
   const budget = { deadline: Infinity, truncated: [] };
   const found = occurrences(objects, RANGE_START, RANGE_END, () => null, budget);
-  // Each series jumps to the range. Walking from 2020 instead takes about 510,000 periods, stops at MAX_PERIODS and is reported here.
   assert.deepEqual(budget.truncated, []);
   const step = 7 * 60000;
   const origin = Date.UTC(2020, 0, 1);
