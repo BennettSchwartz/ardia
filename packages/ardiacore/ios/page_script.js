@@ -148,6 +148,7 @@
       } catch (error) {
         return Promise.reject(error);
       }
+      if (controller !== undefined) installZoomLevels();
       if (controller !== undefined && !isController(controller)) return badController();
       if (activation && isActive && !apply(isActive, activation, []))
         return Promise.reject(new DOMException("getDisplayMedia() requires transient activation (user gesture).", "InvalidStateError"));

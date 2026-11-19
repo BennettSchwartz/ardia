@@ -418,7 +418,8 @@ test("a CaptureController that only appears after the script first ran is still 
   const videoTrack = world.track("browser");
   const p = page({ active: true, window: late, stream: world.streamOf(videoTrack) });
   late.CaptureController = world.CaptureController;
-  p.install();
+  const lookalike = await rejection(p.shim.call(p.devices, { video: true, controller: Object.create(world.CaptureController.prototype) }));
+  assert.match(lookalike, /^TypeError: /);
   const controller = new world.CaptureController();
   const pending = p.shim.call(p.devices, { video: true, controller });
   assert.equal(p.sent.at(-1)?.data.controller, true);
