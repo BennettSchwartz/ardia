@@ -82,16 +82,6 @@ bool TokenClient::MaySessionInput(const std::string& session) {
   return targets_.contains(session) && SessionInScope(session);
 }
 
-bool TokenClient::PluginSessionLive(const std::string& session) {
-  if (revoked_ || wedged_ || draining_ || !RootInScope()) {
-    return false;
-  }
-  if (session.empty()) {
-    return !IsBrowserHost(root_host_.get());
-  }
-  return targets_.contains(session) && !detaching_.contains(session);
-}
-
 bool TokenClient::RootInScope() {
   return IsBrowserHost(root_host_.get()) ||
          (!root_left_ && PluginTargetInScope(*scope_, root_host_.get()));

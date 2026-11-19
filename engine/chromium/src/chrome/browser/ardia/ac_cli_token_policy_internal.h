@@ -39,6 +39,7 @@ inline constexpr int kRefused = -32000;
 inline constexpr size_t kMaxPending = 4096;
 inline constexpr int kMaxIoReadBytes = 16 * 1024 * 1024;
 inline constexpr char kAnswerFilePicker[] = "Ardia.answerFilePicker";
+inline constexpr char kDispatchClick[] = "Ardia.dispatchClick";
 inline constexpr char kOutOfScope[] = "ardia: tab_out_of_scope";
 inline constexpr char kInternalCommand[] = "ardia.internal";
 
@@ -109,7 +110,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   void Revoke();
   bool MayInputTo(content::RenderFrameHost* frame);
   bool MaySessionInput(const std::string& session);
-  bool PluginSessionLive(const std::string& session);
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;
@@ -128,6 +128,11 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                                const std::string& session,
                                const base::DictValue* params,
                                std::string* reply);
+  bool DispatchClickCommand(int id,
+                            const std::string& session,
+                            const base::DictValue& params,
+                            std::string* reply);
+  void FinishDispatchClick(int id, const std::string& session, std::string error);
   bool PluginCommandAllowed(int id,
                             const std::string& session,
                             const std::string& method,

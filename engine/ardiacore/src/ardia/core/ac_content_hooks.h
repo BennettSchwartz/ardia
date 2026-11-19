@@ -33,6 +33,20 @@ bool ArdiaHasAccessedInitialMainDocument(WebContents* contents);
 bool ArdiaMainFrameHandlesEnterPictureInPicture(WebContents* contents);
 
 DevToolsAgentHost* ArdiaDevToolsAgentHostForId(const std::string& id);
+
+struct ArdiaClick {
+  double x = 0;
+  double y = 0;
+  std::string button = "left";
+  int click_count = 1;
+  int modifiers = 0;
+};
+
+void ArdiaDispatchClick(DevToolsAgentHost* host,
+                        DevToolsAgentHostClient* root_client,
+                        const std::string& session_id,
+                        const ArdiaClick& click,
+                        base::OnceCallback<void(std::string error)> done);
 }
 
 namespace gfx {
@@ -174,15 +188,7 @@ extern bool (*g_ardia_devtools_may_input)(
     content::DevToolsAgentHostClient* root_client,
     content::RenderFrameHost* frame);
 
-extern int g_ardia_plugin_drags_refused;
-extern int g_ardia_plugin_drags_refused_unknown;
-extern int g_ardia_drag_gate_consulted;
-
 extern bool (*g_ardia_devtools_session_may_input)(
-    content::DevToolsAgentHostClient* root_client,
-    const std::string& session_id);
-
-extern bool (*g_ardia_devtools_plugin_session_live)(
     content::DevToolsAgentHostClient* root_client,
     const std::string& session_id);
 

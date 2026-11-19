@@ -210,13 +210,33 @@ std::string PluginKeyRefusal(const PluginKeyEvent& event) {
   return refusal;
 }
 
-std::string PluginMouseRefusal(const std::optional<std::string>& button,
+std::string PluginMouseRefusal(const std::optional<std::string>& type,
+                               const std::optional<std::string>& button,
                                std::optional<int> buttons) {
-  if (button && *button == "middle") {
-    return "with the middle button";
+  if (!type || (*type != "mouseMoved" && *type != "mouseWheel")) {
+    return "except to move the pointer or scroll (use Ardia.dispatchClick to "
+           "click)";
   }
-  if (buttons && (*buttons & kCdpMiddleButton)) {
-    return "with the middle button held";
+  if (button && *button != "none") {
+    return "with a button";
+  }
+  if (buttons && *buttons != 0) {
+    return "with a button held";
+  }
+  return std::string();
+}
+
+std::string PluginClickRefusal(const std::optional<std::string>& button,
+                               std::optional<int> click_count,
+                               std::optional<int> modifiers) {
+  if (button && *button != "left" && *button != "right") {
+    return "with that button";
+  }
+  if (click_count && (*click_count < 1 || *click_count > 3)) {
+    return "with a click count outside 1-3";
+  }
+  if (modifiers && (*modifiers & ~(kCdpAlt | kCdpCtrl | kCdpMeta | kCdpShift))) {
+    return "with unknown modifier bits";
   }
   return std::string();
 }

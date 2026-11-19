@@ -13,7 +13,6 @@ inline constexpr int kCdpAlt = 1;
 inline constexpr int kCdpCtrl = 2;
 inline constexpr int kCdpMeta = 4;
 inline constexpr int kCdpShift = 8;
-inline constexpr int kCdpMiddleButton = 4;
 
 struct PluginKeyEvent {
   std::optional<std::string> type;
@@ -29,8 +28,13 @@ struct PluginKeyEvent {
 
 std::string PluginKeyRefusal(const PluginKeyEvent& event);
 
-std::string PluginMouseRefusal(const std::optional<std::string>& button,
+std::string PluginMouseRefusal(const std::optional<std::string>& type,
+                               const std::optional<std::string>& button,
                                std::optional<int> buttons);
+
+std::string PluginClickRefusal(const std::optional<std::string>& button,
+                               std::optional<int> click_count,
+                               std::optional<int> modifiers);
 
 }
 

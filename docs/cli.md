@@ -114,7 +114,8 @@ TypeScript browse client), not to #2808. It must:
   holds at most 16 live credentials; past that, minting answers `too many plugin credentials for this profile`.
 - **What a plugin connection may do** is an exact allowlist (`docs/engine-build.md` › `chromium-devtools-control-token.patch`):
   plain-data DOM and accessibility reads, focus and scroll on its own nodes, page navigation and screenshots, and
-  input. It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
+  input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
+  and releases in place, so a plugin can never drag). It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
   response to its input (a link that opens in another window) counts as the person acting, but the plugin still can't
   reach that window. When its tab leaves the window, its session is detached, commands in flight answer
   `ardia: tab_out_of_scope`, and input it queued before the move never lands.

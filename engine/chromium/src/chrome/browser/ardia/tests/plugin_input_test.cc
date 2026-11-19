@@ -177,14 +177,42 @@ int main() {
                 std::to_string(entry.modifiers));
   }
 
-  Expect(!ardia::PluginMouseRefusal(std::string("middle"), std::nullopt).empty(),
-         "refused: the middle button", "no refusal");
-  Expect(!ardia::PluginMouseRefusal(std::string("none"), 4).empty(),
-         "refused: the middle button held", "no refusal");
-  Expect(!ardia::PluginMouseRefusal(std::string("left"), 5).empty(),
-         "refused: left with middle held", "no refusal");
-  Expect(ardia::PluginMouseRefusal(std::string("left"), 1).empty(),
-         "allowed: the left button", "refused");
+  const auto mouse = [](std::optional<std::string> type,
+                        std::optional<std::string> button,
+                        std::optional<int> buttons) {
+    return ardia::PluginMouseRefusal(type, button, buttons);
+  };
+  Expect(mouse(std::string("mouseMoved"), std::nullopt, std::nullopt).empty(),
+         "allowed: a move with no button", "");
+  Expect(mouse(std::string("mouseMoved"), std::string("none"), 0).empty(),
+         "allowed: a move with button none and buttons 0", "");
+  Expect(mouse(std::string("mouseWheel"), std::nullopt, 0).empty(),
+         "allowed: a wheel event", "");
+  Expect(!mouse(std::string("mousePressed"), std::string("left"), 1).empty(),
+         "refused: mousePressed", "");
+  Expect(!mouse(std::string("mouseReleased"), std::string("left"), 0).empty(),
+         "refused: mouseReleased", "");
+  Expect(!mouse(std::string("mouseMoved"), std::nullopt, 1).empty(),
+         "refused: a move with the left button held", "");
+  Expect(!mouse(std::string("mouseMoved"), std::string("left"), 0).empty(),
+         "refused: a move naming a button", "");
+  Expect(!mouse(std::string("mouseWheel"), std::nullopt, 4).empty(),
+         "refused: a wheel event with the middle button held", "");
+  Expect(!mouse(std::nullopt, std::nullopt, std::nullopt).empty(),
+         "refused: no event type", "");
+  Expect(ardia::PluginClickRefusal(std::nullopt, std::nullopt, std::nullopt)
+             .empty(),
+         "allowed: a plain click", "");
+  Expect(ardia::PluginClickRefusal(std::string("right"), 2, 8).empty(),
+         "allowed: a right double click with Shift", "");
+  Expect(!ardia::PluginClickRefusal(std::string("middle"), 1, 0).empty(),
+         "refused: a middle click", "");
+  Expect(!ardia::PluginClickRefusal(std::string("left"), 4, 0).empty(),
+         "refused: four clicks", "");
+  Expect(!ardia::PluginClickRefusal(std::string("left"), 0, 0).empty(),
+         "refused: zero clicks", "");
+  Expect(!ardia::PluginClickRefusal(std::string("left"), 1, 16).empty(),
+         "refused: unknown modifier bits", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

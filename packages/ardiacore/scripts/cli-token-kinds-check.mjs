@@ -15,8 +15,7 @@ before its first step unless the engine reports both. A Developer ID build ignor
 that gate (the expected result on a signed build). pluginInputHold holds a plugin's mouse deliveries for 2 s and its
 out-of-scope detaches for 5 s, so a delivery admitted before its tab leaves lands after the tab is back, every run,
 and cliControlStatus's pluginDeliveriesRefusedDeparted proves the gate refused it. It needs openssl: a local HTTPS
-server with a throwaway certificate (trusted by SPKI through chromiumSwitches) is the positive navigate case. Drags are
-checked in the main frame and in a cross-site frame, each against an owner drag that does drop.
+server with a throwaway certificate (trusted by SPKI through chromiumSwitches) is the positive navigate case. A plugin\nclicks only with Ardia.dispatchClick, and an owner drag still drops.
 The ardia command's token (kind cli) gets every method and target, including Browser.setDownloadBehavior, a chrome://
 page and the browser target. A plugin credential minted for window 1 (engine.cliPluginCredential, kind plugin) sees and
 attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
@@ -26,8 +25,8 @@ plain-data DOM and accessibility reads work, DOM.focus and DOM.scrollIntoViewIfN
 Runtime method, DOM.resolveNode, DOM search, Page.createIsolatedWorld and any Runtime object or context id are refused,
 as are Page.navigate's referrer, referrerPolicy, transitionType and frameId, every scheme but http, https and
 about:blank, and a script on reload; no Network, console or Runtime event reaches it; a frame of another tab is out of
-its reach; it accepts and cancels a dialog; keys and insertText type; a press, move and release over a draggable
-element starts no drag (no dragenter, dragover or drop). When its tab moves to another window (or out and straight
+its reach; it accepts and cancels a dialog; keys and insertText type; its Input.dispatchMouseEvent is refused for
+presses, releases and moves with a button, and Ardia.dispatchClick clicks, double-clicks a word and starts no drag. When its tab moves to another window (or out and straight
 back), a command in flight answers tab_out_of_scope, a late reply never arrives, the session is detached, mouse and
 wheel input it queued before the move never lands even though the tab is back, and a fresh attach to the returned tab
 takes input again. Backend node ids from another tab in the same renderer and node ids of a node the page adopted
@@ -313,106 +312,42 @@ try {
     return replies;
   };
   const logOf = async (session) => (await cli.send("Runtime.evaluate", { expression: "(() => { const log = window.dragLog.join(','); window.dragLog = []; return log; })()", returnByValue: true }, session)).result?.result?.value;
-  const dragsRefused = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefused ?? -1;
-  const unknownDrags = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefusedUnknown ?? -1;
-  const unknownAtStart = await unknownDrags();
-  const gateConsulted = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.dragGateConsulted ?? -1;
-  const consultedBeforeMain = await gateConsulted();
-  await logOf(csOne);
-  const refusedBeforeMain = await dragsRefused();
-  const pluginDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
-  const pluginLog = await logOf(csOne);
-  const refusedAfterMain = await dragsRefused();
-  const consultedAfterMain = await gateConsulted();
-  check("the drag gate is consulted on a widget a plugin used", consultedBeforeMain >= 0 && consultedAfterMain > consultedBeforeMain, `${consultedBeforeMain} -> ${consultedAfterMain}`);
-  check("plugin: a drag from its press in the main frame is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart:drag,dragend:drag" && refusedBeforeMain >= 0 && refusedAfterMain - refusedBeforeMain === 1 && pluginDrag.every((r) => !refused(r)), `${pluginLog}; refused ${refusedBeforeMain} -> ${refusedAfterMain}; ${pluginDrag.map(text).join(" | ")}`);
-  const clicksOf = async () => (await cli.send("Runtime.evaluate", { expression: "window.clicks", returnByValue: true }, csOne)).result?.result?.value;
+  const centerOf = async (session, id) => (await cli.send("Runtime.evaluate", { expression: `(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`, returnByValue: true }, session)).result?.result?.value ?? [0, 0];
+  const csValue = async (session, expression) => (await cli.send("Runtime.evaluate", { expression, returnByValue: true }, session)).result?.result?.value;
+  for (const [name, params] of [
+    ["mousePressed", { type: "mousePressed", x: 280, y: 135, button: "left", buttons: 1, clickCount: 1 }],
+    ["mouseReleased", { type: "mouseReleased", x: 280, y: 135, button: "left", buttons: 0, clickCount: 1 }],
+    ["a move with the left button held", { type: "mouseMoved", x: 280, y: 150, buttons: 1 }],
+    ["a move naming a button", { type: "mouseMoved", x: 280, y: 150, button: "left" }],
+  ]) {
+    const reply = await plugin.send("Input.dispatchMouseEvent", params, ps);
+    check(`plugin: Input.dispatchMouseEvent ${name} is refused`, refused(reply) && /plugin/.test(reply.error?.message ?? ""), text(reply));
+  }
+  const clicksOf = () => csValue(csOne, "window.clicks");
   const clicksBefore = await clicksOf();
-  for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
-  await sleep(300);
+  const [clickX, clickY] = await centerOf(csOne, "clicker");
+  const clicked = await plugin.send("Ardia.dispatchClick", { x: clickX, y: clickY }, ps);
   const clicksAfter = await clicksOf();
-  check("plugin: its next click after the refused drag is delivered", clicksAfter === clicksBefore + 1, `${clicksBefore} -> ${clicksAfter}`);
+  check("plugin: Ardia.dispatchClick clicks a button once, and answers after the click landed", !refused(clicked) && clicksAfter === clicksBefore + 1, `${text(clicked)} clicks ${clicksBefore} -> ${clicksAfter}`);
+  await csValue(csOne, "(() => { const p = document.createElement('p'); p.id = 'words'; p.style.cssText = 'position:fixed;left:0;top:300px;margin:0;font-size:24px'; p.innerHTML = 'alpha <span id=bravo>bravo</span> charlie'; document.body.append(p); getSelection().removeAllRanges(); return true })()");
+  const [wordX, wordY] = await centerOf(csOne, "bravo");
+  const doubled = await plugin.send("Ardia.dispatchClick", { x: wordX, y: wordY, clickCount: 2 }, ps);
+  const selected = await csValue(csOne, "getSelection().toString().trim()");
+  check("plugin: Ardia.dispatchClick with clickCount 2 double-clicks a word and selects it", !refused(doubled) && selected === "bravo", `${text(doubled)} selected ${JSON.stringify(selected)}`);
+  await logOf(csOne);
+  const [dragX, dragY] = await centerOf(csOne, "drag");
+  const onDraggable = await plugin.send("Ardia.dispatchClick", { x: dragX, y: dragY }, ps);
+  await sleep(500);
+  const clickDragLog = await logOf(csOne);
+  check("plugin: Ardia.dispatchClick on a draggable element starts no drag (no dragstart)", !refused(onDraggable) && clickDragLog === "", `${text(onDraggable)} log ${JSON.stringify(clickDragLog)}`);
+  for (const [name, params] of [["the middle button", { x: clickX, y: clickY, button: "middle" }], ["four clicks", { x: clickX, y: clickY, clickCount: 4 }], ["no position", {}], ["an unknown parameter", { x: clickX, y: clickY, force: 1 }]]) {
+    const reply = await plugin.send("Ardia.dispatchClick", params, ps);
+    check(`plugin: Ardia.dispatchClick with ${name} is refused`, refused(reply) && /plugin/.test(reply.error?.message ?? ""), text(reply));
+  }
+  await logOf(csOne);
   const ownerDrag = await dragWith(cli, csOne, dragPath(280, 135, 185));
   const ownerLog = await logOf(csOne);
-  check("cli: the owner's drag over the same elements still drags and drops on the drop element", ownerDrag.every((r) => !refused(r)) && /^dragstart:drag,.*dragenter:drop.*dragover:drop.*drop:drop,dragend:drag$/.test(ownerLog ?? ""), `${ownerLog}; ${ownerDrag.map(text).join(" | ")}`);
-  const csTwo = cliTwo.result?.sessionId;
-  await logOf(csTwo);
-  const refusedBeforeUnmarked = await dragsRefused();
-  const unknownBeforeUnmarked = await unknownDrags();
-  const consultedBeforeUnmarked = await gateConsulted();
-  const unmarkedDrag = await dragWith(cli, csTwo, dragPath(280, 135, 185));
-  const consultedAfterUnmarked = await gateConsulted();
-  const unmarkedLog = await logOf(csTwo);
-  check("cli: on a widget no plugin has touched (window 2's tab) the drag gate doesn't run: the owner's drag drops on the drop element and no drag is refused, known or unknown", unmarkedDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(unmarkedLog ?? "") && (await dragsRefused()) === refusedBeforeUnmarked && (await unknownDrags()) === unknownBeforeUnmarked && unknownBeforeUnmarked === 0 && consultedBeforeUnmarked >= 0 && consultedAfterUnmarked === consultedBeforeUnmarked, `${unmarkedLog}; unknown ${unknownBeforeUnmarked}; gate consulted ${consultedBeforeUnmarked} -> ${consultedAfterUnmarked}; ${unmarkedDrag.map(text).join(" | ")}`);
-  for (const [who, client, session] of [["plugin", plugin, ps], ["cli", cli, csOne]]) {
-    await logOf(csOne);
-    const refusedBefore = await dragsRefused();
-    const unknownBefore = await unknownDrags();
-    const mark = client.replies.length;
-    const quick = [["mousePressed", 280, 135, 1], ["mouseMoved", 280, 150, 1], ["mouseMoved", 280, 170, 1], ["mousePressed", 100, 215, 1], ["mouseReleased", 100, 215, 0]];
-    quick.forEach(([type, x, y, buttons], i) => client.raw(680000 + i, "Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, session));
-    await until(`${who}'s quick presses`, async () => client.replies.slice(mark).filter((m) => m.id >= 680000 && m.id < 680005).length === 5 || null, 15000).catch(() => null);
-    await sleep(500);
-    const quickLog = await logOf(csOne);
-    const refusedDelta = (await dragsRefused()) - refusedBefore;
-    const unknownDelta = (await unknownDrags()) - unknownBefore;
-    check(`${who}: a drag whose start arrives after a second quick press still matches its own press (${who === "plugin" ? "refused as a plugin drag" : "allowed"}), never as unknown`, unknownDelta === 0 && refusedDelta === (who === "plugin" ? 1 : 0) && /^dragstart:drag/.test(quickLog ?? ""), `${quickLog}; refused +${refusedDelta}, unknown +${unknownDelta}`);
-  }
-  await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
-  const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
-  const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));
-  const cliXsite = xsiteTarget && (await cli.send("Target.attachToTarget", { targetId: xsiteTarget.targetId, flatten: true })).result?.sessionId;
-  if (cliXsite) await logOf(cliXsite);
-  const refusedBeforeXsite = await dragsRefused();
-  const xsiteDrag = xsite ? await dragWith(plugin, xsite.params.sessionId, dragPath(50, 25, 75)) : [];
-  const xsiteLog = cliXsite ? await logOf(cliXsite) : null;
-  const refusedAfterXsite = await dragsRefused();
-  check("plugin: a drag from its press in a cross-site frame (its own frame session) is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart:drag,dragend:drag" && refusedAfterXsite - refusedBeforeXsite === 1 && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; refused ${refusedBeforeXsite} -> ${refusedAfterXsite}; ${xsiteDrag.map(text).join(" | ")}`);
-  if (cliXsite) {
-    const refusedBeforeOwner = await dragsRefused();
-    const ownerXsiteDrag = await dragWith(cli, csOne, dragPath(510, 165, 215));
-    const ownerXsite = await logOf(cliXsite);
-    check("cli: the owner's drag through the top-level session, aimed at the cross-site frame, drops on its drop element and isn't refused", ownerXsiteDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(ownerXsite ?? "") && (await dragsRefused()) === refusedBeforeOwner, `${ownerXsite}; ${ownerXsiteDrag.map(text).join(" | ")}`);
-  }
-  if (xsite) {
-    await logOf(csOne);
-    const refusedBeforeEviction = await dragsRefused();
-    const [press, ...rest] = dragPath(280, 135, 185);
-    const pressReply = await plugin.send("Input.dispatchMouseEvent", { type: press[0], x: press[1], y: press[2], button: "left", buttons: press[3], clickCount: 1 }, ps);
-    const evictMark = plugin.replies.length;
-    for (let i = 0; i < 70; i++) {
-      for (const [type, buttons] of [["mousePressed", 1], ["mouseReleased", 0]]) plugin.raw(670000 + i * 2 + buttons, "Input.dispatchMouseEvent", { type, x: 20, y: 100, button: "left", buttons, clickCount: 1 }, xsite.params.sessionId);
-    }
-    await until("the 140 presses on the other widget", async () => plugin.replies.slice(evictMark).filter((m) => m.id >= 670000 && m.id < 670140).length === 140 || null, 20000).catch(() => null);
-    const evictReplies = plugin.replies.slice(evictMark).filter((m) => m.id >= 670000 && m.id < 670140);
-    const restReplies = [];
-    for (const [type, x, y, buttons] of rest) restReplies.push(await plugin.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, ps));
-    await sleep(500);
-    const evictLog = await logOf(csOne);
-    check("plugin: 70 plugin presses on another widget between its press and the drag don't evict that press: the drag is still refused as a plugin drag", !refused(pressReply) && evictReplies.length === 140 && evictReplies.every((r) => !r.error) && restReplies.every((r) => !refused(r)) && evictLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeEviction === 1, `${evictLog}; ${evictReplies.length} presses answered`);
-  }
-  const childTarget = (await cli.send("Page.getFrameTree", {}, csOne)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
-  const childLogOf = async () => (await cli.send("Runtime.evaluate", { expression: "(() => { const w = document.getElementById('child').contentWindow; const log = w.dragLog.join(','); w.dragLog = []; return log; })()", returnByValue: true }, csOne)).result?.result?.value;
-  await childLogOf();
-  await cli.send("Runtime.evaluate", { expression: "document.getElementById('child').contentWindow.onArdiaDragstart = () => { parent.document.getElementById('child').style.left = '0px'; }; true" }, csOne);
-  const refusedBeforeChild = await dragsRefused();
-  const childDrag = await dragWith(plugin, ps, dragPath(510, 57, 97));
-  const childLog = await childLogOf();
-  await cli.send("Runtime.evaluate", { expression: "(() => { const c = document.getElementById('child'); c.contentWindow.onArdiaDragstart = null; c.style.left = '460px'; return true })()" }, csOne);
-  const clicksBeforeChild = await clicksOf();
-  for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
-  await sleep(300);
-  check("plugin: a drag from its press in a same-process child frame that moves itself away during dragstart is refused, its dragend still reaches that child frame, and the next click is delivered", !!childTarget && childDrag.every((r) => !refused(r)) && childLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
-  await logOf(csOne);
-  await childLogOf();
-  await cli.send("Runtime.evaluate", { expression: "window.onArdiaDragstart = () => { const c = document.getElementById('child'); c.style.left = '240px'; c.style.top = '120px'; }; true" }, csOne);
-  const refusedBeforeCovered = await dragsRefused();
-  const coveredDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
-  const coveredLog = await logOf(csOne);
-  const coveredChildLog = await childLogOf();
-  await cli.send("Runtime.evaluate", { expression: "(() => { window.onArdiaDragstart = null; const c = document.getElementById('child'); c.style.left = '460px'; c.style.top = '40px'; return true })()" }, csOne);
-  check("plugin: a main-frame drag whose cancel point ends up over a child frame (moved there during dragstart) still ends in the main frame", coveredDrag.every((r) => !refused(r)) && coveredLog === "dragstart:drag,dragend:drag" && !/drag/.test(coveredChildLog ?? "") && (await dragsRefused()) - refusedBeforeCovered === 1, `main ${coveredLog}; child ${coveredChildLog}`);
-  check("no drag in this run was refused for an unknown press (owner and plugin presses are all recorded)", unknownAtStart >= 0 && (await unknownDrags()) === unknownAtStart, `${unknownAtStart} -> ${await unknownDrags()}`);
+  check("cli: the owner's drag (Input.dispatchMouseEvent press, moves, release) still drags and drops on the drop element", ownerDrag.every((r) => !refused(r)) && /^dragstart:drag,.*dragenter:drop.*dragover:drop.*drop:drop,dragend:drag$/.test(ownerLog ?? ""), `${ownerLog}; ${ownerDrag.map(text).join(" | ")}`);
   const childFrame = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childAx = childFrame && (await plugin.send("Accessibility.getFullAXTree", { frameId: childFrame }, ps));
   const childNodes = childAx?.result?.nodes ?? [];
@@ -663,6 +598,9 @@ try {
   const refusalsBefore = await departedRefusals();
   for (let i = 0; i < 20; i++) plugin.raw(660000 + i, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10 + i * 5, y: 10 + i * 3 }, s3);
   for (let i = 0; i < 5; i++) plugin.raw(661000 + i, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 50, y: 50, deltaX: 0, deltaY: 20 }, s3);
+  const threeClicksBefore = await csValue(cs3, "window.clicks");
+  const [threeClickX, threeClickY] = await centerOf(cs3, "clicker");
+  plugin.raw(662000, "Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, s3);
   const sentAt = Date.now();
   await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
   const reachedOther = await inWindow("t3", "w2");
@@ -677,15 +615,18 @@ try {
   const outAndBack = await plugin.send("DOM.getDocument", {}, s3);
   const detachedS3 = await until("the detach of the moved session", async () => plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3) || null, 10000).catch(() => false);
   check("plugin: a tab moved to the other window (confirmed natively) and back stays detached", reachedOther && cameBack && !!s3 && refused(outAndBack) && detachedS3, `reached w2 ${reachedOther}, back in w1 ${cameBack}, ${text(outAndBack)}`);
-  check("plugin: mouse and wheel input its departed session queued reached the gate after hit testing, after the tab came back, and the gate refused all 25 for the old session", backBeforeDelivery && refusalsBefore >= 0 && refusalsAfter - refusalsBefore === 25 && movesAtDeparture === 0 && movesAfterReturn === 0 && wheelsAfterReturn === 0, `back before delivery ${backBeforeDelivery}, gate refusals ${refusalsBefore} -> ${refusalsAfter}, moves ${movesAtDeparture}/${movesAfterReturn}, wheels ${wheelsAfterReturn}`);
+  check("plugin: mouse, wheel and an Ardia.dispatchClick its departed session queued reached the gate after hit testing, after the tab came back, and the gate refused all 26 for the old session (the click never landed)", backBeforeDelivery && refusalsBefore >= 0 && refusalsAfter - refusalsBefore === 26 && (await csValue(cs3, "window.clicks")) === threeClicksBefore && movesAtDeparture === 0 && movesAfterReturn === 0 && wheelsAfterReturn === 0, `back before delivery ${backBeforeDelivery}, gate refusals ${refusalsBefore} -> ${refusalsAfter}, moves ${movesAtDeparture}/${movesAfterReturn}, wheels ${wheelsAfterReturn}`);
   const old = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: 20 }, s3);
   const fresh = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
   const freshMove = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 30 }, fresh);
   const freshWheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 30, y: 30, deltaX: 0, deltaY: 20 }, fresh);
+  const freshClicksBefore = await csValue(cs3, "window.clicks");
+  const freshClick = await plugin.send("Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, fresh);
   await sleep(300);
+  const freshClicked = (await csValue(cs3, "window.clicks")) === freshClicksBefore + 1;
   const freshMoves = await moves();
   const freshWheels = await wheels();
-  check("plugin: the departed session's input is refused, and a fresh attach to the returned tab delivers a mouse move and a wheel event", refused(old) && !!fresh && !refused(freshMove) && !refused(freshWheel) && freshMoves > movesAfterReturn && freshWheels > wheelsAfterReturn, `${text(old)} ${text(freshMove)} ${text(freshWheel)} moves ${freshMoves} wheels ${freshWheels}`);
+  check("plugin: the departed session's input is refused, and a fresh attach to the returned tab delivers a mouse move, a wheel event and a click", refused(old) && !!fresh && !refused(freshMove) && !refused(freshWheel) && !refused(freshClick) && freshClicked && freshMoves > movesAfterReturn && freshWheels > wheelsAfterReturn, `${text(old)} ${text(freshMove)} ${text(freshWheel)} moves ${freshMoves} wheels ${freshWheels}`);
 
   const t3Target = (await urlsOf(cli)).find((t) => t.url === `${origin}/three`);
   const direct = await connect(`ws://127.0.0.1:${control.port}/devtools/page/${t3Target?.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null);

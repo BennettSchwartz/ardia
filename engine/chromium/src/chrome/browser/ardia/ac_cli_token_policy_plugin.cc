@@ -46,6 +46,7 @@ const std::set<std::string_view>& PluginMethods() {
       "Accessibility.getPartialAXTree",
       "Accessibility.getRootAXNode",
       "Accessibility.queryAXTree",
+      "Ardia.dispatchClick",
       "DOM.describeNode",
       "DOM.enable",
       "DOM.focus",
@@ -130,8 +131,23 @@ std::string KeyEventRefusal(const base::DictValue& params) {
 }
 
 std::string MouseEventRefusal(const base::DictValue& params) {
-  return PluginMouseRefusal(StringParam(params, "button"),
+  return PluginMouseRefusal(StringParam(params, "type"),
+                            StringParam(params, "button"),
                             params.FindInt("buttons"));
+}
+
+std::string ClickRefusal(const base::DictValue& params) {
+  std::string refusal =
+      OnlyParams(params, {"x", "y", "button", "clickCount", "modifiers"});
+  if (!refusal.empty()) {
+    return refusal;
+  }
+  if (!params.FindDouble("x") || !params.FindDouble("y")) {
+    return "without x and y";
+  }
+  return PluginClickRefusal(StringParam(params, "button"),
+                            params.FindInt("clickCount"),
+                            params.FindInt("modifiers"));
 }
 
 bool FrameInTargetContents(const PluginScope& scope,
@@ -383,6 +399,9 @@ std::string PluginRefusal(const PluginScope& scope,
   }
   if (method == "Input.dispatchMouseEvent") {
     return MouseEventRefusal(params);
+  }
+  if (method == kDispatchClick) {
+    return ClickRefusal(params);
   }
   if (method == "Page.captureScreenshot") {
     return ScreenshotRefusal(params, context);

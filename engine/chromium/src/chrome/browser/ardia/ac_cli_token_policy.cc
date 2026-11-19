@@ -2,6 +2,7 @@
 
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <map>
@@ -259,6 +260,10 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
   if (*method == kAnswerFilePicker) {
     return AnswerFilePickerCommand(*id, session, &params, reply);
   }
+  if (*method == kDispatchClick) {
+    outstanding_[key] = kDispatchClick;
+    return DispatchClickCommand(*id, session, params, reply);
+  }
   if (*method == "IO.read") {
     const std::optional<int> size = params.FindInt("size");
     if (size && *size > kMaxIoReadBytes) {
@@ -312,6 +317,71 @@ bool TokenClient::AnswerFilePickerCommand(int id,
   answer.Set("result", base::DictValue());
   *reply = base::WriteJson(answer).value_or("{}");
   return false;
+}
+
+bool TokenClient::DispatchClickCommand(int id,
+                                       const std::string& session,
+                                       const base::DictValue& params,
+                                       std::string* reply) {
+  CountCommand(CommandDomain::kInput);
+  content::DevToolsAgentHost* host = HostOf(session);
+  const std::optional<double> x = params.FindDouble("x");
+  const std::optional<double> y = params.FindDouble("y");
+  const std::string* button = params.FindString("button");
+  if (!host || !x || !y || (button && *button != "left" && *button != "right")) {
+    outstanding_.erase({session, id});
+    *reply = ErrorReply(id, session, kInvalidRequest,
+                        base::StrCat({"ardia: ", kDispatchClick,
+                                      " needs a page, x, y and a left or right "
+                                      "button"}));
+    return false;
+  }
+  content::ArdiaClick click;
+  click.x = *x;
+  click.y = *y;
+  click.button = button ? *button : "left";
+  click.click_count = std::clamp(params.FindInt("clickCount").value_or(1), 1, 3);
+  click.modifiers = params.FindInt("modifiers").value_or(0);
+  auto dispatch = base::BindOnce(
+      [](base::WeakPtr<TokenClient> self,
+         scoped_refptr<content::DevToolsAgentHost> host, std::string session,
+         int id, content::ArdiaClick click) {
+        if (!self || self->revoked_) {
+          return;
+        }
+        content::ArdiaDispatchClick(
+            host.get(), self->client_, session, click,
+            base::BindOnce(&TokenClient::FinishDispatchClick, self, id,
+                           session));
+      },
+      weak_factory_.GetWeakPtr(), base::WrapRefCounted(host), session, id,
+      click);
+  if (kind_ == TokenKind::kPlugin && CliPluginInputHold()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE, std::move(dispatch), kHeldPluginInput);
+  } else {
+    std::move(dispatch).Run();
+  }
+  return false;
+}
+
+void TokenClient::FinishDispatchClick(int id,
+                                      const std::string& session,
+                                      std::string error) {
+  if (!outstanding_.erase({session, id}) || !to_client_) {
+    return;
+  }
+  if (!error.empty()) {
+    to_client_.Run(ErrorReply(id, session, kRefused, error));
+    return;
+  }
+  base::DictValue answer;
+  answer.Set("id", id);
+  if (!session.empty()) {
+    answer.Set("sessionId", session);
+  }
+  answer.Set("result", base::DictValue());
+  to_client_.Run(base::WriteJson(answer).value_or("{}"));
 }
 
 bool TokenClient::ShouldClose() const {
@@ -452,18 +522,9 @@ bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
   return it->second->MaySessionInput(session);
 }
 
-bool TokenClientPluginSessionLive(content::DevToolsAgentHostClient* root_client,
-                                  const std::string& session) {
-  auto it = cli_token_policy_internal::Registry().find(root_client);
-  return it != cli_token_policy_internal::Registry().end() &&
-         it->second->kind() == TokenKind::kPlugin &&
-         it->second->PluginSessionLive(session);
-}
-
 void InstallTokenClientInputHooks() {
   g_ardia_devtools_may_input = &TokenClientMayInput;
   g_ardia_devtools_session_may_input = &TokenClientSessionMayInput;
-  g_ardia_devtools_plugin_session_live = &TokenClientPluginSessionLive;
 }
 
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client) {
