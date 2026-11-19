@@ -21,7 +21,10 @@ export { recordShortcut, cancelShortcutRecording };
 
 export const confirm = (options: ConfirmOptions) => ardiaHost ? linuxHostDialogs().confirm(options) : webConfirm(options);
 export const prompt = (options: PromptOptions) => ardiaHost ? linuxHostDialogs().prompt(options) : webPrompt(options);
-provideNativeModuleProvider((name, method) => name === "ArdiaShell" && method === "confirm" ? confirm : name === "ArdiaShell" && method === "prompt" ? prompt : undefined);
+export const dismissShownOnly = async (_key?: string | null): Promise<void> => {
+  throw new Error("This Linux host can't take a shown dialog away; it stays until it's answered.");
+};
+provideNativeModuleProvider((name, method) => name === "ArdiaShell" && method === "confirm" ? confirm : name === "ArdiaShell" && method === "prompt" ? prompt : name === "ArdiaShell" && method === "dismissShownOnly" ? dismissShownOnly : undefined);
 
 export const emitCommand = (event: CommandEvent) => emitWebCommand(ardiaHost
   ? { ...event, windowId: ardiaHost!.bootstrap.windowId }
