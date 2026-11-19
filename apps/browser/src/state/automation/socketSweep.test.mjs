@@ -12,6 +12,8 @@ const { methodsCatalog } = await import("./socketCatalog.ts");
 const { registerSocketAreas } = await import("./socketAreas.ts");
 const { automationCommands } = await import("./automationCommands.ts");
 const { changesSharedFolders } = await import("./socketSharedChokePoint.ts");
+const { encodeSetupCode } = await import("../presets/setupCode.ts");
+const { shellNativeModules } = await import("../../test-native/shell.ts");
 const stub = await import("../../test-native/index.ts");
 
 after(() => S().updateSettings({ cliControl: false }));
@@ -56,7 +58,7 @@ async function fixture() {
   const [one, two, homed, mate, loose, other, tileA, tileB, peekFrom, gone, spareA, spareB] = ["one", "two", "homed", "mate", "loose", "other", "tile-a", "tile-b", "peek-from", "gone", "spare-a", "spare-b"].map((n) => tab(`https://${n}.example/`));
   const shared = S().groupTabs([one, two, homed], { pinned: true, name: "Team" });
   const inner = S().newNestedGroup(shared);
-  await ok("splits.create", { tabs: [mate, loose] });
+  await ok("splits.create", { tabs: [two, mate] });
   const split = Object.values(S().splits)[0]?.id;
   const tileFolder = (await ok("pins.createFolder", { tabs: [tileA, tileB], name: "Tiles" })).id;
   setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
@@ -217,4 +219,46 @@ test("run, for every command the socket offers, with a shared folder member and 
     }
   }
   assert.deepEqual(leaked, []);
+});
+
+test("aimed at the shared folder itself (its members, its window and its profile), no mutating method changes what it syncs", async () => {
+  registerSocketAreas();
+  const dialogs = shellNativeModules.ArdiaDialogs;
+  const confirm = dialogs.confirm;
+  dialogs.confirm = async () => ({ confirmed: true, suppressed: false });
+  globalThis.acTestCliOwns = () => ({ owned: true, shown: false });
+  globalThis.acTestCliMoveOffscreen = () => ({ ok: true });
+  const code = encodeSetupCode({ settings: { sidebarSide: "right" }, color: "green" });
+  const leaked = [];
+  try {
+    for (const entry of methodsCatalog().filter((m) => m.mutates)) {
+      const f = await fixture();
+      S().activate(f.one);
+      const aimed = { ...f, other: f.one, loose: f.one, mate: f.two, spareA: f.one, tileA: f.one, w2: f.windowId, p2: f.profileId };
+      const params = {
+        ...PARAMS(aimed),
+        "tabs.duplicate": { tab: f.one },
+        "tabs.setPinnedUrl": { tab: f.one, url: "https://elsewhere.example/" },
+        "tabs.returnToPinnedUrl": { tab: f.one },
+        "presets.apply": { code, window: f.windowId },
+        "profiles.delete": { profile: f.profileId },
+        "littleArdia.toMain": { window: f.little },
+        offscreen: { tab: f.one },
+        "splits.create": { tabs: [f.one, f.spareB] },
+        "pins.createFolder": { tabs: [f.one, f.spareB] },
+        "windows.switchProfile": { window: f.windowId, profile: f.p2 },
+        "live.open": { folder: f.liveFolder, item: f.liveItem, window: f.windowId },
+      }[entry.name];
+      const before = S();
+      await send(entry.name, params);
+      for (let i = 0; i < 10; i++) await tick();
+      if (changesSharedFolders(before, S())) leaked.push(entry.name);
+    }
+  } finally {
+    dialogs.confirm = confirm;
+    delete globalThis.acTestCliOwns;
+    delete globalThis.acTestCliMoveOffscreen;
+    setAccount("github", null);
+  }
+  assert.deepEqual(leaked, [], "methods aimed at the shared folder that changed what it syncs");
 });
