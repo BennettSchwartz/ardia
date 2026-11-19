@@ -349,7 +349,7 @@ function runLittleArdiaCommand(command: string, arg: string | null | undefined, 
   switch (command) {
     case "closeTab":
       if (s.windowUi[windowId]?.panel.open && tab?.url) s.closePanel(windowId);
-      else closeLittleArdia(windowId);
+      else void closeLittleArdia(windowId);
       return true;
     case "focusCommandBar":
       s.openPanel(windowId, tab?.url ?? "");

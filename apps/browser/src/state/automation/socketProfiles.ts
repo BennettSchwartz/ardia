@@ -3,7 +3,7 @@ import { engineProfile, isIncognitoProfile } from "../browser/model";
 import { deleteProfile } from "../browser/actions";
 import { sanitizeTheme, startingTheme } from "../../lib/profileLook";
 import type { ProfileColor } from "../browser/types";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { setOpenTabsSynced } from "../sync/engine";
 import { bool, id, ids, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { expect, now, profileArg } from "./socketTargets";
@@ -83,11 +83,13 @@ function reorder(params: Record<string, unknown>) {
   return listProfiles();
 }
 
-async function remove(params: Record<string, unknown>) {
+async function remove(params: Record<string, unknown>, call: SocketCall) {
   const id = profileArg(params.profile);
   if (now().profileOrder.length <= 1) throw new OpError("refused", "That's the only profile.");
-  await deleteProfile(id);
-  return { deleted: !now().profiles[id] };
+  await deleteProfile(id, undefined, call.serving);
+  const deleted = !now().profiles[id];
+  if (!deleted) call.stillServing();
+  return { deleted };
 }
 
 export const PROFILE_METHODS: MethodSpec[] = [

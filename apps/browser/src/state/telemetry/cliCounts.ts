@@ -17,6 +17,7 @@ const NONE = {
   windowless_pages_given_geometry: 0,
   windowless_pages_missing_geometry: 0,
   cli_socket_call_failures: 0,
+  cli_socket_lines_shrunk: 0,
   ...(Object.fromEntries(SOCKET_FAMILIES.map((family) => [`cli_socket_calls_${family}`, 0])) as Record<`cli_socket_calls_${SocketFamily}`, number>),
 };
 
@@ -39,6 +40,7 @@ export function noteSocketCall(family: SocketFamily, failed: boolean, consent?: 
   countFor(consent, () => void counts[field]++, { [field]: 1 });
   if (failed) countFor(consent, () => void counts.cli_socket_call_failures++, { cli_socket_call_failures: 1 });
 }
+export const noteSocketLineShrunk = (consent: ConsentToken | null) => countFor(consent, () => void counts.cli_socket_lines_shrunk++, { cli_socket_lines_shrunk: 1 });
 export const noteCliAutoEnabled = () => void counts.cli_auto_enables++;
 
 export function noteWindowlessPages(totals: { given: number; missed: number } | undefined) {

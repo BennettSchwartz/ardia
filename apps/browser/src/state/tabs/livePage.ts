@@ -13,7 +13,7 @@ const store = () => useBrowser.getState();
 
 export const livePageId = (tabId: string) => holderOfPage(store().tabs[tabId]) ?? tabId;
 
-export async function withLivePage(tabId: string, act: (page: WebViewHandle, pageId: string) => unknown) {
+export async function withLivePage(tabId: string, act: (page: WebViewHandle, pageId: string) => unknown, mayAct: () => boolean = () => true) {
   const tab = store().tabs[tabId];
   const holderId = holderOfPage(tab);
   if (!tab || !holderId) {
@@ -33,7 +33,7 @@ export async function withLivePage(tabId: string, act: (page: WebViewHandle, pag
     const page = webviews.get(holderId);
     if (page && webviewMount(holderId) !== before) {
       await new Promise((done) => setTimeout(done, SETTLE_MS));
-      if (shownHere() && webviews.get(holderId) === page) act(page, holderId);
+      if (shownHere() && webviews.get(holderId) === page && mayAct()) act(page, holderId);
       return;
     }
     await new Promise((done) => setTimeout(done, ARRIVAL_POLL_MS));

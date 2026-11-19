@@ -5,7 +5,7 @@ import { pruneEngineFavicons, cacheKey } from "../favicons/favicons";
 import { historyOf, historyViewOf } from "../history/history";
 import { clearBrowsingData } from "../profiles/profileData";
 import { queryHistory } from "../../platform/history";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { id, ids, int, obj, PAGE, PROFILE, text } from "./socketSchema";
 import { expect, now, page, profileArg } from "./socketTargets";
 import { openableUrl } from "./workspaceOps";
@@ -101,8 +101,7 @@ function search(params: Record<string, unknown>) {
   const roots = rootsOf(profileArg(params.profile));
   const q = ((params.query as string | undefined) ?? "").toLowerCase();
   const hits = matchesIn([roots.bar, roots.other], q).sort((x, y) => y.addedAt - x.addedAt);
-  const shown = page(hits, params);
-  return { ...shown, items: shown.items.map((n) => bookmarkRow(n, 0)) };
+  return page(hits, params, (n) => bookmarkRow(n, 0));
 }
 
 function placeOf(params: Record<string, unknown>) {
@@ -176,13 +175,12 @@ function remove(params: Record<string, unknown>) {
 
 type Visited = { url: string; title: string; visits: number; lastVisit: number };
 
-async function visitedPages(profileId: string, wanted: number | null): Promise<{ list: Visited[]; truncated: boolean; complete: boolean }> {
+async function newestPages(profileId: string, count: number): Promise<Visited[]> {
   const view = historyViewOf(now(), profileId);
-  if (view?.ready) return { list: [...historyOf(now(), profileId)].sort((a, b) => b.lastVisit - a.lastVisit), truncated: false, complete: true };
-  const cap = wanted === null ? HISTORY_SCAN : Math.min(wanted + 1, HISTORY_SCAN);
-  const rows = await queryHistory(engineProfile(now(), profileId), cap, 1);
-  const list = rows.map((e) => ({ url: e.url, title: e.title, visits: e.visits, lastVisit: e.visitTimes[0] ?? 0 }));
-  return { list, truncated: wanted === null && rows.length >= cap, complete: rows.length < cap };
+  const rows = view?.ready
+    ? [...historyOf(now(), profileId)].sort((a, b) => b.lastVisit - a.lastVisit).slice(0, count)
+    : (await queryHistory(engineProfile(now(), profileId), count, 1)).map((e) => ({ url: e.url, title: e.title, visits: e.visits, lastVisit: e.visitTimes[0] ?? 0 }));
+  return rows.map((h) => ({ url: h.url, title: h.title, visits: h.visits, lastVisit: h.lastVisit }));
 }
 
 async function historySearch(params: Record<string, unknown>) {
@@ -193,24 +191,21 @@ async function historySearch(params: Record<string, unknown>) {
   const filtered = !!q || params.since !== undefined || params.until !== undefined;
   const offset = (params.offset as number | undefined) ?? 0;
   const limit = (params.limit as number | undefined) ?? 100;
-  const { list, truncated, complete } = await visitedPages(profileId, filtered ? null : offset + limit);
-  const hits = filtered ? list.filter((h) => h.lastVisit >= since && h.lastVisit <= until && (!q || h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q))) : list;
+  const read = filtered ? HISTORY_SCAN + 1 : Math.min(offset + limit + 1, HISTORY_SCAN + 1);
+  const rows = await newestPages(profileId, read);
+  const scanned = rows.slice(0, HISTORY_SCAN);
+  const hits = filtered ? scanned.filter((h) => h.lastVisit >= since && h.lastVisit <= until && (!q || h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q))) : scanned;
   const shown = page(hits, params);
-  return {
-    items: shown.items.map((h) => ({ url: h.url, title: h.title, visits: h.visits, lastVisit: h.lastVisit })),
-    total: filtered || complete ? shown.total : null,
-    nextOffset: shown.nextOffset,
-    truncated,
-  };
+  return { items: shown.items, total: rows.length < read ? hits.length : null, nextOffset: shown.nextOffset, truncated: rows.length > HISTORY_SCAN };
 }
 
-async function historyClear(params: Record<string, unknown>) {
+async function historyClear(params: Record<string, unknown>, call: SocketCall) {
   const profileId = profileArg(params.profile);
   const engine = engineProfile(now(), profileId);
   const startedAt = Date.now();
   const since = params.since as number | undefined;
   await clearBrowsingData(engine, ["history"], since);
-  if (engineProfile(now(), profileId) === engine) now().clearHistory(profileId, since, startedAt);
+  if (call.serving() && engineProfile(now(), profileId) === engine) now().clearHistory(profileId, since, startedAt);
   pruneEngineFavicons(cacheKey(profileId));
   return { ok: true };
 }
