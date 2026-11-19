@@ -100,6 +100,10 @@ public final class TalkSpeaker {
     scheduled = 0
     askedAt = nil
     node.stop()
+    if let recording, recording.length > 0 {
+      recording.close()
+      self.recording = nil
+    }
     setSpeaking(false)
   }
 

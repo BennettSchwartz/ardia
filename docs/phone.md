@@ -1466,8 +1466,8 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
   it plays with the silent switch on, and is deactivated with `.notifyOthersOnDeactivation` when reading ends.
 - **Testing** (test builds only). `-ArdiaTalkToMeModels <folder>` loads the models from a folder instead of the pack
   (`build-pack --models-only --out <dir>` writes `<dir>/stage/TalkToMe`), so the simulator can speak.
-  `-ArdiaTalkToMeRecord <path.wav>` also writes what was spoken to a 24 kHz WAV, with `<path.wav>.txt` listing each
-  sentence and when it started. `-ArdiaTalkToMeOn YES -ArdiaTalkToMeAutomatically YES` turn the switches on for the
+  `-ArdiaTalkToMeRecord <path.wav>` also writes what the first reading spoke to a 24 kHz WAV, finished when that
+  reading stops, with `<path.wav>.txt` listing each block in the order it was queued and when its generation started. `-ArdiaTalkToMeOn YES -ArdiaTalkToMeAutomatically YES` turn the switches on for the
   run (they are the settings' own keys, read through the launch argument domain). Together with `-BrowseResearch "<query>" -ArdiaResearchWriter excerpts` the answer reads itself at launch. The
   app logs `TALKTOME first audio after …` and `TALKTOME utterance: …`. Apple's mock server (`xcrun ba-serve --host
   <host> <pack>.aar`, with an SSL certificate the test device trusts and Settings › Developer › Development Overrides ›
