@@ -36,11 +36,22 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
 @property (nonatomic, readonly) ArdiaPiPHandle *handle;
 @end
 
+@interface ArdiaPiPResizeCursor : NSObject
+@property (nonatomic, readonly) BOOL showing;
+@property (nonatomic) BOOL enabled;
+- (instancetype)initWithWindow:(NSWindow *)window view:(NSView *)view;
+- (void)detach;
+- (BOOL)follow:(NSPoint)pointInWindow;
+- (NSDictionary *)resizeStarted;
+- (NSDictionary *)probe;
+@end
+
 @interface ArdiaPiPController : NSObject
 @property (nonatomic, readonly) NSWindow *window;
 @property (nonatomic, weak) ArdiaWebView *view;
 @property (nonatomic, copy) NSString *host;
 @property (nonatomic, readonly) ArdiaPiPOverlay *overlay;
+@property (nonatomic, readonly) ArdiaPiPResizeCursor *resizeCursor;
 @property (nonatomic, readonly) ArdiaPiPEdge stashedEdge;
 @property (nonatomic) BOOL keepOnTop;
 + (instancetype)forWindow:(NSWindow *)window;
@@ -61,6 +72,7 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
   __weak ArdiaWebView *_view;
   NSString *_host;
   ArdiaPiPOverlay *_overlay;
+  ArdiaPiPResizeCursor *_resizeCursor;
   ArdiaPiPEdge _stashedEdge;
   BOOL _keepOnTop;
   NSMutableArray *_observers;
@@ -98,6 +110,7 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
   __weak NSScreen *_stashScreen;
 }
 - (void)detach;
+- (void)resizeStarted;
 - (void)toggleKeepOnTop:(id)sender;
 - (void)backToTabFromMenu:(id)sender;
 - (void)windowMoved;
