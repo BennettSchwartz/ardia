@@ -138,13 +138,15 @@ function guarded(method: string, schema: JsonSchema, value: Record<string, unkno
   const check = (key: string | symbol) => {
     if (typeof key === "string" && !Object.hasOwn(listed, key) && !PROTOTYPE_KEYS.has(key)) throw new UnlistedParamError(`${method} read ${path}${String(key)}, which its params schema doesn't list.`);
   };
+  const wrapped = (key: string | symbol, found: unknown) => {
+    const nested = typeof key === "string" ? ownField(listed, key) : undefined;
+    if (isClosedObject(nested) && typeof found === "object" && found !== null && !Array.isArray(found)) return guarded(method, nested, found as Record<string, unknown>, `${path}${String(key)}.`);
+    return found;
+  };
   return new Proxy(value, {
     get(target, key, receiver) {
       check(key);
-      const found = Reflect.get(target, key, receiver);
-      const nested = typeof key === "string" ? ownField(listed, key) : undefined;
-      if (isClosedObject(nested) && typeof found === "object" && found !== null && !Array.isArray(found)) return guarded(method, nested, found as Record<string, unknown>, `${path}${String(key)}.`);
-      return found;
+      return wrapped(key, Reflect.get(target, key, receiver));
     },
     has(target, key) {
       check(key);
@@ -152,7 +154,8 @@ function guarded(method: string, schema: JsonSchema, value: Record<string, unkno
     },
     getOwnPropertyDescriptor(target, key) {
       check(key);
-      return Reflect.getOwnPropertyDescriptor(target, key);
+      const found = Reflect.getOwnPropertyDescriptor(target, key);
+      return found && "value" in found && found.configurable ? { ...found, value: wrapped(key, found.value) } : found;
     },
   });
 }

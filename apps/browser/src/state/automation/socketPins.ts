@@ -6,6 +6,7 @@ import type { MethodSpec } from "./socketCatalog";
 import { id, ids, obj, text, WINDOW } from "./socketSchema";
 import { expect, now, tabOf, windowOrFocused } from "./socketTargets";
 import { guardEmptied, noSplitTiles } from "./workspaceChecks";
+import { refuseSharedTabs } from "./workspaceSharedGuard";
 import { OpError } from "./workspaceTargets";
 
 const MAX_NAME = 200;
@@ -54,6 +55,7 @@ function sameSpace(tabIds: string[]) {
 function intoFolderChecks(tabIds: string[]) {
   const s = now();
   noSplitTiles(s, tabIds, { pinned: true, row: false }, "into a tile folder");
+  refuseSharedTabs(tabIds);
   guardEmptied(s, new Set(tabIds));
 }
 

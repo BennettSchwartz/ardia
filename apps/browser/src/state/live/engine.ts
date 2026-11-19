@@ -109,7 +109,7 @@ function staleRun(folderId: string, folder: LiveFolder, allowed: () => boolean):
 }
 
 async function run(folderId: string, interactive: boolean, allowed: () => boolean) {
-  if (!live().folders[folderId]) return;
+  if (!live().folders[folderId] || !allowed()) return;
   const claim = claimRefresh(folderId);
   let fence = claim ? await claim : undefined;
   if (fence === null) return;
@@ -152,7 +152,7 @@ async function run(folderId: string, interactive: boolean, allowed: () => boolea
   const folderBeforeHiding = live().folders[folderId];
   hideNewRepos(folderId, fetched);
   const folderAfterHiding = live().folders[folderId];
-  if (fence !== undefined && sameFolder(folderBeforeHiding, folder) && !sameFolder(folderAfterHiding, folderBeforeHiding)) {
+  if (fence !== undefined && allowed() && sameFolder(folderBeforeHiding, folder) && !sameFolder(folderAfterHiding, folderBeforeHiding)) {
     const reclaim = claimRefresh(folderId);
     fence = reclaim ? await reclaim : undefined;
     if (fence === null || !live().folders[folderId]) return;

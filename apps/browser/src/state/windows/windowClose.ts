@@ -69,8 +69,7 @@ export async function closeAfterAsking(windowId: string, { mayClose = () => true
   if (suppressWarning && mayClose()) useBrowser.getState().updateSettings({ warnBeforeClosingWindow: false });
   if (decision === "cancel") return "cancelled";
   if (!mayClose()) return "stopped";
-  const keepsLastWindow = isLastRegularWindow(useBrowser.getState(), windowId);
-  return (await closeWindowAnimated(windowId, { keepsLastWindow, mayCommit: mayClose })) ? "closing" : mayClose() ? "cancelled" : "stopped";
+  return (await closeWindowAnimated(windowId, { keepsLastWindow: true })) ? "closing" : mayClose() ? "cancelled" : "stopped";
 }
 
 export type CloseAsk = typeof confirm;
