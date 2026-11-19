@@ -1,3 +1,4 @@
+import ArdiaCore
 import Darwin
 import Foundation
 
@@ -64,12 +65,12 @@ final class PluginProcess: PluginRun {
 
   static func prepareCertificates(for spec: Spec, deliverOn queue: DispatchQueue, then: @escaping (PluginSandbox.PreparedCertificates) -> Void) {
     guard spec.network else { return then(.offline) }
-    certificateCache.prepare(for: ProcessInfo.processInfo.environment, deliverOn: queue, then: then)
+    certificateCache.prepare(for: LaunchConfig.shared.environmentForChildProcesses, deliverOn: queue, then: then)
   }
 
   static func environment(name: String, data: OpenedFolder, network: Bool, certificates: PluginSandbox.PreparedCertificates) -> [String] {
     let built = PluginSandbox.helperEnvironment(
-      name: name, data: data, channelFd: channelFd, network: network, given: ProcessInfo.processInfo.environment, certificates: certificates)
+      name: name, data: data, channelFd: channelFd, network: network, given: LaunchConfig.shared.environmentForChildProcesses, certificates: certificates)
     if !built.droppedProxies.isEmpty {
       NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, built.droppedProxies.joined(separator: ", "))
     }
