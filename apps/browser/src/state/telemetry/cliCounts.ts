@@ -1,5 +1,6 @@
 import type { ConsentToken } from "./choice";
 import { countFor } from "./countFor";
+import { SOCKET_FAMILIES, type SocketFamily } from "../automation/socketCatalog";
 
 export type CliInstallReason = "auto" | "settings" | "upgrade";
 
@@ -15,6 +16,8 @@ const NONE = {
   cli_settings_install_failures: 0,
   windowless_pages_given_geometry: 0,
   windowless_pages_missing_geometry: 0,
+  cli_socket_call_failures: 0,
+  ...(Object.fromEntries(SOCKET_FAMILIES.map((family) => [`cli_socket_calls_${family}`, 0])) as Record<`cli_socket_calls_${SocketFamily}`, number>),
 };
 
 const FIELDS = {
@@ -30,6 +33,10 @@ export const noteCliInstall = (reason: CliInstallReason, ok: boolean, consent?: 
 export function noteCliPillShown(compact: boolean) {
   counts.cli_pill_shows++;
   if (compact) counts.cli_pill_compact_shows++;
+}
+export function noteSocketCall(family: SocketFamily, failed: boolean) {
+  counts[`cli_socket_calls_${family}`]++;
+  if (failed) counts.cli_socket_call_failures++;
 }
 export const noteCliAutoEnabled = () => void counts.cli_auto_enables++;
 

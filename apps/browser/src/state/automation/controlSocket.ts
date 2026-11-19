@@ -29,6 +29,9 @@ import { launchToReplay, recordLaunch, runLaunchActions } from "./lifecycleEvent
 import { startDecideHooks } from "./decideHooks";
 import { offscreenMethod } from "./offscreen";
 import { applyMethod, workspaceMethod } from "./workspaceMethods";
+import { familyOf, methodsCatalog, runSocketMethod } from "./socketCatalog";
+import { registerSocketAreas } from "./socketAreas";
+import { noteSocketCall } from "../telemetry/cliCounts";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
 
@@ -131,7 +134,9 @@ export function handleControlRequest({ connection, generation: tagged, line }: C
   } catch (error) {
     body = failure("failed", errorText(error));
   }
+  const family = familyOf(method);
   const reply = (settled: Body) => {
+    noteSocketCall(family, "error" in settled);
     try {
       send(connection, id, settled, ticket);
     } catch (error) {
@@ -193,6 +198,8 @@ function answer(connection: number, method: string, params: Record<string, unkno
     }
     case "commands":
       return { result: commands() };
+    case "methods":
+      return Object.keys(params).length ? failure("bad_request", "methods takes no params.") : { result: methodsCatalog() };
     case "windows":
       return windowsWithTargets(automationWindows(useBrowser.getState())).then((result) => ({ result }));
     case "workspace":
@@ -212,6 +219,8 @@ function answer(connection: number, method: string, params: Record<string, unkno
     case "run":
       return runMethod(params);
   }
+  const area = runSocketMethod(method, params);
+  if (area) return area;
   const plugin = pluginMethods?.(method, params);
   if (plugin) return plugin;
   return failure("unknown_method", `There's no method ${method}.`);
@@ -283,6 +292,7 @@ let started = false;
 export function startAutomation() {
   if (started) return;
   started = true;
+  registerSocketAreas();
   startDecideHooks();
   recordLaunch();
   runLaunchActions();
