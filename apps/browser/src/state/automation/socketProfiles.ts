@@ -4,6 +4,7 @@ import { deleteProfile } from "../browser/actions";
 import { sanitizeTheme, startingTheme } from "../../lib/profileLook";
 import type { ProfileColor } from "../browser/types";
 import type { MethodSpec } from "./socketCatalog";
+import { setOpenTabsSynced } from "../sync/engine";
 import { bool, id, ids, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { expect, now, profileArg } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -50,10 +51,10 @@ function updateProfile(params: Record<string, unknown>) {
     ...(params.icon !== undefined ? { icon: params.icon as string | null } : {}),
     ...(params.pinnedCollapsed !== undefined ? { pinnedCollapsed: params.pinnedCollapsed as boolean } : {}),
     ...(params.shareTopApps !== undefined ? { shareTopApps: params.shareTopApps ? (true as const) : undefined } : {}),
-    ...(params.syncTabs !== undefined ? { syncTabs: params.syncTabs ? (true as const) : undefined } : {}),
   };
-  if (!Object.keys(patch).length) throw new OpError("bad_request", "profiles.update needs name, icon, pinnedCollapsed, shareTopApps or syncTabs.");
-  now().updateProfile(id, patch);
+  if (!Object.keys(patch).length && params.syncTabs === undefined) throw new OpError("bad_request", "profiles.update needs name, icon, pinnedCollapsed, shareTopApps or syncTabs.");
+  if (Object.keys(patch).length) now().updateProfile(id, patch);
+  if (params.syncTabs !== undefined && !!now().profiles[id]!.syncTabs !== params.syncTabs) setOpenTabsSynced(id, params.syncTabs as boolean);
   return profileRow(now(), id);
 }
 

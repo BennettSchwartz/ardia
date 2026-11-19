@@ -12,12 +12,39 @@ import { openableUrl } from "./workspaceOps";
 import { OpError } from "./workspaceTargets";
 
 const MAX_DEPTH = 64;
+export const TREE_MAX_ITEMS = 5000;
+export const TREE_MAX_BYTES = 1024 * 1024;
+export const HISTORY_SCAN = 20_000;
 
-function bookmarkRow(node: BookmarkNode, depth: number): Record<string, unknown> {
+type TreeBudget = { items: number; bytes: number; truncated: boolean };
+
+const unbounded = (): TreeBudget => ({ items: Infinity, bytes: Infinity, truncated: false });
+
+function spend(budget: TreeBudget, node: BookmarkNode) {
+  budget.items -= 1;
+  budget.bytes -= 96 + node.title.length * 3 + (node.kind === "url" ? node.url.length * 3 : 0);
+  return budget.items >= 0 && budget.bytes >= 0;
+}
+
+function bookmarkRow(node: BookmarkNode, depth: number, budget = unbounded()): Record<string, unknown> {
   const b = now().bookmarks;
   const base = { id: node.id, kind: node.kind, parent: node.parentId, title: node.title, addedAt: node.addedAt };
   if (node.kind === "url") return { ...base, url: node.url };
-  return { ...base, children: depth > 0 ? folderChildren(b, node.id).map((c) => bookmarkRow(c, depth - 1)) : node.children.length };
+  if (depth <= 0) return { ...base, children: node.children.length };
+  const children: Record<string, unknown>[] = [];
+  for (const child of folderChildren(b, node.id)) {
+    if (!spend(budget, child)) {
+      budget.truncated = true;
+      return { ...base, children: node.children.length };
+    }
+    children.push(bookmarkRow(child, depth - 1, budget));
+  }
+  return { ...base, children };
+}
+
+function rootsHolding(profile: string, nodeId: string) {
+  const roots = rootsOf(profile);
+  if (!isWithin(now().bookmarks, nodeId, [roots.bar, roots.other])) throw new OpError("bad_request", `${nodeId} isn't in profile ${profile}'s bookmarks.`);
 }
 
 function rootsOf(profile: string) {
@@ -41,25 +68,51 @@ function folderOf(value: unknown) {
 
 function tree(params: Record<string, unknown>) {
   const depth = (params.depth as number | undefined) ?? MAX_DEPTH;
-  if (params.folder !== undefined) return bookmarkRow(folderOf(params.folder), depth);
+  const budget: TreeBudget = { items: TREE_MAX_ITEMS, bytes: TREE_MAX_BYTES, truncated: false };
+  if (params.folder !== undefined) {
+    const folder = folderOf(params.folder);
+    if (params.profile !== undefined) rootsHolding(profileArg(params.profile), folder.id);
+    const row = bookmarkRow(folder, depth, budget);
+    return { ...row, truncated: budget.truncated };
+  }
   const roots = rootsOf(profileArg(params.profile));
   const b = now().bookmarks;
-  return { bar: bookmarkRow(b.nodes[roots.bar]!, depth), other: bookmarkRow(b.nodes[roots.other]!, depth) };
+  const bar = bookmarkRow(b.nodes[roots.bar]!, depth, budget);
+  const other = bookmarkRow(b.nodes[roots.other]!, depth, budget);
+  return { bar, other, truncated: budget.truncated };
+}
+
+function matchesIn(rootIds: readonly string[], q: string) {
+  const b = now().bookmarks;
+  const hits: BookmarkNode[] = [];
+  const seen = new Set<string>();
+  const stack = rootIds.flatMap((id) => folderChildren(b, id));
+  while (stack.length) {
+    const n = stack.pop()!;
+    if (seen.has(n.id)) continue;
+    seen.add(n.id);
+    if (!q || n.title.toLowerCase().includes(q) || (n.kind === "url" && n.url.toLowerCase().includes(q))) hits.push(n);
+    if (n.kind === "folder") stack.push(...folderChildren(b, n.id));
+  }
+  return hits;
 }
 
 function search(params: Record<string, unknown>) {
   const roots = rootsOf(profileArg(params.profile));
-  const b = now().bookmarks;
   const q = ((params.query as string | undefined) ?? "").toLowerCase();
-  const hits = Object.values(b.nodes).filter(
-    (n) => n.id !== roots.bar && n.id !== roots.other && isWithin(b, n.id, [roots.bar, roots.other]) && (!q || n.title.toLowerCase().includes(q) || (n.kind === "url" && n.url.toLowerCase().includes(q))),
-  );
-  return page(hits.sort((x, y) => y.addedAt - x.addedAt).map((n) => bookmarkRow(n, 0)), params);
+  const hits = matchesIn([roots.bar, roots.other], q).sort((x, y) => y.addedAt - x.addedAt);
+  const shown = page(hits, params);
+  return { ...shown, items: shown.items.map((n) => bookmarkRow(n, 0)) };
 }
 
 function placeOf(params: Record<string, unknown>) {
   if (params.parent === undefined) return { profileId: profileArg(params.profile), parentId: undefined };
   const parent = folderOf(params.parent);
+  if (params.profile !== undefined) {
+    const profileId = profileArg(params.profile);
+    rootsHolding(profileId, parent.id);
+    return { profileId, parentId: parent.id };
+  }
   return { profileId: ownerOfBookmark(now(), parent.id)!, parentId: parent.id };
 }
 
@@ -101,8 +154,14 @@ function move(params: Record<string, unknown>) {
     if (n.kind === "folder" && (n.id === parent.id || isWithin(now().bookmarks, parent.id, [n.id]))) throw new OpError("bad_request", `${n.id} can't go inside itself.`);
     if (n.parentId === null) throw new OpError("refused", `${n.id} is a root folder.`);
   }
-  now().moveBookmarks(nodes.map((n) => n.id), parent.id, params.index as number | undefined);
-  expect(nodes.every((n) => now().bookmarks.nodes[n.id]?.parentId === parent.id), "the bookmarks didn't move.");
+  const picked = nodes.map((n) => n.id);
+  const carried = nodes.filter((n) => picked.some((other) => other !== n.id && isWithin(now().bookmarks, n.parentId ?? "", [other])));
+  now().moveBookmarks(picked, parent.id, params.index as number | undefined);
+  const after = now().bookmarks.nodes;
+  expect(
+    nodes.every((n) => (carried.includes(n) ? after[n.id]?.parentId === n.parentId : after[n.id]?.parentId === parent.id)),
+    "the bookmarks didn't move.",
+  );
   return bookmarkRow(now().bookmarks.nodes[parent.id]!, 1);
 }
 
@@ -115,15 +174,34 @@ function remove(params: Record<string, unknown>) {
   return { removed: nodes.length };
 }
 
+type Visited = { url: string; title: string; visits: number; lastVisit: number };
+
+async function visitedPages(profileId: string, wanted: number | null): Promise<{ list: Visited[]; truncated: boolean; complete: boolean }> {
+  const view = historyViewOf(now(), profileId);
+  if (view?.ready) return { list: [...historyOf(now(), profileId)].sort((a, b) => b.lastVisit - a.lastVisit), truncated: false, complete: true };
+  const cap = wanted === null ? HISTORY_SCAN : Math.min(wanted + 1, HISTORY_SCAN);
+  const rows = await queryHistory(engineProfile(now(), profileId), cap, 1);
+  const list = rows.map((e) => ({ url: e.url, title: e.title, visits: e.visits, lastVisit: e.visitTimes[0] ?? 0 }));
+  return { list, truncated: wanted === null && rows.length >= cap, complete: rows.length < cap };
+}
+
 async function historySearch(params: Record<string, unknown>) {
   const profileId = profileArg(params.profile);
-  const view = historyViewOf(now(), profileId);
-  const list = view?.ready ? historyOf(now(), profileId) : (await queryHistory(engineProfile(now(), profileId), 100_000)).map((e) => ({ ...e, lastVisit: Math.max(0, ...(e.visitTimes ?? [])) }));
   const q = ((params.query as string | undefined) ?? "").toLowerCase();
   const since = (params.since as number | undefined) ?? -Infinity;
   const until = (params.until as number | undefined) ?? Infinity;
-  const hits = list.filter((h) => h.lastVisit >= since && h.lastVisit <= until && (!q || h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q)));
-  return page([...hits].sort((a, b) => b.lastVisit - a.lastVisit).map((h) => ({ url: h.url, title: h.title, visits: h.visits, lastVisit: h.lastVisit })), params);
+  const filtered = !!q || params.since !== undefined || params.until !== undefined;
+  const offset = (params.offset as number | undefined) ?? 0;
+  const limit = (params.limit as number | undefined) ?? 100;
+  const { list, truncated, complete } = await visitedPages(profileId, filtered ? null : offset + limit);
+  const hits = filtered ? list.filter((h) => h.lastVisit >= since && h.lastVisit <= until && (!q || h.title.toLowerCase().includes(q) || h.url.toLowerCase().includes(q))) : list;
+  const shown = page(hits, params);
+  return {
+    items: shown.items.map((h) => ({ url: h.url, title: h.title, visits: h.visits, lastVisit: h.lastVisit })),
+    total: filtered || complete ? shown.total : null,
+    nextOffset: shown.nextOffset,
+    truncated,
+  };
 }
 
 async function historyClear(params: Record<string, unknown>) {
@@ -141,7 +219,7 @@ const BOOKMARK_PLACE = { profile: PROFILE, parent: id("A folder id; the profile'
 const SINCE = int("Milliseconds since 1970", 0);
 
 export const LIBRARY_METHODS: MethodSpec[] = [
-  { name: "bookmarks.tree", mutates: false, description: "A profile's Bookmarks Bar and Other Bookmarks, or one folder, as a tree", params: obj({ profile: PROFILE, folder: id("Only this folder"), depth: int("How many folder levels to open (all when left out)", 0, MAX_DEPTH) }), result: "{bar, other} | folder", run: tree },
+  { name: "bookmarks.tree", mutates: false, description: "A profile's Bookmarks Bar and Other Bookmarks, or one folder, as a tree", params: obj({ profile: PROFILE, folder: id("Only this folder"), depth: int("How many folder levels to open (all when left out)", 0, MAX_DEPTH) }), result: "{bar, other, truncated} | {…folder, truncated}", run: tree },
   { name: "bookmarks.search", mutates: false, description: "Bookmarks and folders whose title or URL contains the query, newest first", params: obj({ profile: PROFILE, query: text("Text to look for; every bookmark when left out"), ...PAGE }), result: "{items, total, nextOffset}", run: search },
   { name: "bookmarks.get", mutates: false, description: "One bookmark or folder", params: obj({ id: id("A bookmark id") }, ["id"]), result: "bookmark", run: (p) => bookmarkRow(nodeOf(p.id), 1) },
   { name: "bookmarks.add", mutates: true, description: "Bookmark a page", params: obj({ url: text("The page"), title: text("Its title; the URL when left out"), ...BOOKMARK_PLACE }, ["url"]), result: "bookmark", run: add },
@@ -149,7 +227,7 @@ export const LIBRARY_METHODS: MethodSpec[] = [
   { name: "bookmarks.update", mutates: true, description: "Rename a bookmark or folder, or change a bookmark's URL", params: obj({ id: id("A bookmark id"), title: text("New title"), url: text("New URL") }, ["id"]), result: "bookmark", run: update },
   { name: "bookmarks.move", mutates: true, description: "Move bookmarks and folders into a folder", params: obj({ ids: ids("Bookmark ids, in the order they should land"), parent: id("The folder"), index: int("Position in the folder; the end when left out", 0) }, ["ids", "parent"]), result: "folder", run: move },
   { name: "bookmarks.remove", mutates: true, description: "Delete bookmarks and folders (with what's in them)", params: obj({ ids: ids("Bookmark ids") }, ["ids"]), result: "{removed}", run: remove },
-  { name: "history.search", mutates: false, description: "Visited pages whose title or URL contains the query, newest first", params: obj({ profile: PROFILE, query: text("Text to look for"), since: SINCE, until: SINCE, ...PAGE }), result: "{items: [{url, title, visits, lastVisit}], total, nextOffset}", run: historySearch },
+  { name: "history.search", mutates: false, description: "Visited pages whose title or URL contains the query, newest first", params: obj({ profile: PROFILE, query: text("Text to look for"), since: SINCE, until: SINCE, ...PAGE }), result: "{items: [{url, title, visits, lastVisit}], total, nextOffset, truncated}", run: historySearch },
   {
     name: "history.remove",
     mutates: true,
