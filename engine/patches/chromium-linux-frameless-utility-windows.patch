@@ -1,8 +1,10 @@
 The Ardia Linux host draws its own window controls in every window it hosts. Its Settings and Import windows are
 legacy app windows (TYPE_APP with an app name and no web app controller), so on X11 Chromium asked the window manager
 for its frame and the window showed both the manager's title bar and Ardia's controls, and with a custom frame it
-drew a title bar of its own. The host names such windows through g_ardia_linux_frameless_app; they get Chromium's
-custom frame and no window title bar, as a normal browser window does. The hook is null outside the Linux host.
+drew a title bar of its own, and its window icon (the product logo) over the window's top-left corner. The host names
+such windows through g_ardia_linux_frameless_app; they get Chromium's custom frame with no window title bar and no
+window icon, as a normal browser window does. The window manager's icon for the window is unchanged. The hook is null
+outside the Linux host.
 --- a/chrome/browser/ui/views/frame/browser_native_widget_aura_linux.cc
 +++ b/chrome/browser/ui/views/frame/browser_native_widget_aura_linux.cc
 @@ -17,6 +17,8 @@
@@ -46,7 +48,7 @@ custom frame and no window title bar, as a normal browser window does. The hook 
  
  namespace {
  
-@@ -4023,6 +4035,9 @@ views::View* BrowserView::GetInitiallyFocusedView() {
+@@ -4023,11 +4035,17 @@ views::View* BrowserView::GetInitiallyFocusedView() {
  }
  
  bool BrowserView::ShouldShowWindowTitle() const {
@@ -56,3 +58,11 @@ custom frame and no window title bar, as a normal browser window does. The hook 
    return WindowFeatureController::From(browser_)->SupportsWindowFeature(
        WindowFeatureController::WindowFeature::kFeatureTitleBar);
  }
+ 
+ bool BrowserView::ShouldShowWindowIcon() const {
++  if (ArdiaLinuxFramelessApp(browser_.get())) {
++    return false;
++  }
+ #if !BUILDFLAG(IS_CHROMEOS)
+   if (GetIsWebAppType() && !GetSupportsTabStrip()) {
+     return true;
