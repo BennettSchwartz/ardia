@@ -164,6 +164,7 @@ export const surfaces = {
   performed: [] as { path: number[]; ref: string; windowId: string }[],
   checked: [] as { path: number[]; ref: string }[],
   dismissed: [] as string[],
+  checkHook: null as (() => void) | null,
   emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
 };
 
@@ -193,7 +194,10 @@ const menus: Modules["ArdiaMenus"] = {
     surfaces.performed.push({ path, ref, windowId });
     return "performed";
   },
-  checkMenuBarItem: async (path, ref) => void surfaces.checked.push({ path, ref }),
+  checkMenuBarItem: async (path, ref) => {
+    surfaces.checked.push({ path, ref });
+    surfaces.checkHook?.();
+  },
   showMenu: () => Promise.resolve(null),
   updateMenu: () => Promise.resolve(),
   setMenuState: () => Promise.resolve(),

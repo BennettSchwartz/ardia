@@ -305,6 +305,7 @@ export const crxInstallFailure: { next: string | null } = { next: null };
 export const linkRoute: { next: LinkRoute } = { next: {} };
 export const resolvedPermissions: { id: string; result: string; remember: boolean }[] = [];
 export const gonePermissions = new Set<string>();
+export const permissionReadback: { onAnswer: ((answer: { id: string; result: string; remember: boolean }) => void) | null } = { onAnswer: null };
 export const extensionAnswers = {
   actionStates: async (_tabId: string, _ids: string[], _profile?: string): Promise<Record<string, ActionState>> => ({}),
   sidePanelUrl: async (_tabId: string, _extensionId: string, _profile?: string): Promise<string | null> => null,
@@ -410,6 +411,7 @@ const fakeModules = {
     answer: ({ id, result, remember }) => {
       if (gonePermissions.delete(id)) return false;
       resolvedPermissions.push({ id, result, remember });
+      permissionReadback.onAnswer?.({ id, result, remember });
       return true;
     },
     resolveExternalApp: () => null,

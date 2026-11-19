@@ -82,9 +82,9 @@ test("a password answer for a prompt that was replaced is refused", async () => 
   const { tab } = await freshWindow("https://login.example/");
   const answers = [];
   webviews.set(tab, { answerPasswordPrompt: async (...a) => (answers.push(a), true) });
-  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [] });
+  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [], offerSerial: 1 });
   const [first] = await ok("passwords.prompts");
-  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "b", passwordLength: 4, federation: "", usernames: [] });
+  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "b", passwordLength: 4, federation: "", usernames: [], offerSerial: 2 });
   const [second] = await ok("passwords.prompts");
   assert.notEqual(first.id, second.id);
   assert.equal((await call("passwords.respond", { tab, id: first.id, decision: "update" })).error.code, "no_window");
@@ -153,15 +153,15 @@ test("a permission whose native request is gone fails instead of answering", asy
 });
 
 test("allowOnce needs a known kind list made only of kinds a one-time grant covers", async () => {
-  const { tab } = await freshWindow("https://cam.example/");
-  startPermissionPrompts();
-  stub.emitPermission({ id: "o1", tabId: tab, origin: "https://cam.example", permissions: [] });
-  await tick();
-  assert.equal((await call("permissions.respond", { id: "o1", decision: "allowOnce" })).error.code, "refused");
-  await ok("permissions.respond", { id: "o1", decision: "dismiss" });
-  stub.emitPermission({ id: "o2", tabId: tab, origin: "https://cam.example", permissions: ["camera", "notifications"] });
-  await tick();
-  assert.equal((await call("permissions.respond", { id: "o2", decision: "allowOnce" })).error.code, "refused");
+  for (const [id, permissions] of [["o1", []], ["o2", ["camera", "notifications"]]]) {
+    const { tab } = await freshWindow("https://cam.example/");
+    startPermissionPrompts();
+    stub.emitPermission({ id, tabId: tab, origin: "https://cam.example", permissions });
+    await tick();
+    const reply = await call("permissions.respond", { id, decision: "allowOnce" });
+    assert.equal(reply.error.code, "refused");
+    assert.match(reply.error.message, /Only camera, microphone and location/);
+  }
 });
 
 test("password prompts list at most 20 usernames with the full count, in replies and events", async () => {
@@ -174,7 +174,7 @@ test("password prompts list at most 20 usernames with the full count, in replies
   const [row] = await ok("passwords.prompts");
   assert.equal(row.usernames.length, 20);
   assert.equal(row.usernameCount, 50);
-  assert.ok(row.usernames.every((u) => u.length <= 256));
+  assert.ok(row.usernames.every((u, i) => u.id === `u${i}` && u.name.length <= 256));
   const event = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line)).find((e) => e.event === "password.prompted");
   assert.equal(event.data.usernames.length, 20);
   assert.equal(event.data.usernameCount, 50);
