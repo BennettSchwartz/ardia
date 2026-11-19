@@ -59,10 +59,10 @@ test("an iPhone 17 Pro on its side gets main's landscape deck: a 520.3 by 240 ca
   expect(g.safeSide).toBe(59);
 });
 
-test("in landscape the deck's header and bottom bar pad by the wider side inset plus 12 on both sides, and on iPhone the grid by it plus 16", () => {
+test("in landscape the deck's header pads by the wider side inset plus 12 and its bottom bar by it plus the bars' 24 on both sides, and on iPhone the grid by it plus 16", () => {
   act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
   const root = redesigned(<TabDeck />);
-  expect(flat(hosts(root, "deckBottomBar")[0]!).paddingHorizontal).toBe(59 + 12);
+  expect(flat(hosts(root, "deckBottomBar")[0]!).paddingHorizontal).toBe(59 + 24);
   const header = root.root.findAll((node) => typeof node.type === "string" && typeof node.props.testID === "string" && node.props.testID.startsWith("deckHeader"));
   expect(header.length).toBeGreaterThan(0);
   const sides = header.map(flat).flatMap((style) => [style.paddingHorizontal, style.left, style.right, style.paddingLeft, style.paddingRight]).filter((value) => typeof value === "number");
@@ -75,16 +75,16 @@ test("in landscape the deck's header and bottom bar pad by the wider side inset 
   unmount(root);
 });
 
-test("in landscape the page bar stays one centred row: the wider side inset on both sides, then the bar's own 12, leaving main's 598-point address capsule on an 852 screen", () => {
+test("in landscape the page bar stays one centred row: the wider side inset on both sides, then the bars' own 24, leaving a 574-point address capsule on an 852 screen", () => {
   act(() => browse.useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null }));
   const root = redesigned(<BrowsingScreen tab={currentTabs().open[0]!} />);
   const bar = root.root.findAll((node) => node.type === FloatingBar)[0]!;
   let controls: ReactTestInstance | null = bar.parent;
   while (controls && (typeof controls.type !== "string" || flat(controls).bottom === undefined)) controls = controls.parent;
   expect(flat(controls!).paddingHorizontal).toBe(59);
-  const row = bar.findAll((node) => typeof node.type === "string" && flat(node).flexDirection === "row" && flat(node).paddingHorizontal === 12)[0]!;
+  const row = bar.findAll((node) => typeof node.type === "string" && flat(node).flexDirection === "row" && flat(node).paddingHorizontal === 24)[0]!;
   const { gap, height } = flat(row) as { gap: number; height: number };
-  expect(LANDSCAPE.width - 2 * (59 + 12) - 2 * height - 2 * gap).toBe(598);
+  expect(LANDSCAPE.width - 2 * (59 + 24) - 2 * height - 2 * gap).toBe(574);
   unmount(root);
 });
 
