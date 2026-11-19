@@ -51,7 +51,7 @@ const data = join(work, "d");
 mkdirSync(data);
 
 const DRAG_LOG = `window.dragLog = [];
-for (const type of ["dragstart", "dragend", "dragenter", "dragover", "drop"]) document.addEventListener(type, (e) => { if (type !== "dragstart" && type !== "dragend") e.preventDefault(); dragLog.push(type + ":" + (e.target.id || e.target.nodeName)); }, true);`;
+for (const type of ["dragstart", "dragend", "dragenter", "dragover", "drop"]) document.addEventListener(type, (e) => { if (type !== "dragstart" && type !== "dragend") e.preventDefault(); dragLog.push(type + ":" + (e.target.id || e.target.nodeName)); if (type === "dragstart") window.onArdiaDragstart?.(); }, true);`;
 const XCHILD = `<!doctype html><title>xchild</title>
 <div id=drag draggable=true style="position:fixed;left:10px;top:10px;width:80px;height:30px;background:#ccc">drag</div>
 <div id=drop style="position:fixed;left:10px;top:60px;width:80px;height:30px;background:#eee">drop</div>
@@ -316,11 +316,15 @@ try {
   const dragsRefused = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefused ?? -1;
   const unknownDrags = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDragsRefusedUnknown ?? -1;
   const unknownAtStart = await unknownDrags();
+  const gateConsulted = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.dragGateConsulted ?? -1;
+  const consultedBeforeMain = await gateConsulted();
   await logOf(csOne);
   const refusedBeforeMain = await dragsRefused();
   const pluginDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
   const pluginLog = await logOf(csOne);
   const refusedAfterMain = await dragsRefused();
+  const consultedAfterMain = await gateConsulted();
+  check("the drag gate is consulted on a widget a plugin used", consultedBeforeMain >= 0 && consultedAfterMain > consultedBeforeMain, `${consultedBeforeMain} -> ${consultedAfterMain}`);
   check("plugin: a drag from its press in the main frame is refused by the press check (pluginDragsRefused +1) and shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart:drag,dragend:drag" && refusedBeforeMain >= 0 && refusedAfterMain - refusedBeforeMain === 1 && pluginDrag.every((r) => !refused(r)), `${pluginLog}; refused ${refusedBeforeMain} -> ${refusedAfterMain}; ${pluginDrag.map(text).join(" | ")}`);
   const clicksOf = async () => (await cli.send("Runtime.evaluate", { expression: "window.clicks", returnByValue: true }, csOne)).result?.result?.value;
   const clicksBefore = await clicksOf();
@@ -335,9 +339,25 @@ try {
   await logOf(csTwo);
   const refusedBeforeUnmarked = await dragsRefused();
   const unknownBeforeUnmarked = await unknownDrags();
+  const consultedBeforeUnmarked = await gateConsulted();
   const unmarkedDrag = await dragWith(cli, csTwo, dragPath(280, 135, 185));
+  const consultedAfterUnmarked = await gateConsulted();
   const unmarkedLog = await logOf(csTwo);
-  check("cli: on a widget no plugin has touched (window 2's tab) the drag gate doesn't run: the owner's drag drops on the drop element and no drag is refused, known or unknown", unmarkedDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(unmarkedLog ?? "") && (await dragsRefused()) === refusedBeforeUnmarked && (await unknownDrags()) === unknownBeforeUnmarked && unknownBeforeUnmarked === 0, `${unmarkedLog}; unknown ${unknownBeforeUnmarked}; ${unmarkedDrag.map(text).join(" | ")}`);
+  check("cli: on a widget no plugin has touched (window 2's tab) the drag gate doesn't run: the owner's drag drops on the drop element and no drag is refused, known or unknown", unmarkedDrag.every((r) => !refused(r)) && /^dragstart:drag,.*drop:drop,dragend:drag$/.test(unmarkedLog ?? "") && (await dragsRefused()) === refusedBeforeUnmarked && (await unknownDrags()) === unknownBeforeUnmarked && unknownBeforeUnmarked === 0 && consultedBeforeUnmarked >= 0 && consultedAfterUnmarked === consultedBeforeUnmarked, `${unmarkedLog}; unknown ${unknownBeforeUnmarked}; gate consulted ${consultedBeforeUnmarked} -> ${consultedAfterUnmarked}; ${unmarkedDrag.map(text).join(" | ")}`);
+  for (const [who, client, session] of [["plugin", plugin, ps], ["cli", cli, csOne]]) {
+    await logOf(csOne);
+    const refusedBefore = await dragsRefused();
+    const unknownBefore = await unknownDrags();
+    const mark = client.replies.length;
+    const quick = [["mousePressed", 280, 135, 1], ["mouseMoved", 280, 150, 1], ["mouseMoved", 280, 170, 1], ["mousePressed", 100, 215, 1], ["mouseReleased", 100, 215, 0]];
+    quick.forEach(([type, x, y, buttons], i) => client.raw(680000 + i, "Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, session));
+    await until(`${who}'s quick presses`, async () => client.replies.slice(mark).filter((m) => m.id >= 680000 && m.id < 680005).length === 5 || null, 15000).catch(() => null);
+    await sleep(500);
+    const quickLog = await logOf(csOne);
+    const refusedDelta = (await dragsRefused()) - refusedBefore;
+    const unknownDelta = (await unknownDrags()) - unknownBefore;
+    check(`${who}: a drag whose start arrives after a second quick press still matches its own press (${who === "plugin" ? "refused as a plugin drag" : "allowed"}), never as unknown`, unknownDelta === 0 && refusedDelta === (who === "plugin" ? 1 : 0) && /^dragstart:drag/.test(quickLog ?? ""), `${quickLog}; refused +${refusedDelta}, unknown +${unknownDelta}`);
+  }
   await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
   const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
   const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));
@@ -374,13 +394,24 @@ try {
   const childTarget = (await cli.send("Page.getFrameTree", {}, csOne)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childLogOf = async () => (await cli.send("Runtime.evaluate", { expression: "(() => { const w = document.getElementById('child').contentWindow; const log = w.dragLog.join(','); w.dragLog = []; return log; })()", returnByValue: true }, csOne)).result?.result?.value;
   await childLogOf();
+  await cli.send("Runtime.evaluate", { expression: "document.getElementById('child').contentWindow.onArdiaDragstart = () => { parent.document.getElementById('child').style.left = '0px'; }; true" }, csOne);
   const refusedBeforeChild = await dragsRefused();
   const childDrag = await dragWith(plugin, ps, dragPath(510, 57, 97));
   const childLog = await childLogOf();
+  await cli.send("Runtime.evaluate", { expression: "(() => { const c = document.getElementById('child'); c.contentWindow.onArdiaDragstart = null; c.style.left = '460px'; return true })()" }, csOne);
   const clicksBeforeChild = await clicksOf();
   for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
   await sleep(300);
-  check("plugin: a drag from its press in a same-process child frame is refused, its dragend reaches that child frame, and the next click is delivered", !!childTarget && childDrag.every((r) => !refused(r)) && childLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
+  check("plugin: a drag from its press in a same-process child frame that moves itself away during dragstart is refused, its dragend still reaches that child frame, and the next click is delivered", !!childTarget && childDrag.every((r) => !refused(r)) && childLog === "dragstart:drag,dragend:drag" && (await dragsRefused()) - refusedBeforeChild === 1 && (await clicksOf()) === clicksBeforeChild + 1, `${childLog}`);
+  await logOf(csOne);
+  await childLogOf();
+  await cli.send("Runtime.evaluate", { expression: "window.onArdiaDragstart = () => { const c = document.getElementById('child'); c.style.left = '240px'; c.style.top = '120px'; }; true" }, csOne);
+  const refusedBeforeCovered = await dragsRefused();
+  const coveredDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
+  const coveredLog = await logOf(csOne);
+  const coveredChildLog = await childLogOf();
+  await cli.send("Runtime.evaluate", { expression: "(() => { window.onArdiaDragstart = null; const c = document.getElementById('child'); c.style.left = '460px'; c.style.top = '40px'; return true })()" }, csOne);
+  check("plugin: a main-frame drag whose cancel point ends up over a child frame (moved there during dragstart) still ends in the main frame", coveredDrag.every((r) => !refused(r)) && coveredLog === "dragstart:drag,dragend:drag" && !/drag/.test(coveredChildLog ?? "") && (await dragsRefused()) - refusedBeforeCovered === 1, `main ${coveredLog}; child ${coveredChildLog}`);
   check("no drag in this run was refused for an unknown press (owner and plugin presses are all recorded)", unknownAtStart >= 0 && (await unknownDrags()) === unknownAtStart, `${unknownAtStart} -> ${await unknownDrags()}`);
   const childFrame = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
   const childAx = childFrame && (await plugin.send("Accessibility.getFullAXTree", { frameId: childFrame }, ps));
