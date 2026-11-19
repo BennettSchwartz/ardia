@@ -7,6 +7,7 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+#include <atomic>
 #include <cmath>
 #include <initializer_list>
 
@@ -40,9 +41,10 @@ CGFloat WindowCornerRadius(NSWindow *window) {
 }
 
 CGFloat DrawnWindowCornerRadius(NSWindow *window) {
-  static CGFloat drawn = 0;
-  if (window && drawn <= 0) drawn = [ArdiaChromeWindowHost frameCornerRadiusOfWindow:window];
-  return drawn > 0 ? drawn : WindowCornerRadius(nil);
+  static std::atomic<CGFloat> drawn{0};
+  if (window && drawn.load() <= 0) drawn.store([ArdiaChromeWindowHost frameCornerRadiusOfWindow:window]);
+  const CGFloat measured = drawn.load();
+  return measured > 0 ? measured : WindowCornerRadius(nil);
 }
 
 }
