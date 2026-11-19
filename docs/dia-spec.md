@@ -244,13 +244,16 @@ corner**, the corner nearest the row.
 - Show delay: the controller sleeps **0.5 s** or **0.1 s** before presenting (a flag in the hover source picks which;
   not identified) and **0** when another card is already up. A click or key down dismisses it (local event monitor).
   The leave delay comes from the hover source's dismissal behaviour; no value in the binary. Both need a recording.
-- Ours (`components/sidebar/hoverMotion.ts`): the same curve, spring and scale, anchored at the card's top-left. Unlike Dia,
+- Ardia originally used the same curve, spring and scale, anchored at the card's top-left. Unlike Dia,
   since 2026-11-14 (#1584, #1365) it opens only after the pointer rests 0.8 s on one row (Dia: 0.5 s, then 0 for every
   next row), never moves from row to row with the pointer, leaves at once when the pointer leaves away from it (up, out
   of the far edge, or onto another row) and 160 ms after a leave toward it, and never opens for rows a peeking sidebar
   brings under the pointer during its first 0.4 s; Settings › Tabs › Show tab hover menu turns it off. Measured on the native driver's own per-frame values
   (120 Hz, a hidden instance): opacity within 0.007 of Dia's curve over its 12 frames, scale within 0.001 of the spring
   (peak 1.0022 at 180 ms, settled by 340 ms); the fade out takes 12 frames.
+- Ours since 2026-11-19 (the owner's review of 0.2.47-nightly.6): the fade only, in and out on the 0.10 s curve above,
+  with no scale spring either way, for the sidebar card, the top-strip card, live items, the calendar and the mini
+  player (`sidebar/hoverMotion.ts`). The card sits at its final size and position from the first frame.
 
 ### Opening and closing tabs (owner's 2× recording, 120 fps, 2026-10-15)
 
@@ -343,9 +346,12 @@ recording: of three unpinned tabs, the two unselected close and the selected one
   text button to 0.985 on `springs.snappy`, with no overshoot. The Arc-style squish (rows to 0.975, tiles to 0.94,
   a bounce back of about 13 %) shipped in 0.2.47-nightly.6 and was removed at the owner's request: with the row
   scaling about its centre, a folder's icon slid 4 pt sideways and sprang back on every click.
-  The reload button's dip, a New Tab card's lift and a finished live item's check mark settle on `springs.snappy`
-  too. `springs.bouncy` stays for rare, larger moves: a toast, an unread or live badge appearing, import's check
-  mark, and the sidebar's edge springing back from a resize past its limit.
+  A New Tab card's lift and a finished live item's check mark settle on `springs.snappy` too. Since 2026-11-19,
+  pressing Reload highlights the toolbar plate while the glyph stays the same size. `springs.bouncy` stays for rare, larger moves: an unread or
+  live badge appearing, import's check mark, and the sidebar's edge springing back from a resize past its limit.
+- **Toast.** Fades in place: in over `duration.base` on `curve.enter`, out over `duration.slow` on `curve.exit`
+  (`ui/Toast.tsx`). Its 10 pt rise, 0.96 scale and `springs.bouncy` arrival were removed on 2026-11-19 (the owner's
+  review of 0.2.47-nightly.6).
 - **Hover.** A highlight lights in 50 ms and fades out over 200 ms, so the pointer leaves a short trail down a list:
   sidebar rows, top-strip tabs and pins, icon and text buttons, settings and list rows. The pressed colour replaces
   the hover colour at once. A row that becomes selected drops the highlight with no fade (the selected fill is
