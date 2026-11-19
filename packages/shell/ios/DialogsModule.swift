@@ -8,6 +8,8 @@ public class DialogsModule: Module {
   public func definition() -> ModuleDefinition {
     Name("ArdiaDialogs")
 
+    Constant("dismissesShownOnly") { true }
+
     AsyncFunction("confirm") { (options: ConfirmOptions, promise: Promise) in
       if let file = MenuChoice.testFile(flag: "appDialog", name: "dialog.json"),
          let answer = MenuChoice.testAnswer(dumping: options.toDictionary().merging(["kind": "confirm"]) { $1 }, to: file) {

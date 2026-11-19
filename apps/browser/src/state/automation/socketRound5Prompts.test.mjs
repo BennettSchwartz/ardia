@@ -9,8 +9,8 @@ const { COMMAND_INTERACTION } = await import("../commands/commandInteraction.ts"
 const { shellNativeModules } = await import("../../test-native/shell.ts");
 
 const dialogs = shellNativeModules.ArdiaDialogs;
-const originals = { confirm: dialogs.confirm, dismiss: dialogs.dismissShownOnly };
-const restore = () => Object.assign(dialogs, { confirm: originals.confirm, dismissShownOnly: originals.dismiss });
+const originals = { confirm: dialogs.confirm, dismiss: dialogs.dismissShownOnly, can: dialogs.dismissesShownOnly };
+const restore = () => Object.assign(dialogs, { confirm: originals.confirm, dismissShownOnly: originals.dismiss, dismissesShownOnly: originals.can });
 after(() => {
   restore();
   delete globalThis.acTestUserScripts;
@@ -50,7 +50,7 @@ test("without native dismissal the close guard holds until the question is answe
   S().updateSettings({ warnBeforeClosingWindow: true });
   const waiting = [];
   dialogs.confirm = () => new Promise((resolve) => waiting.push(resolve));
-  delete dialogs.dismissShownOnly;
+  dialogs.dismissesShownOnly = false;
   try {
     const closing = fire("windows.close", { window: windowId });
     for (let i = 0; i < 50 && !waiting.length; i++) await tick();
