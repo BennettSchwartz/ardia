@@ -25,10 +25,11 @@ function foldersIn(s: BrowserState, windowId: string) {
   return [...seen].map((folderId) => folderRow(s, windowId, folderId));
 }
 
-function folderOf(params: Record<string, unknown>): { windowId: string; folderId: string } {
+function folderOf(params: Record<string, unknown>, near?: string): { windowId: string; folderId: string } {
   const s = now();
   const folderId = params.folder as string;
-  const windows = params.window !== undefined ? [windowOrFocused(params.window).id] : s.windowOrder.filter((w) => eligibleKind(s, w) === "normal");
+  const order = [...(near ? [near] : []), ...s.ui.focusOrder, ...s.windowOrder];
+  const windows = params.window !== undefined ? [windowOrFocused(params.window).id] : [...new Set(order)].filter((w) => eligibleKind(s, w) === "normal");
   const windowId = windows.find((w) => folderMembers(s, w, folderId).length > 0);
   if (!windowId) throw new OpError("no_window", `There's no tile folder ${folderId}${params.window !== undefined ? ` in window ${String(params.window)}` : ""}.`);
   return { windowId, folderId };
@@ -74,7 +75,7 @@ function removeFolder(params: Record<string, unknown>) {
 }
 
 function addTabs(params: Record<string, unknown>) {
-  const { windowId, folderId } = folderOf(params);
+  const { windowId, folderId } = folderOf(params, tabOf((params.tabs as string[])[0]).windowId);
   const onto = folderMembers(now(), windowId, folderId)[0]!;
   const moving = sameSpace([onto, ...(params.tabs as string[])]).filter((t) => t !== onto);
   if (moving.some((t) => now().tabs[t]!.windowId !== windowId)) throw new OpError("bad_request", "Those tabs aren't in the folder's window.");

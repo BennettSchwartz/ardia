@@ -76,6 +76,19 @@ test("tile folders refuse tabs from two windows and Little Ardia", async () => {
   if (S().windows[little]?.kind === "small") assert.equal(await code("pins.createFolder", { tabs: [S().windows[little].tabIds[0]] }), "bad_request");
 });
 
+test("a folder mirrored into another window is found in the window of the tabs being added", async () => {
+  const { tabs: [, , , d] } = await setup();
+  const other = S().createWindow({ url: "https://o.example/" });
+  const own = S().windows[other].tabIds[0];
+  const extra = S().newTab(other, { url: "https://p.example/", background: true });
+  const made = await ok("pins.createFolder", { tabs: [own] });
+  assert.ok(Object.values(S().tabs).some((t) => t.windowId !== other && t.pin?.folder?.id === made.id), "the folder is mirrored into the first window");
+  const grown = await ok("pins.addToFolder", { folder: made.id, tabs: [extra] });
+  assert.equal(grown.window, other);
+  assert.ok(grown.tabs.includes(extra));
+  assert.equal(await code("pins.addToFolder", { folder: made.id, tabs: [d], window: other }), "bad_request");
+});
+
 test("favicons: from the app's cache or the profile's icon database, as base64", async () => {
   await setup();
   const profile = S().settings.defaultProfileId;
