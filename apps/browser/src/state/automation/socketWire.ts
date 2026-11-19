@@ -7,7 +7,11 @@ export const CLIPPED_STRING_CHARS = 32 * 1024;
 
 const utf8 = new TextEncoder();
 
-export const fitsOnLine = (line: string) => line.length * 3 <= LINE_BYTE_LIMIT || utf8.encode(line).length <= LINE_BYTE_LIMIT;
+export const DROPPED_MARKER_ROOM = 64;
+
+export const frameBytes = (line: string) => utf8.encode(line).length + 1;
+
+export const fitsOnLine = (line: string, room = 0) => (line.length + 1) * 3 + room <= LINE_BYTE_LIMIT || frameBytes(line) + room <= LINE_BYTE_LIMIT;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -67,8 +71,8 @@ export function fittedReply(id: unknown, body: WireBody, method: WireMethod, con
 
 export function fittedEvent(name: string, time: number, data: Record<string, unknown>, consent: ConsentToken | null): string {
   const line = JSON.stringify({ event: name, time, data });
-  if (fitsOnLine(line)) return line;
+  if (fitsOnLine(line, DROPPED_MARKER_ROOM)) return line;
   noteSocketLineShrunk(consent);
   const short = JSON.stringify({ event: name, time, data: { ...summary(data), truncated: true } });
-  return fitsOnLine(short) ? short : JSON.stringify({ event: name, time, data: { truncated: true } });
+  return fitsOnLine(short, DROPPED_MARKER_ROOM) ? short : JSON.stringify({ event: name, time, data: { truncated: true } });
 }

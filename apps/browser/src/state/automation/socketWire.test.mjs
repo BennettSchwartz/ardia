@@ -6,7 +6,7 @@ const { ensureRoots } = await import("../bookmarks/bookmarks.ts");
 const { replyLine } = await import("./controlSocket.ts");
 const { noteCommit } = await import("./automationEvents.ts");
 const { requestDecision } = await import("./decideSocket.ts");
-const { LINE_BYTE_LIMIT } = await import("./socketWire.ts");
+const { LINE_BYTE_LIMIT, DROPPED_MARKER_ROOM, fittedEvent } = await import("./socketWire.ts");
 const { reloadHooks, useHookRules } = await import("./hookRules.ts");
 const { approveRule, resetApprovalsForTests } = await import("./approvals.ts");
 const { approvalFor } = await import("./hookPolicy.ts");
@@ -15,7 +15,7 @@ const stub = await import("../../test-native/index.ts");
 after(() => S().updateSettings({ cliControl: false }));
 
 const { call, ok } = socketClient(41);
-const bytes = (line) => Buffer.byteLength(line, "utf8");
+const bytes = (line) => Buffer.byteLength(line, "utf8") + 1;
 const lines = (connection, from) => stub.controlSocket.broadcasts.slice(from).filter((b) => b.connections.includes(connection)).map((b) => b.line);
 const hugeUrl = (n = LINE_BYTE_LIMIT + 4096) => `https://big.example/?q=${"a".repeat(n)}`;
 
@@ -100,4 +100,43 @@ test("a decide request over 1 MiB isn't sent, and Ardia goes on as if nobody ans
   await ok("subscribe", { events: [], hooks: null });
   stub.configFolder.files.delete("hooks.json");
   reloadHooks();
+});
+
+test("lines are measured as sent: escaped JSON plus the newline, and events leave room for the dropped marker", async () => {
+  const control = "\u0001".repeat(200_000);
+  const quotes = '"'.repeat(600_000);
+  for (const text of [control, quotes]) {
+    assert.ok(Buffer.byteLength(text) < LINE_BYTE_LIMIT, "the raw text is under the limit");
+    const reply = replyLine(1, { result: text }, "tabs.get");
+    assert.ok(bytes(reply) <= LINE_BYTE_LIMIT, `reply ${bytes(reply)}`);
+    assert.equal(JSON.parse(reply).error.code, "failed", "escaped, it's over, so it was refit");
+    const write = replyLine(2, { result: { ok: true, note: text } }, "apply");
+    assert.ok(bytes(write) <= LINE_BYTE_LIMIT);
+    assert.equal(JSON.parse(write).result.oversized, true);
+    const event = fittedEvent("history.removed", 1, { urls: [text] }, null);
+    assert.ok(bytes(event) + DROPPED_MARKER_ROOM <= LINE_BYTE_LIMIT, `event ${bytes(event)}`);
+    assert.equal(JSON.parse(event).data.truncated, true);
+  }
+  const envelope = JSON.stringify({ id: 3, result: "" }).length;
+  const exact = replyLine(3, { result: "x".repeat(LINE_BYTE_LIMIT - envelope) }, "tabs.get");
+  assert.equal(JSON.parse(exact).error?.code, "failed", "a line of exactly 1 MiB is over once its newline is added");
+  const fits = replyLine(4, { result: "x".repeat(LINE_BYTE_LIMIT - envelope - 1) }, "tabs.get");
+  assert.equal(bytes(fits), LINE_BYTE_LIMIT, "a reply whose frame is exactly 1 MiB goes out whole");
+  const nearEvent = fittedEvent("tab.navigated", 1, { url: "y".repeat(LINE_BYTE_LIMIT - 100) }, null);
+  assert.equal(JSON.parse(nearEvent).data.truncated, true, "an event too big to take the marker is summarized");
+});
+
+test("every reply, event and decide line the socket sends fits in 1 MiB with its newline", async () => {
+  const { tab } = await freshWindow();
+  const from = stub.controlSocket.replies.length;
+  const fromBroadcast = stub.controlSocket.broadcasts.length;
+  await ok("subscribe", { events: ["tab.navigated"], fullUrls: true });
+  noteCommit(tab, `https://big.example/${"\u0001".repeat(300_000)}`, Date.now());
+  await new Promise((r) => setTimeout(r, 20));
+  await call("tabs.list", {});
+  await call("methods", {});
+  const sent = [...stub.controlSocket.replies.slice(from), ...stub.controlSocket.broadcasts.slice(fromBroadcast)].map((r) => r.line);
+  assert.ok(sent.length >= 3);
+  for (const line of sent) assert.ok(bytes(line) <= LINE_BYTE_LIMIT, `${bytes(line)} bytes`);
+  await ok("subscribe", { events: [] });
 });
