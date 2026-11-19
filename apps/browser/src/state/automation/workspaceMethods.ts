@@ -7,6 +7,7 @@ import { failure, type ErrorCode, type MethodError } from "./automationMethods";
 import { eligibleKind, isEligibleTab, ownEntry } from "./automationWindows";
 import { parseOps, type Op } from "./workspaceOps";
 import { runOp } from "./workspaceApply";
+import { takeLateOutcomes } from "./tabCalls";
 import { OpError, type Changed, type OpResult } from "./workspaceTargets";
 import { groupFields, isEligibleGroup, tabNode, workspace, type GroupNode, type TabNode } from "./workspaceTree";
 import { sampleTabUsage, workspaceWithUsage } from "./workspaceUsage";
@@ -37,6 +38,7 @@ export type ApplyResult = {
   applied: number;
   results: (OpResult & { op: string })[];
   error?: { index: number; code: ErrorCode; message: string; changed?: Changed };
+  late?: Record<string, string>;
   tabs: TabNode[];
   groups: (Omit<GroupNode, "items"> & { tabs: string[] })[];
   windows: { id: string; activeTab: string | null }[];
@@ -74,6 +76,7 @@ async function runAll(ops: Op[], stillOn: () => boolean, consent: ConsentToken |
       break;
     }
   }
+  const late = takeLateOutcomes();
   const applied = ops.slice(0, results.length);
   noteCliEdits(applied.filter((op) => !op.op.startsWith("group.")).length, applied.filter((op) => op.op.startsWith("group.")).length, error ? 1 : 0, consent);
   return {
@@ -81,6 +84,7 @@ async function runAll(ops: Op[], stillOn: () => boolean, consent: ConsentToken |
     applied: results.length,
     results: results.map((r, i) => ({ op: ops[i]!.op, ...r })),
     ...(error ? { error } : {}),
+    ...(late ? { late } : {}),
     ...settledState(ops, results),
   };
 }

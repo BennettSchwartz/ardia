@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 const { S, socketClient, freshWindow } = await import("./fixtures/socketHarness.mjs");
 const { useBrowser } = await import("../browser/store.ts");
-const { HISTORY_SCAN } = await import("./socketLibrary.ts");
+const { HISTORY_SCAN } = await import("./socketHistory.ts");
 const stub = await import("../../test-native/index.ts");
 
 const { ok } = socketClient(31);
