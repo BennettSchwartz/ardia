@@ -75,7 +75,7 @@ struct ControlOutput {
       bytes -= chunk.data.count
       if chunk.kind == .event {
         eventBytes -= chunk.data.count
-        if !(index == 0 && headStarted) { waitingEvents -= 1 }
+        waitingEvents -= 1
       }
     }
     if !midLine { headStarted = false }
@@ -110,6 +110,7 @@ struct ControlOutput {
         if errno == EINTR { continue }
         return errno == EAGAIN || errno == EWOULDBLOCK ? .blocked : .failed
       }
+      if headWritten == 0 && chunks[0].kind == .event { waitingEvents -= 1 }
       offset += written
       headWritten += written
       bytes -= written
@@ -152,9 +153,7 @@ struct ControlOutput {
   private mutating func startHead() {
     guard !headStarted else { return }
     headStarted = true
-    guard chunks[0].kind == .event else { return }
-    waitingEvents -= 1
-    guard dropped > 0 else { return }
+    guard chunks[0].kind == .event, dropped > 0 else { return }
     let marked = Self.marking(chunks[0].data, dropped: dropped)
     let grown = marked.count - chunks[0].data.count
     guard grown > 0, grown <= Self.markerRoom, marked.count <= Self.maxLine else { return }
