@@ -113,7 +113,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "importBrowserData":
       return openImport();
     case "openFile":
-      return void openFiles(requested, strictWindow);
+      return void openFiles(requested);
     case "manageExtensions":
       return openManageExtensions(requested);
     case "toggleBookmarksBar": {
@@ -355,12 +355,11 @@ async function addBookmarkToFolder(windowId: string, tabId: string, folder: stri
   useBrowser.getState().addBookmark({ profileId, url: tab.url, title: tab.title, favicon: tab.favicon, parentId });
 }
 
-async function openFiles(windowId: string | null, boundToWindow: boolean) {
+async function openFiles(windowId: string | null) {
   const urls = await pickFiles();
   if (!urls.length) return;
   const s = useBrowser.getState();
-  if (boundToWindow && windowId && !s.windows[windowId]) return;
-  const target = boundToWindow && windowId ? windowId : resolveWindowId(s, windowId);
+  const target = resolveWindowId(s, windowId);
   if (!target) return void openWindow({ url: urls[0] });
   let last: string | undefined;
   for (const url of urls) last = useBrowser.getState().newTab(target, { url });

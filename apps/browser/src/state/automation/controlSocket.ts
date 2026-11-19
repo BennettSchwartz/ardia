@@ -169,9 +169,12 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
   }));
 }
 
+export const OPEN_FILE_REFUSED = "Opening files needs the person, so the ardia command never starts Open File; open a file URL in a tab with apply's open op instead.";
+
 export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
+  if (plan.command === "openFile") return failure("refused", OPEN_FILE_REFUSED);
   const needsUser = background ? runNeedsUser(useBrowser.getState(), plan) : null;
   if (needsUser === "asks") return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
   if (needsUser === "interactive") return failure("refused", `${plan.command} opens something only a person can answer (a sheet, dialog, picker, menu, print preview or Cast), and this Ardia runs in the background, so it didn't run.`);
