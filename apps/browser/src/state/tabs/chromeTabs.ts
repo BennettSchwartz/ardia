@@ -163,7 +163,9 @@ function project(s: BrowserState) {
 
 const stripCommandRefused = (strip: number, consent: ConsentToken | null) => (cmd: number) => {
   if (stillValid(consent)) noteTabStripCommandRefused();
-  if (inflight.get(strip)?.cmd === cmd) inflight.delete(strip);
+  if (inflight.get(strip)?.cmd !== cmd) return;
+  inflight.delete(strip);
+  scheduleProject();
 };
 
 function sentAlready(strip: number, kind: Kind, sig: string) {
