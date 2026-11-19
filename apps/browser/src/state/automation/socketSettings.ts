@@ -1,0 +1,131 @@
+import { sameValue, checkedSettings } from "../config/configSettings";
+import { isConfigSettingKey } from "../settings/configAllowlist";
+import { DEFAULT_SETTINGS, SETTING_KEYS, SETTING_SPECS, searchEngines, type SettingKey, type Settings } from "../settings/settings";
+import type { MethodSpec } from "./socketCatalog";
+import { id, ids, obj, text } from "./socketSchema";
+import { expect, now } from "./socketTargets";
+import { OpError } from "./workspaceTargets";
+
+const OWN_METHOD: Partial<Record<SettingKey, string>> = {
+  defaultProfileId: "profiles.setDefault",
+  customSearchEngines: "search.add, search.update and search.remove",
+  cliControl: "nothing: the ardia command can't switch its own control",
+  allowJavaScriptFromAppleEvents: "nothing: it would let any AppleScript run script in every page",
+};
+
+const whyNot = (key: string) => {
+  if (!(SETTING_KEYS as readonly string[]).includes(key)) return `${key} isn't a setting`;
+  if (isConfigSettingKey(key)) return null;
+  const own = OWN_METHOD[key as SettingKey];
+  return own ? `${key} is set with ${own}` : `${key} can't be set from the ardia command yet`;
+};
+
+function getSettings(params: Record<string, unknown>) {
+  const s = now().settings;
+  const keys = (params.keys as string[] | undefined) ?? SETTING_KEYS;
+  const unknown = keys.filter((k) => !(SETTING_KEYS as readonly string[]).includes(k));
+  if (unknown.length) throw new OpError("bad_request", `Not settings: ${unknown.join(", ")}.`);
+  return Object.fromEntries(keys.map((k) => [k, s[k as SettingKey]]));
+}
+
+const settingsSchema = () =>
+  SETTING_KEYS.map((key) => ({
+    key,
+    schema: SETTING_SPECS[key].schema,
+    default: SETTING_SPECS[key].default,
+    writable: whyNot(key) === null,
+    ...(whyNot(key) ? { why: whyNot(key) } : {}),
+    synced: SETTING_SPECS[key].synced,
+  }));
+
+function apply(values: Record<string, unknown>, label: string) {
+  const refused = Object.keys(values).map(whyNot).filter((w): w is string => !!w);
+  if (refused.length) throw new OpError("refused", `${refused.join("; ")}.`);
+  const settings = now().settings;
+  const { values: checked, problems } = checkedSettings(label, values, settings);
+  if (problems.length) throw new OpError("bad_request", problems.join("; "));
+  const patch: Partial<Record<SettingKey, unknown>> = {};
+  for (const [key, value] of Object.entries(checked) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
+  if (Object.keys(patch).length) now().updateSettings(patch as Partial<Settings>);
+  const after = now().settings;
+  const changed = Object.keys(patch).filter((k) => !sameValue(after[k as SettingKey], settings[k as SettingKey]));
+  return { changed, values: Object.fromEntries(Object.keys(values).map((k) => [k, after[k as SettingKey]])) };
+}
+
+function reset(params: Record<string, unknown>) {
+  const keys = params.keys as string[];
+  const values = Object.fromEntries(keys.map((k) => [k, (DEFAULT_SETTINGS as Record<string, unknown>)[k]]));
+  return apply(values, "settings.reset");
+}
+
+const engineRows = () => {
+  const s = now().settings;
+  return searchEngines(s).map((e) => ({ id: e.id, name: e.name, keyword: e.keyword, url: e.url, custom: !!e.custom, default: e.id === s.searchEngine }));
+};
+
+function engineOf(value: unknown) {
+  const engine = engineRows().find((e) => e.id === value);
+  if (!engine) throw new OpError("no_window", `There's no search engine ${String(value)}.`);
+  return engine;
+}
+
+const engineInput = (params: Record<string, unknown>, was?: { name: string; keyword: string; url: string }) => ({
+  name: (params.name as string | undefined) ?? was?.name ?? "",
+  keyword: (params.keyword as string | undefined) ?? was?.keyword ?? "",
+  url: (params.url as string | undefined) ?? was?.url ?? "",
+});
+
+function addEngine(params: Record<string, unknown>) {
+  const made = now().addCustomEngine(engineInput(params));
+  if ("error" in made) throw new OpError("bad_request", made.error);
+  return engineOf(made.id);
+}
+
+function updateEngine(params: Record<string, unknown>) {
+  const was = engineOf(params.id);
+  if (!was.custom) throw new OpError("refused", `${was.name} is built in; only engines added in Settings change.`);
+  const problem = now().updateCustomEngine(was.id, engineInput(params, was));
+  if (problem) throw new OpError("bad_request", problem);
+  return engineOf(was.id);
+}
+
+function removeEngine(params: Record<string, unknown>) {
+  const was = engineOf(params.id);
+  if (!was.custom) throw new OpError("refused", `${was.name} is built in; only engines added in Settings can be removed.`);
+  now().removeCustomEngine(was.id);
+  expect(!engineRows().some((e) => e.id === was.id), "the engine is still there.");
+  return { ok: true };
+}
+
+const ENGINE_FIELDS = { name: text("Its name"), keyword: text("The keyword that searches it from the address bar"), url: text("Its search URL, with %s for the query") };
+
+export const SETTINGS_METHODS: MethodSpec[] = [
+  { name: "settings.get", mutates: false, description: "Settings and their values: every one, or the keys given", params: obj({ keys: ids("Setting keys", 200) }), result: "{key: value}", run: getSettings },
+  { name: "settings.schema", mutates: false, description: "Every setting: its JSON schema, default, whether the command can set it, and whether it syncs", params: obj({}), result: "[{key, schema, default, writable, why?, synced}]", run: settingsSchema },
+  {
+    name: "settings.set",
+    mutates: true,
+    description: "Change settings, as the Settings window does; the keys and values config.json takes. Nothing changes unless every value is valid",
+    params: obj({ values: { type: "object", description: "Setting key to new value (settings.schema lists them)" } }, ["values"]),
+    result: "{changed, values}",
+    run: (p) => apply(p.values as Record<string, unknown>, "settings.set"),
+  },
+  { name: "settings.reset", mutates: true, description: "Put settings back to their defaults", params: obj({ keys: ids("Setting keys", 200) }, ["keys"]), result: "{changed, values}", run: reset },
+  { name: "search.engines", mutates: false, description: "Search engines: built in, added in Settings and from extensions, with the default", params: obj({}), result: "[{id, name, keyword, url, custom, default}]", run: engineRows },
+  {
+    name: "search.setDefault",
+    mutates: true,
+    description: "Make a search engine the default",
+    params: obj({ id: id("An engine id from search.engines") }, ["id"]),
+    result: "engine",
+    run: (p) => {
+      const engine = engineOf(p.id);
+      now().setSearchEngine(engine.id);
+      expect(now().settings.searchEngine === engine.id, `${engine.name} isn't the default (an extension may control it).`);
+      return engineOf(engine.id);
+    },
+  },
+  { name: "search.add", mutates: true, description: "Add a search engine", params: obj(ENGINE_FIELDS, ["name", "keyword", "url"]), result: "engine", run: addEngine },
+  { name: "search.update", mutates: true, description: "Change a search engine added in Settings", params: obj({ id: id("An engine id"), ...ENGINE_FIELDS }, ["id"]), result: "engine", run: updateEngine },
+  { name: "search.remove", mutates: true, description: "Remove a search engine added in Settings", params: obj({ id: id("An engine id") }, ["id"]), result: "{ok}", run: removeEngine },
+];
