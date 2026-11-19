@@ -63,6 +63,23 @@ struct ControlOutput {
     return true
   }
 
+  mutating func keepOnlyReplies() {
+    var kept: [Chunk] = []
+    for (index, chunk) in chunks.enumerated() {
+      if chunk.kind == .reply || (index == 0 && headStarted) {
+        kept.append(chunk)
+        continue
+      }
+      bytes -= chunk.data.count
+      if chunk.kind == .event {
+        eventBytes -= chunk.data.count
+        waitingEvents -= 1
+      }
+    }
+    chunks = kept
+    dropped = 0
+  }
+
   mutating func keepOnlyHead() -> [Int] {
     guard midLine else { return [] }
     let rest = chunks.dropFirst()
@@ -139,6 +156,33 @@ struct ControlOutput {
     dropped = 0
   }
 
+  static let maxSafeInteger: Double = 9_007_199_254_740_991
+
+  static func echoedId(_ given: Any?) -> Any {
+    if let number = given as? NSNumber {
+      guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return NSNull() }
+      let value = number.doubleValue
+      return value.rounded() == value && abs(value) <= maxSafeInteger ? number : NSNull()
+    }
+    guard let text = given as? NSString, wellFormed(text) else { return NSNull() }
+    let string = text as String
+    return string.utf8.count <= maxIdBytes ? string : NSNull()
+  }
+
+  static func wellFormed(_ text: NSString) -> Bool {
+    var index = 0
+    while index < text.length {
+      let unit = text.character(at: index)
+      if (0xDC00...0xDFFF).contains(unit) { return false }
+      if (0xD800...0xDBFF).contains(unit) {
+        guard index + 1 < text.length, (0xDC00...0xDFFF).contains(text.character(at: index + 1)) else { return false }
+        index += 1
+      }
+      index += 1
+    }
+    return true
+  }
+
   static func marking(_ line: Data, dropped: Int) -> Data {
     guard line.count >= 2, line.first == UInt8(ascii: "{"), line[line.startIndex + 1] != UInt8(ascii: "}") else { return line }
     var marked = Data("{\"dropped\":\(dropped),".utf8)
@@ -149,11 +193,8 @@ struct ControlOutput {
   static func fittedReply(_ data: Data) -> Data {
     guard data.count > maxLine else { return data }
     let message = "The reply would be over 1 MiB, the most a line can carry; ask for less."
-    var id: Any = NSNull()
-    if let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any], let given = parsed["id"], given is NSNumber || (given as? String).map({ $0.utf8.count <= maxIdBytes }) == true {
-      id = given
-    }
-    let reply: [String: Any] = ["id": id, "error": ["code": "failed", "message": message]]
+    let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any]
+    let reply: [String: Any] = ["id": echoedId(parsed?["id"]), "error": ["code": "failed", "message": message]]
     var line = (try? JSONSerialization.data(withJSONObject: reply)) ?? Data("{\"id\":null,\"error\":{\"code\":\"failed\",\"message\":\"\(message)\"}}".utf8)
     line.append(10)
     return line
