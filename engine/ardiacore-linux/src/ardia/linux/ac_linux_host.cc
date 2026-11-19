@@ -3379,6 +3379,7 @@ void ShellHostView::HideCaptionButtons() {
 
 void ShellHostView::OnWidgetThemeChanged(views::Widget*) {
   HideCaptionButtons();
+  if (browser_view_) RoundUtilityCorners();
 }
 
 void ShellHostView::OnViewIsDeleting(views::View*) {

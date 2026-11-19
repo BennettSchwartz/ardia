@@ -140,6 +140,8 @@ class FramelessUtilityWindowTests(unittest.TestCase):
         self.assertIn('SetBackground(views::CreateRoundedRectBackground(kColorWebContentsBackground, corners));', overlay)
         self.assertIn('shell_->holder()->SetNativeViewCornerRadii(corners);', overlay)
         self.assertIn('if (curtain_) curtain_->layer()->SetRoundedCornerRadius(corners);', overlay)
+        theme = self.host[self.host.index('void ShellHostView::OnWidgetThemeChanged(views::Widget*) {'):]
+        self.assertIn('  if (browser_view_) RoundUtilityCorners();\n}', theme[:theme.index('\n}\n') + 3])
 
     def test_a_utility_window_opens_over_its_opener(self):
         opening = self.host[self.host.index('if (method == "ArdiaShell.openWindow") {'):self.host.index('if (method == "ArdiaShell.isDarkAppearance") {')]
