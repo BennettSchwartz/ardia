@@ -31,8 +31,9 @@ Issue #717. Config files and themes are `docs/config.md`; page scripting over CD
 
 At most 16 connections (more are closed at accept). Per connection: one input line at most 1,048,576 bytes before its
 newline, an incomplete line closes the connection after 30 s, at most 32 requests waiting for a reply, at most 4 MB of
-output buffered. Events beyond 1,000 waiting on one connection drop the oldest waiting events (never a reply, never a
-partly written line); the next event written carries a top-level `"dropped": N` with the count since the last one.
+output buffered. Events beyond 1,000 waiting on one connection, or beyond what fits in the 4 MB, drop the oldest
+waiting events (never a reply, never a partly written line; an event larger than the whole budget is dropped
+itself); the next event written carries a top-level `"dropped": N` with the count since the last one.
 Going over any other limit closes only that connection. Each event is serialized at most twice (with and without
 full URLs) and the bytes are fanned out. Decide requests ride the event path, so a flooded runner can lose one; the
 app then uses its default at the deadline. At most 64 decisions wait at once (16 per connection); past that the
@@ -271,7 +272,7 @@ clipboard writes, internal pages). That is the point of it, and it is opt-in beh
 | `user.idle`, `user.active` * | `idle` (threshold, s) |
 | `page.error` | `windowId`, `tabId`, `profile`, `url`, `status` |
 | `bookmarks.changed` | `profile`, `added`, `changed`, `removed` (bookmark ids, at most 1000 each), `count` |
-| `history.removed` | `profiles` (every profile sharing that history), `all`, `urls` (at most 1000), `count` |
+| `history.removed` | `profiles` (every profile sharing that history), `all`, `urls` (at most 1000 and 256 KB, minimized without `fullUrls`), `count`, `truncated` |
 | `download.changed` | `id`, `change` (`added`/`updated`/`removed`), `state`, `paused`, `dangerous`, `awaitsKeep`, `filename`, `profile` |
 | `profile.changed` | `profile`, `change` (`created`/`updated`/`removed`), `name`, `keys` (what changed, `default` when it became the default); or `change: "reordered"`, `order` |
 

@@ -160,7 +160,11 @@ Five keys `config.json` can't take are set here with the checks their Settings r
 | `websiteEngines` | `{site: engine}`, each site typed as the Add Rule sheet takes it (`netflix.com` or a full address) and stored as its scheme, host and port; a value that isn't a website address is `bad_request`. The whole map is replaced, as each sheet edit replaces one rule |
 | `protectedVideoInWebKit` | A boolean, the Streaming sites row; macOS only |
 | `newTabUrl` | Empty (Ardia's New Tab), or an `http(s)` address, `about:blank` or an Ardia page: the address Settings marks invalid is refused here, not saved. Stored trimmed |
-| `customSearchUrl` | The legacy one-URL engine that `search.engines` lists as `custom`: empty clears it (and if it was the default, the default goes back to Ardia's, as removing an engine does); otherwise an `http(s)` URL with `%s`, and only while no other engine uses the keyword `custom` |
+| `customSearchUrl` | The legacy one-URL engine that `search.engines` lists as `custom`: empty clears it (and if it was the default, the default goes back to Ardia's, as removing an engine does, unless the same call chooses `searchEngine`); otherwise an `http(s)` URL with `%s`, and only while no other engine uses the keyword `custom` |
+
+One `settings.set` is checked as the settings would end up: adding `customSearchUrl` and choosing `searchEngine:
+"custom"` together works, clearing it while choosing `custom` is `bad_request`, and a `searchEngine` named in the
+same call wins over the fallback.
 
 `extensionSearchEngines` stays read only: it mirrors the engines installed extensions provide, Settings has no
 control for it, and a written value would be overwritten from the extensions on the next refresh. Change it through
@@ -174,10 +178,20 @@ are store watches and `history.removed` listens to the engine's history (`librar
 `storeEvents.ts` only while a connection or plugin asks for one of them); their fields are in `docs/automation.md` ›
 Events. No protocol change: an older command never names them.
 
+Every URL an event carries, `url` or the `urls` of `history.removed`, is cut to origin and path for a socket
+connection or plugin without `fullUrls` (`eventRedaction.ts`, used by both delivery paths). `history.removed` keeps
+its line under 256 KB: `urls` stops at 1000 entries or that many bytes, `count` stays the full number, and
+`truncated: true` says some were left out. A reader too slow for its events loses the oldest waiting ones, never the
+connection: past 1,000 waiting events or 4 MB of output the oldest waiting events are dropped, and the next event
+written carries `"dropped": N` (`ControlOutput.swift`).
+
 ### Sync
 
 The sync methods call `state/sync/engine.ts` as Settings does, and each refuses while sync is off, unavailable or
-locked. `sync.setProfile` needs the profile's sync link (it appears on the first sync after the profile opens; the
+locked. The writes (`sync.now` and every `sync.set*` and `sync.sendTab`) also refuse while sync is starting (its
+saved state isn't loaded yet) or turning off (Settings still shows it on during the last pass), so an `ok` is never
+dropped afterwards. `sync.now` answers after a pass that started after the call: when a pass is already running it
+waits for that one, then runs its own. `sync.setProfile` needs the profile's sync link (it appears on the first sync after the profile opens; the
 Settings toggle is disabled until then), and `sync.setOpenTabs` needs the profile on and Open Tabs syncing, as the
 Sync All Open Tabs toggle does. `sync.sendTab` takes an `http(s)` tab and a device from `sync.devices`, the list the
 tab menu's Send to Device shows. Turning sync on or off and the recovery phrase stay in Settings: they choose a
@@ -189,10 +203,29 @@ folder and show or ask for the phrase, which is the user's to see.
 (a link or id, checked as Add from a Link checks it) opens the extension's Chrome Web Store page in a window of
 that profile, where the user adds it, and answers `{waiting: true, id}` (or `{installed: true}` when it's already
 there); `folder` (an absolute path, as Load Unpacked Extension… picks) shows Ardia's install sheet in a window of
-that profile and answers when the user decides: `{installed, extensions}`, with the ids it added. Nothing installs
-without the user's click. `extensions.configure` sets what an extension's page in Settings offers: site access
-(only for an extension that asks for sites), Allow in Incognito, and Allow User Scripts (only when the extension
-uses them); a policy-installed one is `refused`.
+that profile and answers when the user decides: `{installed, extensions}`, naming the extension this request added
+(a reinstall of the same id counts), or `{installed: false}` when the user cancels or another sheet replaces it.
+Nothing installs without the user's click.
+
+The folder path is refused before anything is read when it isn't absolute, holds `.` or `..`, or is a system root
+or a home folder. macOS then resolves it (`realpath`), reads the manifest, locales and icons off the main thread
+with at most 4 MB per file and no symbolic links, and hashes every file in the folder (at most 20,000 files and 1
+GB; a link may point only at a file inside the folder) into a `digest`. One sheet shows at a time: a second
+`folder` request while any install sheet is up is `refused`. Each sheet carries its request's key, so its Add button
+and Return confirm that request only. Confirming hands the digest back, and macOS hashes the folder again and
+refuses the install if anything changed since the sheet showed it; Load Unpacked Extension… in Settings goes through
+the same check. Where the platform can't hash the folder (Linux's engine today) a socket `folder` install is
+`refused`. Closing the window that shows the sheet answers `failed`. Each step after an await re-checks that
+control is still on and the profile still exists, and answers `failed` or `no_window` without changing anything
+otherwise; that covers the Web Store tab too.
+
+`extensions.configure` sets what an extension's page in Settings offers: site access (only for an extension that
+asks for sites), Allow in Incognito, and Allow User Scripts (only when the extension uses them); a policy-installed
+one is `refused`. The whole call is checked before anything changes, then site access, the one change Chromium can
+still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
+and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
+`sites`) as success. Changing several fields in one engine call atomically would need `ac_extensions.cc`
+(`engine/`) to validate before it applies anything.
 
 ### Window geometry
 
@@ -200,12 +233,16 @@ uses them); a policy-installed one is `refused`.
 functions of the `ArdiaAppWindows` module in `packages/shell` (`WindowGeometry.swift`, typed in
 `packages/shell/src/windows.ts`, wrapped in `platform/windows.ts`): `windowGeometry(id)`, `setWindowFrame(id, frame)`,
 `setWindowZoomed(id, on)` and `setWindowFullScreen(id, on)`, each answering the window's geometry afterwards:
-`{frame, zoomed, fullScreen, miniaturized, visible, display}`. They are the extension point for anything in the app or
+`{frame, zoomed, fullScreen, pageFullScreen, miniaturized, visible, display}`, plus `refused: "offscreen" |
+"invalid"` when `setWindowFrame` left the window where it was. They are the extension point for anything in the app or
 a plugin (through these socket methods) that moves windows; nothing about them is socket-only. Frames are AppKit's: screen points from the
 bottom-left of the main display, the same as `frame` in `windows`. A frame is kept on the display it overlaps most and at
-least the window's smallest size; zoom is macOS's (the green button with Option, or double-clicking the title bar);
-full screen takes a main window into its own Space and the reply waits until the store has seen it (4 s), and none
-of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
+least the window's smallest size; a frame that overlaps no display, or isn't finite with a positive size, is refused
+by the native call itself, and the socket also bounds every coordinate to ±100,000 points. Zoom is macOS's (the
+green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
+finished (`didEnter`/`didExit`, at most 6 s), not when it starts; the socket runs one full-screen change at a time
+per window, checks the final geometry against the request, and answers `refused` while a page is full screen in the
+window, `failed` if the window didn't get there. None of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
 window events they already listen to. `PLATFORM_FEATURES.windowGeometry` is on for macOS only: Linux needs the same
 four calls in `engine/ardiacore-linux` (an engine change, so a new engine), and Windows in `WindowManager` of
 `apps/browser/windows` (its maximize already exists as `toggleMaximizeWindow`); until then the methods are `refused`
