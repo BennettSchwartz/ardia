@@ -251,8 +251,19 @@ export async function chooseSyncFolder(): Promise<string | null> {
   return picked;
 }
 
-export async function syncNow() {
+const WRITES_CLOSED: readonly string[] = ["starting", "locked", "off", "unavailable"];
+
+export const syncWritesOpen = () => {
+  if (leading()) return engine.syncWritesOpen();
+  const s = useSync.getState();
+  return s.enabled && !WRITES_CLOSED.includes(s.status);
+};
+
+export async function syncNow(stillWanted: () => void = () => {}): Promise<boolean> {
+  if (leading()) return engine.syncNow(stillWanted);
+  stillWanted();
   await forward("syncNow", [], INTERACTIVE_CALL_TIMEOUT_MS);
+  return true;
 }
 
 export async function turnOnSync(folder: string): Promise<{ ok: true } | { error: string }> {
