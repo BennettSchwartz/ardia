@@ -45,8 +45,7 @@ function list(params: Record<string, unknown>) {
   const engine = params.profile !== undefined ? engineProfile(now(), profileArg(params.profile)) : null;
   const live = useDownloadProgress.getState();
   const rows = ownDownloads().filter((d) => (engine === null || (d.profile ?? "") === engine) && (params.state === undefined || d.state === params.state));
-  const shown = page(rows, params);
-  return { ...shown, items: shown.items.map((d) => downloadRow(withProgress(d, Object.hasOwn(live, d.id) ? live[d.id] : undefined))) };
+  return page(rows, params, (d) => downloadRow(withProgress(d, Object.hasOwn(live, d.id) ? live[d.id] : undefined)));
 }
 
 const engineCall = (verb: (id: string) => Promise<unknown>, when: (d: Download) => string | null) => async (params: Record<string, unknown>) => {
@@ -59,10 +58,10 @@ const engineCall = (verb: (id: string) => Promise<unknown>, when: (d: Download) 
 
 const inProgress = (d: Download) => (d.state === "downloading" ? null : `Download ${d.id} is ${d.state}.`);
 
-async function openOrReveal(params: Record<string, unknown>, reveal: boolean) {
+async function openOrReveal(params: Record<string, unknown>, reveal: boolean, call: SocketCall) {
   const d = downloadOf(params.id);
   if (d.state !== "finished") throw new OpError("refused", `Download ${d.id} is ${d.state}, so there's no file yet.`);
-  const done = await (reveal ? revealFile(d.path) : openDownload(d.path));
+  const done = await (reveal ? revealFile(d.path) : openDownload(d.path, undefined, call.serving));
   expect(done, `${reveal ? "revealing" : "opening"} ${d.filename} failed (the file may be gone).`);
   return { ok: true };
 }
@@ -103,8 +102,8 @@ export const DOWNLOAD_METHODS: MethodSpec[] = [
   { name: "downloads.resume", mutates: true, description: "Resume a paused download", params: DOWNLOAD, result: "{ok}", run: engineCall(resumeDownload, (d) => inProgress(d) ?? (d.paused ? null : `Download ${d.id} isn't paused.`)) },
   { name: "downloads.cancel", mutates: true, description: "Cancel a download", params: DOWNLOAD, result: "{ok}", run: engineCall(cancelDownload, inProgress) },
   { name: "downloads.keep", mutates: true, description: "Keep a download Ardia held as dangerous", params: DOWNLOAD, result: "{ok}", run: engineCall(keepDownload, (d) => (awaitsKeep(d) ? null : `Download ${d.id} isn't waiting to be kept.`)) },
-  { name: "downloads.open", mutates: true, description: "Open a finished download with its app", params: DOWNLOAD, result: "{ok}", run: (p) => openOrReveal(p, false) },
-  { name: "downloads.reveal", mutates: true, description: "Show a finished download in Finder", params: DOWNLOAD, result: "{ok}", run: (p) => openOrReveal(p, true) },
+  { name: "downloads.open", mutates: true, description: "Open a finished download with its app", params: DOWNLOAD, result: "{ok}", run: (p, call) => openOrReveal(p, false, call) },
+  { name: "downloads.reveal", mutates: true, description: "Show a finished download in Finder", params: DOWNLOAD, result: "{ok}", run: (p, call) => openOrReveal(p, true, call) },
   { name: "downloads.remove", mutates: true, description: "Remove a download from the list (the file stays)", params: DOWNLOAD, result: "{ok}", run: remove },
   { name: "downloads.clear", mutates: true, description: "Remove every download that isn't running from the list", params: obj({}), result: "{removed}", run: clear },
   { name: "downloads.settings", mutates: false, description: "Where a profile saves downloads and whether it asks", params: obj({ profile: PROFILE }), result: "{folder, askWhereToSave, managed}", run: settings },

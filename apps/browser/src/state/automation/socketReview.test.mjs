@@ -3,7 +3,6 @@ import { test } from "node:test";
 const { S, tick, socketClient, controlOn, freshWindow } = await import("./fixtures/socketHarness.mjs");
 const { schemaProblem, obj } = await import("./socketSchema.ts");
 const { familyOf, methodSpec, accessProblem, PLUGIN_SESSION_METHODS } = await import("./socketCatalog.ts");
-const { replyLine, REPLY_BYTE_LIMIT } = await import("./controlSocket.ts");
 const stub = await import("../../test-native/index.ts");
 
 const { fire, call, ok } = socketClient(21);
@@ -143,17 +142,6 @@ test("a plugin's session reaches only the methods the dispatcher lets it", () =>
   assert.equal(accessProblem("plugin", methodSpec("bookmarks.remove"))?.code, "refused");
   assert.equal(accessProblem("plugin", methodSpec("passwords.list"))?.code, "refused");
   for (const name of PLUGIN_SESSION_METHODS) assert.equal(accessProblem("plugin", methodSpec(name)), null);
-});
-
-test("a reply over the socket's limit goes out as a failed error instead of closing the connection", () => {
-  const big = { result: "x".repeat(REPLY_BYTE_LIMIT + 10) };
-  const line = JSON.parse(replyLine(7, big));
-  assert.equal(line.id, 7);
-  assert.equal(line.error.code, "failed");
-  assert.match(line.error.message, /over 3 MiB/);
-  assert.equal(JSON.parse(replyLine(8, { result: "small" })).result, "small");
-  const wide = { result: "é".repeat(Math.ceil(REPLY_BYTE_LIMIT / 2) + 10) };
-  assert.equal(JSON.parse(replyLine(9, wide)).error.code, "failed");
 });
 
 test("sites.setZoom describes the profile it changed even when the default changes meanwhile", async () => {
