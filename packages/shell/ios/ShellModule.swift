@@ -24,6 +24,7 @@ public class ShellModule: Module {
       _ = installOutsidePressMonitor
       _ = installWindowMoveFallback
       _ = installCenteredResize
+      FullScreenLifecycle.shared.start()
       self.lifetime.begin(self) {
         self.appearanceObservation?.invalidate()
         self.appearanceObservation = nil

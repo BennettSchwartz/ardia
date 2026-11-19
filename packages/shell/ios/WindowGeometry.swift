@@ -3,7 +3,6 @@ import ArdiaCore
 
 extension WindowManager {
   static let fullScreenTransitionLimit: TimeInterval = 6
-  static let fullScreenRecoveryLimit: TimeInterval = 30
   static let coordinateLimit: CGFloat = 100_000
 
   func geometry(id: String) -> [String: Any]? {
@@ -44,25 +43,25 @@ extension WindowManager {
   }
 
   func setFullScreen(id: String, on: Bool, done: @escaping ([String: Any]?) -> Void) {
-    if let owner = FullScreenRequest.owners[id] {
-      guard owner.age >= Self.fullScreenRecoveryLimit else { return done(marked(id, "transition", "busy")) }
-      owner.release()
-    }
-    guard let window = window(id), inFullScreen(id, window) != on, isMainWindow(window),
-          !ArdiaChromeWindowHost.windowFullScreenIs(forPage: window)
+    let lifecycle = FullScreenLifecycle.shared
+    lifecycle.start()
+    guard let window = window(id) else { return done(nil) }
+    if lifecycle.isUnresolved(window) { return done(marked(id, "transition", "busy")) }
+    guard inFullScreen(id, window) != on, isMainWindow(window), !ArdiaChromeWindowHost.windowFullScreenIs(forPage: window)
     else { return done(geometry(id: id)) }
-    let request = FullScreenRequest(windowId: id, done: done)
-    let finished = on ? NSWindow.didEnterFullScreenNotification : NSWindow.didExitFullScreenNotification
-    for name in [finished, NSWindow.willCloseNotification] {
-      request.observe(name, of: window) { [weak self, weak request] in
-        guard let request, request.owns else { return }
-        request.release()
-        request.reply(self?.geometry(id: id))
-      }
+    var replied = false
+    let reply = { (answer: [String: Any]?) in
+      guard !replied else { return }
+      replied = true
+      done(answer)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullScreenTransitionLimit) { [weak self, weak request] in
-      guard let request, request.owns else { return }
-      request.reply(self?.marked(id, "transition", "timeout"))
+    let token = lifecycle.waitForTransition(of: window, startedAfter: lifecycle.latestGeneration) { [weak self] in
+      reply(self?.geometry(id: id))
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullScreenTransitionLimit) { [weak self] in
+      guard !replied else { return }
+      lifecycle.stopWaiting(token)
+      reply(self?.marked(id, "transition", "timeout"))
     }
     window.toggleFullScreen(nil)
   }
@@ -91,41 +90,5 @@ extension WindowManager {
     }
     guard let best = NSScreen.screens.max(by: { overlap($0) < overlap($1) }), overlap(best) > 0 else { return nil }
     return best
-  }
-}
-
-final class FullScreenRequest {
-  static var owners: [String: FullScreenRequest] = [:]
-
-  let windowId: String
-  private let started = Date()
-  private var observers: [NSObjectProtocol] = []
-  private var done: (([String: Any]?) -> Void)?
-
-  init(windowId: String, done: @escaping ([String: Any]?) -> Void) {
-    self.windowId = windowId
-    self.done = done
-    Self.owners[windowId] = self
-  }
-
-  var owns: Bool { Self.owners[windowId] === self }
-  var age: TimeInterval { Date().timeIntervalSince(started) }
-
-  func observe(_ name: NSNotification.Name, of window: NSWindow, then: @escaping () -> Void) {
-    observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
-      DispatchQueue.main.async(execute: then)
-    })
-  }
-
-  func release() {
-    for observer in observers { NotificationCenter.default.removeObserver(observer) }
-    observers = []
-    if owns { Self.owners[windowId] = nil }
-  }
-
-  func reply(_ answer: [String: Any]?) {
-    guard let done else { return }
-    self.done = nil
-    done(answer)
   }
 }
