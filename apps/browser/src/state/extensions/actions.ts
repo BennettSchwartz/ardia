@@ -165,8 +165,8 @@ export function cancelInstall() {
   useExtensions.setState({ install: null });
 }
 
-export async function removeExtension(profile: string, ext: InstalledExtension, windowId?: string, mayRemove: () => boolean = () => true) {
-  const { confirmed } = await confirm({
+export async function removeExtension(profile: string, ext: InstalledExtension, windowId?: string, mayRemove: () => boolean = () => true, ask: typeof confirm = confirm) {
+  const { confirmed } = await ask({
     title: `Remove “${ext.name}”?`,
     message: ext.fromWebStore ? "Its data and settings will be removed too." : `The extension's folder stays on your ${PLATFORM_TERMS.computer}.`,
     confirmTitle: "Remove",

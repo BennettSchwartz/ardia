@@ -192,6 +192,7 @@ export async function removePlugin(name: string, mayGoOn: () => boolean = () => 
     if (!(await pluginRecordsSaved(consent))) return { ok: false, reason: "It couldn't be turned off, because plugins.json couldn't be saved." };
     if (!mayGoOn()) return { ok: false, reason: "Control was turned off after Ardia turned it off, so its files are still there." };
     await removePrograms(name, consent);
+    if (!mayGoOn()) return { ok: false, reason: "Control was turned off after Ardia unlinked its programs, so its files are still there." };
     const removed = await removePluginFiles(name).catch((error: unknown) => ({ ok: false as const, reason: String(error) }));
     if (!removed.ok) return removed;
     const forgotten = updateRecord(name, () => null, consent) && (await pluginRecordsSaved(consent));

@@ -7,6 +7,7 @@ import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { expect, now, profileArg } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
+import { askWhereSeen, shownWindowId } from "./socketAsk";
 
 const SITE_SETTINGS = [
   "popups", "camera", "microphone", "location", "notifications", "sound", "autoplay", "javascript", "images", "clipboard", "automaticDownloads", "cookies", "midi", "sensors",
@@ -109,7 +110,7 @@ async function uninstall(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
   modifiable(ext);
   call.stillServing();
-  await removeExtension(engine, ext, undefined, call.serving);
+  await removeExtension(engine, ext, shownWindowId(), call.serving, askWhereSeen(`${ext.name} wasn't removed`));
   const removed = !(await refreshExtensions(engine)).some((x) => x.id === ext.id);
   if (!removed) call.stillServing();
   return { removed };

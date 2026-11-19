@@ -7,6 +7,7 @@ struct ControlOutput {
   static let maxBytes = 34 * 1_048_576
   static let markerRoom = 64
   static let maxWaitingEvents = 1000
+  static let maxIdBytes = 256
 
   enum WriteResult { case drained, blocked, failed }
   enum Kind { case reply, kept, event }
@@ -149,7 +150,7 @@ struct ControlOutput {
     guard data.count > maxLine else { return data }
     let message = "The reply would be over 1 MiB, the most a line can carry; ask for less."
     var id: Any = NSNull()
-    if let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any], let given = parsed["id"], given is NSNumber || (given as? String).map({ $0.utf8.count <= 4096 }) == true {
+    if let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any], let given = parsed["id"], given is NSNumber || (given as? String).map({ $0.utf8.count <= maxIdBytes }) == true {
       id = given
     }
     let reply: [String: Any] = ["id": id, "error": ["code": "failed", "message": message]]

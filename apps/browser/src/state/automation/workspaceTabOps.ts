@@ -6,6 +6,7 @@ import { needsPage, wokenPage } from "../tabs/pageSession";
 import { sleepTab } from "../tabs/manualSleep";
 import { isSleeping } from "../tabs/sleepingTabs";
 import { webviews } from "../../platform/webviews";
+import { withDeadline } from "../../lib/deadline";
 import type { IconValue, Op } from "./workspaceOps";
 import { OpError, store, tabRef, tabRefs, type OpResult } from "./workspaceTargets";
 
@@ -22,28 +23,58 @@ export function mute(results: OpResult[], op: Op, muted: boolean): OpResult {
   return { tabs: ids };
 }
 
-export async function sleep(results: OpResult[], op: Op): Promise<OpResult> {
+export const NATIVE_DEADLINE_MS = 10_000;
+
+const LATE = Symbol("late");
+
+function stopped(message: string, done: string[]) {
+  const error = new OpError("failed", message);
+  if (done.length) error.changed = { tabs: [...done] };
+  return error;
+}
+
+async function settled<T>(work: Promise<T>, id: string, doing: string, done: string[], stillOn: () => boolean): Promise<T> {
+  const outcome = await withDeadline(work, NATIVE_DEADLINE_MS, LATE);
+  if (outcome === LATE) throw stopped(`Tab ${id} didn't finish ${doing} within ${NATIVE_DEADLINE_MS / 1000} s, so Ardia stopped waiting (it may still finish); the tabs in changed were done.`, done);
+  if (!stillOn()) throw stopped(`Control was turned off while tab ${id} was ${doing}; the tabs after it were left alone.`, [...done, id]);
+  return outcome;
+}
+
+function goingOn(stillOn: () => boolean, done: string[]) {
+  if (!stillOn()) throw stopped("Control was turned off during this op; the tabs after the ones in changed were left alone.", done);
+}
+
+export async function sleep(results: OpResult[], op: Op, stillOn: () => boolean = () => true): Promise<OpResult> {
   const ids = tabRefs(results, op.tabs as string[]);
   const outcomes: Record<string, string> = {};
-  for (const id of ids) outcomes[id] = await sleepTab(id);
+  const done: string[] = [];
+  for (const id of ids) {
+    goingOn(stillOn, done);
+    outcomes[id] = await settled(sleepTab(id), id, "going to sleep", done, stillOn);
+    done.push(id);
+  }
   return { tabs: ids, outcomes };
 }
 
-export async function wake(results: OpResult[], op: Op): Promise<OpResult> {
+export async function wake(results: OpResult[], op: Op, stillOn: () => boolean = () => true): Promise<OpResult> {
   const ids = tabRefs(results, op.tabs as string[]);
   const outcomes: Record<string, string> = {};
+  const done: string[] = [];
   for (const id of ids) {
+    goingOn(stillOn, done);
     const t = store().tabs[id];
     if (!t) outcomes[id] = "gone";
     else if (isSleeping(id) && webviews.get(id)) {
-      outcomes[id] = await webviews.get(id)!.reload().then(
+      const reload = webviews.get(id)!.reload().then(
         () => "awake",
         () => "failed",
       );
+      outcomes[id] = await settled(reload, id, "waking", done, stillOn);
     } else if (needsPage(t)) {
       store().updateTab(id, { page: wokenPage(t) });
       outcomes[id] = "awake";
     } else outcomes[id] = "already";
+    done.push(id);
   }
   return { tabs: ids, outcomes };
 }
