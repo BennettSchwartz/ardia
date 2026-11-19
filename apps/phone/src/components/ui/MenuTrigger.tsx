@@ -1,7 +1,7 @@
 import { actionSheet, ContextMenuView, nativeMenusAvailable, settingsUI, type MenuItem as NativeMenuItem } from "@ardia/phone-native";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { findNodeHandle, Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
-import type { Point } from "../../lib/menuPlace";
+import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
@@ -20,6 +20,7 @@ type Props = {
   haptic?: () => void;
   disabled?: boolean;
   privately?: boolean;
+  align?: MenuAlign;
   place?: ViewStyle;
   dark?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -98,7 +99,7 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
   return touch && typeof touch.pageX === "number" && typeof touch.pageY === "number" ? { x: touch.pageX, y: touch.pageY } : null;
 };
 
-function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, style, testID, children }: Props) {
+function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
   const restore = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -139,7 +140,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
       {children(held ? { onLongPress: open } : { onPress: open })}
-      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
+      {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} align={align} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
     </View>
   );
 }

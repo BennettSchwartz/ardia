@@ -120,7 +120,8 @@ onAndroid("on the hand-built Appearance Android keeps, the page has main's choic
   const text = textOf(root);
   if (Platform.OS === "android") expect(text).toContain("Appearance");
   for (const line of ["Color", "Interface Style", "Light or Dark", "Glass", "Classic", "System", "Light", "Dark"]) expect(text).toContain(line);
-  expect(text).toContain("Match My Mac follows your Mac. Reduce Transparency in iOS Settings always uses Classic.");
+  expect(text).toContain("Match My Mac follows your Mac.");
+  expect(text).not.toContain("Reduce Transparency");
   expect(text).toContain("Match My Mac follows your Mac. System follows this device.");
   const choices = root.root.findAll((node) => node.props.accessibilityRole === "button" && node.props.accessibilityState && typeof node.props.onPress === "function").map((node) => node.props.accessibilityLabel);
   expect(choices).toEqual(["Match My Mac", "Glass", "Classic", "Match My Mac", "System", "Light", "Dark", "Stack", "Grid"]);

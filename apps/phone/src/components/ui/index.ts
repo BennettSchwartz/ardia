@@ -10,7 +10,7 @@ export { Favicon } from "./Favicon";
 export { LoadingLine, type LoadWatch } from "./LoadingLine";
 export { barReturnMotion, deckChromeMotion, duration, menuMotion, iPhoneOr, moveTo, pageMenuMotion, trayLandingDelayMs, settingsMotion, spring, springs, stageMotion, startMotion, tabsCurve, tabsMotion, toastMotion, trayMotion } from "./motion";
 export { ConfirmDialog, Dialog, showActionSheet, type Confirmation, type DialogButton } from "./Dialog";
-export { FloatingMenu, Menu, MenuFrostProvider, pointPlacer, type MenuPlacer, onDrawnMenuOpened, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
+export { FloatingMenu, Menu, menuExitMs, MenuFrostProvider, pointPlacer, type MenuPlacer, onDrawnMenuOpened, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 export { ActionSheet, ConfirmSheet, type SheetAction } from "./ActionSheet";
 export { confirmInSheet, MenuTrigger, nativeMenus, onNativeMenuOpened, spaceSystemImage, type MenuHandlers } from "./MenuTrigger";
 export { Shade } from "./Shade";

@@ -1,11 +1,17 @@
-import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { StyleSheet, View, type ViewInstance } from "react-native";
 
 export type WindowRect = { x: number; y: number; width: number; height: number };
 
-type Overlay = { show: (id: number, node: ReactNode | null) => void; frame: () => Promise<WindowRect> };
+type Layer = { id: number; node: ReactNode; leaving: boolean };
+
+type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect> };
 
 const OverlayContext = createContext<Overlay | null>(null);
+
+const LeavingContext = createContext(false);
+
+export const usePortalLeaving = () => useContext(LeavingContext);
 
 let nextId = 0;
 
@@ -17,39 +23,55 @@ const measure = (view: ViewInstance | null): Promise<WindowRect> =>
 
 export function OverlayHost({ children }: { children: ReactNode }) {
   const root = useRef<ViewInstance>(null);
-  const [layers, setLayers] = useState<{ id: number; node: ReactNode }[]>([]);
+  const [layers, setLayers] = useState<Layer[]>([]);
   const overlay = useMemo<Overlay>(
     () => ({
       show: (id, node) =>
         setLayers((now) => {
           if (node === null) return now.filter((layer) => layer.id !== id);
-          return now.some((layer) => layer.id === id) ? now.map((layer) => (layer.id === id ? { id, node } : layer)) : [...now, { id, node }];
+          if (now.some((layer) => layer.id === id)) return now.map((layer) => (layer.id === id ? { id, node, leaving: false } : layer));
+          return [...now.filter((layer) => !layer.leaving), { id, node, leaving: false }];
         }),
+      leave: (id, ms) => {
+        setLayers((now) => now.map((layer) => (layer.id === id ? { ...layer, leaving: true } : layer)));
+        setTimeout(() => setLayers((now) => now.filter((layer) => layer.id !== id || !layer.leaving)), ms);
+      },
       frame: () => measure(root.current),
     }),
     [],
   );
+  const covered = layers.some((layer) => !layer.leaving);
   return (
     <OverlayContext.Provider value={overlay}>
-      <View style={styles.content} collapsable={false} importantForAccessibility={layers.length ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={layers.length > 0}>
+      <View testID="overlayCovered" style={styles.content} collapsable={false} importantForAccessibility={covered ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={covered}>
         {children}
       </View>
       <View ref={root} style={StyleSheet.absoluteFill} pointerEvents="box-none" collapsable={false}>
         {layers.map((layer) => (
-          <Fragment key={layer.id}>{layer.node}</Fragment>
+          <LeavingContext.Provider key={layer.id} value={layer.leaving}>
+            {layer.node}
+          </LeavingContext.Provider>
         ))}
       </View>
     </OverlayContext.Provider>
   );
 }
 
-export function Portal({ children }: { children: ReactNode }) {
+export function Portal({ exitMs = 0, children }: { exitMs?: number; children: ReactNode }) {
   const overlay = useContext(OverlayContext);
   const [id] = useState(() => ++nextId);
+  const leaveAfter = useRef(exitMs);
+  leaveAfter.current = exitMs;
   useLayoutEffect(() => {
     overlay?.show(id, children);
   });
-  useEffect(() => () => overlay?.show(id, null), [overlay, id]);
+  useLayoutEffect(
+    () => () => {
+      if (leaveAfter.current > 0) overlay?.leave(id, leaveAfter.current);
+      else overlay?.show(id, null);
+    },
+    [overlay, id],
+  );
   return overlay ? null : <>{children}</>;
 }
 

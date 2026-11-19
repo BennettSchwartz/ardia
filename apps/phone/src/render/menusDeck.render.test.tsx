@@ -342,3 +342,23 @@ drawnTest("on Android holding the plus opens main's PlusButton menu at the finge
   expect((menu.props.items as { label: string }[]).map((item) => item.label)).toEqual(["New Incognito Tab", "Reopen Closed Tab"]);
   unmount(root);
 });
+
+drawnTest("on Android a deck card's long-press menu hides the deck from TalkBack while it is open, as every drawn menu and confirmation does", () => {
+  withSpaces([WORK]);
+  const root = deck();
+  const covered = () => root.root.findAll((node) => node.props.testID === "overlayCovered" && typeof node.type === "string")[0]!.props.importantForAccessibility;
+  expect(covered()).toBe("auto");
+  const { State } = require("react-native-gesture-handler") as typeof import("react-native-gesture-handler");
+  const { fireGestureHandler } = require("react-native-gesture-handler/jest-utils") as typeof import("react-native-gesture-handler/jest-utils");
+  const { deckCardAt, deckGeometry, initialDeckScroll } = require("../lib/deckGeometry") as typeof import("../lib/deckGeometry");
+  const { deckHeaderBottom } = require("../components/tabs/DeckHeader") as typeof import("../components/tabs/DeckHeader");
+  const g = deckGeometry(393, 873, 40, 24, 0, Platform.OS, "redesigned", deckHeaderBottom());
+  const y = g.cardCenterY;
+  let x = 0;
+  while (x < 393 && deckCardAt(g, 3, initialDeckScroll(3), x, y) < 0) x += 2;
+  act(() => fireGestureHandler(getByGestureTestId("deckLongPress"), [{ state: State.BEGAN, x, y, absoluteX: x, absoluteY: y }, { state: State.ACTIVE, x, y, absoluteX: x, absoluteY: y }, { state: State.END, x, y, absoluteX: x, absoluteY: y }]));
+  act(() => jest.advanceTimersByTime(16));
+  expect(covered()).toBe("no-hide-descendants");
+  expect(root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").length).toBeGreaterThan(0);
+  unmount(root);
+});

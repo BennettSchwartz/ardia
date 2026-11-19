@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import type { GestureResponderEvent } from "react-native";
 import { closeFrontTab, menuOpenedHaptic, recentTabs, switchToTab, tabTitle } from "../../state/browse/tabMenus";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import type { MenuItem } from "../ui";
+import { MenuFrostProvider, type MenuItem } from "../ui";
 import { MenuTrigger, nativeMenus } from "../ui/MenuTrigger";
 
 export function tabsMenuItems(order: readonly BrowserTab[]): MenuItem[] {
@@ -15,9 +15,11 @@ export type TabsMenuHandlers = { onLongPress?: (event?: GestureResponderEvent) =
 export function TabsMenuTrigger({ order, onTabsMenu, children }: { order: readonly BrowserTab[]; onTabsMenu: () => void; children: (handlers: TabsMenuHandlers) => ReactElement }) {
   if (!nativeMenus())
     return (
-      <MenuTrigger testID="tabsButtonMenu" items={tabsMenuItems(order)} trigger="longPress" haptic={menuOpenedHaptic}>
-        {({ onLongPress }) => children({ onLongPress, screenReaderActions: [] })}
-      </MenuTrigger>
+      <MenuFrostProvider value={null}>
+        <MenuTrigger testID="tabsButtonMenu" items={tabsMenuItems(order)} trigger="longPress" haptic={menuOpenedHaptic}>
+          {({ onLongPress }) => children({ onLongPress, screenReaderActions: [] })}
+        </MenuTrigger>
+      </MenuFrostProvider>
     );
   return (
     <MenuTrigger testID="tabsButtonMenu" items={tabsMenuItems(order)} trigger="longPress">

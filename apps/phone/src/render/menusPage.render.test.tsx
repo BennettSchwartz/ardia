@@ -110,6 +110,7 @@ drawnTest("on Android the Reader's Text Appearance opens the drawn menu with the
   expect(sepia.props.accessibilityState).toMatchObject({ checked: true });
   act(() => root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === "Dark" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(theme).toHaveBeenCalledWith("dark");
+  act(() => jest.advanceTimersByTime(500));
   expect(drawnLabels(root)).toEqual([]);
   unmount(root);
 });

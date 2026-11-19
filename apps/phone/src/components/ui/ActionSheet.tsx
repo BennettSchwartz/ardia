@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { FadeOut } from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
 import { useCoverFocus } from "./coverFocus";
 import type { Confirmation } from "./Dialog";
-import { countDrawnMenuOpened, MenuMaterial, useMenuFrost } from "./Menu";
+import { countDrawnMenuOpened, MenuMaterial } from "./Menu";
 import { menuMotion } from "./motion";
-import { Portal } from "./Overlay";
+import { Portal, usePortalLeaving } from "./Overlay";
 import { actionSheetInk, actionSheetLook, ink } from "./tokens";
 import { useTheme } from "./theme";
 
@@ -16,15 +16,14 @@ export type SheetAction = { title: string; destructive?: boolean; onPress: () =>
 type Props = { title?: string | null; message?: string | null; actions: SheetAction[]; cancel?: string; onCancel: () => void };
 
 export function ActionSheet(props: Props) {
-  const frost = useMenuFrost();
   return (
-    <Portal>
-      <SheetCard {...props} frost={frost} />
+    <Portal exitMs={menuMotion.sheetOut}>
+      <SheetCard {...props} />
     </Portal>
   );
 }
 
-function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost }: Props & { frost: string | null }) {
+function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Props) {
   const theme = useTheme();
   const paint = theme.dark ? actionSheetInk.dark : actionSheetInk.light;
   const reduceMotion = useReduceMotion();
@@ -33,23 +32,30 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel, frost
   const width = confirmCardWidth(window.fontScale, window.width - insets.left - insets.right);
   const maxHeight = window.height - insets.top - insets.bottom - 2 * actionSheetLook.screenMargin;
   const card = useRef<ViewInstance>(null);
+  const leaving = usePortalLeaving();
+  const shown = useSharedValue(1);
+  useEffect(() => {
+    if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut });
+  }, [leaving]);
+  const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
   useCoverFocus(card);
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
   useEffect(() => {
+    if (leaving) return;
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       onCancel();
       return true;
     });
     return () => back.remove();
-  }, [onCancel]);
+  }, [onCancel, leaving]);
   return (
-    <Animated.View style={StyleSheet.absoluteFill} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.sheetOut)}>
+    <Animated.View style={[StyleSheet.absoluteFill, fade]} pointerEvents={leaving ? "none" : "auto"} collapsable={false} accessibilityElementsHidden={leaving} importantForAccessibility={leaving ? "no-hide-descendants" : "auto"}>
       <Pressable accessibilityRole="button" accessibilityLabel={cancel} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onCancel} />
       <View style={styles.centre} pointerEvents="box-none">
         <View ref={card} testID="drawnActionSheet" accessibilityViewIsModal style={[styles.card, { width, maxHeight, borderColor: paint.rim, boxShadow: actionSheetLook.shadow }]}>
-          <MenuMaterial source={frost} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={[styles.material, { maxHeight: maxHeight - 2 * actionSheetLook.rim }]}>
+          <MenuMaterial source={null} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={[styles.material, { maxHeight: maxHeight - 2 * actionSheetLook.rim }]}>
             <ScrollView testID="drawnConfirmationScroll" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.content} bounces={false} overScrollMode="never">
             {title ? (
               <Text accessibilityRole="header" style={[actionSheetLook.title, { color: paint.title }]}>

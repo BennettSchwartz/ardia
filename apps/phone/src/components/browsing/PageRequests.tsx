@@ -5,7 +5,7 @@ import { answerRequest, dismissPress, pressAction } from "../../state/page/actio
 import { usePageRequest, usePress } from "../../state/page/hooks";
 import { confirmAnswer, pressHeading, pressMenuGroups, PRESS_TITLES, requestPlan, type PressAction, type Request } from "../../state/page/pagePrompts";
 import { presentSystemRequest } from "./systemRequest";
-import { ActionSheet, Dialog, dialogLayout, font, Menu, menuLook, pointPlacer, radius, space, useTheme, type MenuItem, type SymbolName } from "../ui";
+import { ActionSheet, Dialog, dialogLayout, font, Menu, menuExitMs, menuLook, pointPlacer, Portal, radius, space, useTheme, type MenuItem, type SymbolName } from "../ui";
 import { currentTabs } from "../../state/tabs/store";
 import { findTab } from "../../state/tabs/tabsState";
 
@@ -84,7 +84,11 @@ export function PressMenu({ width, height }: { width: number; height: number }) 
     for (const action of group) items.push({ label: PRESS_TITLES[action], icon: PRESS_ICONS[action], onPress: () => pressAction(press, action) });
   }
   const placer = pointPlacer({ x: press.x, y: press.y + insets.top }, { width, height }, insets, menuLook.width);
-  return <Menu items={items} placer={placer} dimmed privately={pressedPrivately(press.tabId)} onDismiss={dismissPress} />;
+  return (
+    <Portal exitMs={menuExitMs(true)}>
+      <Menu items={items} placer={placer} dimmed frost={null} privately={pressedPrivately(press.tabId)} onDismiss={dismissPress} />
+    </Portal>
+  );
 }
 
 const pressedPrivately = (tabId: string) => findTab(currentTabs(), tabId)?.isPrivate === true;

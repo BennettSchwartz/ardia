@@ -88,6 +88,7 @@ test("with a row's menu open over the tray, Back goes to the menu: the tray's na
     for (const back of [...backs].reverse()) if (back({ type: "hardwareBackPress", timeStamp: 0 })) break;
   });
   listening.mockRestore();
+  await act(async () => jest.advanceTimersByTime(500));
   expect(root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.type === "string")).toHaveLength(0);
   expect(useSearch.getState().open).toBe(true);
   expect(mockBack.enabled.at(-1)).toBe(true);

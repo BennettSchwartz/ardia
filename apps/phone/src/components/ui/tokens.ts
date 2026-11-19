@@ -219,7 +219,7 @@ export const menuLook = {
 export const menuInk = {
   light: {
     fill: "rgba(255,255,255,0.57)",
-    solid: "#F7F6F6",
+    solid: "#F8F6F7",
     label: "#0A090A",
     destructive: "#FE373C",
     highlight: "rgba(0,0,0,0.11)",
@@ -231,7 +231,7 @@ export const menuInk = {
   },
   dark: {
     fill: "rgba(150,150,150,0.26)",
-    solid: "#383838",
+    solid: "#504C4D",
     label: "#F9F8F8",
     destructive: "#FF6567",
     highlight: "rgba(255,255,255,0.11)",
@@ -264,8 +264,8 @@ export const actionSheetLook = {
 } as const;
 
 export const actionSheetInk = {
-  light: { fill: "rgba(255,252,253,0.92)", solid: "#FFFBFC", rim: "#9E9E9E", title: "#000000", message: "#989898", button: "#DFDFDF", destructive: "#F22F32" },
-  dark: { fill: "rgba(96,96,96,0.85)", solid: "#565656", rim: "#2A2A2A", title: "#FFFFFF", message: "#C5C5C5", button: "#959595", destructive: "#FF9A9C" },
+  light: { fill: "rgba(255,252,253,0.92)", solid: "#F9F9F9", rim: "#9E9E9E", title: "#000000", message: "#989898", button: "#DFDFDF", destructive: "#F22F32" },
+  dark: { fill: "rgba(96,96,96,0.85)", solid: "#777777", rim: "#2A2A2A", title: "#FFFFFF", message: "#C5C5C5", button: "#959595", destructive: "#FF9A9C" },
 } as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;

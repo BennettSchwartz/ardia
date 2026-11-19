@@ -27,13 +27,20 @@ export function tallestMenuPage(items: readonly Entry[]): number {
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));
 
-export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean): MenuSpot {
-  const roomTop = room.y + margin;
-  const roomBottom = room.y + room.height - margin;
-  const height = Math.min(wanted, roomBottom - roomTop);
-  const trailing = anchor.x + anchor.width / 2 > room.x + room.width / 2;
-  const x = clamp(trailing ? anchor.x + anchor.width - width : anchor.x, room.x + margin, room.x + room.width - width - margin);
+export type MenuAlign = { trailing: boolean; inset: number };
+
+export const MENU_FINGER_GAP = 16;
+
+export function menuOnTrigger(anchor: Rect, host: Rect, room: Rect, width: number, wanted: number, margin: number, keepBelow?: boolean, align?: MenuAlign): MenuSpot {
   const anchorBottom = anchor.y + anchor.height;
+  const roomTop = Math.min(room.y + margin, anchor.y);
+  const roomBottom = Math.max(room.y + room.height - margin, anchorBottom);
+  const roomLeft = Math.min(room.x + margin, anchor.x);
+  const roomRight = Math.max(room.x + room.width - margin, anchor.x + anchor.width);
+  const height = Math.min(wanted, roomBottom - roomTop);
+  const trailing = align ? align.trailing : anchor.x + anchor.width / 2 > room.x + room.width / 2;
+  const inset = align ? align.inset : 0;
+  const x = clamp(trailing ? anchor.x + anchor.width - inset - width : anchor.x + inset, roomLeft, roomRight - width);
   const below = keepBelow ?? (anchor.y + height <= roomBottom || anchorBottom - height < roomTop);
   const y = clamp(below ? anchor.y : anchorBottom - height, roomTop, roomBottom - height);
   return { left: x - host.x, top: y - host.y, height, origin: `${trailing ? "right" : "left"} ${below ? "top" : "bottom"}` };
@@ -46,7 +53,7 @@ export function menuAt(point: Point, host: Rect, room: Rect, width: number, want
   const fitsRight = point.x + width + margin <= room.x + room.width;
   const fitsBelow = keepBelow ?? point.y + height <= roomBottom;
   const x = clamp(fitsRight ? point.x : point.x - width, room.x + margin, room.x + room.width - width - margin);
-  const y = clamp(fitsBelow ? point.y : point.y - height, roomTop, roomBottom - height);
+  const y = clamp(fitsBelow ? point.y : point.y - MENU_FINGER_GAP - height, roomTop, roomBottom - height);
   return { left: x - host.x, top: y - host.y, height, origin: `${fitsRight ? "left" : "right"} ${fitsBelow ? "top" : "bottom"}` };
 }
 

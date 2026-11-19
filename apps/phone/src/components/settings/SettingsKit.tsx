@@ -230,7 +230,7 @@ export function PickerRow<T extends string>({ title, icon, tint, divider, option
   const items: MenuItem[] = options.map((option) => ({ label: option.title, checked: option.id === selected, onPress: () => onSelect(option.id) }));
   return (
     <View>
-      <MenuTrigger items={items} trigger="tap" place={{ right: space.l * 2, width: Math.min(tabsLayout.menuWidth, width - space.huge * 2) }}>
+      <MenuTrigger items={items} trigger="tap" align={{ trailing: true, inset: settingsLayout.rowInset }} place={{ width: Math.min(tabsLayout.menuWidth, width - space.huge * 2) }}>
         {({ onPress }) => (
           <Pressable accessibilityRole="button" accessibilityLabel={title} accessibilityValue={{ text: current }} onPress={onPress} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
             <Label title={title} icon={icon} tint={tint} />

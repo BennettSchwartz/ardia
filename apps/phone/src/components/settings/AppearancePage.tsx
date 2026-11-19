@@ -39,7 +39,7 @@ export function AppearancePage() {
         <ColorRow labelled={false} />
         {syncEnabled ? <MatchMyMac labelled={false} /> : null}
       </Group>
-      <Group header="Interface Style" footer={offersSync ? "Match My Mac follows your Mac. Reduce Transparency in iOS Settings always uses Classic." : undefined}>
+      <Group header="Interface Style" footer={offersSync ? "Match My Mac follows your Mac." : undefined}>
         {styleChoices.map((choice, index) => (
           <CheckRow key={choice} title={INTERFACE_STYLE_NAMES[choice]} checked={style === choice} divider={index < styleChoices.length - 1} onPress={() => setInterfaceStyle(choice)} />
         ))}

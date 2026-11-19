@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
-import Animated, { FadeIn, FadeOut, useAnimatedStyle, useSharedValue, withSpring, withTiming, type EntryExitAnimationFunction } from "react-native-reanimated";
+import { lookIsNative } from "@ardia/phone-native";
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, type Point, type Rect } from "../../lib/menuPlace";
+import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, type MenuAlign, type Point, type Rect } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
 import { focusForScreenReader } from "./coverFocus";
 import { LookFrost, SURFACES_FROST } from "./LookViews";
 import { menuMotion } from "./motion";
-import { measureAnchor, Portal, useOverlayFrame } from "./Overlay";
+import { measureAnchor, Portal, useOverlayFrame, usePortalLeaving } from "./Overlay";
 import { Symbol } from "./Symbol";
 import type { SymbolName } from "./symbolPaths";
 import { useTheme } from "./theme";
@@ -39,19 +40,6 @@ export const MenuFrostProvider = MenuFrostContext.Provider;
 
 export const useMenuFrost = () => useContext(MenuFrostContext);
 
-const shrinkAway =
-  (ms: number): EntryExitAnimationFunction =>
-  () => {
-    "worklet";
-    return {
-      initialValues: { opacity: 1, transform: [{ scale: 1 }] },
-      animations: { opacity: withTiming(0, { duration: menuMotion.contentFade }), transform: [{ scale: withTiming(menuMotion.fromScale, { duration: ms }) }] },
-    };
-  };
-
-const TAP_CLOSE = shrinkAway(menuMotion.close);
-const HELD_CLOSE = shrinkAway(menuMotion.heldClose);
-
 const PRESS = menuLook.pressInset;
 const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
 
@@ -64,6 +52,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const frostAround = useMenuFrost();
   const source = frost === undefined ? frostAround : frost;
   const [page, setPage] = useState<MenuSubmenu | null>(null);
+  const leaving = usePortalLeaving();
   const rows = page ? page.children : items;
   const [content, setContent] = useState<number | null>(null);
   const revealed = shown && (placer === undefined || content !== null);
@@ -81,21 +70,35 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     countDrawnMenuOpened(privately);
   }, []);
   useEffect(() => {
-    if (revealed) focusForScreenReader(() => firstRow.current);
+    if (revealed && !leaving) focusForScreenReader(() => firstRow.current);
   }, [revealed, page]);
   useEffect(() => {
+    if (leaving) return;
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
       if (page) setPage(null);
       else onDismiss();
       return true;
     });
     return () => back.remove();
-  }, [onDismiss, page]);
+  }, [onDismiss, page, leaving]);
   const opened = useSharedValue(reduceMotion ? 1 : 0);
+  const shownContent = useSharedValue(1);
+  const dim = useSharedValue(reduceMotion ? 1 : 0);
   useEffect(() => {
-    if (revealed && !reduceMotion) opened.value = withSpring(1, menuMotion.open);
+    if (!revealed || leaving || reduceMotion) return;
+    opened.value = withSpring(1, menuMotion.open);
+    dim.value = withTiming(1, { duration: menuMotion.heldOpen });
   }, [revealed]);
+  useEffect(() => {
+    if (!leaving) return;
+    const closing = dimmed ? menuMotion.heldClose : menuMotion.close;
+    if (!reduceMotion) opened.value = withTiming(0, { duration: closing });
+    shownContent.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : dimmed ? closing : menuMotion.contentFade });
+    dim.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.heldClose });
+  }, [leaving]);
   const grow = useAnimatedStyle(() => ({ transform: [{ scale: menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value }] }));
+  const dimStyle = useAnimatedStyle(() => ({ opacity: dim.value }));
+  const fade = useAnimatedStyle(() => ({ opacity: shownContent.value }));
   const choose = (action: () => void) => {
     if (chosen.current) return;
     chosen.current = true;
@@ -171,16 +174,14 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     );
   });
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents={revealed ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!revealed} importantForAccessibility={revealed ? "auto" : "no-hide-descendants"}>
-      {dimmed ? (
-        <Animated.View entering={reduceMotion ? undefined : FadeIn.duration(menuMotion.heldOpen)} exiting={reduceMotion ? undefined : FadeOut.duration(menuMotion.heldClose)} style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }]} />
-      ) : null}
+    <View style={StyleSheet.absoluteFill} pointerEvents={revealed && !leaving ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!revealed || leaving} importantForAccessibility={revealed && !leaving ? "auto" : "no-hide-descendants"}>
+      {dimmed ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }, dimStyle]} /> : null}
       <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={() => onDismiss()} />
+      <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, fade]}>
       <Animated.View
         testID="drawnMenu"
         accessibilityRole="menu"
         accessibilityViewIsModal
-        exiting={reduceMotion ? FadeOut.duration(menuMotion.contentFade) : dimmed ? HELD_CLOSE : TAP_CLOSE}
         style={[styles.panel, { boxShadow: menuLook.shadow, borderColor: paint.rim, transformOrigin: spot.origin }, spot.place, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight }, revealed ? null : styles.unseen, grow]}
       >
         <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={[styles.material, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight - 2 * menuLook.rim }]}>
@@ -196,14 +197,16 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
           </ScrollView>
         </MenuMaterial>
       </Animated.View>
+      </Animated.View>
     </View>
   );
 }
 
 export function MenuMaterial({ source, fill, solid, radius, style, children }: { source: string | null; fill: string; solid: string; radius: number; style?: StyleProp<ViewStyle>; children: ReactNode }) {
-  if (!source) return <View style={[style, { backgroundColor: solid, borderRadius: radius }]}>{children}</View>;
+  if (!source || !lookIsNative()) return <View style={[style, { backgroundColor: solid, borderRadius: radius }]}>{children}</View>;
   return (
-    <LookFrost source={source} variant={menuLook.frost} cornerRadius={radius} fill={fill} style={style}>
+    <LookFrost source={source} variant={menuLook.frost} cornerRadius={radius} fill={ink.clear} style={style}>
+      <View testID="menuMaterialFill" pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />
       {children}
     </LookFrost>
   );
@@ -227,9 +230,9 @@ export function pointPlacer(at: Point, screen: { width: number; height: number }
   };
 }
 
-function triggerPlacer(row: Rect, host: Rect, insets: Insets, width: number): MenuPlacer {
+function triggerPlacer(row: Rect, host: Rect, insets: Insets, width: number, align?: MenuAlign): MenuPlacer {
   return (height, keepBelow) => {
-    const spot = menuOnTrigger(row, host, host.width > 0 ? insetRect(host, insets) : host, width, height, MENU_MARGIN, keepBelow);
+    const spot = menuOnTrigger(row, host, host.width > 0 ? insetRect(host, insets) : host, width, height, MENU_MARGIN, keepBelow, align);
     return { place: { left: spot.left, top: spot.top, width }, origin: spot.origin, maxHeight: spot.height };
   };
 }
@@ -246,11 +249,13 @@ function fixedPlacer(place: ViewStyle, host: Rect, insets: Insets, width: number
   };
 }
 
+export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close) + menuMotion.contentFade;
+
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 
-type FloatingProps = Omit<Props, "shown" | "origin" | "placer" | "place"> & { place?: ViewStyle; anchor?: RefObject<ViewInstance | null>; at?: Point | null };
+type FloatingProps = Omit<Props, "shown" | "origin" | "placer" | "place"> & { place?: ViewStyle; anchor?: RefObject<ViewInstance | null>; at?: Point | null; align?: MenuAlign };
 
-export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, dimmed, frost, privately }: FloatingProps) {
+export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, align, dimmed, frost, privately }: FloatingProps) {
   const hostFrame = useOverlayFrame();
   const insets = useSafeAreaInsets();
   const screen = useWindowDimensions();
@@ -267,9 +272,9 @@ export function FloatingMenu({ items, place = {}, onDismiss, anchor, at, dimmed,
       live = false;
     };
   }, []);
-  const placer = at ? pointPlacer(at, screen, insets, width) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width) : fixedPlacer(place, measured.host, insets, width)) : undefined;
+  const placer = at ? pointPlacer(at, screen, insets, width) : measured ? (measured.row ? triggerPlacer(measured.row, measured.host, insets, width, align) : fixedPlacer(place, measured.host, insets, width)) : undefined;
   return (
-    <Portal>
+    <Portal exitMs={menuExitMs(dimmed)}>
       <Menu items={items} place={{ ...place, width }} placer={placer} shown={placer !== undefined} dimmed={dimmed} privately={privately} frost={frost === undefined ? frostAround : frost} onDismiss={onDismiss} />
     </Portal>
   );

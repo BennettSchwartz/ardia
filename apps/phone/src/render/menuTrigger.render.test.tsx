@@ -6,7 +6,7 @@ import { mockNative, resetNativeMenus } from "./nativeMenusMock";
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
 const { MenuTrigger, confirmInSheet, nativeMenu } = require("../components/ui/MenuTrigger") as typeof import("../components/ui/MenuTrigger");
-const { FloatingMenu, Menu } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
+const { FloatingMenu, Menu, menuExitMs } = require("../components/ui/Menu") as typeof import("../components/ui/Menu");
 type MenuItem = import("../components/ui").MenuItem;
 
 type Root = ReturnType<typeof renderSurface>;
@@ -158,6 +158,7 @@ test("Back closes the drawn menu, and on a submenu's page goes back to the menu 
   back();
   expect(menuLabels(root)).toEqual(["Copy Link", "Send to Device", "Light", "Dark", "Close Tab"]);
   back();
+  act(() => jest.advanceTimersByTime(menuExitMs(true)));
   expect(menuLabels(root)).toEqual([]);
   expect(ran).toEqual([]);
   unmount(root);
@@ -230,6 +231,7 @@ test("without them the trigger opens the drawn menu on tap or long press, and a 
   expect(menuLabels(tapped)).toEqual(["Studio", "Pixel"]);
   pickMenu(tapped, "Studio");
   expect(ran).toEqual(["studio"]);
+  act(() => jest.advanceTimersByTime(menuExitMs(true)));
   expect(menuLabels(tapped)).toEqual([]);
   unmount(tapped);
   const held = trigger("longPress");
@@ -302,7 +304,7 @@ test("a placed menu stays hidden until its rows are measured, then shows where t
   const shown = flat(panelOf(root).props.style);
   expect(shown.opacity).not.toBe(0);
   expect(hiddenLayer()).toHaveLength(0);
-  expect(shown.top).toBe(600 - 301);
+  expect(shown.top).toBe(600 - 16 - 301);
   unmount(root);
 });
 
@@ -468,4 +470,46 @@ test("a confirmation's button labels wrap instead of truncating, and the card gr
   expect(style.height).toBeUndefined();
   expect(style.minHeight).toBe(43.5);
   unmount(sheet);
+});
+
+const covered = (root: Root) => root.root.findAll((node) => node.props.testID === "overlayCovered" && typeof node.type === "string")[0]!.props;
+
+test("a closed menu stays drawn for its close, out of the way of touches and TalkBack, and goes when the close ends", () => {
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  expect(covered(root).importantForAccessibility).toBe("no-hide-descendants");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  expect(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")).toHaveLength(1);
+  expect(root.root.findAll((node) => typeof node.type === "string" && node.props.pointerEvents === "none" && node.props.accessibilityElementsHidden === true)).not.toHaveLength(0);
+  expect(covered(root).importantForAccessibility).toBe("auto");
+  act(() => jest.advanceTimersByTime(menuExitMs(false)));
+  expect(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")).toHaveLength(0);
+  unmount(root);
+});
+
+test("a row that opens a confirmation shows the card alone: the closing menu is dropped at once, and the app behind is hidden from TalkBack", () => {
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const { useState } = require("react") as typeof import("react");
+  function Asking() {
+    const [asking, setAsking] = useState(false);
+    return (
+      <>
+        <MenuTrigger items={[{ label: "Close All Tabs", destructive: true, onPress: () => setAsking(true) }]} trigger="tap">
+          {({ onPress }) => (
+            <Pressable accessibilityLabel="More" onPress={onPress}>
+              <Text>More</Text>
+            </Pressable>
+          )}
+        </MenuTrigger>
+        {asking ? <ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => setAsking(false)} /> : null}
+      </>
+    );
+  }
+  const root = renderSurface(<Asking />);
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "More" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  pickMenu(root, "Close All Tabs");
+  expect(root.root.findAll((node) => node.props.testID === "drawnActionSheet" && typeof node.type === "string")).toHaveLength(1);
+  expect(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")).toHaveLength(0);
+  expect(covered(root).importantForAccessibility).toBe("no-hide-descendants");
+  unmount(root);
 });

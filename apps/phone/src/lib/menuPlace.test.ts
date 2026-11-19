@@ -33,7 +33,7 @@ test("a long-press menu opens at the finger, down and to the right when it fits"
 });
 
 test("near the right or bottom edge it opens back toward the screen from the finger", () => {
-  assert.deepEqual(menuAt({ x: 340, y: 760 }, host, room, 250, 200, 8), { left: 90, top: 560, height: 200, origin: "right bottom" });
+  assert.deepEqual(menuAt({ x: 340, y: 760 }, host, room, 250, 200, 8), { left: 90, top: 544, height: 200, origin: "right bottom" });
 });
 
 test("a menu wider or taller than the room left keeps clear of the bars and the screen's edges", () => {
@@ -44,8 +44,9 @@ test("a menu wider or taller than the room left keeps clear of the bars and the 
 
 test("a tap menu never runs under the system bars", () => {
   const button = { x: 346, y: 760, width: 44, height: 44 };
-  assert.deepEqual(menuOnTrigger(button, host, room, 250, 200, 8), { left: 134, top: 604, height: 200, origin: "right bottom" });
-  assert.equal(menuOnTrigger({ ...button, y: 20 }, host, room, 250, 200, 8).top, 48);
+  assert.deepEqual(menuOnTrigger(button, host, room, 250, 200, 8), { left: 140, top: 604, height: 200, origin: "right bottom" });
+  assert.equal(menuOnTrigger({ ...button, y: 44 }, host, room, 250, 200, 8).top, 44);
+  assert.equal(menuOnTrigger({ ...button, y: 100 }, host, room, 250, 900, 8).top, 48);
 });
 
 test("the tallest page of a menu counts a submenu's back row and its children", () => {
@@ -61,9 +62,30 @@ test("a menu taller than the safe room is cut to it, top and bottom inside the r
   assert.ok(held.top >= 24 + 8);
   assert.ok(held.top + held.height <= 368 - 8);
   assert.equal(held.height, 344 - 16);
-  const tapped = menuOnTrigger({ x: 16, y: 320, width: 44, height: 44 }, landscape, safe, 250, tall, 8);
+  const tapped = menuOnTrigger({ x: 16, y: 300, width: 44, height: 44 }, landscape, safe, 250, tall, 8);
   assert.ok(tapped.top >= 24 + 8);
   assert.ok(tapped.top + tapped.height <= 368 - 8);
   const short = menuAt({ x: 400, y: 100 }, landscape, safe, 250, 200, 8);
   assert.equal(short.height, 200);
+});
+
+test("a tap menu's corner sits exactly on its trigger's corner even when the trigger sits inside the screen margin, as the deck's ··· does under the status bar", () => {
+  const safe = { x: 0, y: 31, width: 392, height: 818 };
+  const more = { x: 336, y: 33.6, width: 44, height: 44 };
+  const spot = menuOnTrigger(more, host, safe, 250, 272, 8);
+  assert.equal(spot.top, 33.6);
+  assert.equal(spot.left + 250, 380);
+});
+
+test("a picker's menu lines its trailing edge up with the row's value when the trigger asks for it, opening above when there is no room below", () => {
+  const row = { x: 16, y: 700, width: 360, height: 52 };
+  const spot = menuOnTrigger(row, host, host, 250, 314, 8, undefined, { trailing: true, inset: 16 });
+  assert.equal(spot.left + 250, 360);
+  assert.equal(spot.top + spot.height, 752);
+  assert.equal(spot.origin, "right bottom");
+});
+
+test("with no room below the finger, a long-press menu ends 16 pt above it instead of covering it", () => {
+  const spot = menuAt({ x: 60, y: 800 }, host, host, 250, 200, 8);
+  assert.equal(spot.top + spot.height, 800 - 16);
 });
