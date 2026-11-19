@@ -39,6 +39,12 @@ CGFloat WindowCornerRadius(NSWindow *window) {
   return radius;
 }
 
+CGFloat DrawnWindowCornerRadius(NSWindow *window) {
+  static CGFloat drawn = 0;
+  if (window && drawn <= 0) drawn = [ArdiaChromeWindowHost frameCornerRadiusOfWindow:window];
+  return drawn > 0 ? drawn : WindowCornerRadius(nil);
+}
+
 }
 
 namespace {
@@ -505,6 +511,7 @@ void ConfigureWindow(NSWindow *window) {
   window.tabbingMode = NSWindowTabbingModeDisallowed;
   InsetTrafficLights(window);
   WindowCornerRadius(window);
+  DrawnWindowCornerRadius(window);
 }
 
 void InsetUtilityTrafficLights(NSWindow *window) {

@@ -8,9 +8,12 @@ export { isPopupWindowId };
 
 const Windows = nativeModule("ArdiaAppWindows");
 let cachedWindowCornerRadius: number | undefined;
+let cachedDrawnWindowCornerRadius: number | undefined;
 export const windowCornerRadius = () => (cachedWindowCornerRadius ??= Windows.windowCornerRadius());
+export const drawnWindowCornerRadius = () => (cachedDrawnWindowCornerRadius ??= Windows.drawnWindowCornerRadius());
 export const forgetWindowCornerRadius = () => {
   cachedWindowCornerRadius = undefined;
+  cachedDrawnWindowCornerRadius = undefined;
 };
 
 export const openWindow = (id: string, options: OpenWindowOptions = {}) => Windows.openWindow(id, options);
