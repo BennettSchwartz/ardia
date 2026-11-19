@@ -235,10 +235,10 @@ Events. No protocol change: an older command never names them.
 
 Every URL an event carries, `url` or the `urls` of `history.removed`, is cut to origin and path for a socket
 connection or plugin without `fullUrls` (`eventRedaction.ts`, used by both delivery paths). `history.removed` keeps
-its line under 256 KB: `urls` stops at 1000 entries or that many bytes, `count` stays the full number, and
-`truncated: true` says some were left out. A reader too slow for its events loses the oldest waiting ones, never the
-connection: past 1,000 waiting events or 4 MB of output the oldest waiting events are dropped, and the next event
-written carries `"dropped": N` (`ControlOutput.swift`).
+its whole line, escaped JSON, envelope and newline included (measured with `socketWire.ts`'s `frameBytes`), under 256
+KB: `urls` stops at 1000 entries or where the next one would pass that, `count` stays the full number, and
+`truncated: true` says some were left out. The 1 MiB line limit, the output budgets and the `dropped` marker are the
+socket's own (`socketWire.ts`, `ControlOutput.swift`), the same for every event.
 
 ### Sync
 
@@ -246,7 +246,9 @@ The sync methods call `state/sync/engine.ts` as Settings does, and each refuses 
 locked. The writes (`sync.now` and every `sync.set*` and `sync.sendTab`) also refuse while sync is starting (its
 saved state isn't loaded yet) or turning off (Settings still shows it on during the last pass), so an `ok` is never
 dropped afterwards. `sync.now` answers after a pass that started after the call: when a pass is already running it
-waits for that one, then runs its own. `sync.setProfile` needs the profile's sync link (it appears on the first sync after the profile opens; the
+waits for that one, then runs its own. Right where that pass would start it checks again: if sync began turning off
+meanwhile it answers `refused` and starts nothing (the retiring pass is the last), and if control turned off it starts
+nothing. `sync.setProfile` needs the profile's sync link (it appears on the first sync after the profile opens; the
 Settings toggle is disabled until then), and `sync.setOpenTabs` needs the profile on and Open Tabs syncing, as the
 Sync All Open Tabs toggle does. `sync.sendTab` takes an `http(s)` tab and a device from `sync.devices`, the list the
 tab menu's Send to Device shows. Turning sync on or off and the recovery phrase stay in Settings: they choose a
@@ -263,23 +265,42 @@ that profile and answers when the user decides: `{installed, extensions}`, namin
 Nothing installs without the user's click.
 
 The folder path is refused before anything is read when it isn't absolute, holds `.` or `..`, or is a system root
-or a home folder. macOS then resolves it (`realpath`), reads the manifest, locales and icons off the main thread
-with at most 4 MB per file and no symbolic links, and hashes every file in the folder (at most 20,000 files and 1
-GB; a link may point only at a file inside the folder) into a `digest`. One sheet shows at a time: a second
-`folder` request while any install sheet is up is `refused`. Each sheet carries its request's key, so its Add button
-and Return confirm that request only. Confirming hands the digest back, and macOS hashes the folder again and
-refuses the install if anything changed since the sheet showed it; Load Unpacked Extension… in Settings goes through
-the same check. Where the platform can't hash the folder (Linux's engine today) a socket `folder` install is
-`refused`. Closing the window that shows the sheet answers `failed`. Each step after an await re-checks that
-control is still on and the profile still exists, and answers `failed` or `no_window` without changing anything
-otherwise; that covers the Web Store tab too.
+or a home folder. macOS then resolves it (`realpath`) and, off the main thread, copies it once into a private staging
+folder (`ArdiaExtensionStaging.mm`): one walk reads every file a single time, hashes exactly the bytes it writes into
+the copy, and refuses the whole folder when any entry can't be read, any file is over 4 MB, it holds more than 20,000
+files or 1 GB, or a link points outside it or at a folder (a link to a file inside is copied as that file). Hidden
+entries (names starting with `.`, such as `.git`) and a top-level `_metadata` (Chromium's own) are left out of both the
+copy and the digest. The sheet's name, permissions, locales and icons are then read from that copy only, so they and
+the `digest` describe the same bytes. One sheet shows at a time: a second `folder` request while any install sheet is
+up is `refused`. Each sheet carries its request's key, so its Add button and Return confirm that request only.
+
+Confirming hashes the copy again and installs the copy, never the source folder: editing the source after the sheet
+showed changes nothing about what's added. Copies live in `<data dir>/Ardia Unpacked Extensions/<key>`, where the
+key comes from the source folder's canonical path, so an extension without a `key` keeps the same id each time the
+same folder is loaded. Reinstall policy: loading the same folder again shows a new sheet, and only Add replaces the
+earlier copy, atomically (the new copy is staged beside it and swapped in with `rename`), after which Chromium reloads
+it; Reload on the extension's page reloads Ardia's copy, so picking up edits to the source means loading the folder
+again. Cancel, a replaced sheet or a closed window deletes the staged copy, and staged copies left over for a day
+are swept. The copy stays writable for Chromium's own files under `_metadata` (indexed rulesets). Load Unpacked
+Extension… in Settings goes through the same copy. Where the platform can't stage the folder (Linux and Windows
+today) a socket `folder` install is `refused`.
+
+Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it: a Web Store prompt
+that arrives meanwhile waits and shows after. A socket request settles only on Chromium's answer from then on, even
+if its window closes (then no error sheet is left behind). Pressing Add on a socket's sheet first re-checks that
+control is still on (the same socket generation) and that the profile still exists and maps to the same engine
+profile; otherwise nothing installs and the request answers `failed`. Closing the window before Add answers
+`failed`. Each step after an await re-checks control and the profile the same way, and answers `failed` or
+`no_window` without changing anything otherwise; that covers the Web Store tab and its already-installed answer too.
 
 `extensions.configure` sets what an extension's page in Settings offers: site access (only for an extension that
-asks for sites), Allow in Incognito, and Allow User Scripts (only when the extension uses them); a policy-installed
-one is `refused`. The whole call is checked before anything changes, then site access, the one change Chromium can
+asks for sites), Allow in Incognito (not for one whose manifest says `"incognito": "not_allowed"`), and Allow User
+Scripts (only when the extension uses them); a policy-installed one is `refused`. The whole call is checked before
+anything changes, then site access, the one change Chromium can
 still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
 and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
-`sites`) as success. Changing several fields in one engine call atomically would need `ac_extensions.cc`
+`sites`) as success. The reply reads the list again with a request started after the write, never one that was
+already running. Changing several fields in one engine call atomically would need `ac_extensions.cc`
 (`engine/`) to validate before it applies anything.
 
 ### Window geometry
@@ -295,9 +316,14 @@ bottom-left of the main display, the same as `frame` in `windows`. A frame is ke
 least the window's smallest size; a frame that overlaps no display, or isn't finite with a positive size, is refused
 by the native call itself, and the socket also bounds every coordinate to ±100,000 points. Zoom is macOS's (the
 green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
-finished (`didEnter`/`didExit`, at most 6 s), not when it starts; the socket runs one full-screen change at a time
-per window, checks the final geometry against the request, and answers `refused` while a page is full screen in the
-window, `failed` if the window didn't get there. None of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
+finished (`didEnter`/`didExit` for the direction asked, or the window closing), not when it starts. Each call owns the
+window's transition natively until one of those notifications arrives; only its own notifications settle it, so an
+earlier transition's late notification can't answer a later request. After 6 s it answers with `transition:
+"timeout"` (the socket's `failed`, "Timed out…") but keeps the ownership, and a call made while another owns the
+window answers `transition: "busy"` (the socket's `refused`). If AppKit never ends a transition, a call 30 s after it
+began takes the window over. The socket runs one full-screen change at a time per window, checks the final geometry
+against the request, waits for the store to follow (`failed` if it doesn't within 4 s), and answers `refused` while a
+page is full screen in the window, `failed` if the window didn't get there. None of the three acts while a page is full screen in the window. The store's `frame` and `fullScreen` follow through the
 window events they already listen to. `PLATFORM_FEATURES.windowGeometry` is on for macOS only: Linux needs the same
 four calls in `engine/ardiacore-linux` (an engine change, so a new engine), and Windows in `WindowManager` of
 `apps/browser/windows` (its maximize already exists as `toggleMaximizeWindow`); until then the methods are `refused`
