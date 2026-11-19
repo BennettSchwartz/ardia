@@ -13,18 +13,23 @@ export const LIBRARY_EVENTS = ["bookmarks.changed", "history.removed", "download
 
 const MAX_IDS = 1000;
 
-export const HISTORY_EVENT_URL_BYTES = 256 * 1024;
+export const HISTORY_EVENT_LINE_BYTES = 256 * 1024;
+
+const TIME_DIGITS_ROOM = 20;
 
 const capped = (ids: readonly string[]) => (ids.length > MAX_IDS ? ids.slice(0, MAX_IDS) : [...ids]);
 
 const utf8 = new TextEncoder();
 
+const jsonBytes = (value: unknown) => utf8.encode(JSON.stringify(value)).length;
+
 export function historyRemoval(profiles: string[], all: boolean, urls: readonly string[]) {
+  const envelope = { event: "history.removed", time: 0, data: { profiles, all, count: urls.length, urls: [] as string[], truncated: false } };
+  let bytes = jsonBytes(envelope) + TIME_DIGITS_ROOM + 1;
   const kept: string[] = [];
-  let bytes = 0;
   for (const url of urls) {
-    const size = utf8.encode(url).length + 3;
-    if (kept.length >= MAX_IDS || bytes + size > HISTORY_EVENT_URL_BYTES) break;
+    const size = jsonBytes(url) + (kept.length ? 1 : 0);
+    if (kept.length >= MAX_IDS || bytes + size > HISTORY_EVENT_LINE_BYTES) break;
     kept.push(url);
     bytes += size;
   }
