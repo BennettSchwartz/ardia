@@ -243,7 +243,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Air traffic (link routing rules) | rules per source app | `air-traffic.json` | 🗺️ `airTraffic.*` |
 | Hooks, config, approvals | hook rules, config.json, approvals | `hooks.json`, `config.json`, `automation-approvals.json` | files the user edits; ⛔ approvals |
 | Prompts on screen | permission, save password, save address or card prompts per tab | memory (`state/tabs/pageState.ts`) | ✅ `permissions.*`, `passwords.prompts`/`respond`, `autofill.prompts`/`respond` |
-| Native menus | open `<select>` popups, context menus, Ardia's menus, the menu bar | AppKit (`OpenSurfaces.swift`) | ✅ `menus.*`; 🗺️ the color popup, payment and WebAuthn sheets; ⛔ macOS's own sheets |
+| Native menus | page context menus a hidden Ardia captures, the menu bar's static catalog | `OpenSurfaces.swift`, `MenuCatalog` | ✅ `menus.open`, `menus.bar`, `menus.runBar`; menus on screen (`<select>` popups, live context menus, Ardia's menus, WebKit's) aren't socket-visible; 🗺️ the color popup, payment and WebAuthn sheets; ⛔ macOS's own sheets |
 | Telemetry, reports, onboarding, release notes | the app's own bookkeeping | their documents | ⛔ not profile data |
 
 ## Methods
@@ -358,9 +358,10 @@ also takes 84 and merges first, so this becomes 85 then (merge order #2811, #281
 
 Until the engine items listed under "Needs engine code" land, the socket **lists** prompts and captured page menus but
 **doesn't answer** permission or password prompts or **pick** from a captured menu: those methods answer `refused`
-with a message naming the engine work. Picks from page menus and `<select>` popups are refused on every route, and
-the menu bar is refused while any private window is open. Autofill prompts and the menu bar otherwise are answered as
-described below.
+with a message naming the engine work. Only captured background menus are listed; a menu on screen (a `<select>`
+popup, a live context menu, Ardia's or WebKit's) isn't socket-visible at all. The menu bar is reached through its
+static catalog and is refused while any private window is open. Autofill prompts and the menu bar otherwise are
+answered as described below.
 
 | Method | Mutates | What it does, and the path it takes |
 | --- | --- | --- |
@@ -370,11 +371,11 @@ described below.
 | `passwords.respond {tab, id, decision, usernameId?}` | yes | **Refused for now**, with a message naming the engine work: the engine names no offer and doesn't say whether an answer took, and an app-side number can outlive its offer (Chromium's manual-save fallback replaces the form without a new bubble, and a queued Save can follow a Dismiss). Needs an offer id and a resolve result (`ac_password_prompt.mm`, below). `no_window` when the tab shows no prompt or another one. The prompt on screen answers as before |
 | `autofill.prompts` | no | Save address, update address and save card prompts: the engine's `id`, origin, `kind`, `fields` (for an update: which of name, address, email, phone, other change) and a `description` Ardia writes from those. Never the engine's text (an update's summary holds the name and street), the address lines or the card |
 | `autofill.respond {tab, id, decision}` | yes | `accept`, `decline`, `dismiss`. `no_window` when the tab now shows another prompt or its page is gone; `failed` when the engine's prompt id no longer matches or it stays open after the answer |
-| `menus.open` | no | Open page and Ardia menus with their owner (`window`, and `tab` for a page's menu) and items (`path`, `title`, `enabled`, `checked`, `separator`, `submenu`): `kind` is `select` (a page's `<select>` popup), `page` (a page's context menu captured in a hidden instance, `captured: true`, which carries its own source tab and window), `app` (an Ardia menu). A page's context menu on screen isn't listed and `menus.dismiss` on it is refused: AppKit's menu says nothing of the view it was shown from, Chromium's source view can't be reached from `packages/` without `engine/`, and guessing from the key window's first responder can credit it to the wrong tab or window. Page menus keep their enabled and checked state: they exist only for windows the ardia command may use, so their state is that page's. A tracking menu bar is never listed. A menu whose window isn't one the ardia command may use (private, unknown, closed) isn't listed, nor a page menu without a known tab in that window |
-| `menus.choose {menu, path, ref?}` | yes | Not in `methods` (its spec is `hidden`); the handler stays for older clients and is **refused for every open menu**. A `<select>` popup or a page's context menu AppKit is tracking (its items, Ardia's injected Share among them, run outside `run`'s policy), a captured page menu (listed only until the engine runs a captured item for its own frame), Ardia's own menus (`app`: their callbacks, such as an engine switch or copying the sync recovery code, aren't commands `run` allows) and a tracking menu bar (its rows are live UI state). To run a menu bar item, use `menus.runBar` with a row from `menus.bar` |
-| `menus.dismiss {menu}` | yes | Closes a `<select>` popup or an Ardia menu without choosing; a page's context menu on screen is refused (its source isn't known). Dismissing a captured page menu just drops it, with no `menu.closed` (nothing on screen closed). A tracking menu bar is refused |
+| `menus.open` | no | **Captured page menus only**: a page's context menu that a hidden Ardia captured as data (`kind: "page"`, `captured: true`), with the tab and window it came from, recorded when it was captured, and its items (`path`, `title`, `enabled`, `checked`, `separator`, `submenu`). It is listed only when that window and tab are ones the ardia command may use. Nothing else is socket-visible: a menu on screen (a page's context menu, a `<select>` popup, Ardia's own menus, a WebKit context menu, a tracking menu bar, any menu whose items target a class the app doesn't know) has no proven source, so it gets no id, no entry and no event. The menu bar is reached only through the static catalog in `menus.bar` |
+| `menus.choose {menu, path, ref?}` | yes | **Hidden from `methods`** (its spec is `hidden`); the handler stays for older clients, with its schema and consent checks. A captured page menu answers `refused` until the engine runs a captured item for its own frame. Any other id, whether it names a menu on screen or nothing at all, answers exactly as an unknown id: `no_window`, "There's no open menu with that id", by the same path. To run a menu bar item, use `menus.runBar` with a row from `menus.bar` |
+| `menus.dismiss {menu}` | yes | Drops a captured page menu from the list, with no `menu.closed` (nothing on screen closed). Any other id answers exactly as an unknown id does |
 | `menus.bar` | no | A **static catalog** of the menu bar, generated from its definition, never from the live `NSMenu`: `MainMenu.build()` hands its freshly built tree to `MenuCatalog.capture` before anything state-driven fills it, and before it assigns `NSApp.windowsMenu` (AppKit copies the open windows' rows into a new Window menu at that moment, so a rebuild with a private window open would otherwise capture its title); the capture also drops any row whose target or represented object is a window. The catalog is kept from then on. Each row has its path in that definition, `ref`, the static title it was built with, its default shortcut (`key`), and its `command` and `arg` when `run` takes it or its AppKit `action`; no enabled, checked or hidden state and no page-derived titles. Menus built from open windows, profiles, pages or history (Services, Share, Move to Profile, Move to Window, Add Bookmark to Folder, Profiles, New Little Ardia Window in Profile, History, Extensions) are one row each with `dynamic: true` and no items; Bookmarks and Window list their static items followed by one `dynamic` row for their saved bookmarks and open windows. So the catalog is the same bytes whatever is focused, open or private. Still refused while any private window is open |
-| `menus.runBar {path, ref, window?}` | yes | Runs a row of `menus.bar`, found by its `ref` (its `path` must match). A `dynamic` row, a submenu or a separator doesn't run. An Ardia command goes straight to `runMethod`, which applies the command policy (`needsPerson` and the rest, then the background rule) before it resolves the named window, exactly as `run` does, and then runs against that window's store state, with no menu validation (`validateMenuItem` and the cached menu state never decide), so the automation policy applies (`automationCommands.ts`: no Quit, no engine switch, no Allow JavaScript from Apple Events, no command that needs the person, the settings `config.json` can't set). **In a background Ardia `menus.runBar` runs nothing**: `run` refuses every command there (#2811), and every native item is refused too. Any other item is a native one, dispatched with no validation step to an explicit target the catalog recorded: the named window itself when it is the key window, or, for Minimize All and Arrange in Front, the app or the item's own `MenuTarget` handler; the target's own handler decides. With no key window every native item is refused; an item that only works along the responder chain (Undo, Copy, Paste, Select All, spelling and substitutions, Keep Window on Top) is refused, and so is everything off the `MenuBarAction` allowlist (Quit, Hide, Close Window, Check for Updates, system input, Check Document Now, Show Substitutions…). Everything is refused while any private window is open, checked in JS right before `run` with no await in between and natively in the turn that dispatches |
+| `menus.runBar {path, ref, window?}` | yes | Runs a row of `menus.bar`, found by its `ref` (its `path` must match). A `dynamic` row, a submenu or a separator doesn't run. An Ardia command goes straight to `runMethod`, exactly as `run`: it first refuses everything in a background Ardia (#2811), then applies the command policy (`needsPerson` and the rest) before it resolves the named window, and then runs against that window's store state, with no menu validation (`validateMenuItem` and the cached menu state never decide), so the automation policy applies (`automationCommands.ts`: no Quit, no engine switch, no Allow JavaScript from Apple Events, no command that needs the person, the settings `config.json` can't set). **In a background Ardia `menus.runBar` runs nothing**: `run` refuses every command there (#2811), and every native item is refused too. Any other item is a native one, dispatched with no validation step to an explicit target the catalog recorded: the named window itself when it is the key window, or, for Minimize All and Arrange in Front, the app or the item's own `MenuTarget` handler; the target's own handler decides. With no key window every native item is refused; an item that only works along the responder chain (Undo, Copy, Paste, Select All, spelling and substitutions, Keep Window on Top) is refused, and so is everything off the `MenuBarAction` allowlist (Quit, Hide, Close Window, Check for Updates, system input, Check Document Now, Show Substitutions…). Everything is refused while any private window is open, checked in JS right before `run` with no await in between and natively in the turn that dispatches |
 
 **Events:** `permission.prompted` (`{id, windowId, tabId, origin, permissions, queued}`), `password.prompted`
 (`{id, windowId, tabId, origin, state, username, usernames, usernameCount}`, the same capped list; named only, not in `"*"`), `menu.opened` (`{id, kind, windowId, tabId, items}`, `items` being a count), `menu.closed`. None of
@@ -404,14 +405,12 @@ external app, lives in `socketDownloads.ts` (#2811).
 missing was the menu as data (which items exist, under which menus, with which shortcuts) and the menu items that
 aren't Ardia commands (Window). `menus.bar` and `menus.runBar` add only those, from the static catalog.
 
-**How it works.** `OpenSurfaces.swift` (in `packages/shell`) runs in the app process, where Chromium shows page menus,
-and watches `NSMenuDidBeginTracking`/`NSMenuDidEndTracking` for menus outside the menu bar. A `<select>` popup is the
-`NSMenu` of Chromium's `WebMenuRunner` (`content/app_shim_remote_cocoa/web_menu_runner_mac.mm`), a page's context menu
-Chromium's `MenuControllerCocoa`. These are listed, never chosen. Every menu carries its owner: a `<select>` popup the
-tab and window whose view holds the popup's anchor, a visible context menu the tab holding the key window's first
-responder and that window, Ardia's menus the key window. The socket shows a menu only when its window is one the ardia
-command may use and, for a page's menu, the tab is in it. The menu bar isn't tracked for the socket at all: `menus.bar`
-is the static catalog above, and `menus.runBar` runs from it.
+**How it works.** `OpenSurfaces.swift` (in `packages/shell`) keeps only what a hidden Ardia captures: the engine hands a
+page's context menu to the app (`-tab:runContextMenu:`), and the app records it with the tab and window it came from.
+It doesn't watch AppKit menu tracking at all, so a menu on screen, whoever shows it (Chromium's `MenuControllerCocoa`
+or `WebMenuRunner`, WebKit's `WKMenuTarget`, Ardia's own menus, the menu bar), never gets an id or an event: none of
+them says which tab and window it belongs to, and a guess from the key window could credit it to the wrong one. The
+menu bar is the static catalog in `menus.bar`, and `menus.runBar` runs from it.
 
 **Background mode.** A hidden instance (`ARDIA_BACKGROUND=1`) doesn't show a page's context menu: the engine hands it to
 the app (`-tab:runContextMenu:`). While the socket serves, the app captures the menu as data (`ArdiaPageMenuCaptured`:
@@ -423,7 +422,7 @@ subscription's set of announced menus, so a later `menu.closed` is never sent fo
 is refused: the engine's menu doesn't say which frame it came from, and nothing the app can read (the main world's
 `document.activeElement` included, which the page controls, misses closed shadow roots and can change between a read
 and the dispatch) binds an edit to that frame. Without a serving socket the menu is logged as before. A `<select>`
-popup is a real AppKit menu in either mode.
+popup is a real AppKit menu in either mode, so it isn't socket-visible.
 
 **Needs engine code (joins the engine/next build or a later key).** These change `engine/ardiacore/src/ardia/core`,
 which is frozen outside the engine/next build (#2328, #2808), so they move the engine key and aren't in this change.
@@ -524,5 +523,6 @@ Designed, not built in this round, each in its own file under `state/automation/
   the Settings pane does; `newTabUrl` and `customSearchUrl` with the URL checks `apply` uses.
 - **Events:** `bookmarks.changed`, `history.removed`, `download.changed`, `profile.changed`.
 - **Native UI, engine side** (with #2808's build or a later key): the payment and WebAuthn hooks above; the context
-  menu's checked state in `DescribeMenu` (`ac_context_menu.mm` reports enabled and visible only); and the tab that opened
-  a `<select>` popup passed with it, in place of the focus lookup; the color popup hook above.
+  menu's checked state in `DescribeMenu` (`ac_context_menu.mm` reports enabled and visible only); the tab and window that
+  showed a live context menu or a `<select>` popup, passed with it, so those can become socket-visible; the color popup
+  hook above.
