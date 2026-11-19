@@ -19,7 +19,7 @@ export function leftPage(tabId: string, url: string, previousPage: string, engin
   setPopover(tabId, null);
   setPageSelection(tabId, null);
   clearEngineOffer(tabId);
-  patchPage(tabId, { popups: [], passwordPrompt: null, crashed: null, status: "" });
+  patchPage(tabId, { popups: [], passwordPrompt: null, verificationCode: null, crashed: null, status: "" });
   revealToolbar(tabId);
   if (!inPeek) followSiteChoice(tabId, engine, url, previousPage);
 }

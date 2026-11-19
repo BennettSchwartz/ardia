@@ -99,3 +99,28 @@ test("official plugin counts are a fixed set of fields, sent with the hourly cou
   assert.deepEqual(takeOfficialPluginCounts(), {});
   assert.ok(WHATS_SENT.some((group) => group.items.some((item) => item.includes("official plugin") && item.includes("onboarding") && item.includes("Settings"))));
 });
+
+test("a built-in plugin with an off switch offers Turn On, and once on shows On with its switch; an always-on one still installs", () => {
+  const switchable = (state) => ({ ...plugin(state, "passwords"), switchable: true });
+  const off = officialView(switchable("available"), undefined, null);
+  assert.deepEqual([off.action, off.note, off.toggle], ["turnOn", null, false]);
+  const on = officialView(switchable("installed"), undefined, null);
+  assert.deepEqual([on.note, on.toggle, on.action, on.firstCommand], ["on", true, null, null]);
+  const cli = officialView({ ...plugin("available"), switchable: false }, undefined, null);
+  assert.deepEqual([cli.action, cli.toggle], ["install", false]);
+  assert.equal(officialView({ ...plugin("installed"), switchable: false }, LINKED, null).note, "installed");
+});
+
+test("the seam marks a built-in plugin switchable unless it's always on", async () => {
+  const manifest = (name, extra) => JSON.stringify({ manifest: 1, name, title: name, version: "1.0.0", official: true, icon: "key.fill", ...extra });
+  const listed = (name, extra) => ({ name, status: "ok", text: manifest(name, extra), folderId: "bundled", bundled: true });
+  useBrowser.getState().hydrate({});
+  startPlugins();
+  stub.pluginHost.folders = [listed("switchy", { passwordManager: { fill: "system", fields: ["login"] } }), listed("stays", { alwaysOn: true })];
+  await lifecycle.rescanPlugins(null);
+  const byName = Object.fromEntries(officialPlugins(usePlugins.getState(), true).map((p) => [p.name, p]));
+  assert.equal(byName.switchy?.switchable, true);
+  assert.equal(byName.stays?.switchable, false);
+  stub.pluginHost.folders = [];
+  await lifecycle.rescanPlugins(null);
+});

@@ -1,0 +1,144 @@
+import { getPasswordAutofill, setPasswordAutofill } from "../../platform/passwords";
+import { readDocument, saveDocument } from "../../platform/documents";
+import { parseSaved, unchanged, versionedJson, type Migrations } from "../../lib/savedDocument";
+import { isFields } from "../../lib/decode";
+import { resource, store as storeResource } from "../settings/resources";
+import { consentToken, type ConsentToken } from "../telemetry/choice";
+import { warnFor } from "../telemetry/consoleConsent";
+import { notePasswordManagerRecordFailed } from "../telemetry/passwordManagerCounts";
+import type { PasswordManagerChoice } from "./passwordManagerChoice";
+
+export const passwordAutofill = resource("passwordAutofill", (profile: string) => getPasswordAutofill(profile).catch(() => true));
+
+const HELD_OFF_DOCUMENT = "password-manager.json";
+const HELD_OFF_VERSION = 1;
+const HELD_OFF_MIGRATIONS: Migrations = { 0: unchanged };
+
+type HeldOff = { profiles: Set<string>; writable: boolean };
+
+function readHeldOff(): HeldOff {
+  const raw = readDocument(HELD_OFF_DOCUMENT);
+  if (!raw) return { profiles: new Set(), writable: true };
+  try {
+    const doc: unknown = JSON.parse(raw);
+    if (isFields(doc) && typeof doc.version === "number" && doc.version > HELD_OFF_VERSION) return { profiles: new Set(), writable: false };
+  } catch {
+    return { profiles: new Set(), writable: true };
+  }
+  const list = parseSaved(raw, HELD_OFF_VERSION, HELD_OFF_MIGRATIONS)?.offerToSaveHeldOff;
+  return { profiles: new Set(Array.isArray(list) ? list.filter((p): p is string => typeof p === "string") : []), writable: true };
+}
+
+const heldOffProfiles = () => readHeldOff().profiles;
+
+let newerNoted = false;
+
+function noteNewerRecord(consent: ConsentToken | null) {
+  if (newerNoted) return;
+  newerNoted = true;
+  warnFor(consent, `[passwords] ${HELD_OFF_DOCUMENT} is from a newer Ardia, so offer to save is left as it is`);
+  notePasswordManagerRecordFailed(consent);
+}
+
+let recording: Promise<unknown> = Promise.resolve();
+
+function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
+  const saved = recording.then(async () => {
+    const { profiles, writable } = readHeldOff();
+    if (!writable) return false;
+    if (profiles.has(profile) === held) return true;
+    if (held) profiles.add(profile);
+    else profiles.delete(profile);
+    const contents = versionedJson({ offerToSaveHeldOff: [...profiles].sort() }, HELD_OFF_VERSION);
+    await saveDocument(HELD_OFF_DOCUMENT, contents);
+    return readDocument(HELD_OFF_DOCUMENT) === contents;
+  });
+  const landed = saved.catch(() => false);
+  recording = landed;
+  return landed;
+}
+
+type Intent = { on: boolean; consent: ConsentToken | null };
+const intents = new Map<string, Intent>();
+const owed = new Map<string, ConsentToken | null>();
+const draining = new Set<string>();
+
+const stillWanted = (profile: string, intent: Intent) => intents.get(profile) === intent;
+
+async function payOwed(profile: string, consent: ConsentToken | null): Promise<boolean> {
+  if (!owed.has(profile)) return true;
+  if (!(await recordHeldOff(profile, true))) {
+    notePasswordManagerRecordFailed(consent);
+    return false;
+  }
+  owed.delete(profile);
+  return true;
+}
+
+async function holdOff(profile: string, intent: Intent) {
+  if (!(await getPasswordAutofill(profile))) return void (await payOwed(profile, intent.consent));
+  if (!stillWanted(profile, intent)) return;
+  if (!(await recordHeldOff(profile, true))) return notePasswordManagerRecordFailed(intent.consent);
+  owed.delete(profile);
+  if (!stillWanted(profile, intent)) return;
+  await setPasswordAutofill(false, profile);
+  storeResource(passwordAutofill, [profile], false);
+}
+
+async function giveBack(profile: string, intent: Intent) {
+  const recorded = heldOffProfiles().has(profile);
+  if (!recorded && !owed.has(profile)) return;
+  await getPasswordAutofill(profile);
+  if (!stillWanted(profile, intent)) return;
+  if (recorded && !(await recordHeldOff(profile, false))) return notePasswordManagerRecordFailed(intent.consent);
+  owed.delete(profile);
+  if (!stillWanted(profile, intent)) {
+    owed.set(profile, intent.consent);
+    await payOwed(profile, intent.consent);
+    return;
+  }
+  await setPasswordAutofill(true, profile);
+  storeResource(passwordAutofill, [profile], true);
+}
+
+async function drain(profile: string) {
+  for (;;) {
+    const intent = intents.get(profile);
+    if (!readHeldOff().writable) {
+      noteNewerRecord(intent ? intent.consent : (owed.get(profile) ?? null));
+      intents.delete(profile);
+      owed.delete(profile);
+      return;
+    }
+    if (!intent) return void (await payOwed(profile, owed.get(profile) ?? null));
+    try {
+      await (intent.on ? giveBack(profile, intent) : holdOff(profile, intent));
+    } catch {
+      return;
+    }
+    if (stillWanted(profile, intent)) return void intents.delete(profile);
+  }
+}
+
+export const pendingOfferToSave = () => intents.size + owed.size;
+
+export function writeOfferToSave(profile: string) {
+  if ((!intents.has(profile) && !owed.has(profile)) || draining.has(profile)) return;
+  draining.add(profile);
+  void drain(profile).finally(() => draining.delete(profile));
+}
+
+function offerToSave(profile: string, on: boolean) {
+  intents.set(profile, { on, consent: consentToken() });
+  writeOfferToSave(profile);
+}
+
+export const followMode = (profile: string, mode: PasswordManagerChoice) => offerToSave(profile, mode === "ardia");
+
+export function forgetPendingOfferToSave(profile: string, consent: ConsentToken | null): Promise<void> {
+  intents.delete(profile);
+  owed.delete(profile);
+  return recordHeldOff(profile, false).then((landed) => {
+    if (!landed) notePasswordManagerRecordFailed(consent);
+  });
+}
