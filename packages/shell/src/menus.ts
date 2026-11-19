@@ -90,7 +90,6 @@ export type MenusNative = {
   addListener(name: "onSurface", listener: (e: SurfaceEvent) => void): EventSubscription;
   openSurfaces(): Promise<OpenSurface[]>;
   capturePageMenus(captures: boolean): Promise<void>;
-  chooseSurfaceItem(id: string, path: number[]): Promise<string>;
   dismissSurface(id: string): Promise<void>;
   menuBar(): Promise<SurfaceItem[]>;
   performMenuBarItem(menu: string | null, path: number[], ref: string, windowId: string): Promise<string>;

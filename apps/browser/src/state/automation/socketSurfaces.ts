@@ -1,4 +1,4 @@
-import { checkMenuBarItem, chooseSurfaceItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
+import { checkMenuBarItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
 import type { BrowserState } from "../browser/store";
 import { eligibleKind, isEligibleTab, lastFocusedEligibleWindow } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
@@ -33,10 +33,12 @@ function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
   return undefined;
 }
 
-export const REFLECTS_PRIVATE = "The menu bar currently reflects a private window, so the ardia command can't read or use it.";
+export const REFLECTS_PRIVATE = "A private window is open and the menu bar can reflect it, so the ardia command can't read or use the menu bar until it closes.";
+export const PAGE_PICK_REFUSED =
+  "Picking from a page's menu or <select> popup is refused: its items run page and app actions (Share among them) outside run's policy. The ardia command chooses only from the menu bar.";
 
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
-  if (surface.kind === "menuBar" && surface.reflectsPrivate) return null;
+  if (surface.kind === "menuBar" && (surface.reflectsPrivate || privateOpen(s))) return null;
   const window = surface.window ?? (surface.kind === "menuBar" && surface.keyless ? lastFocusedEligibleWindow(s) : null);
   if (!window || !eligibleKind(s, window)) return null;
   if (surface.tab) {
@@ -60,7 +62,7 @@ async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
 async function surfaceOf(menuId: string) {
   const s = now();
   const raw = (await openSurfaces()).find((m) => m.id === menuId);
-  if (raw?.kind === "menuBar" && raw.reflectsPrivate) throw new OpError("refused", REFLECTS_PRIVATE);
+  if (raw?.kind === "menuBar" && (raw.reflectsPrivate || privateOpen(s))) throw new OpError("refused", REFLECTS_PRIVATE);
   const found = raw && visibleSurface(s, raw);
   if (!found) throw new OpError("no_window", `There's no open menu ${menuId}; menus.open lists them.`);
   return found;
@@ -70,6 +72,7 @@ async function choose(params: Record<string, unknown>, call: SocketCall) {
   const surface = await surfaceOf(params.menu as string);
   const path = params.path as number[];
   if (surface.kind === "menuBar") {
+    if (privateOpen(now())) throw new OpError("refused", REFLECTS_PRIVATE);
     if (typeof params.ref !== "string") throw new OpError("bad_request", "A menu bar item is chosen by its ref as well as its path; menus.open and menus.bar give both.");
     const own = itemAt(surface.items ?? [], path);
     if (!own || own.separator || own.submenu) throw new OpError("no_window", `There's no item at that path in menu ${surface.id}; menus.open lists its items.`);
@@ -96,11 +99,9 @@ async function choose(params: Record<string, unknown>, call: SocketCall) {
       watch.remove();
     }
   }
-  if (!PAGE_KINDS.has(surface.kind)) throw new OpError("refused", "Only a page's menus and the menu bar are chosen from here; Ardia's own menus stay with you.");
   if (surface.captured) throw new OpError("refused", CAPTURED_PICK_NEEDS_ENGINE);
-  call.stillServing();
-  const title = await nativeCall(() => chooseSurfaceItem(surface.id, path));
-  return { ok: true, menu: surface.id, kind: surface.kind, title };
+  if (PAGE_KINDS.has(surface.kind)) throw new OpError("refused", PAGE_PICK_REFUSED);
+  throw new OpError("refused", "Only the menu bar is chosen from here; Ardia's own menus stay with you.");
 }
 
 async function dismiss(params: Record<string, unknown>, call: SocketCall) {
@@ -119,6 +120,7 @@ async function runBarEntry(
   stillOpen: () => Promise<void> = async () => call.stillServing(),
   rightBeforeRun: () => void = () => call.stillServing(),
 ) {
+  if (privateOpen(now())) throw new OpError("refused", REFLECTS_PRIVATE);
   const bar = await nativeCall(() => menuBar());
   await stillOpen();
   const s = now();
@@ -171,7 +173,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.choose",
     mutates: true,
-    description: "Choose an item in an open menu, as a click on it does; the menu closes. A menu bar item needs its ref and goes through the same rules as menus.runBar; Ardia's own menus are refused, and so are picks from a captured page menu until the engine can run them",
+    description: "Choose a menu bar item while the menu bar tracks, by its path and ref, under the same rules as menus.runBar; the menu closes. Picks from a page's menu, a <select> popup, a captured page menu or Ardia's own menus are refused",
     params: obj({ menu: MENU, path: PATH, ref: REF }, ["menu", "path"]),
     result: "{ok, menu, kind, title}",
     run: choose,
@@ -187,10 +189,13 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.bar",
     mutates: false,
-    description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it; refused while a private window is key or main, since the menu then reflects it",
+    description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it; refused while any private window is open, since the menu bar can reflect it",
     params: obj({}),
     result: "[{path, ref, title, enabled, checked, key?, command?, arg?, action?, submenu?}]",
-    run: async () => shownItems(now(), await nativeCall(() => menuBar())),
+    run: async () => {
+      if (privateOpen(now())) throw new OpError("refused", REFLECTS_PRIVATE);
+      return shownItems(now(), await nativeCall(() => menuBar()));
+    },
   },
   {
     name: "menus.runBar",

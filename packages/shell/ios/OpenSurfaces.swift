@@ -39,7 +39,7 @@ final class OpenSurfaces: NSObject {
 
   var send: ((String, [String: Any]) -> Void)?
   var capturesPageMenus = false {
-    didSet { if !capturesPageMenus { closeCaptured { _ in true } } }
+    didSet { if !capturesPageMenus { dropCaptured { _ in true } } }
   }
   private var open: [Tracked] = []
   private var next = 0
@@ -145,13 +145,13 @@ final class OpenSurfaces: NSObject {
     send?("menuClosed", ["id": tracked.id, "kind": tracked.kind])
   }
 
-  private func closeCaptured(_ matching: (Tracked) -> Bool) {
-    while let index = open.firstIndex(where: { $0.captured != nil && matching($0) }) { close(at: index) }
+  private func dropCaptured(_ matching: (Tracked) -> Bool) {
+    open.removeAll { $0.captured != nil && matching($0) }
   }
 
   private func captured(_ box: [String: Any]?) {
     guard let box, capturesPageMenus, let tab = box["tab"] as? String, let window = WindowManager.shared.id(of: box["window"] as? NSWindow) else { return }
-    closeCaptured { _ in true }
+    dropCaptured { _ in true }
     let menu = Captured(link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
     let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, captured: menu, tab: tab, window: window)
     open.append(tracked)
@@ -227,7 +227,7 @@ final class OpenSurfaces: NSObject {
     if let tab = tracked.tab { out["tab"] = tab }
     if let window = tracked.window { out["window"] = window }
     if tracked.keyless { out["keyless"] = true }
-    if tracked.kind == "menuBar", WindowManager.shared.privateWindowInFront { out["reflectsPrivate"] = true }
+    if tracked.kind == "menuBar", WindowManager.shared.anyIncognitoWindow { out["reflectsPrivate"] = true }
     if let menu = tracked.menu {
       out["items"] = Self.rows(menu, path: tracked.pathPrefix, validate: false)
     } else if let captured = tracked.captured {
@@ -239,52 +239,19 @@ final class OpenSurfaces: NSObject {
   }
 
   func list() -> [[String: Any]] {
-    closeCaptured { $0.expired }
+    dropCaptured { $0.expired }
     return open.map(describe)
   }
 
   private func find(_ id: String) throws -> Tracked {
-    closeCaptured { $0.expired }
+    dropCaptured { $0.expired }
     guard let tracked = open.first(where: { $0.id == id }) else { throw Problem.missing("There's no open menu \(id); menus.open lists them.") }
     return tracked
   }
 
-  func choose(_ id: String, path: [Int], done: @escaping (Result<String, Error>) -> Void) {
-    do {
-      let tracked = try find(id)
-      guard !path.isEmpty else { throw Problem.missing("path names an item.") }
-      if tracked.captured != nil { throw Problem.refused(Self.capturedPickNeedsEngine) }
-      done(.success(try chooseTracked(tracked, path: path)))
-    } catch {
-      done(.failure(error))
-    }
-  }
-
-  private func chooseTracked(_ tracked: Tracked, path: [Int]) throws -> String {
-    guard tracked.kind == "select" || tracked.kind == "page" else {
-      throw Problem.refused("Only a page's menus are chosen here; menu bar items go through menus.runBar, and Ardia's own menus stay with you.")
-    }
-    guard let root = tracked.menu else { throw Problem.missing("That menu closed.") }
-    var menu = root
-    for step in path.dropLast() {
-      guard step >= 0, step < menu.numberOfItems, let submenu = menu.item(at: step)?.submenu else { throw Problem.missing("There's no submenu at that path.") }
-      menu = submenu
-    }
-    let last = path.last!
-    guard last >= 0, last < menu.numberOfItems, let item = menu.item(at: last) else { throw Problem.missing("There's no item at that path.") }
-    guard !item.isSeparatorItem, item.submenu == nil else { throw Problem.refused("That item opens a submenu or is a separator.") }
-    guard item.isEnabled else { throw Problem.refused("That item is turned off.") }
-    menu.performActionForItem(at: last)
-    root.cancelTracking()
-    return item.title
-  }
-
-  static let reflectsPrivate = "The menu bar currently reflects a private window, so the ardia command can't read or use it."
-  static let capturedPickNeedsEngine =
-    "A captured page menu is listed only: picking from it waits for engine support that runs the item for the frame the menu came from (runContextMenuCommand in ac_context_menu.mm)."
-
+  static let reflectsPrivate = "A private window is open and the menu bar can reflect it, so the ardia command can't read or use the menu bar until it closes."
   func trackedBarItem(_ id: String?, path: [Int], ref: String) throws -> NSMenuItem {
-    guard !WindowManager.shared.privateWindowInFront else { throw Problem.refused(Self.reflectsPrivate) }
+    guard !WindowManager.shared.anyIncognitoWindow else { throw Problem.refused(Self.reflectsPrivate) }
     var menu: NSMenu
     var steps = path
     if let id {

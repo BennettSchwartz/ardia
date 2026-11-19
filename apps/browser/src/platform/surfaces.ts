@@ -6,7 +6,6 @@ const Menus = () => nativeModule("ArdiaMenus");
 
 export const openSurfaces = () => Menus().openSurfaces();
 export const capturePageMenus = (captures: boolean) => Promise.resolve().then(() => Menus().capturePageMenus(captures));
-export const chooseSurfaceItem = (id: string, path: number[]) => Menus().chooseSurfaceItem(id, path);
 export const dismissSurface = (id: string) => Menus().dismissSurface(id);
 export const menuBar = () => Menus().menuBar();
 export const performMenuBarItem = (menu: string | null, path: number[], ref: string, windowId: string) => Menus().performMenuBarItem(menu, path, ref, windowId);
