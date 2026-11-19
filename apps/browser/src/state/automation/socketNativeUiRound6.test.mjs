@@ -1,0 +1,94 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+const { S, tick, socketClient, freshWindow } = await import("./fixtures/socketHarness.mjs");
+const stub = await import("../../test-native/index.ts");
+const surfacesModule = await import("./socketSurfaces.ts");
+const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
+setConsentPeriod(true, "socket-native-ui-round6-test");
+
+const { call, ok } = socketClient(37);
+
+const item = (path, title, more) => ({ path, title, enabled: true, checked: false, separator: false, ...more });
+const STRUCTURE = new Set(["path", "title", "separator", "ref", "key", "command", "arg", "action", "boundWindow", "submenu"]);
+const flat = (items) => items.flatMap((i) => [i, ...flat(i.submenu ?? [])]);
+
+function barWith(state) {
+  return [
+    item([2], "View", {
+      submenu: [
+        item([2, 0], "Back", { command: "back", ref: "cmd:back@View\u001fBack", enabled: state.canGoBack, hidden: !state.canGoBack }),
+        item([2, 1], "Reload", { command: "reload", ref: "cmd:reload@View\u001fReload", checked: state.loading, mixed: state.loading }),
+        item([2, 2], "Mute Tab", { command: "toggleMute", ref: "cmd:toggleMute@View\u001fMute Tab", checked: state.muted, alternate: state.muted }),
+      ],
+    }),
+  ];
+}
+
+test("menus.bar carries structure only: no field changes with the active page's state", async () => {
+  await freshWindow();
+  stub.surfaces.bar = barWith({ canGoBack: false, loading: false, muted: false });
+  const quiet = await ok("menus.bar");
+  stub.surfaces.bar = barWith({ canGoBack: true, loading: true, muted: true });
+  const busy = await ok("menus.bar");
+  assert.deepEqual(busy, quiet);
+  for (const row of flat(busy)) for (const key of Object.keys(row)) assert.ok(STRUCTURE.has(key), `${row.title}: ${key}`);
+});
+
+test("a private window opened during the last native check stops the command before run", async () => {
+  const { windowId } = await freshWindow();
+  const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
+  stub.surfaces.bar = [item([1], "File", { submenu: [newTab] })];
+  stub.surfaces.open = [{ id: "pv1", kind: "menuBar", window: windowId, items: [newTab] }];
+  const tabsBefore = Object.keys(S().tabs).length;
+  stub.surfaces.checkHook = () => S().createWindow({ kind: "private", url: "https://p.example/" });
+  const reply = await call("menus.choose", { menu: "pv1", path: newTab.path, ref: newTab.ref });
+  stub.surfaces.checkHook = null;
+  assert.equal(reply.error?.code, "refused");
+  assert.match(reply.error.message, /private window is open/);
+  await tick();
+  const regularTabs = Object.values(S().tabs).filter((t) => S().windows[t.windowId]?.kind !== "private").length;
+  assert.equal(regularTabs, tabsBefore, "run never ran");
+});
+
+test("a background Ardia refuses every native menu item and runs only allowlisted Ardia commands", async () => {
+  const { windowId } = await freshWindow();
+  const minimize = item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" });
+  const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
+  const print = item([1, 9], "Print…", { command: "print", ref: "cmd:print@File\u001fPrint…" });
+  stub.surfaces.bar = [item([1], "File", { submenu: [newTab, print] }), item([5], "Window", { submenu: [minimize] })];
+  stub.surfaces.performed.length = 0;
+  surfacesModule.surfaceRunMode.background = true;
+  try {
+    const refused = await call("menus.runBar", { path: minimize.path, ref: minimize.ref, window: windowId });
+    assert.equal(refused.error?.code, "refused");
+    assert.match(refused.error.message, /background Ardia runs no native menu item/);
+    assert.deepEqual(stub.surfaces.performed, []);
+    assert.equal((await call("menus.runBar", { path: print.path, ref: print.ref, window: windowId })).error?.code, "refused", "not on the background allowlist");
+    assert.ok((await ok("menus.runBar", { path: newTab.path, ref: newTab.ref, window: windowId })).command === "newTab");
+  } finally {
+    surfacesModule.surfaceRunMode.background = false;
+  }
+});
+
+test("a dropped capture leaves no announced id behind, so no menu.closed ever follows it", async () => {
+  const { windowId, tab } = await freshWindow();
+  await ok("subscribe", { events: ["menu.opened", "menu.closed"] });
+  stub.controlSocket.broadcasts.length = 0;
+  stub.surfaces.emit({ type: "menuOpened", id: "dr1", kind: "page", captured: true, tab, window: windowId, items: [] });
+  stub.surfaces.emit({ type: "menuDropped", id: "dr1", kind: "page" });
+  stub.surfaces.emit({ type: "menuClosed", id: "dr1", kind: "page" });
+  const events = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line).event);
+  assert.deepEqual(events, ["menu.opened"]);
+  await ok("subscribe", { events: [] });
+});
+
+test("Open File isn't in commands, and run refuses it before resolving a window, never no_window", async () => {
+  await freshWindow();
+  assert.equal((await ok("commands")).some((c) => c.id === "openFile"), false);
+  for (const id of [...S().windowOrder]) S().closeWindow(id, { keepsLastWindow: true });
+  S().createWindow({ kind: "private", url: "https://p.example/" });
+  const reply = await call("run", { command: "openFile" });
+  assert.equal(reply.error?.code, "refused");
+  assert.match(reply.error.message, /apply's open op/);
+  assert.match(surfacesModule.SURFACE_METHODS.find((m) => m.name === "menus.runBar").description, /Open File is refused[\s\S]*private window[\s\S]*background Ardia/);
+});
