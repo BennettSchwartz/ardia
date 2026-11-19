@@ -325,23 +325,26 @@ bool TokenClient::DispatchClickCommand(int id,
                                        std::string* reply) {
   CountCommand(CommandDomain::kInput);
   content::DevToolsAgentHost* host = HostOf(session);
-  const std::optional<double> x = params.FindDouble("x");
-  const std::optional<double> y = params.FindDouble("y");
-  const std::string* button = params.FindString("button");
-  if (!host || !x || !y || (button && *button != "left" && *button != "right")) {
+  PluginClickParams validated;
+  const std::string refusal =
+      PluginClickRefusal(ToPluginParams(params), &validated);
+  if (!host || !refusal.empty()) {
     outstanding_.erase({session, id});
-    *reply = ErrorReply(id, session, kInvalidRequest,
-                        base::StrCat({"ardia: ", kDispatchClick,
-                                      " needs a page, x, y and a left or right "
-                                      "button"}));
+    *reply = ErrorReply(
+        id, session, kInvalidRequest,
+        base::StrCat({"ardia: ", kDispatchClick, " ",
+                      refusal.empty() ? std::string("without a page")
+                                      : refusal,
+                      " can't be sent"}));
     return false;
   }
   content::ArdiaClick click;
-  click.x = *x;
-  click.y = *y;
-  click.button = button ? *button : "left";
-  click.click_count = std::clamp(params.FindInt("clickCount").value_or(1), 1, 3);
-  click.modifiers = params.FindInt("modifiers").value_or(0);
+  click.x = validated.x;
+  click.y = validated.y;
+  click.button = validated.button;
+  click.click_count = validated.click_count;
+  click.modifiers = validated.modifiers;
+  click.document = content::ArdiaClickDocument(host, client_, session);
   auto dispatch = base::BindOnce(
       [](base::WeakPtr<TokenClient> self,
          scoped_refptr<content::DevToolsAgentHost> host, std::string session,
@@ -520,6 +523,15 @@ bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
     return true;
   }
   return it->second->MaySessionInput(session);
+}
+
+int EndPluginFocusEmulation(const std::string& credential_id) {
+  int ended = 0;
+  for (cli_token_policy_internal::TokenClient* client :
+       cli_token_policy_internal::ClientsOf(credential_id)) {
+    ended += client->EndFocusEmulation();
+  }
+  return ended;
 }
 
 void InstallTokenClientInputHooks() {

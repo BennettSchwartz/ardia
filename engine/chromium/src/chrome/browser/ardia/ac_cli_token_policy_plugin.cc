@@ -49,7 +49,6 @@ const std::set<std::string_view>& PluginMethods() {
       "Ardia.dispatchClick",
       "DOM.describeNode",
       "DOM.enable",
-      "DOM.focus",
       "DOM.getAttributes",
       "DOM.getBoxModel",
       "DOM.getContentQuads",
@@ -63,7 +62,6 @@ const std::set<std::string_view>& PluginMethods() {
       "Input.dispatchKeyEvent",
       "Input.dispatchMouseEvent",
       "Input.insertText",
-      "Page.captureScreenshot",
       "Page.enable",
       "Page.getFrameTree",
       "Page.getLayoutMetrics",
@@ -111,7 +109,12 @@ std::string KeyEventRefusal(const base::DictValue& params) {
   }
   event.has_native_key_code = params.Find("nativeVirtualKeyCode");
   event.has_system_key = params.Find("isSystemKey");
-  event.modifiers = params.FindInt("modifiers");
+  if (const base::Value* modifiers = params.Find("modifiers")) {
+    if (!modifiers->is_int()) {
+      return "with modifiers that aren't an integer";
+    }
+    event.modifiers = modifiers->GetInt();
+  }
   event.type = StringParam(params, "type");
   event.key = StringParam(params, "key");
   event.code = StringParam(params, "code");
@@ -130,24 +133,39 @@ std::string KeyEventRefusal(const base::DictValue& params) {
   return PluginKeyRefusal(event);
 }
 
-std::string MouseEventRefusal(const base::DictValue& params) {
-  return PluginMouseRefusal(StringParam(params, "type"),
-                            StringParam(params, "button"),
-                            params.FindInt("buttons"));
-}
-
-std::string ClickRefusal(const base::DictValue& params) {
-  std::string refusal =
-      OnlyParams(params, {"x", "y", "button", "clickCount", "modifiers"});
+std::string MouseEventRefusal(base::DictValue& params) {
+  PluginMouseParams mouse;
+  const std::string refusal = PluginMouseRefusal(ToPluginParams(params), &mouse);
   if (!refusal.empty()) {
     return refusal;
   }
-  if (!params.FindDouble("x") || !params.FindDouble("y")) {
-    return "without x and y";
+  base::DictValue rebuilt;
+  rebuilt.Set("type", mouse.type);
+  rebuilt.Set("x", mouse.x);
+  rebuilt.Set("y", mouse.y);
+  rebuilt.Set("modifiers", mouse.modifiers);
+  if (mouse.delta_x && mouse.delta_y) {
+    rebuilt.Set("deltaX", *mouse.delta_x);
+    rebuilt.Set("deltaY", *mouse.delta_y);
   }
-  return PluginClickRefusal(StringParam(params, "button"),
-                            params.FindInt("clickCount"),
-                            params.FindInt("modifiers"));
+  params = std::move(rebuilt);
+  return std::string();
+}
+
+std::string ClickRefusal(base::DictValue& params) {
+  PluginClickParams click;
+  const std::string refusal = PluginClickRefusal(ToPluginParams(params), &click);
+  if (!refusal.empty()) {
+    return refusal;
+  }
+  base::DictValue rebuilt;
+  rebuilt.Set("x", click.x);
+  rebuilt.Set("y", click.y);
+  rebuilt.Set("button", click.button);
+  rebuilt.Set("clickCount", click.click_count);
+  rebuilt.Set("modifiers", click.modifiers);
+  params = std::move(rebuilt);
+  return std::string();
 }
 
 bool FrameInTargetContents(const PluginScope& scope,
@@ -172,29 +190,6 @@ bool FrameInTargetContents(const PluginScope& scope,
         return content::RenderFrameHost::FrameIterationAction::kStop;
       });
   return found;
-}
-
-std::string ScreenshotRefusal(base::DictValue& params,
-                              const PluginCommandContext& context) {
-  params.Set("fromSurface", true);
-  params.Set("captureBeyondViewport", false);
-  const base::DictValue* clip = params.FindDict("clip");
-  if (!clip) {
-    return std::string();
-  }
-  const std::optional<double> x = clip->FindDouble("x");
-  const std::optional<double> y = clip->FindDouble("y");
-  const std::optional<double> width = clip->FindDouble("width");
-  const std::optional<double> height = clip->FindDouble("height");
-  const std::optional<double> scale = clip->FindDouble("scale");
-  const std::optional<std::pair<double, double>> viewport =
-      context.viewport ? context.viewport.Run() : std::nullopt;
-  if (!x || !y || !width || !height || !viewport || *x < 0 || *y < 0 ||
-      *width <= 0 || *height <= 0 || *x + *width > viewport->first ||
-      *y + *height > viewport->second || (scale && (*scale <= 0 || *scale > 1))) {
-    return "with a clip outside the viewport";
-  }
-  return std::string();
 }
 
 const std::set<std::string_view>& PluginPageEvents() {
@@ -372,6 +367,25 @@ void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info) {
   }
 }
 
+PluginParams ToPluginParams(const base::DictValue& params) {
+  PluginParams converted;
+  for (auto [name, value] : params) {
+    PluginParam param;
+    if (value.is_int()) {
+      param.kind = PluginParam::Kind::kInt;
+      param.int_value = value.GetInt();
+    } else if (value.is_double()) {
+      param.kind = PluginParam::Kind::kDouble;
+      param.double_value = value.GetDouble();
+    } else if (value.is_string()) {
+      param.kind = PluginParam::Kind::kString;
+      param.string_value = value.GetString();
+    }
+    converted[name] = std::move(param);
+  }
+  return converted;
+}
+
 bool PluginForwardsEvent(std::string_view method) {
   return PluginPageEvents().contains(method) || method.starts_with("DOM.") ||
          method.starts_with("Accessibility.");
@@ -402,9 +416,6 @@ std::string PluginRefusal(const PluginScope& scope,
   }
   if (method == kDispatchClick) {
     return ClickRefusal(params);
-  }
-  if (method == "Page.captureScreenshot") {
-    return ScreenshotRefusal(params, context);
   }
   if (method == "Page.navigate") {
     std::string refusal = OnlyParams(params, {"url"});

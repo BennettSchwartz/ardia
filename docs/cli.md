@@ -107,13 +107,16 @@ TypeScript browse client), not to #2808. It must:
     on, then mint again; a credential minted while it's off still works once it's on, but the reply can't say where).
 
   An unknown or closed tab answers the error `no such tab`.
+- **End focus emulation.** `engine.cliPluginCredential {endFocusEmulation: <id>}` (engine args `{"endFocusEmulation": "<id>"}`)
+  turns focus emulation off on every session of that credential that turned it on, and answers `{"ended": <n>}`. An act
+  lease calls it (or `EndPluginFocusEmulation` in the engine) when the lease ends.
 - **Revoke.** `engine.cliPluginCredential {revoke: <id>}` (engine args `{"revoke": "<id>"}`) answers
   `{"revoked": true}`, or `false` for an unknown id. It forgets the credential and closes every connection made with
   it. The app revokes when the activity ends. A credential also dies with the window it was minted for, when the
   control server stops or restarts (mint again after turning control back on) and when the browser quits. A profile
   holds at most 16 live credentials; past that, minting answers `too many plugin credentials for this profile`.
 - **What a plugin connection may do** is an exact allowlist (`docs/engine-build.md` › `chromium-devtools-control-token.patch`):
-  plain-data DOM and accessibility reads, focus and scroll on its own nodes, page navigation and screenshots, and
+  plain-data DOM and accessibility reads, scrolling its own nodes into view, page navigation, focus emulation, and
   input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
   and releases in place, so a plugin can never drag). It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
   response to its input (a link that opens in another window) counts as the person acting, but the plugin still can't
@@ -132,3 +135,9 @@ TypeScript browse client), not to #2808. It must:
   has read it, before it spawns anything.
 - **Connecting.** The child opens `<endpoint>?token=<credential>` (base64url needs no escaping) with no `Origin`
   header, exactly like the `ardia` command's browser connection. `/ardia/active` and `/json*` answer it nothing.
+  The credential in the query isn't recorded by the browser: the token server's DevTools handler and `net/server`
+  never log a request path (their logs are accept errors, a non-HTTP/1.1 protocol token and buffer sizes), its socket
+  has no NetLog (`LoopbackSocketFactory` passes none, so `--log-net-log` and net-internals never see it), and nothing
+  on that path sets a crash key, emits a trace event, shows on a `chrome://` page, or logs from our `ac_cli_*` code or
+  the app's `NSLog`/`os_log`. A crash dump holds process memory and could contain it, as it could any secret the
+  browser holds. A client should keep the URL out of its own error messages and logs.

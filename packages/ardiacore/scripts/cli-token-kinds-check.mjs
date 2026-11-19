@@ -21,7 +21,9 @@ page and the browser target. A plugin credential minted for window 1 (engine.cli
 attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
 cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.json and can't read /ardia/active;
 revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its allowlist: the
-plain-data DOM and accessibility reads work, DOM.focus and DOM.scrollIntoViewIfNeeded work on its own nodes, and every
+plain-data DOM and accessibility reads work, DOM.scrollIntoViewIfNeeded works on its own nodes, DOM.focus and
+Page.captureScreenshot are refused (Ardia.dispatchClick focuses a field), ending its focus emulation through
+engine.cliPluginCredential {endFocusEmulation} turns it off, and every
 Runtime method, DOM.resolveNode, DOM search, Page.createIsolatedWorld and any Runtime object or context id are refused,
 as are Page.navigate's referrer, referrerPolicy, transitionType and frameId, every scheme but http, https and
 about:blank, and a script on reload; no Network, console or Runtime event reaches it; a frame of another tab is out of
@@ -63,10 +65,14 @@ const PICKERS = `<textarea id=area style="position:fixed;left:240px;top:40px;wid
 <div id=drop style="position:fixed;left:240px;top:170px;width:80px;height:30px;background:#eee">drop</div>
 <button id=clicker style="position:fixed;left:0;top:200px;width:200px;height:30px">click</button>
 <template id=tpl><p id=tplp>template</p></template>
+<div id=capture style="position:fixed;left:0;top:240px;width:200px;height:30px;background:#ddd">capture</div>
 <script>
 ${DRAG_LOG}
 window.clicks = 0;
 clicker.onclick = () => window.clicks++;
+window.captureLog = [];
+capture.addEventListener("pointerdown", (e) => { capture.setPointerCapture(e.pointerId); captureLog.push("pointerdown"); });
+for (const type of ["gotpointercapture", "pointerup", "lostpointercapture"]) capture.addEventListener(type, () => captureLog.push(type));
 const report = (p) => p.then((v) => (window.picked = v), (e) => (window.picked = "error:" + e.name));
 open.onclick = () => report(showOpenFilePicker().then(async ([h]) => "open:" + h.name + ":" + (await (await h.getFile()).text())));
 save.onclick = () => report(showSaveFilePicker().then(async (h) => { const w = await h.createWritable(); await w.write("saved by the page"); await w.close(); return "save:" + h.name; }));
@@ -142,6 +148,7 @@ function connect(url) {
       ws, events, replies,
       closed: new Promise((r) => ws.addEventListener("close", r)),
       raw: (id, method, params = {}, sessionId) => ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })),
+      rawJson: (json) => ws.send(json),
       repliesTo: async (id, since, ms) => {
         await sleep(ms);
         return replies.slice(since).filter((m) => m.id === id);
@@ -244,8 +251,9 @@ try {
   const objectHandle = await plugin.send("DOM.describeNode", { objectId: "1.1.1" }, ps);
   check("plugin: a Runtime object id is refused on a DOM read", refused(objectHandle) && /objectId/.test(objectHandle.error?.message ?? ""), text(objectHandle));
   const focused = await plugin.send("DOM.focus", { nodeId: areaNode }, ps);
+  const shot = await plugin.send("Page.captureScreenshot", {}, ps);
   const scrolled = await plugin.send("DOM.scrollIntoViewIfNeeded", { nodeId: openNode }, ps);
-  check("plugin: DOM.focus and DOM.scrollIntoViewIfNeeded work on its own node", !refused(focused) && !refused(scrolled), `${text(focused)} ${text(scrolled)}`);
+  check("plugin: DOM.focus and Page.captureScreenshot are refused, and DOM.scrollIntoViewIfNeeded works on its own node", refused(focused) && /plugin/.test(focused.error?.message ?? "") && refused(shot) && /plugin/.test(shot.error?.message ?? "") && !refused(scrolled), `${text(focused)} ${text(shot)} ${text(scrolled)}`);
   const wheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 60, deltaX: 0, deltaY: 50 }, ps);
   check("plugin: a mouseWheel event answers", !refused(wheel), text(wheel));
 
@@ -340,6 +348,29 @@ try {
   await sleep(500);
   const clickDragLog = await logOf(csOne);
   check("plugin: Ardia.dispatchClick on a draggable element starts no drag (no dragstart)", !refused(onDraggable) && clickDragLog === "", `${text(onDraggable)} log ${JSON.stringify(clickDragLog)}`);
+  const [captureX, captureY] = await centerOf(csOne, "capture");
+  const captured = await plugin.send("Ardia.dispatchClick", { x: captureX, y: captureY }, ps);
+  await sleep(300);
+  const captureLog = await csValue(csOne, "window.captureLog.join(',')");
+  check("plugin: Ardia.dispatchClick releases the button, so a pointer-capture control sees pointerup and lostpointercapture", !refused(captured) && /pointerdown/.test(captureLog ?? "") && /pointerup/.test(captureLog ?? "") && /lostpointercapture/.test(captureLog ?? ""), `${text(captured)} ${captureLog}`);
+  const outside = await plugin.send("Ardia.dispatchClick", { x: 100000, y: 10 }, ps);
+  check("plugin: Ardia.dispatchClick outside the page's view is refused before hit testing", refused(outside) && /outside the page/.test(outside.error?.message ?? ""), text(outside));
+  for (const [name, params] of [["the middle button", { x: clickX, y: clickY, button: "middle" }], ["four clicks", { x: clickX, y: clickY, clickCount: 4 }], ["a negative x", { x: -1, y: clickY }], ["a string clickCount", { x: clickX, y: clickY, clickCount: "2" }]]) {
+    const reply = await cli.send("Ardia.dispatchClick", params, csOne);
+    check(`cli: Ardia.dispatchClick with ${name} is refused for the owner too`, refused(reply), text(reply));
+  }
+  for (const [name, json] of [["buttons 1.0", '"buttons":1.0'], ["buttons 0.0", '"buttons":0.0'], ["buttons -0.0", '"buttons":-0.0'], ["buttons \"0\"", '"buttons":"0"'], ["buttons 1e20", '"buttons":1e20'], ["modifiers 2.0", '"modifiers":2.0']]) {
+    const mark = plugin.replies.length;
+    plugin.rawJson(`{"id":691000,"method":"Input.dispatchMouseEvent","params":{"type":"mouseMoved","x":5,"y":5,${json}},"sessionId":"${ps}"}`);
+    const reply = (await plugin.repliesTo(691000, mark, 800))[0];
+    check(`plugin: Input.dispatchMouseEvent with ${name} is refused (numbers are checked strictly)`, !!reply && refused(reply) && /plugin/.test(reply.error?.message ?? ""), reply ? text(reply) : "no reply");
+  }
+  {
+    const mark = plugin.replies.length;
+    plugin.rawJson(`{"id":691100,"method":"Ardia.dispatchClick","params":{"x":${clickX},"y":${clickY},"clickCount":2.0},"sessionId":"${ps}"}`);
+    const reply = (await plugin.repliesTo(691100, mark, 800))[0];
+    check("plugin: Ardia.dispatchClick with clickCount 2.0 is refused", !!reply && refused(reply), reply ? text(reply) : "no reply");
+  }
   for (const [name, params] of [["the middle button", { x: clickX, y: clickY, button: "middle" }], ["four clicks", { x: clickX, y: clickY, clickCount: 4 }], ["no position", {}], ["an unknown parameter", { x: clickX, y: clickY, force: 1 }]]) {
     const reply = await plugin.send("Ardia.dispatchClick", params, ps);
     check(`plugin: Ardia.dispatchClick with ${name} is refused`, refused(reply) && /plugin/.test(reply.error?.message ?? ""), text(reply));
@@ -359,8 +390,10 @@ try {
   const runtimeEvents = plugin.events.filter((e) => e.method?.startsWith("Runtime."));
   check("plugin: no Runtime event reaches it", runtimeEvents.length === 0, runtimeEvents.map((e) => e.method).join(" "));
   const activeIs = async (id) => (await cli.send("Runtime.evaluate", { expression: `document.activeElement?.id === ${JSON.stringify(id)}`, returnByValue: true }, csOne)).result?.result?.value === true;
-  await plugin.send("DOM.focus", { nodeId: await pluginNode("#area") }, ps);
-  check("plugin: DOM.focus moves focus to its node", await activeIs("area"));
+  await csValue(csOne, "document.activeElement?.blur(), true");
+  const [areaX, areaY] = await centerOf(csOne, "area");
+  const areaClick = await plugin.send("Ardia.dispatchClick", { x: areaX, y: areaY }, ps);
+  check("plugin: Ardia.dispatchClick on a field focuses it", !refused(areaClick) && await activeIs("area"), text(areaClick));
 
   const key = (extra) => plugin.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 4, ...extra }, ps);
   const selectAll = await key({ commands: ["selectAll"] });
@@ -387,7 +420,7 @@ try {
   check("cli: the private pasteboard round-trips (the CLI copies and pastes in a page)", roundTrip === probe, JSON.stringify(roundTrip));
   const clipboardKeys = [...readFileSync(new URL("../../../engine/chromium/src/chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h", import.meta.url), "utf8").matchAll(/\{(\d+), (\d+), "([A-Za-z]*)"\}/g)]
     .map(([, keyCode, modifiers, domKey]) => ({ keyCode: Number(keyCode), modifiers: Number(modifiers), domKey }));
-  const pluginFocus = async () => plugin.send("DOM.focus", { nodeId: await pluginNode("#area") }, ps);
+  const pluginFocus = () => cliValue("document.getElementById('area').focus(), true");
   const pluginKey = async (fields) => {
     const down = await plugin.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...fields }, ps);
     await plugin.send("Input.dispatchKeyEvent", { type: "keyUp", ...fields, commands: undefined }, ps);
@@ -463,10 +496,6 @@ try {
   const marker = await cli.send("Runtime.evaluate", { expression: "typeof window.ardiaReloadMarker", returnByValue: true }, csOne);
   check("plugin: Page.reload with a script to run on load is refused and the marker never runs", refused(reloadScript) && /plugin/.test(reloadScript.error?.message ?? "") && marker.result?.result?.value === "undefined", `${text(reloadScript)} marker=${text(marker)}`);
 
-  const shot = await plugin.send("Page.captureScreenshot", { fromSurface: false }, ps);
-  check("plugin: Page.captureScreenshot answers from the page surface even when asked for the window", !refused(shot) && !!shot.result?.data, text(shot));
-  const clipped = await plugin.send("Page.captureScreenshot", { clip: { x: 0, y: 0, width: 100000, height: 100, scale: 1 } }, ps);
-  check("plugin: Page.captureScreenshot with a clip outside the viewport is refused", refused(clipped) && /plugin/.test(clipped.error?.message ?? ""), text(clipped));
 
   for (const [name, params] of [["referrer", { referrer: origin }], ["referrerPolicy", { referrerPolicy: "unsafeUrl" }], ["transitionType", { transitionType: "typed" }], ["frameId", { frameId }]]) {
     const navigated = await plugin.send("Page.navigate", { url: `${origin}/one`, ...params }, ps);
@@ -475,9 +504,9 @@ try {
   const tree = await plugin.send("Accessibility.getFullAXTree", {}, ps);
   const button = tree.result?.nodes?.find((n) => n.role?.value === "button" && n.backendDOMNodeId);
   const described = await plugin.send("DOM.describeNode", { backendNodeId: button?.backendDOMNodeId }, ps);
-  const focusedByBackend = await plugin.send("DOM.focus", { backendNodeId: button?.backendDOMNodeId }, ps);
+  const focusedByBackend = await plugin.send("DOM.scrollIntoViewIfNeeded", { backendNodeId: button?.backendDOMNodeId }, ps);
   const resolved = await plugin.send("DOM.resolveNode", { backendNodeId: button?.backendDOMNodeId }, ps);
-  check("plugin: a backendNodeId from its own tab's accessibility tree describes and focuses, and DOM.resolveNode is refused", !!button && !refused(described) && !refused(focusedByBackend) && refused(resolved), `${text(described)} ${text(focusedByBackend)} ${text(resolved)}`);
+  check("plugin: a backendNodeId from its own tab's accessibility tree describes and scrolls into view, and DOM.resolveNode is refused", !!button && !refused(described) && !refused(focusedByBackend) && refused(resolved), `${text(described)} ${text(focusedByBackend)} ${text(resolved)}`);
   await cli.send("Runtime.evaluate", { expression: `window.popupRef = window.open(${JSON.stringify(`${origin}/four`)}), true`, userGesture: true }, csOne);
   const popup = await until("the popup", async () => (await urlsOf(cli)).find((t) => t.url === `${origin}/four`) ?? null, 15000).catch(() => null);
   const movedPopup = await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
@@ -488,7 +517,7 @@ try {
   const foreign = html?.children?.find((c) => c.nodeName === "BODY")?.backendNodeId ?? html?.backendNodeId;
   const crossTab = await plugin.send("DOM.describeNode", { backendNodeId: foreign }, ps);
   check("plugin: a backendNodeId from another tab in the same renderer is refused", !!popup && movedPopup === true && !!foreign && refused(crossTab) && /isn't in this page/.test(crossTab.error?.message ?? ""), text(crossTab));
-  for (const method of ["DOM.focus", "DOM.scrollIntoViewIfNeeded"]) {
+  for (const method of ["DOM.scrollIntoViewIfNeeded"]) {
     const crossTabAct = await plugin.send(method, { backendNodeId: foreign }, ps);
     check(`plugin: ${method} on another tab's node is refused`, !!foreign && refused(crossTabAct) && /isn't in this page/.test(crossTabAct.error?.message ?? ""), text(crossTabAct));
   }
@@ -504,7 +533,7 @@ try {
   const beforeAdoption = await plugin.send("DOM.getOuterHTML", { nodeId: tplNode }, ps);
   const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const t = window.opener?.document.getElementById('tpl'); if (!t) return false; document.body.append(document.adoptNode(t)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
   const adoptedReads = [];
-  for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["DOM.focus", { nodeId: tplNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
+  for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
     adoptedReads.push([method, await plugin.send(method, params, ps)]);
   }
   check("plugin: a template node it mapped stays mapped when the page adopts the template into a window-2 document, and every read, focus and scroll by that nodeId is refused as not in this page", !!tplNode && /tplp/.test(beforeAdoption.result?.outerHTML ?? "") && adopted === true && adoptedReads.every(([, r]) => /that nodeId isn't in this page/.test(r.error?.message ?? "")), `before: ${text(beforeAdoption)}; ` + adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
@@ -627,6 +656,20 @@ try {
   const freshMoves = await moves();
   const freshWheels = await wheels();
   check("plugin: the departed session's input is refused, and a fresh attach to the returned tab delivers a mouse move, a wheel event and a click", refused(old) && !!fresh && !refused(freshMove) && !refused(freshWheel) && !refused(freshClick) && freshClicked && freshMoves > movesAfterReturn && freshWheels > wheelsAfterReturn, `${text(old)} ${text(freshMove)} ${text(freshWheel)} moves ${freshMoves} wheels ${freshWheels}`);
+  const hasFocus = () => csValue(cs3, "document.hasFocus()");
+  const focusBefore = await hasFocus();
+  const emulated = await plugin.send("Emulation.setFocusEmulationEnabled", { enabled: true }, fresh);
+  const focusEmulated = await hasFocus();
+  const endedFocus = await appEval(`return ac.engine.call("engine.cliPluginCredential", { endFocusEmulation: ${JSON.stringify(minted.id)} })`);
+  const focusAfterEnd = await until("focus emulation to end", async () => (await hasFocus()) === false || null, 5000).then(() => false, () => true);
+  check("plugin: ending its focus emulation (engine.cliPluginCredential endFocusEmulation, the lease's hook) turns it off for its sessions", focusBefore === false && !refused(emulated) && focusEmulated === true && endedFocus?.ended >= 1 && focusAfterEnd === false, `before ${focusBefore}, emulated ${focusEmulated}, ended ${JSON.stringify(endedFocus)}, after ${focusAfterEnd}`);
+  const heldMark = plugin.replies.length;
+  plugin.raw(663000, "Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, fresh);
+  await cli.send("Page.navigate", { url: `${origin}/three` }, cs3);
+  await until("page three reloaded", async () => (await csValue(cs3, "document.readyState === 'complete' && window.clicks === 0")) || null, 8000).catch(() => null);
+  const heldReply = (await plugin.repliesTo(663000, heldMark, 3500))[0];
+  const clicksAfterNavigation = await csValue(cs3, "window.clicks");
+  check("plugin: a click held past an in-scope navigation is refused at delivery and never lands in the new document", !!heldReply && refused(heldReply) && /page changed/.test(heldReply.error?.message ?? "") && clicksAfterNavigation === 0, `${heldReply ? text(heldReply) : "no reply"} clicks ${clicksAfterNavigation}`);
 
   const t3Target = (await urlsOf(cli)).find((t) => t.url === `${origin}/three`);
   const direct = await connect(`ws://127.0.0.1:${control.port}/devtools/page/${t3Target?.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null);
@@ -635,7 +678,7 @@ try {
     direct.ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id === 888001) directOrder.push(`reply:${m.error?.message ?? "result"}`); });
     direct.closed.then(() => directOrder.push("close"));
     direct.ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id === 888002) directOrder.push(`concurrent:${m.error?.message ?? "result"}`); });
-    for (let i = 0; i < 20; i++) direct.raw(889000 + i, "Page.captureScreenshot", {});
+    for (let i = 0; i < 20; i++) direct.raw(889000 + i, "Page.getLayoutMetrics", {});
     direct.raw(888001, "Page.navigate", { url: `${origin}/slow-three` });
     await sleep(200);
     await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
@@ -673,7 +716,7 @@ try {
   if (drained) {
     drained.ws.addEventListener("message", () => drainedReplies++);
     drained.closed.then(() => (drainedClosedAt = Date.now()));
-    for (let i = 0; i < 20; i++) drained.raw(890000 + i, "Page.captureScreenshot", {});
+    for (let i = 0; i < 20; i++) drained.raw(890000 + i, "Page.getLayoutMetrics", {});
     await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
   }
   const pluginAlive = await plugin.send("Target.getTargets");

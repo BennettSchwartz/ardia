@@ -21,9 +21,7 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
-#include "ui/gfx/geometry/size.h"
 
 namespace ardia {
 namespace cli_token_policy_internal {
@@ -80,6 +78,18 @@ bool TokenClient::MaySessionInput(const std::string& session) {
     return false;
   }
   return targets_.contains(session) && SessionInScope(session);
+}
+
+int TokenClient::EndFocusEmulation() {
+  int ended = 0;
+  for (const std::string& session : std::exchange(focus_emulated_, {})) {
+    if (session.empty() || targets_.contains(session)) {
+      SendInternal(session, "Emulation.setFocusEmulationEnabled",
+                   base::DictValue().Set("enabled", false));
+      ++ended;
+    }
+  }
+  return ended;
 }
 
 bool TokenClient::RootInScope() {
@@ -141,20 +151,6 @@ void TokenClient::TabLeftWindow(const std::string& session) {
                      weak_factory_.GetWeakPtr(), session));
 }
 
-std::optional<std::pair<double, double>> TokenClient::ViewportOf(
-    const std::string& session) {
-  content::DevToolsAgentHost* host = HostOf(session);
-  content::WebContents* contents = host ? host->GetWebContents() : nullptr;
-  content::RenderWidgetHostView* view =
-      contents ? contents->GetRenderWidgetHostView() : nullptr;
-  if (!view) {
-    return std::nullopt;
-  }
-  const gfx::Size size = view->GetVisibleViewportSize();
-  return std::make_pair(static_cast<double>(size.width()),
-                        static_cast<double>(size.height()));
-}
-
 bool TokenClient::FilterPluginReply(int id,
                                     const std::string& session,
                                     std::string& message) {
@@ -199,11 +195,15 @@ bool TokenClient::PluginCommandAllowed(int id,
         return self->targets_.contains(value);
       },
       base::Unretained(this));
-  context.viewport =
-      base::BindRepeating(&TokenClient::ViewportOf, base::Unretained(this),
-                          session);
   const std::string refusal = PluginRefusal(*scope_, method, params, context);
   if (refusal.empty()) {
+    if (method == "Emulation.setFocusEmulationEnabled") {
+      if (params.FindBool("enabled").value_or(false)) {
+        focus_emulated_.insert(session);
+      } else {
+        focus_emulated_.erase(session);
+      }
+    }
     return true;
   }
   ++PluginTotalsSoFar().refused;

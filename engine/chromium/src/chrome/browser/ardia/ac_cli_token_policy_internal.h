@@ -19,6 +19,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "chrome/browser/ardia/ac_cli_plugin_input.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "content/public/browser/devtools_agent_host.h"
 
@@ -73,11 +74,11 @@ bool PluginMayAttachToFrame(const PluginScope& scope,
 bool PluginMayAttachToTargetId(const PluginScope& scope,
                                const std::string* target_id);
 bool PluginForwardsEvent(std::string_view method);
+PluginParams ToPluginParams(const base::DictValue& params);
 
 struct PluginCommandContext {
   bool on_root_session = false;
   base::RepeatingCallback<bool(const std::string&)> session_known;
-  base::RepeatingCallback<std::optional<std::pair<double, double>>()> viewport;
 };
 
 void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info);
@@ -110,6 +111,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   void Revoke();
   bool MayInputTo(content::RenderFrameHost* frame);
   bool MaySessionInput(const std::string& session);
+  int EndFocusEmulation();
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;
@@ -157,8 +159,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   bool RootInScope();
   void WatchTab(const std::string& session);
   void TabLeftWindow(const std::string& session);
-  std::optional<std::pair<double, double>> ViewportOf(
-      const std::string& session);
   void DetachOutOfScope(const std::string& session);
   void CloseOutOfScope();
   void CheckScope();
@@ -176,6 +176,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::map<std::string, std::string> detaching_;
   std::set<std::string> told_targets_;
   std::set<std::string> left_;
+  std::set<std::string> focus_emulated_;
   bool root_left_ = false;
   struct TabWatch {
     base::CallbackListSubscription will_detach;

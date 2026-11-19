@@ -177,42 +177,117 @@ int main() {
                 std::to_string(entry.modifiers));
   }
 
-  const auto mouse = [](std::optional<std::string> type,
-                        std::optional<std::string> button,
-                        std::optional<int> buttons) {
-    return ardia::PluginMouseRefusal(type, button, buttons);
+  using Kind = ardia::PluginParam::Kind;
+  const auto integer = [](long long value) {
+    ardia::PluginParam param;
+    param.kind = Kind::kInt;
+    param.int_value = value;
+    return param;
   };
-  Expect(mouse(std::string("mouseMoved"), std::nullopt, std::nullopt).empty(),
-         "allowed: a move with no button", "");
-  Expect(mouse(std::string("mouseMoved"), std::string("none"), 0).empty(),
-         "allowed: a move with button none and buttons 0", "");
-  Expect(mouse(std::string("mouseWheel"), std::nullopt, 0).empty(),
-         "allowed: a wheel event", "");
-  Expect(!mouse(std::string("mousePressed"), std::string("left"), 1).empty(),
-         "refused: mousePressed", "");
-  Expect(!mouse(std::string("mouseReleased"), std::string("left"), 0).empty(),
-         "refused: mouseReleased", "");
-  Expect(!mouse(std::string("mouseMoved"), std::nullopt, 1).empty(),
-         "refused: a move with the left button held", "");
-  Expect(!mouse(std::string("mouseMoved"), std::string("left"), 0).empty(),
-         "refused: a move naming a button", "");
-  Expect(!mouse(std::string("mouseWheel"), std::nullopt, 4).empty(),
-         "refused: a wheel event with the middle button held", "");
-  Expect(!mouse(std::nullopt, std::nullopt, std::nullopt).empty(),
-         "refused: no event type", "");
-  Expect(ardia::PluginClickRefusal(std::nullopt, std::nullopt, std::nullopt)
+  const auto real = [](double value) {
+    ardia::PluginParam param;
+    param.kind = Kind::kDouble;
+    param.double_value = value;
+    return param;
+  };
+  const auto text = [](std::string value) {
+    ardia::PluginParam param;
+    param.kind = Kind::kString;
+    param.string_value = std::move(value);
+    return param;
+  };
+  const auto mouse = [&](ardia::PluginParams params) {
+    ardia::PluginMouseParams out;
+    return ardia::PluginMouseRefusal(params, &out);
+  };
+  const auto click = [&](ardia::PluginParams params) {
+    ardia::PluginClickParams out;
+    return ardia::PluginClickRefusal(params, &out);
+  };
+  const ardia::PluginParams move = {{"type", text("mouseMoved")},
+                                    {"x", integer(10)},
+                                    {"y", real(20.5)}};
+  Expect(mouse(move).empty(), "allowed: a move with no button", mouse(move));
+  auto with = [](ardia::PluginParams params, const std::string& name,
+                 ardia::PluginParam value) {
+    params[name] = value;
+    return params;
+  };
+  Expect(mouse(with(with(move, "button", text("none")), "buttons", integer(0)))
              .empty(),
-         "allowed: a plain click", "");
-  Expect(ardia::PluginClickRefusal(std::string("right"), 2, 8).empty(),
+         "allowed: a move with button none and buttons 0", "");
+  Expect(mouse(with(with(move, "type", text("mouseWheel")), "deltaX",
+                    integer(0)))
+             .size() > 0,
+         "refused: a wheel event without deltaY", "");
+  Expect(mouse(with(with(with(move, "type", text("mouseWheel")), "deltaX",
+                         integer(0)),
+                    "deltaY", real(40)))
+             .empty(),
+         "allowed: a wheel event", "");
+  Expect(!mouse(with(move, "type", text("mousePressed"))).empty(),
+         "refused: mousePressed", "");
+  Expect(!mouse(with(move, "type", text("mouseReleased"))).empty(),
+         "refused: mouseReleased", "");
+  Expect(!mouse(with(move, "buttons", integer(1))).empty(),
+         "refused: a move with the left button held", "");
+  Expect(!mouse(with(move, "buttons", real(0.0))).empty(),
+         "refused: buttons as the double 0.0", "");
+  Expect(!mouse(with(move, "buttons", real(-0.0))).empty(),
+         "refused: buttons as negative zero", "");
+  Expect(!mouse(with(move, "buttons", real(1e20))).empty(),
+         "refused: buttons as a huge number", "");
+  Expect(!mouse(with(move, "buttons", text("0"))).empty(),
+         "refused: buttons as a string", "");
+  Expect(!mouse(with(move, "button", text("left"))).empty(),
+         "refused: a move naming a button", "");
+  Expect(!mouse(with(move, "button", integer(0))).empty(),
+         "refused: button as a number", "");
+  Expect(!mouse(with(move, "modifiers", real(1.0))).empty(),
+         "refused: modifiers as a double", "");
+  Expect(!mouse(with(move, "x", text("10"))).empty(),
+         "refused: x as a string", "");
+  Expect(!mouse(with(move, "x", real(-1))).empty(), "refused: a negative x",
+         "");
+  Expect(!mouse(with(move, "clickCount", integer(1))).empty(),
+         "refused: an unexpected field", "");
+  Expect(!mouse(with(move, "deltaX", integer(5))).empty(),
+         "refused: deltas on a move", "");
+
+  const ardia::PluginParams plain = {{"x", integer(30)}, {"y", integer(40)}};
+  Expect(click(plain).empty(), "allowed: a plain click", click(plain));
+  Expect(click(with(with(with(plain, "button", text("right")), "clickCount",
+                         integer(2)),
+                    "modifiers", integer(8)))
+             .empty(),
          "allowed: a right double click with Shift", "");
-  Expect(!ardia::PluginClickRefusal(std::string("middle"), 1, 0).empty(),
+  Expect(!click(with(plain, "button", text("middle"))).empty(),
          "refused: a middle click", "");
-  Expect(!ardia::PluginClickRefusal(std::string("left"), 4, 0).empty(),
+  Expect(!click(with(plain, "clickCount", integer(4))).empty(),
          "refused: four clicks", "");
-  Expect(!ardia::PluginClickRefusal(std::string("left"), 0, 0).empty(),
+  Expect(!click(with(plain, "clickCount", integer(0))).empty(),
          "refused: zero clicks", "");
-  Expect(!ardia::PluginClickRefusal(std::string("left"), 1, 16).empty(),
+  Expect(!click(with(plain, "clickCount", real(2.0))).empty(),
+         "refused: clickCount as a double", "");
+  Expect(!click(with(plain, "clickCount", text("2"))).empty(),
+         "refused: clickCount as a string", "");
+  Expect(!click(with(plain, "modifiers", integer(16))).empty(),
          "refused: unknown modifier bits", "");
+  Expect(!click(with(plain, "modifiers", real(-0.0))).empty(),
+         "refused: modifiers as negative zero", "");
+  Expect(!click(with(plain, "button", integer(1))).empty(),
+         "refused: button as a number", "");
+  Expect(!click({{"x", integer(30)}}).empty(), "refused: no y", "");
+  Expect(!click(with(plain, "y", real(1e400))).empty(),
+         "refused: an infinite y", "");
+  Expect(!click(with(plain, "force", integer(1))).empty(),
+         "refused: an unknown field", "");
+  {
+    ardia::PluginClickParams out;
+    ardia::PluginClickRefusal(with(plain, "clickCount", integer(3)), &out);
+    Expect(out.click_count == 3 && out.button == "left" && out.x == 30,
+           "parsed: the validated click", "");
+  }
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

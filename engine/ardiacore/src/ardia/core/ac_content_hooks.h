@@ -40,7 +40,12 @@ struct ArdiaClick {
   std::string button = "left";
   int click_count = 1;
   int modifiers = 0;
+  std::string document;
 };
+
+std::string ArdiaClickDocument(DevToolsAgentHost* host,
+                               DevToolsAgentHostClient* root_client,
+                               const std::string& session_id);
 
 void ArdiaDispatchClick(DevToolsAgentHost* host,
                         DevToolsAgentHostClient* root_client,

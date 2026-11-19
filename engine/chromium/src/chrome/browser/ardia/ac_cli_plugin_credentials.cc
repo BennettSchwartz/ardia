@@ -143,6 +143,10 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
     return out.Send(base::DictValue().Set(
         "revoked", ardia::RevokePluginCredential(*revoke)));
   }
+  if (const std::string* lease_ended = args.FindString("endFocusEmulation")) {
+    return out.Send(base::DictValue().Set(
+        "ended", ardia::EndPluginFocusEmulation(*lease_ended)));
+  }
   std::optional<int> tab = args.FindInt("tab");
   content::WebContents* contents = tab ? ardia::TabWithId(*tab) : nullptr;
   BrowserWindowInterface* browser =

@@ -48,6 +48,8 @@ bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
 bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
                                 const std::string& session);
 
+int EndPluginFocusEmulation(const std::string& credential_id);
+
 void InstallTokenClientInputHooks();
 
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client);
