@@ -74,6 +74,7 @@ export type OpenSurface = {
   tab?: string;
   window?: string;
   keyless?: boolean;
+  reflectsPrivate?: boolean;
   captured?: boolean;
   openedAt?: number;
   link?: string;

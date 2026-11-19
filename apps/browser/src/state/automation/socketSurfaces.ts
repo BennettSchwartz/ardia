@@ -33,7 +33,10 @@ function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
   return undefined;
 }
 
+export const REFLECTS_PRIVATE = "The menu bar currently reflects a private window, so the ardia command can't read or use it.";
+
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
+  if (surface.kind === "menuBar" && surface.reflectsPrivate) return null;
   const window = surface.window ?? (surface.kind === "menuBar" && surface.keyless ? lastFocusedEligibleWindow(s) : null);
   if (!window || !eligibleKind(s, window)) return null;
   if (surface.tab) {
@@ -56,7 +59,9 @@ async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
 
 async function surfaceOf(menuId: string) {
   const s = now();
-  const found = (await openSurfaces()).map((m) => visibleSurface(s, m)).find((m) => m?.id === menuId);
+  const raw = (await openSurfaces()).find((m) => m.id === menuId);
+  if (raw?.kind === "menuBar" && raw.reflectsPrivate) throw new OpError("refused", REFLECTS_PRIVATE);
+  const found = raw && visibleSurface(s, raw);
   if (!found) throw new OpError("no_window", `There's no open menu ${menuId}; menus.open lists them.`);
   return found;
 }
@@ -69,14 +74,27 @@ async function choose(params: Record<string, unknown>, call: SocketCall) {
     const own = itemAt(surface.items ?? [], path);
     if (!own || own.separator || own.submenu) throw new OpError("no_window", `There's no item at that path in menu ${surface.id}; menus.open lists its items.`);
     if (own.ref !== params.ref) throw new OpError("refused", "That ref isn't the item at that path in this menu.");
+    let closed = false;
+    const watch = onSurface((event) => {
+      if (event.type === "menuClosed" && event.id === surface.id) closed = true;
+    });
     const stillOpen = async () => {
       call.stillServing();
       await surfaceOf(surface.id);
       call.stillServing();
+      if (closed) throw new OpError("no_window", `Menu ${surface.id} closed.`);
     };
-    const ran = await runBarEntry(surface.id, path, params.ref, surface.window, call, stillOpen);
-    await dismissSurface(surface.id).catch(() => undefined);
-    return { ok: true, menu: surface.id, kind: surface.kind, ...ran };
+    const tracking = () => {
+      call.stillServing();
+      if (closed) throw new OpError("no_window", `Menu ${surface.id} closed before its item could run.`);
+    };
+    try {
+      const ran = await runBarEntry(surface.id, path, params.ref, surface.window, call, stillOpen, tracking);
+      await dismissSurface(surface.id).catch(() => undefined);
+      return { ok: true, menu: surface.id, kind: surface.kind, ...ran };
+    } finally {
+      watch.remove();
+    }
   }
   if (!PAGE_KINDS.has(surface.kind)) throw new OpError("refused", "Only a page's menus and the menu bar are chosen from here; Ardia's own menus stay with you.");
   if (surface.captured) throw new OpError("refused", CAPTURED_PICK_NEEDS_ENGINE);
@@ -92,8 +110,16 @@ async function dismiss(params: Record<string, unknown>, call: SocketCall) {
   return { ok: true };
 }
 
-async function runBarEntry(menuId: string | null, path: number[], ref: string, window: string | null, call: SocketCall, stillOpen: () => Promise<void> = async () => call.stillServing()) {
-  const bar = await menuBar();
+async function runBarEntry(
+  menuId: string | null,
+  path: number[],
+  ref: string,
+  window: string | null,
+  call: SocketCall,
+  stillOpen: () => Promise<void> = async () => call.stillServing(),
+  rightBeforeRun: () => void = () => call.stillServing(),
+) {
+  const bar = await nativeCall(() => menuBar());
   await stillOpen();
   const s = now();
   const item = itemAt(shownItems(s, bar), path);
@@ -107,7 +133,7 @@ async function runBarEntry(menuId: string | null, path: number[], ref: string, w
   if (typeof item.command === "string") {
     await stillOpen();
     await nativeCall(() => checkMenuBarItem(menuId, path, ref));
-    call.stillServing();
+    rightBeforeRun();
     const ran = runMethod({ command: item.command, arg: item.arg ?? null, window, tab: null });
     if ("error" in ran) {
       const { code, message } = ran.error as { code: OpError["code"]; message: string };
@@ -145,7 +171,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.choose",
     mutates: true,
-    description: "Choose an item in an open menu, as a click on it does; the menu closes. A menu bar item needs its ref and goes through the same rules as menus.runBar; Ardia's own menus are refused",
+    description: "Choose an item in an open menu, as a click on it does; the menu closes. A menu bar item needs its ref and goes through the same rules as menus.runBar; Ardia's own menus are refused, and so are picks from a captured page menu until the engine can run them",
     params: obj({ menu: MENU, path: PATH, ref: REF }, ["menu", "path"]),
     result: "{ok, menu, kind, title}",
     run: choose,
@@ -161,15 +187,15 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.bar",
     mutates: false,
-    description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it",
+    description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it; refused while a private window is key or main, since the menu then reflects it",
     params: obj({}),
     result: "[{path, ref, title, enabled, checked, key?, command?, arg?, action?, submenu?}]",
-    run: async () => shownItems(now(), await menuBar()),
+    run: async () => shownItems(now(), await nativeCall(() => menuBar())),
   },
   {
     name: "menus.runBar",
     mutates: true,
-    description: "Run a menu bar item: an Ardia command goes through run, an editing or window item (Copy, Paste, Undo, Minimize) through the menu itself; Quit, Hide, Close Window and updates are refused",
+    description: "Run a menu bar item: an Ardia command goes through run, a window item (Minimize, Zoom, Enter Full Screen, Minimize All, Arrange in Front) through the menu itself; Quit, Hide, Close Window, updates and items that only act through the responder chain are refused",
     params: obj({ path: PATH, ref: REF, window: text("The window to run it in; the last focused one when left out. Window items act only when it is the key window and the item can be sent to that window itself; Minimize All and Arrange in Front are refused while a private window is open") }, ["path", "ref"]),
     result: "{ok, title, command? | action?}",
     run: runBarItem,

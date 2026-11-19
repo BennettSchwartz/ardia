@@ -11,8 +11,6 @@ final class OpenSurfaces: NSObject {
   }
 
   private struct Captured {
-    let documents: Int
-    let url: String
     let link: String
     let items: [Any]
   }
@@ -154,7 +152,7 @@ final class OpenSurfaces: NSObject {
   private func captured(_ box: [String: Any]?) {
     guard let box, capturesPageMenus, let tab = box["tab"] as? String, let window = WindowManager.shared.id(of: box["window"] as? NSWindow) else { return }
     closeCaptured { _ in true }
-    let menu = Captured(documents: box["documents"] as? Int ?? -1, url: box["url"] as? String ?? "", link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
+    let menu = Captured(link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
     let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, captured: menu, tab: tab, window: window)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
@@ -229,6 +227,7 @@ final class OpenSurfaces: NSObject {
     if let tab = tracked.tab { out["tab"] = tab }
     if let window = tracked.window { out["window"] = window }
     if tracked.keyless { out["keyless"] = true }
+    if tracked.kind == "menuBar", WindowManager.shared.privateWindowInFront { out["reflectsPrivate"] = true }
     if let menu = tracked.menu {
       out["items"] = Self.rows(menu, path: tracked.pathPrefix, validate: false)
     } else if let captured = tracked.captured {
@@ -280,10 +279,12 @@ final class OpenSurfaces: NSObject {
     return item.title
   }
 
+  static let reflectsPrivate = "The menu bar currently reflects a private window, so the ardia command can't read or use it."
   static let capturedPickNeedsEngine =
     "A captured page menu is listed only: picking from it waits for engine support that runs the item for the frame the menu came from (runContextMenuCommand in ac_context_menu.mm)."
 
   func trackedBarItem(_ id: String?, path: [Int], ref: String) throws -> NSMenuItem {
+    guard !WindowManager.shared.privateWindowInFront else { throw Problem.refused(Self.reflectsPrivate) }
     var menu: NSMenu
     var steps = path
     if let id {
@@ -343,8 +344,13 @@ enum MenuBarAction {
     let target: AnyObject
     if appWideActions.contains(name) {
       guard !WindowManager.shared.anyIncognitoWindow else { throw OpenSurfaces.Problem.refused("\(item.title) acts on every window, and a private window is open.") }
-      guard item.target == nil, NSApp.responds(to: action) else { throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to an explicit target.") }
-      target = NSApp
+      if let fixed = item.target {
+        guard fixed === MenuTarget.shared, fixed.responds(to: action) else { throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to an explicit target.") }
+        target = fixed
+      } else {
+        guard NSApp.responds(to: action) else { throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to an explicit target.") }
+        target = NSApp
+      }
     } else {
       guard item.target == nil, window.responds(to: action) else {
         throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to the named window itself, only along the responder chain, so the ardia command doesn't choose it.")

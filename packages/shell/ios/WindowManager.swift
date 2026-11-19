@@ -49,6 +49,7 @@ final class WindowManager: NSObject, NSWindowDelegate {
     return managed.first { $0.value.window === window }?.key
   }
   var anyIncognitoWindow: Bool { managed.values.contains { $0.incognito } }
+  var privateWindowInFront: Bool { [NSApp.keyWindow, NSApp.mainWindow].contains { id(of: $0).flatMap { managed[$0]?.incognito } == true } }
   var keyWindowId: String? { id(of: NSApp.keyWindow) ?? id(of: NSApp.mainWindow) }
 
   func closeForeignKeyWindow() -> Bool {

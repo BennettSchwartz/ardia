@@ -208,8 +208,6 @@ void CaptureForChoice(ArdiaWebView *view, ArdiaCoreTab *tab, NSDictionary *menu,
                                                     object:@{
                                                       @"tab" : tabId,
                                                       @"window" : view.window,
-                                                      @"documents" : @(tab.committedDocumentCount),
-                                                      @"url" : tab.url ?: @"",
                                                       @"link" : Field<NSString>(menu, @"link") ?: @"",
                                                       @"items" : CapturedItems(items),
                                                     }];

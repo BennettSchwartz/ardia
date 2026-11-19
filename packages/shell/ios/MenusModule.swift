@@ -73,7 +73,12 @@ public class MenusModule: Module {
       }
     }.runOnQueue(.main)
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
-    AsyncFunction("menuBar") { () -> [[String: Any]] in NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? [] }.runOnQueue(.main)
+    AsyncFunction("menuBar") { () throws -> [[String: Any]] in
+      guard !WindowManager.shared.privateWindowInFront else {
+        throw Exception(name: "refused", description: OpenSurfaces.reflectsPrivate, code: "refused")
+      }
+      return NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? []
+    }.runOnQueue(.main)
     AsyncFunction("performMenuBarItem") { (menu: String?, path: [Int], ref: String, windowId: String) throws -> String in
       try MenusModule.surfaceCall { try MenuBarAction.perform(menu: menu, path: path, ref: ref, windowId: windowId) }
     }.runOnQueue(.main)
