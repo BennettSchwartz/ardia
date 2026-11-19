@@ -18,7 +18,13 @@ no universal access), no Network method and no Network, console or main-world co
 another window (or out and straight back), a command in flight answers tab_out_of_scope, a late reply never arrives,
 and the session is detached. Backend node ids from another tab in the same renderer, another client's world name, paste
 and native key codes, window screenshots and clips outside the viewport are refused or confined, and a target whose
-opener left the window shows no opener. It aborts before any step unless the engine reports its private pasteboard. The CLI answers a page's
+opener left the window shows no opener; from that popup's plugin world the opener reads null and window.open is refused;
+editing commands without a key, a script on reload, the middle button (both encodings) and the clipboard API or
+execCommand after a real click are refused, and a plugin world's paste listener sees no clipboardData; macOS word
+deletion still works; a scope close drains its replies even with a backlog and a concurrent command, and a revoke
+during it closes at once. It aborts before its first step unless the engine reports its private pasteboard: a
+Developer ID build ignores test flags, so there it stops at that gate and runs no clipboard step. Run the clipboard
+checks on a test build; on a signed build the abort is the expected result. The CLI answers a page's
 showOpenFilePicker, showSaveFilePicker and showDirectoryPicker with Ardia.answerFilePicker (no dialog opens), and a
 plugin is refused that command. The app's file eval runs
 through its perf probe, so a release build works.`;
@@ -307,6 +313,35 @@ try {
   }
   const typed = await areaValue();
   check("plugin: plain typing still types", typed === "hey", JSON.stringify(typed));
+  if (process.platform === "darwin") {
+    await fillArea("hello world", false);
+    await pluginFocus();
+    const wordDelete = await pluginKey({ key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8, modifiers: 1 });
+    const afterWordDelete = await areaValue();
+    check("plugin: macOS word deletion (Alt+Backspace) is allowed and deletes a word", !refused(wordDelete) && afterWordDelete === "hello ", `${text(wordDelete)} ${JSON.stringify(afterWordDelete)}`);
+  }
+  for (const commands of [["paste"], ["copy"]]) {
+    const keyless = await plugin.send("Input.dispatchKeyEvent", { type: "rawKeyDown", commands }, ps);
+    check(`plugin: editing command ${commands[0]} without a key is refused`, refused(keyless) && /plugin/.test(keyless.error?.message ?? ""), text(keyless));
+  }
+  for (const [name, params] of [["button middle", { type: "mousePressed", x: 5, y: 5, button: "middle", clickCount: 1 }], ["buttons with the middle bit", { type: "mouseMoved", x: 5, y: 5, buttons: 4 }]]) {
+    const middle = await plugin.send("Input.dispatchMouseEvent", params, ps);
+    check(`plugin: the middle button (${name}) is refused`, refused(middle) && /plugin/.test(middle.error?.message ?? ""), text(middle));
+  }
+  const areaBox = (await cli.send("Runtime.evaluate", { expression: "(() => { const r = document.getElementById('area').getBoundingClientRect(); return [r.x + 5, r.y + 5]; })()", returnByValue: true }, csOne)).result?.result?.value ?? [250, 50];
+  for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: areaBox[0], y: areaBox[1], button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
+  const clipboardApi = await plugin.send("Runtime.evaluate", { expression: "Promise.all([navigator.clipboard.writeText('plugin').then(() => 'wrote', (e) => e.name), navigator.clipboard.readText().then(() => 'read', (e) => e.name), (() => { try { document.execCommand('copy'); return 'ran'; } catch (e) { return e.name; } })(), (() => { try { document.execCommand('paste'); return 'ran'; } catch (e) { return e.name; } })()]).then((r) => r.join(','))", contextId: isolated, awaitPromise: true, returnByValue: true }, ps);
+  check("plugin: after a real click, its world is refused the clipboard API and execCommand copy and paste", clipboardApi.result?.result?.value === "NotAllowedError,NotAllowedError,NotAllowedError,NotAllowedError", text(clipboardApi));
+  await plugin.send("Runtime.evaluate", { expression: "window.pasteSeen = 'none'; document.addEventListener('paste', (e) => { window.pasteSeen = e.clipboardData === null ? 'null' : 'data'; }); true", contextId: isolated }, ps);
+  await fillArea("", false);
+  await cliKey("v", "KeyV", 86, 4, ["paste"]);
+  await sleep(300);
+  const pasteSeen = await plugin.send("Runtime.evaluate", { expression: "window.pasteSeen", contextId: isolated, returnByValue: true }, ps);
+  check("plugin: its paste listener sees no clipboardData on a real paste", pasteSeen.result?.result?.value === "null", text(pasteSeen));
+  const reloadScript = await plugin.send("Page.reload", { scriptToEvaluateOnLoad: "window.ardiaReloadMarker = 1" }, ps);
+  await sleep(500);
+  const marker = await cli.send("Runtime.evaluate", { expression: "typeof window.ardiaReloadMarker", returnByValue: true }, csOne);
+  check("plugin: Page.reload with a script to run on load is refused and the marker never runs", refused(reloadScript) && /plugin/.test(reloadScript.error?.message ?? "") && marker.result?.result?.value === "undefined", `${text(reloadScript)} marker=${text(marker)}`);
 
   const shot = await plugin.send("Page.captureScreenshot", { fromSurface: false }, ps);
   check("plugin: Page.captureScreenshot answers from the page surface even when asked for the window", !refused(shot) && !!shot.result?.data, text(shot));
@@ -392,12 +427,16 @@ try {
     direct.ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id === 888001) directOrder.push(`reply:${m.error?.message ?? "result"}`); });
     direct.closed.then(() => directOrder.push("close"));
     const directWorld = (await direct.send("Page.createIsolatedWorld", { frameId: t3Target.targetId })).result?.executionContextId;
+    direct.ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id === 888002) directOrder.push(`concurrent:${m.error?.message ?? "result"}`); });
+    for (let i = 0; i < 20; i++) direct.raw(889000 + i, "Page.captureScreenshot", {});
     direct.raw(888001, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(1), 3000))", contextId: directWorld, awaitPromise: true });
     await sleep(200);
     await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
+    direct.raw(888002, "Page.getLayoutMetrics", {});
     await until("the direct socket to close", async () => directOrder.includes("close") || null, 8000).catch(() => null);
   }
-  check("plugin: a direct page socket gets tab_out_of_scope for its command in flight before it closes", (directOrder[0] ?? "").startsWith("reply:ardia: tab_out_of_scope") && directOrder[1] === "close", directOrder.join(" | ") || "no direct socket");
+  check("plugin: a direct page socket gets tab_out_of_scope for its command in flight before it closes", (directOrder[0] ?? "").startsWith("reply:ardia: tab_out_of_scope") && directOrder.at(-1) === "close", directOrder.join(" | ") || "no direct socket");
+  check("plugin: under a backlog, a command sent during the scope close gets tab_out_of_scope before the close", directOrder.some((e) => e.startsWith("concurrent:ardia: tab_out_of_scope")) && directOrder.indexOf("close") > directOrder.findIndex((e) => e.startsWith("concurrent:")), directOrder.join(" | ") || "no direct socket");
   await appEval(`ac.actions.moveTabToWindow("t3", "w1"); return true`);
   await inWindow("t3", "w1");
 
@@ -409,6 +448,11 @@ try {
   await sleep(1500);
   const orphan = (await plugin.send("Target.getTargets")).result?.targetInfos?.find((t) => t.url === `${origin}/four`);
   check("plugin: a target whose opener left its window shows no opener", returned === true && !!orphan && !orphan.openerId && !orphan.openerFrameId && orphan.canAccessOpener !== true, JSON.stringify(orphan ?? null).slice(0, 300));
+  const orphanSession = orphan && (await plugin.send("Target.attachToTarget", { targetId: orphan.targetId, flatten: true })).result?.sessionId;
+  const orphanFrame = orphanSession && (await plugin.send("Page.getFrameTree", {}, orphanSession)).result?.frameTree?.frame?.id;
+  const orphanWorld = orphanFrame && (await plugin.send("Page.createIsolatedWorld", { frameId: orphanFrame }, orphanSession)).result?.executionContextId;
+  const reach = orphanWorld && (await plugin.send("Runtime.evaluate", { expression: "(() => { let open; try { open = window.open('about:blank') === null ? 'null' : 'opened'; } catch (e) { open = e.name; } return (window.opener === null) + ',' + open; })()", contextId: orphanWorld, returnByValue: true }, orphanSession));
+  check("plugin: from a popup in its window, the opener in another window reads null and window.open is refused", reach?.result?.result?.value === "true,NotAllowedError", reach ? text(reach) : "no popup world");
   check("plugin: a reply that finishes after its tab moved never reaches it; it gets exactly one tab_out_of_scope error",
     late.length === 1 && (late[0].error?.message ?? "").startsWith("ardia: tab_out_of_scope") && !late.some((m) => m.result), JSON.stringify(late).slice(0, 300));
   const detached = await until("the detach event", async () => plugin.events.find((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === ps) ?? null, 8000).catch(() => null);
@@ -421,11 +465,23 @@ try {
   const cliCookies = await cli.send("Network.getCookies", {}, cliTwo.result?.sessionId);
   check("cli: still gets everything after a plugin connected (Network.getCookies)", !refused(cliCookies), text(cliCookies));
 
+  const drained = orphan && (await connect(`ws://127.0.0.1:${control.port}/devtools/page/${orphan.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null));
+  let drainedReplies = 0;
+  let drainedClosedAt = 0;
+  if (drained) {
+    drained.ws.addEventListener("message", () => drainedReplies++);
+    drained.closed.then(() => (drainedClosedAt = Date.now()));
+    for (let i = 0; i < 20; i++) drained.raw(890000 + i, "Page.captureScreenshot", {});
+    await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
+  }
   const pluginAlive = await plugin.send("Target.getTargets");
   check("plugin: its browser connection stays open after the detach", !refused(pluginAlive), text(pluginAlive));
+  const revokeStarted = Date.now();
   const revoked = await appEval(`return ac.engine.call("engine.cliPluginCredential", { revoke: ${JSON.stringify(minted.id)} })`);
   const closedInTime = await Promise.race([plugin.closed.then(() => true), sleep(5000).then(() => false)]);
   check("revoking the credential closes its connection", revoked?.revoked === true && closedInTime, JSON.stringify(revoked));
+  await until("the draining socket to close", async () => drainedClosedAt || null, 4000).catch(() => null);
+  check("plugin: a revoke during a scope close closes the draining socket at once", !!drained && drainedClosedAt > 0 && drainedClosedAt - revokeStarted < 2000 && drainedReplies <= 20, drained ? `closed after ${drainedClosedAt ? drainedClosedAt - revokeStarted : "never"} ms, ${drainedReplies} replies` : "no socket");
   const again = await connect(`${base}?token=${encodeURIComponent(minted.credential)}`).then(() => "accepted", () => "refused");
   check("a revoked credential can't connect again", again === "refused", again);
   const cliAlive = await cli.send("Browser.getVersion");

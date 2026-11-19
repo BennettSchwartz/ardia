@@ -93,6 +93,7 @@ std::string KeyEventRefusal(const base::DictValue& params) {
   event.has_native_key_code = params.Find("nativeVirtualKeyCode");
   event.has_system_key = params.Find("isSystemKey");
   event.modifiers = params.FindInt("modifiers");
+  event.type = StringParam(params, "type");
   event.key = StringParam(params, "key");
   event.code = StringParam(params, "code");
   if (const base::Value* commands = params.Find("commands")) {
@@ -454,7 +455,14 @@ std::string PluginRefusal(const PluginScope& scope,
   }
   if (method == "Page.navigate") {
     const std::string* url = params.FindString("url");
-    return url && IsWebDestination(*url) ? std::string() : "to that URL";
+    const GURL destination(url ? *url : std::string());
+    return destination.is_valid() && (destination.SchemeIsHTTPOrHTTPS() ||
+                                      destination.IsAboutBlank())
+               ? std::string()
+               : "to that URL";
+  }
+  if (method == "Page.reload" && params.Find("scriptToEvaluateOnLoad")) {
+    return "with a script to run on load";
   }
   return std::string();
 }

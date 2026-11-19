@@ -16,6 +16,7 @@ inline constexpr int kCdpShift = 8;
 inline constexpr int kCdpMiddleButton = 4;
 
 struct PluginKeyEvent {
+  std::optional<std::string> type;
   std::optional<int> windows_key_code;
   bool has_native_key_code = false;
   bool has_system_key = false;

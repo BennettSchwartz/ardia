@@ -110,6 +110,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   const std::optional<PluginScope>& scope() const { return scope_; }
   content::DevToolsAgentHost* root_host() const { return root_host_.get(); }
   void Revoke();
+  bool MayInputTo(content::RenderFrameHost* frame);
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;
@@ -196,6 +197,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   base::RepeatingTimer scope_timer_;
   int next_internal_id_ = 0;
   bool wedged_ = false;
+  bool draining_ = false;
   bool revoked_ = false;
   base::WeakPtrFactory<TokenClient> weak_factory_{this};
 };

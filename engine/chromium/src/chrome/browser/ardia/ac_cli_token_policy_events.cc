@@ -69,7 +69,7 @@ void ForgetDestroyedTarget(const std::string& message) {
 }
 
 bool TokenClient::FilterEvent(std::string& message) {
-  if (revoked_) {
+  if (revoked_ || draining_) {
     return false;
   }
   std::string_view view(message);

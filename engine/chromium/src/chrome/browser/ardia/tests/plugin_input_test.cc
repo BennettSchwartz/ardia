@@ -24,6 +24,7 @@ ardia::PluginKeyEvent Key(std::optional<std::string> key,
                           int modifiers,
                           std::optional<std::string> dom_code = std::nullopt) {
   ardia::PluginKeyEvent event;
+  event.type = "rawKeyDown";
   event.key = std::move(key);
   event.windows_key_code = code;
   event.modifiers = modifiers;
@@ -73,6 +74,32 @@ int main() {
   Refused(Key("ArrowLeft", 45, kCdpCtrl), "ArrowLeft with the key code of Insert");
   Refused(Key(";", 45, kCdpShift), "punctuation with the key code of Insert");
   Refused(Key(std::nullopt, 45, kCdpShift), "a key code with no key");
+  ardia::PluginKeyEvent keyless_paste = Key(std::nullopt, 0, 0);
+  keyless_paste.commands = {"paste"};
+  Refused(keyless_paste, "no key, code 0, with commands paste");
+  ardia::PluginKeyEvent keyless_copy = Key(std::nullopt, 0, 0);
+  keyless_copy.commands = {"copy"};
+  Refused(keyless_copy, "no key, code 0, with commands copy");
+  ardia::PluginKeyEvent keyless_select = Key(std::nullopt, 0, 0);
+  keyless_select.commands = {"selectAll"};
+  Allowed(keyless_select, "no key with an allowed command");
+  ardia::PluginKeyEvent key_up_command = Key("a", 65, kCdpMeta, "KeyA");
+  key_up_command.type = "keyUp";
+  key_up_command.commands = {"selectAll"};
+  Refused(key_up_command, "commands on a keyUp");
+  ardia::PluginKeyEvent char_command = Key("a", 0, 0);
+  char_command.type = "char";
+  char_command.commands = {"selectAll"};
+  Refused(char_command, "commands on a char event");
+  Allowed(Key("!", 49, kCdpShift, "Digit1"), "a shifted digit with its ordinary key code");
+  Allowed(Key("\"", 222, kCdpShift, "Quote"), "a shifted quote");
+  Refused(Key("a", 49, 0, "Digit1"), "key a with the code Digit1");
+  Refused(Key("Shift", 17, kCdpShift, "ShiftLeft"), "Shift with Control's key code");
+  Refused(Key("Shift", 16, kCdpShift, "KeyA"), "Shift with the code KeyA");
+  Allowed(Key("Shift", 16, kCdpShift, "ShiftRight"), "Shift on the right with the generic key code");
+  Allowed(Key("Meta", 93, kCdpMeta, "MetaRight"), "Meta on the right");
+  Allowed(Key("\xc3\xa9", 0, 0), "a character the US layout doesn't have, with no key code");
+  Refused(Key("\xc3\xa9", 69, 0), "a character the US layout doesn't have, with a key code");
 
   const int navigation_modifiers[] = {kCdpAlt, kCdpCtrl, kCdpMeta};
   const struct {
@@ -96,12 +123,19 @@ int main() {
   }
   Allowed(Key("a", 65, kCdpCtrl, "KeyA"), "Ctrl+A");
   Allowed(Key("a", 65, kCdpMeta, "KeyA"), "Meta+A");
-  for (int modifier : navigation_modifiers) {
+  for (int modifier : {kCdpCtrl, kCdpMeta}) {
     Allowed(Key("Backspace", 8, modifier, "Backspace"),
             "Backspace with modifier " + std::to_string(modifier));
+  }
+  for (int modifier : navigation_modifiers) {
     Allowed(Key("Delete", 46, modifier, "Delete"),
             "Delete with modifier " + std::to_string(modifier));
   }
+#if !defined(_WIN32)
+  Allowed(Key("Backspace", 8, kCdpAlt, "Backspace"), "macOS word deletion with Alt+Backspace");
+#else
+  Refused(Key("Backspace", 8, kCdpAlt, "Backspace"), "Alt+Backspace, which undoes on Windows");
+#endif
   Allowed(Key("Enter", 13, kCdpShift, "Enter"), "Shift+Enter");
   Allowed(Key("Tab", 9, kCdpShift, "Tab"), "Shift+Tab");
   Allowed(Key("h", 72, 0, "KeyH"), "plain typing");

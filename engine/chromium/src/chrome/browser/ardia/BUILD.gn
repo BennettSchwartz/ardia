@@ -19,6 +19,7 @@ ardia_sources = [
   "ac_cli_plugin_credentials.h",
   "ac_cli_plugin_input.cc",
   "ac_cli_plugin_input.h",
+  "ac_cli_plugin_key_table.h",
   "ac_cli_token_policy.cc",
   "ac_cli_token_policy.h",
   "ac_cli_token_policy_events.cc",

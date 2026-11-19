@@ -14,6 +14,7 @@ ac_cli_plugin_credentials.cc
 ac_cli_plugin_credentials.h
 ac_cli_plugin_input.cc
 ac_cli_plugin_input.h
+ac_cli_plugin_key_table.h
 ac_cli_test_signals.cc
 ac_cli_test_signals.h
 ac_cli_token_policy.cc

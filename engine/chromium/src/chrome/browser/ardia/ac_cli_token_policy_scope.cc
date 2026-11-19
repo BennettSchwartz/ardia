@@ -82,6 +82,22 @@ bool TokenClient::SessionInScope(const std::string& session) {
   return it != targets_.end() && PluginMayAttachToTargetId(*scope_, &it->second);
 }
 
+bool TokenClient::MayInputTo(content::RenderFrameHost* frame) {
+  if (!frame || revoked_ || wedged_ || draining_ || !RootInScope() ||
+      !PluginMayAttachToFrame(*scope_, frame)) {
+    return false;
+  }
+  content::WebContents* contents =
+      content::WebContents::FromRenderFrameHost(frame);
+  for (const std::string& session : left_) {
+    content::DevToolsAgentHost* host = HostOf(session);
+    if (host && host->GetWebContents() == contents) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool TokenClient::RootInScope() {
   return IsBrowserHost(root_host_.get()) ||
          (!root_left_ && PluginTargetInScope(*scope_, root_host_.get()));
@@ -271,7 +287,7 @@ void TokenClient::DetachOutOfScope(const std::string& session) {
 }
 
 void TokenClient::CloseOutOfScope() {
-  if (wedged_) {
+  if (wedged_ || draining_) {
     return;
   }
   for (const auto& [key, method] : outstanding_) {
@@ -280,7 +296,8 @@ void TokenClient::CloseOutOfScope() {
     }
   }
   outstanding_.clear();
-  wedged_ = true;
+  draining_ = true;
+  scope_timer_.Stop();
   if (closer_) {
     closer_.Run(false);
   }

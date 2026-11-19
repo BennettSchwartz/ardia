@@ -230,6 +230,12 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
                         "ardia: this connection is closing");
     return false;
   }
+  if (draining_) {
+    *reply = ErrorReply(
+        *id, session, kRefused,
+        base::StrCat({kOutOfScope, ": the tab left the plugin's window"}));
+    return false;
+  }
   const std::pair<std::string, int> key(session, *id);
   if (outstanding_.contains(key)) {
     *reply = ErrorReply(*id, session, kInvalidRequest,
@@ -424,8 +430,7 @@ bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
       it->second->kind() == TokenKind::kCli) {
     return true;
   }
-  return frame && cli_token_policy_internal::PluginMayAttachToFrame(
-                      *it->second->scope(), frame);
+  return it->second->MayInputTo(frame);
 }
 
 bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client) {

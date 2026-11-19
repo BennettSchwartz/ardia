@@ -27,10 +27,58 @@ diff --git a/content/browser/devtools/devtools_session.cc b/content/browser/devt
        IsWaitingForDebuggerOnStart());
    session_.set_disconnect_handler(base::BindOnce(
        &DevToolsSession::MojoConnectionDestroyed, base::Unretained(this)));
+diff --git a/third_party/blink/renderer/bindings/core/v8/binding_security.cc b/third_party/blink/renderer/bindings/core/v8/binding_security.cc
+--- a/third_party/blink/renderer/bindings/core/v8/binding_security.cc
++++ b/third_party/blink/renderer/bindings/core/v8/binding_security.cc
+@@ -51,12 +51,31 @@
+ #include "third_party/blink/renderer/platform/bindings/exception_state.h"
+ #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+ #include "third_party/blink/renderer/platform/web_test_support.h"
++#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+ #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+ 
+ namespace blink {
+ 
+ namespace {
+ 
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++bool ArdiaSamePage(const Frame* a, const Frame* b) {
++  return a && b && &a->Tree().Top() == &b->Tree().Top();
++}
++
++}
++
++namespace {
++
+ // Documents that have the same WindowAgentFactory should be able to
+ // share data with each other if they have the same Agent and are
+ // SameOriginDomain.
+@@ -89,6 +108,12 @@ bool CanAccessWindow(const LocalDOMWindow* accessing_window,
+   if (!(accessing_window && local_target_window))
+     return false;
+ 
++  if (ArdiaInPluginWorld(accessing_window->GetIsolate()) &&
++      !ArdiaSamePage(accessing_window->GetFrame(),
++                     local_target_window->GetFrame())) {
++    return false;
++  }
++
+   const SecurityOrigin* accessing_origin =
+       accessing_window->GetSecurityOrigin();
+ 
 diff --git a/third_party/blink/renderer/core/editing/commands/document_exec_command.cc b/third_party/blink/renderer/core/editing/commands/document_exec_command.cc
 --- a/third_party/blink/renderer/core/editing/commands/document_exec_command.cc
 +++ b/third_party/blink/renderer/core/editing/commands/document_exec_command.cc
-@@ -44,12 +44,31 @@
+@@ -44,12 +44,32 @@
  #include "third_party/blink/renderer/core/trustedtypes/trusted_html.h"
  #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
  #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
@@ -45,7 +93,8 @@ diff --git a/third_party/blink/renderer/core/editing/commands/document_exec_comm
 +                                      ExecutionContext* context) {
 +  if (!context || !(EqualIgnoringAsciiCase(command_name, "copy") ||
 +                    EqualIgnoringAsciiCase(command_name, "cut") ||
-+                    EqualIgnoringAsciiCase(command_name, "paste"))) {
++                    EqualIgnoringAsciiCase(command_name, "paste") ||
++                    EqualIgnoringAsciiCase(command_name, "pasteAndMatchStyle"))) {
 +    return false;
 +  }
 +  v8::Isolate* isolate = context->GetIsolate();
@@ -62,7 +111,7 @@ diff --git a/third_party/blink/renderer/core/editing/commands/document_exec_comm
  EditorCommand GetCommand(Document* document, const String& command_name) {
    LocalFrame* frame = document->GetFrame();
    if (!frame || frame->GetDocument() != document)
-@@ -114,6 +133,13 @@ bool Document::execCommand(const String& command_name,
+@@ -114,6 +134,13 @@ bool Document::execCommand(const String& command_name,
      return false;
    }
  
@@ -76,6 +125,60 @@ diff --git a/third_party/blink/renderer/core/editing/commands/document_exec_comm
    UseCounter::Count(*this, WebFeature::kExecCommand);
    if (FocusedElement() && IsTextControl(*FocusedElement()))
      UseCounter::Count(*this, WebFeature::kExecCommandOnInputOrTextarea);
+diff --git a/third_party/blink/renderer/core/events/clipboard_event.cc b/third_party/blink/renderer/core/events/clipboard_event.cc
+--- a/third_party/blink/renderer/core/events/clipboard_event.cc
++++ b/third_party/blink/renderer/core/events/clipboard_event.cc
+@@ -24,9 +24,24 @@
+ 
+ #include "third_party/blink/renderer/bindings/core/v8/v8_clipboard_event_init.h"
+ #include "third_party/blink/renderer/core/event_interface_names.h"
++#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+ 
+ namespace blink {
+ 
++namespace {
++
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++}
++
+ ClipboardEvent::ClipboardEvent(const AtomicString& type,
+                                DataTransfer* clipboard_data)
+     : Event(type, Bubbles::kYes, Cancelable::kYes, ComposedMode::kComposed),
+@@ -36,6 +51,13 @@ ClipboardEvent::ClipboardEvent(const AtomicString& type,
+                                const ClipboardEventInit* initializer)
+     : Event(type, initializer), clipboard_data_(initializer->clipboardData()) {}
+ 
++DataTransfer* ClipboardEvent::clipboardData() const {
++  if (isTrusted() && ArdiaInPluginWorld(v8::Isolate::TryGetCurrent())) {
++    return nullptr;
++  }
++  return clipboard_data_.Get();
++}
++
+ ClipboardEvent::~ClipboardEvent() = default;
+ 
+ const AtomicString& ClipboardEvent::InterfaceName() const {
+diff --git a/third_party/blink/renderer/core/events/clipboard_event.h b/third_party/blink/renderer/core/events/clipboard_event.h
+--- a/third_party/blink/renderer/core/events/clipboard_event.h
++++ b/third_party/blink/renderer/core/events/clipboard_event.h
+@@ -50,7 +50,7 @@ class ClipboardEvent final : public Event {
+     return MakeGarbageCollected<ClipboardEvent>(type, initializer);
+   }
+ 
+-  DataTransfer* clipboardData() const { return clipboard_data_.Get(); }
++  DataTransfer* clipboardData() const;
+ 
+   void Trace(Visitor*) const override;
+ 
 diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc b/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
 --- a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
 +++ b/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
@@ -88,6 +191,149 @@ diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.c
 +  }
  
    session->CreateAndAppend<InspectorLayerTreeAgent>(inspected_frames, this);
+ 
+diff --git a/third_party/blink/renderer/core/frame/dom_window.cc b/third_party/blink/renderer/core/frame/dom_window.cc
+--- a/third_party/blink/renderer/core/frame/dom_window.cc
++++ b/third_party/blink/renderer/core/frame/dom_window.cc
+@@ -54,12 +54,31 @@
+ #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+ #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+ #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
++#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+ #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+ 
+ namespace blink {
+ 
+ namespace {
+ 
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++bool ArdiaSamePage(const Frame* a, const Frame* b) {
++  return a && b && &a->Tree().Top() == &b->Tree().Top();
++}
++
++}
++
++namespace {
++
+ struct WindowProxyAccessCounters {
+   // `property_access` is optional as most methods are measured through
+   // the idl itself, and only anonymous getters cannot use that attribute.
+@@ -345,6 +364,9 @@ DOMWindow* DOMWindow::frames() const {
+ }
+ 
+ ScriptValue DOMWindow::openerForBindings(v8::Isolate* isolate) const {
++  if (ArdiaInPluginWorld(isolate)) {
++    return ScriptValue::CreateNull(isolate);
++  }
+   RecordWindowProxyAccessMetrics(
+       mojom::blink::WindowProxyAccessType::kOpener);
+   ScriptState* script_state = ScriptState::ForCurrentRealm(isolate);
+@@ -974,6 +996,12 @@ void DOMWindow::DoPostMessage(scoped_refptr<SerializedScriptValue> message,
+                               LocalDOMWindow* source,
+                               ExceptionState& exception_state) {
+   TRACE_EVENT0("blink", "DOMWindow::DoPostMessage");
++  if (ArdiaInPluginWorld(source->GetIsolate()) &&
++      !ArdiaSamePage(GetFrame(), source->GetFrame())) {
++    exception_state.ThrowSecurityError(
++        "A plugin can't message a window of another page.");
++    return;
++  }
+   auto* source_frame = source->GetFrame();
+   bool unload_event_in_progress =
+       source_frame && source_frame->GetDocument() &&
+diff --git a/third_party/blink/renderer/core/frame/local_dom_window.cc b/third_party/blink/renderer/core/frame/local_dom_window.cc
+--- a/third_party/blink/renderer/core/frame/local_dom_window.cc
++++ b/third_party/blink/renderer/core/frame/local_dom_window.cc
+@@ -175,6 +175,20 @@
+ 
+ namespace blink {
+ 
++namespace {
++
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++}
++
+ namespace {
+ bool IsRunningMicrotasks(ScriptState* script_state) {
+   if (auto* microtask_queue = ToMicrotaskQueue(script_state)) {
+@@ -2482,6 +2496,11 @@ DOMWindow* LocalDOMWindow::open(v8::Isolate* isolate,
+                                 const AtomicString& target,
+                                 const String& features,
+                                 ExceptionState& exception_state) {
++  if (ArdiaInPluginWorld(isolate)) {
++    exception_state.ThrowDOMException(DOMExceptionCode::kNotAllowedError,
++                                      "A plugin can't open windows.");
++    return nullptr;
++  }
+   // Get the window script is currently executing within the context of.
+   // This is usually, but not necessarily the same as 'this'.
+   LocalDOMWindow* entered_window = EnteredDOMWindow(isolate);
+diff --git a/third_party/blink/renderer/core/frame/location.cc b/third_party/blink/renderer/core/frame/location.cc
+--- a/third_party/blink/renderer/core/frame/location.cc
++++ b/third_party/blink/renderer/core/frame/location.cc
+@@ -46,10 +46,29 @@
+ #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+ #include "third_party/blink/renderer/platform/weborigin/kurl.h"
+ #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
++#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+ #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+ 
+ namespace blink {
+ 
++namespace {
++
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++bool ArdiaSamePage(const Frame* a, const Frame* b) {
++  return a && b && &a->Tree().Top() == &b->Tree().Top();
++}
++
++}
++
+ Location::Location(DOMWindow* dom_window) : dom_window_(dom_window) {}
+ 
+ v8::Local<v8::Value> Location::Wrap(ScriptState* script_state) {
+@@ -279,6 +298,15 @@ void Location::SetLocation(const String& url,
+   if (!IsAttached())
+     return;
+ 
++  if (ArdiaInPluginWorld(incumbent_window->GetIsolate()) &&
++      !ArdiaSamePage(DomWindow()->GetFrame(), incumbent_window->GetFrame())) {
++    if (exception_state) {
++      exception_state->ThrowSecurityError(
++          "A plugin can't navigate a window of another page.");
++    }
++    return;
++  }
++
+   if (!incumbent_window->GetFrame())
+     return;
  
 diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 --- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
@@ -229,3 +475,40 @@ diff --git a/third_party/blink/renderer/modules/clipboard/clipboard.cc b/third_p
    return ClipboardPromise::CreateForWriteText(
        GetExecutionContext(), script_state, data, exception_state);
  }
+diff --git a/third_party/blink/renderer/modules/clipboard/clipboard_change_event.cc b/third_party/blink/renderer/modules/clipboard/clipboard_change_event.cc
+--- a/third_party/blink/renderer/modules/clipboard/clipboard_change_event.cc
++++ b/third_party/blink/renderer/modules/clipboard/clipboard_change_event.cc
+@@ -6,8 +6,23 @@
+ 
+ #include "third_party/blink/renderer/bindings/modules/v8/v8_clipboard_change_event_init.h"
+ #include "third_party/blink/renderer/core/event_type_names.h"
++#include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+ 
+ namespace blink {
++
++namespace {
++
++bool ArdiaInPluginWorld(v8::Isolate* isolate) {
++  if (!isolate || !isolate->InContext()) {
++    return false;
++  }
++  const DOMWrapperWorld& world = DOMWrapperWorld::Current(isolate);
++  return world.GetWorldType() ==
++             DOMWrapperWorld::WorldType::kInspectorIsolated &&
++         world.NonMainWorldHumanReadableName().starts_with("ardia-plugin-");
++}
++
++}
+ ClipboardChangeEvent::ClipboardChangeEvent(const Vector<String>& types,
+                                            const BigInt& change_id)
+     : Event(event_type_names::kClipboardchange, Bubbles::kNo, Cancelable::kNo),
+@@ -23,6 +38,9 @@ ClipboardChangeEvent::ClipboardChangeEvent(
+ ClipboardChangeEvent::~ClipboardChangeEvent() = default;
+ 
+ Vector<String> ClipboardChangeEvent::types() const {
++  if (ArdiaInPluginWorld(v8::Isolate::TryGetCurrent())) {
++    return Vector<String>();
++  }
+   return types_;
+ }
+ 
