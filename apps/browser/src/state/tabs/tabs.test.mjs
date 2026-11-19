@@ -6,6 +6,7 @@ const organize = await import("../pins/tabCleanup.ts");
 const { controllingSearchExtension, defaultSearchEngine, searchUrlPrefix } = await import("../settings/settings.ts");
 const media = await import("../media/media.ts");
 const { splitTabIdsOf } = await import("../splits/splits.ts");
+const { takeOpenerCounts } = await import("../telemetry/openerCounts.ts");
 
 let clock = Date.now();
 Date.now = () => (clock += 1000);
@@ -368,6 +369,30 @@ test("⇧⌘T reopens only what the window's shown profile closed", () => {
   S().switchProfile(w, "default");
   S().reopenClosedTab(w);
   assert.ok(Object.values(S().tabs).some((t) => short(t.url) === "b" && t.profileId === "default"));
+});
+
+test("switching tabs in one profile keeps another profile's opener links in the same window", () => {
+  reset();
+  const [w, a] = setup("a", "b");
+  const c = open(w, "c", a);
+  const p = S().createProfile({ name: "Work" });
+  S().switchProfile(w, p);
+  const w1 = model.activeTabId(S(), w);
+  const w2 = S().newTab(w, { url: "w2.com", background: true });
+  const w3 = open(w, "w3", w1);
+  S().activate(w3);
+  takeOpenerCounts();
+  S().activate(w2);
+  assert.deepEqual(takeOpenerCounts(), { opener_switches_kept_other_profiles: 1, opener_links_kept_other_profiles: 1 });
+  assert.equal(S().tabs[w3].openerId, null, "Work's own opener links clear on a switch, as before");
+  assert.equal(S().tabs[c].openerId, a, "a switch in Work keeps the default profile's opener link");
+  open(w, "w4", w2, false);
+  S().navigate(w2, "typed.com");
+  assert.equal(S().tabs[c].openerId, a, "a link opened in front and a typed address in Work keep it too");
+  S().switchProfile(w, "default");
+  open(w, "c2", a);
+  const personal = hosts(w).filter((_, i) => S().tabs[S().windows[w].tabIds[i]].profileId === "default");
+  assert.deepEqual(personal, ["a", "c", "c2", "b"], "the next link from the same tab still lines up after the first");
 });
 
 test("abandoned New Tab cleanup never closes a window or the tab it shows", () => {

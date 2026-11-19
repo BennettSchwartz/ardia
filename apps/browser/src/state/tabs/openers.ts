@@ -5,6 +5,7 @@ import { groupOf, pinnedChildGroup } from "../pins/tabGrouping";
 import { splitOf, splitTabIds, splitTabIdsOf } from "../splits/splits";
 import type { BrowserWindow, Tab } from "../browser/types";
 import { isAsleep } from "./pageSession";
+import { noteOpenersKeptInOtherProfiles } from "../telemetry/openerCounts";
 
 const regular = (s: BrowserState, id: string) => !inPinnedContainer(s, id);
 
@@ -81,10 +82,11 @@ function outsideSplit(s: BrowserState, w: BrowserWindow, index: number): number 
   return Math.max(...splitTabIds(split).map((id) => w.tabIds.indexOf(id))) + 1;
 }
 
-export function forgetOpeners(s: BrowserState, windowId: string, keep?: string): BrowserState {
-  const w = s.windows[windowId];
-  const ids = w?.tabIds.filter((id) => id !== keep && s.tabs[id]?.openerId);
-  if (!ids?.length) return s;
+export function forgetOpeners(s: BrowserState, windowId: string, profileId: string): BrowserState {
+  const linked = s.windows[windowId]?.tabIds.filter((id) => s.tabs[id]?.openerId) ?? [];
+  const ids = linked.filter((id) => s.tabs[id]!.profileId === profileId);
+  noteOpenersKeptInOtherProfiles(linked.length - ids.length);
+  if (!ids.length) return s;
   const tabs = { ...s.tabs };
   for (const id of ids) tabs[id] = { ...tabs[id]!, openerId: null };
   return { ...s, tabs };
