@@ -72,6 +72,9 @@ test("sync writes: refused while sync is off, then the same switches Settings ha
 
   sync.startSync();
   assert.ok("ok" in (await sync.turnOnSync("/sync")));
+  assert.equal(sync.useSync.getState().status, "starting");
+  assert.equal(await code("sync.setType", { type: "history", on: false }), "refused", "no writes before the first pass has loaded what's saved");
+  for (let i = 0; i < 500 && sync.useSync.getState().status === "starting"; i++) await tick();
   const now = await ok("sync.now");
   assert.ok(["updated", "updating"].includes(now.status), now.status);
 
@@ -93,4 +96,52 @@ test("sync writes: refused while sync is off, then the same switches Settings ha
   assert.equal(await code("sync.sendTab", { tab, device: "dev-elsewhere" }), "no_window");
   const blank = S().newTab(windowId, { url: "about:blank" });
   assert.equal(await code("sync.sendTab", { tab: blank, device: "dev-elsewhere" }), "refused", "only web pages are sent");
+});
+
+test("sync.now answers after a pass that started after the call, not the one already running", async () => {
+  const native = globalThis.acTestNativeModules.ArdiaSync;
+  const plain = native.chainStatus;
+  let release;
+  let passes = 0;
+  native.chainStatus = async () => {
+    passes++;
+    if (passes === 1) await new Promise((resolve) => (release = resolve));
+    return "ok";
+  };
+  try {
+    const running = sync.syncNow();
+    for (let i = 0; i < 50 && !release; i++) await tick();
+    assert.ok(release, "a pass is running");
+    const id = ++nextId;
+    const before = stub.controlSocket.replies.length;
+    stub.emitControlRequest({ connection: 41, generation: stub.controlSocket.generation, line: JSON.stringify({ id, method: "sync.now" }) });
+    for (let i = 0; i < 30; i++) await tick();
+    assert.equal(stub.controlSocket.replies.slice(before).filter((r) => r.connection === 41).length, 0, "no reply while only the earlier pass has run");
+    release();
+    await running;
+    for (let i = 0; i < 500 && !stub.controlSocket.replies.slice(before).some((r) => r.connection === 41); i++) await tick();
+    assert.equal(passes, 2, "the reply came after a second pass ran");
+  } finally {
+    native.chainStatus = plain;
+  }
+});
+
+test("sync writes are refused while sync is turning off, so a sent tab is never dropped after an ok", async () => {
+  const native = globalThis.acTestNativeModules.ArdiaSync;
+  const plain = native.forget;
+  let release;
+  native.forget = () => new Promise((resolve) => (release = resolve));
+  try {
+    assert.ok(sync.useSync.getState().enabled);
+    const stopping = sync.stopSync();
+    for (let i = 0; i < 500 && !release; i++) await tick();
+    assert.ok(release, "stopping is under way");
+    assert.equal(sync.useSync.getState().enabled, true, "Settings still shows sync on while it winds down");
+    assert.equal(await code("sync.setType", { type: "history", on: false }), "refused");
+    assert.equal(await code("sync.now"), "refused");
+    release();
+    await stopping;
+  } finally {
+    native.forget = plain;
+  }
 });

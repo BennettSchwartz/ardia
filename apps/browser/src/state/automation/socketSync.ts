@@ -1,4 +1,4 @@
-import { sendTab, sendTargets, setOpenTabsSynced, setProfileSynced, setTypeSynced, syncNow, useSync } from "../sync/engine";
+import { sendTab, sendTargets, setOpenTabsSynced, setProfileSynced, setTypeSynced, syncNow, syncWritesOpen, useSync } from "../sync/engine";
 import { DATA_TYPES, type DataType } from "../sync/syncDoc";
 import type { MethodSpec } from "./socketCatalog";
 import { bool, id, obj, oneOf, PROFILE, TAB } from "./socketSchema";
@@ -15,19 +15,25 @@ function syncing(what: string) {
   return s;
 }
 
+function writable(what: string) {
+  const s = syncing(what);
+  if (!syncWritesOpen()) throw new OpError("refused", `Sync is ${s.enabled && s.status !== "starting" ? "turning off" : "starting"}; try again once Settings › General shows it running.`);
+  return s;
+}
+
 const summary = () => {
   const s = useSync.getState();
   return { status: s.status, lastSyncedAt: s.lastSyncedAt, pending: s.pending, error: s.error, types: s.types, profiles: s.profiles };
 };
 
 async function runNow() {
-  syncing("syncing now");
+  writable("syncing now");
   await syncNow();
   return summary();
 }
 
 function setType(params: Record<string, unknown>) {
-  syncing("choosing what syncs");
+  writable("choosing what syncs");
   const type = params.type as DataType;
   setTypeSynced(type, params.on as boolean);
   expect(useSync.getState().types[type] === params.on, `${type} didn't turn ${params.on ? "on" : "off"}.`);
@@ -35,7 +41,7 @@ function setType(params: Record<string, unknown>) {
 }
 
 function linkOf(profileId: string) {
-  const link = syncing("choosing which profiles sync").profiles[profileId];
+  const link = writable("choosing which profiles sync").profiles[profileId];
   if (!link) throw new OpError("refused", `Profile ${profileId} isn't linked to sync yet; it links on the next sync after it opens.`);
   return link;
 }
@@ -63,7 +69,7 @@ function devicesFor(params: Record<string, unknown>) {
 }
 
 function send(params: Record<string, unknown>) {
-  syncing("sending a tab");
+  writable("sending a tab");
   const tab = tabOf(params.tab);
   if (!/^https?:/i.test(tab.url)) throw new OpError("refused", "Only http and https pages can be sent to another device.");
   const device = sendTargets(tab.profileId).find((d) => d.id === params.device);
