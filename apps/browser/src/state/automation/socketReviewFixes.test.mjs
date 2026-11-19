@@ -110,6 +110,23 @@ test("a huge history removal stays under the event budget, with its full count a
   stub.emitControlClose(conn);
 });
 
+test("history.removed counts each URL as it is escaped on the line, envelope included", async () => {
+  await setup();
+  const { HISTORY_EVENT_LINE_BYTES } = await import("./libraryEvents.ts");
+  const conn = ++nextConnection;
+  await call("subscribe", { events: ["history.removed"], fullUrls: true }, conn);
+  const from = stub.controlSocket.broadcasts.length;
+  const urls = Array.from({ length: 900 }, (_, i) => `https://escape.example/${i}/${"\u0001\"".repeat(150)}`);
+  stub.chromeHistoryEvent({ kind: "deleted", profile: "", all: false, urls });
+  await wait(10);
+  const line = stub.controlSocket.broadcasts.slice(from).find((b) => b.connections.includes(conn)).line;
+  assert.ok(Buffer.byteLength(line) + 1 <= HISTORY_EVENT_LINE_BYTES, `the line is ${Buffer.byteLength(line)} bytes`);
+  const event = JSON.parse(line);
+  assert.equal(event.data.truncated, true);
+  assert.ok(event.data.urls.length > 100, `${event.data.urls.length} URLs kept, not a summary`);
+  stub.emitControlClose(conn);
+});
+
 async function geometrySetup() {
   const { windowId } = await setup();
   stub.windows.geometry.clear();
@@ -134,6 +151,38 @@ test("full screen: overlapping opposite requests take turns and each answers wit
   } finally {
     stub.geometryWorld.transitionMs = 0;
     done();
+  }
+});
+
+test("full screen: a transition AppKit hasn't ended answers as a timeout and keeps the window until it ends", async () => {
+  const { windowId, done } = await geometrySetup();
+  stub.geometryWorld.stalls = true;
+  try {
+    const stalled = await call("windows.setFullScreen", { window: windowId, on: true });
+    assert.equal(stalled.error?.code, "failed", JSON.stringify(stalled));
+    assert.match(stalled.error.message, /Timed out/);
+    stub.geometryWorld.stalls = false;
+    const busy = await call("windows.setFullScreen", { window: windowId, on: false });
+    assert.equal(busy.error?.code, "refused", "a later request doesn't start while the earlier transition is still AppKit's");
+    stub.finishStalledTransition(windowId);
+    await wait(5);
+    assert.equal(!!S().windows[windowId].fullScreen, true, "the late end still reached the store");
+    const left = await ok("windows.setFullScreen", { window: windowId, on: false });
+    assert.equal(left.fullScreen, false);
+  } finally {
+    stub.geometryWorld.stalls = false;
+    done();
+  }
+});
+
+test("full screen: native success without the store following is a failure, not an ok", async () => {
+  const { windowId, done } = await geometrySetup();
+  done();
+  try {
+    const reply = await send("windows.setFullScreen", { window: windowId, on: true })(8000);
+    assert.equal(reply?.error?.code, "failed", JSON.stringify(reply));
+  } finally {
+    stub.windows.geometry.get(windowId).fullScreen = false;
   }
 });
 
