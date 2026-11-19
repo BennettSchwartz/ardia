@@ -53,9 +53,9 @@ test("a private window opened during the last native check stops the command bef
 test("a background Ardia refuses every native menu item and runs only allowlisted Ardia commands", async () => {
   const { windowId } = await freshWindow();
   const minimize = item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" });
-  const newTab = item([1, 0], "New Tab", { command: "newTab", ref: "cmd:newTab@File\u001fNew Tab" });
+  const sidebar = item([1, 0], "Toggle Sidebar", { command: "toggleSidebar", ref: "cmd:toggleSidebar@View\u001fToggle Sidebar" });
   const print = item([1, 9], "Print…", { command: "print", ref: "cmd:print@File\u001fPrint…" });
-  stub.surfaces.bar = [item([1], "File", { submenu: [newTab, print] }), item([5], "Window", { submenu: [minimize] })];
+  stub.surfaces.bar = [item([1], "File", { submenu: [sidebar, print] }), item([5], "Window", { submenu: [minimize] })];
   stub.surfaces.performed.length = 0;
   surfacesModule.surfaceRunMode.background = true;
   try {
@@ -64,7 +64,7 @@ test("a background Ardia refuses every native menu item and runs only allowliste
     assert.match(refused.error.message, /background Ardia runs no native menu item/);
     assert.deepEqual(stub.surfaces.performed, []);
     assert.equal((await call("menus.runBar", { path: print.path, ref: print.ref, window: windowId })).error?.code, "refused", "not on the background allowlist");
-    assert.ok((await ok("menus.runBar", { path: newTab.path, ref: newTab.ref, window: windowId })).command === "newTab");
+    assert.ok((await ok("menus.runBar", { path: sidebar.path, ref: sidebar.ref, window: windowId })).command === "toggleSidebar");
   } finally {
     surfacesModule.surfaceRunMode.background = false;
   }
