@@ -14,6 +14,7 @@ public class MenusModule: Module {
       self.lifetime.begin(self) {
         ShortcutRecorder.shared.abandon(by: self)
         ShellEvents.retire(self)
+        DispatchQueue.main.async { OpenSurfaces.shared.capturesPageMenus = false }
       }
       ShellEvents.attach(.command, to: self, while: self.lifetime)
       self.lifetime.onMain {
@@ -59,11 +60,14 @@ public class MenusModule: Module {
     }.runOnQueue(.main)
 
     AsyncFunction("openSurfaces") { () -> [[String: Any]] in OpenSurfaces.shared.list() }.runOnQueue(.main)
-    AsyncFunction("holdPageMenus") { (holds: Bool) in OpenSurfaces.shared.holdsPageMenus = holds }.runOnQueue(.main)
+    AsyncFunction("capturePageMenus") { (captures: Bool) in OpenSurfaces.shared.capturesPageMenus = captures }.runOnQueue(.main)
     AsyncFunction("chooseSurfaceItem") { (id: String, path: [Int]) throws -> String in try MenusModule.surfaceCall { try OpenSurfaces.shared.choose(id, path: path) } }.runOnQueue(.main)
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
     AsyncFunction("menuBar") { () -> [[String: Any]] in NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? [] }.runOnQueue(.main)
-    AsyncFunction("performMenuBarItem") { (path: [Int]) throws -> String in try MenusModule.surfaceCall { try MenuBarAction.perform(path) } }.runOnQueue(.main)
+    AsyncFunction("performMenuBarItem") { (path: [Int], ref: String, windowId: String) throws -> String in
+      try MenusModule.surfaceCall { try MenuBarAction.perform(path, ref: ref, windowId: windowId) }
+    }.runOnQueue(.main)
+    AsyncFunction("checkMenuBarItem") { (path: [Int], ref: String) throws in try MenusModule.surfaceCall { _ = try MenuBarAction.item(at: path, ref: ref) } }.runOnQueue(.main)
 
     AsyncFunction("menuShortcuts") { () -> [[String: Any]] in MainMenu.shortcutList() }.runOnQueue(.main)
 

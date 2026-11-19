@@ -183,9 +183,7 @@ NSURL *SharedImageFile(NSData *image, NSString *mimeType, NSString *source) {
   return file;
 }
 
-constexpr NSTimeInterval kHeldMenuSeconds = 60;
-
-NSArray *HeldItems(NSArray *items) {
+NSArray *CapturedItems(NSArray *items) {
   NSMutableArray *out = [NSMutableArray array];
   for (NSDictionary *item in items) {
     if (![item isKindOfClass:NSDictionary.class]) continue;
@@ -197,28 +195,45 @@ NSArray *HeldItems(NSArray *items) {
       @"separator" : @(MenuItemType(item) == kMenuSeparator),
       @"checked" : @(Flag(item, @"checked")),
     } mutableCopy];
-    if (NSArray *submenu = Field<NSArray>(item, @"submenu")) row[@"submenu"] = HeldItems(submenu);
+    if (NSArray *submenu = Field<NSArray>(item, @"submenu")) row[@"submenu"] = CapturedItems(submenu);
     [out addObject:row];
   }
   return out;
 }
 
-NSDictionary *HoldForChoice(ArdiaCoreTab *tab, NSDictionary *menu, NSArray *items) {
-  NSMutableDictionary *box = [@{
-    @"kind" : @"page",
-    @"tab" : ardia_host::AppTabIdOf(tab) ?: @"",
-    @"url" : Field<NSString>(menu, @"url") ?: tab.url ?: @"",
-    @"link" : Field<NSString>(menu, @"link") ?: @"",
-    @"items" : HeldItems(items),
-  } mutableCopy];
-  [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuOpened" object:box];
-  if (![box[@"held"] boolValue]) return nil;
-  NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:kHeldMenuSeconds];
-  while (!box[@"pick"] && !box[@"done"] && deadline.timeIntervalSinceNow > 0)
-    [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
-  box[@"done"] = @YES;
-  [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuClosed" object:box];
-  return [box[@"pick"] isKindOfClass:NSDictionary.class] ? box[@"pick"] : nil;
+void CaptureForChoice(ArdiaWebView *view, ArdiaCoreTab *tab, NSDictionary *menu, NSArray *items) {
+  NSString *tabId = ardia_host::AppTabIdOf(tab);
+  if (!tabId.length || !view.window) return;
+  [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuCaptured"
+                                                    object:@{
+                                                      @"tab" : tabId,
+                                                      @"window" : view.window,
+                                                      @"documents" : @(tab.committedDocumentCount),
+                                                      @"url" : tab.url ?: @"",
+                                                      @"link" : Field<NSString>(menu, @"link") ?: @"",
+                                                      @"items" : CapturedItems(items),
+                                                    }];
+}
+
+NSDictionary<NSNumber *, NSString *> *CapturedEditActions() {
+  static NSDictionary *actions = @{
+    @50150 : @"copy:",
+    @50151 : @"cut:",
+    @50152 : @"paste:",
+    @50153 : @"delete:",
+    @50154 : @"undo:",
+    @50155 : @"redo:",
+    @50156 : @"selectAll:",
+    @50157 : @"pasteAndMatchStyle:",
+  };
+  return actions;
+}
+
+NSView *PageWidgetView(NSView *view) {
+  if ([NSStringFromClass(view.class) containsString:@"RenderWidgetHostViewCocoa"]) return view;
+  for (NSView *sub in view.subviews)
+    if (NSView *found = PageWidgetView(sub)) return found;
+  return nil;
 }
 
 NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
@@ -307,8 +322,8 @@ NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   NoteEvent(ardia_host::BrowserId(tab), @"contextMenu", @{@"items" : items});
   ArdiaLaunchConfig *config = ArdiaLaunchConfig.shared;
   if (![config testFlag:@"contextMenu"]) {
-    if (NSDictionary *held = ardia_host::Background() ? HoldForChoice(tab, menu, items) : nil) return held;
     if (ardia_host::Background()) {
+      CaptureForChoice(self, tab, menu, items);
       NSMutableArray<NSString *> *titles = [NSMutableArray array];
       for (NSDictionary *item in items)
         if (MenuItemType(item) != kMenuSeparator && Field<NSString>(item, @"label").length) [titles addObject:MenuTitle(item[@"label"])];
@@ -331,6 +346,20 @@ NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   NSDictionary *found = pick.length ? FindMenuItem(items, parts[0]) : nil;
   if (!found) return nil;
   return @{@"command" : found[@"command"], @"path" : found[@"path"], @"flags" : @(parts.count > 1 ? parts[1].intValue : 0)};
+}
+
++ (NSString *)runCapturedMenuCommand:(NSInteger)command tab:(NSString *)tabId documents:(NSInteger)documents url:(NSString *)url {
+  ArdiaCoreTab *tab = ardia_host::TabWithAppTabId(tabId);
+  if (!tab || tab.closed) return @"The tab that showed this menu has closed.";
+  if (tab.committedDocumentCount != documents || ![tab.url isEqualToString:url ?: @""])
+    return @"The page changed since this menu opened; open it again.";
+  NSString *action = CapturedEditActions()[@(command)];
+  if (!action) return @"Only the editing items (Undo, Redo, Cut, Copy, Paste, Delete, Select All) of a page's menu can be chosen in a hidden window until the engine runs the others itself.";
+  NSView *widget = PageWidgetView(tab.view);
+  SEL selector = NSSelectorFromString(action);
+  if (!widget || ![widget respondsToSelector:selector]) return @"The page can't take that command now.";
+  [NSApp sendAction:selector to:widget from:nil];
+  return nil;
 }
 
 @end

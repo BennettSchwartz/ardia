@@ -3,30 +3,43 @@ import ArdiaCore
 
 final class OpenSurfaces: NSObject {
   static let shared = OpenSurfaces()
+  static let capturedLifetime: TimeInterval = 60
 
   enum Problem: Error {
     case missing(String)
     case refused(String)
   }
 
+  private struct Captured {
+    let documents: Int
+    let url: String
+    let link: String
+    let items: [Any]
+  }
+
   private final class Tracked {
     let id: String
     let kind: String
     let menu: NSMenu?
-    let held: NSMutableDictionary?
+    let captured: Captured?
     let tab: String?
+    let window: String?
     let openedAt = Date()
-    init(id: String, kind: String, menu: NSMenu?, held: NSMutableDictionary?, tab: String?) {
+    init(id: String, kind: String, menu: NSMenu?, captured: Captured?, tab: String?, window: String?) {
       self.id = id
       self.kind = kind
       self.menu = menu
-      self.held = held
+      self.captured = captured
       self.tab = tab
+      self.window = window
     }
+    var expired: Bool { captured != nil && Date().timeIntervalSince(openedAt) > OpenSurfaces.capturedLifetime }
   }
 
   var send: ((String, [String: Any]) -> Void)?
-  var holdsPageMenus = false
+  var capturesPageMenus = false {
+    didSet { if !capturesPageMenus { closeCaptured { _ in true } } }
+  }
   private var open: [Tracked] = []
   private var next = 0
   private var observers: [NSObjectProtocol] = []
@@ -37,8 +50,9 @@ final class OpenSurfaces: NSObject {
     observers = [
       center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] in self?.began($0.object as? NSMenu) },
       center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] in self?.ended($0.object as? NSMenu) },
-      center.addObserver(forName: Notification.Name("ArdiaPageMenuOpened"), object: nil, queue: nil) { [weak self] in self?.heldOpened($0.object as? NSMutableDictionary) },
-      center.addObserver(forName: Notification.Name("ArdiaPageMenuClosed"), object: nil, queue: nil) { [weak self] in self?.heldClosed($0.object as? NSMutableDictionary) },
+      center.addObserver(forName: Notification.Name("ArdiaPageMenuCaptured"), object: nil, queue: nil) { [weak self] in
+        self?.captured($0.object as? [String: Any])
+      },
     ]
   }
 
@@ -54,7 +68,7 @@ final class OpenSurfaces: NSObject {
     return ""
   }
 
-  private static func inMenuBar(_ menu: NSMenu) -> Bool {
+  static func inMenuBar(_ menu: NSMenu) -> Bool {
     var current: NSMenu? = menu
     while let m = current {
       if m === NSApp.mainMenu { return true }
@@ -72,19 +86,27 @@ final class OpenSurfaces: NSObject {
     return "other"
   }
 
-  private static func pageTab() -> String? {
-    if let responder = NSApp.keyWindow?.firstResponder as? NSView, let tab = ArdiaWebView.appTabId(containing: responder) { return tab }
+  private static func focusedPage() -> (tab: String, window: String)? {
+    guard let key = NSApp.keyWindow, let responder = key.firstResponder as? NSView,
+          let tab = ArdiaWebView.appTabId(containing: responder), let window = WindowManager.shared.id(of: key) else { return nil }
+    return (tab, window)
+  }
+
+  private static func selectOwner() -> (tab: String, window: String)? {
     for window in NSApp.windows where window.isVisible {
-      if let tab = selectAnchor(in: window.contentView) { return tab }
+      if let anchor = selectAnchor(in: window.contentView), let tab = ArdiaWebView.appTabId(containing: anchor),
+         let id = WindowManager.shared.id(of: anchor.window) {
+        return (tab, id)
+      }
     }
     return nil
   }
 
-  private static func selectAnchor(in view: NSView?) -> String? {
+  private static func selectAnchor(in view: NSView?) -> NSView? {
     guard let view else { return nil }
     if NSStringFromClass(type(of: view)).contains("RenderWidgetHostViewCocoa"),
        view.subviews.contains(where: { type(of: $0) == NSView.self }) {
-      return ArdiaWebView.appTabId(containing: view)
+      return view
     }
     for sub in view.subviews { if let found = selectAnchor(in: sub) { return found } }
     return nil
@@ -93,36 +115,61 @@ final class OpenSurfaces: NSObject {
   private func began(_ menu: NSMenu?) {
     guard let menu, menu.supermenu == nil || menu === NSApp.mainMenu, !open.contains(where: { $0.menu === menu }) else { return }
     let kind = Self.kind(of: menu)
-    let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, held: nil, tab: kind == "select" || kind == "page" ? Self.pageTab() : nil)
+    let owner: (tab: String?, window: String?) = switch kind {
+    case "select": Self.selectOwner().map { ($0.tab, $0.window) } ?? (nil, nil)
+    case "page": Self.focusedPage().map { ($0.tab, $0.window) } ?? (nil, nil)
+    default: (nil, WindowManager.shared.id(of: NSApp.keyWindow))
+    }
+    let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
   }
 
   private func ended(_ menu: NSMenu?) {
     guard let menu, let index = open.firstIndex(where: { $0.menu === menu }) else { return }
+    close(at: index)
+  }
+
+  private func close(at index: Int) {
     let tracked = open.remove(at: index)
     send?("menuClosed", ["id": tracked.id, "kind": tracked.kind])
   }
 
-  private func heldOpened(_ box: NSMutableDictionary?) {
-    guard let box, holdsPageMenus else { return }
-    box["held"] = true
-    let tab = (box["tab"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-    let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, held: box, tab: tab)
+  private func closeCaptured(_ matching: (Tracked) -> Bool) {
+    while let index = open.firstIndex(where: { $0.captured != nil && matching($0) }) { close(at: index) }
+  }
+
+  private func captured(_ box: [String: Any]?) {
+    guard let box, capturesPageMenus, let tab = box["tab"] as? String, let window = WindowManager.shared.id(of: box["window"] as? NSWindow) else { return }
+    closeCaptured { _ in true }
+    let menu = Captured(documents: box["documents"] as? Int ?? -1, url: box["url"] as? String ?? "", link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
+    let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, captured: menu, tab: tab, window: window)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
   }
 
-  private func heldClosed(_ box: NSMutableDictionary?) {
-    guard let box, let index = open.firstIndex(where: { $0.held === box }) else { return }
-    let tracked = open.remove(at: index)
-    send?("menuClosed", ["id": tracked.id, "kind": tracked.kind])
+  static func ref(of item: NSMenuItem) -> String {
+    var titles: [String] = []
+    var current: NSMenuItem? = item
+    while let entry = current {
+      titles.insert(entry.title, at: 0)
+      current = entry.parent
+    }
+    let identity: String
+    if let command = item as? CommandItem {
+      identity = "cmd:" + (command.arg.map { "\(command.command):\($0)" } ?? command.command)
+    } else if let action = item.action {
+      identity = "sel:" + NSStringFromSelector(action)
+    } else {
+      identity = "none"
+    }
+    return identity + "@" + titles.joined(separator: "\u{1F}")
   }
 
   private static func row(_ item: NSMenuItem, path: [Int]) -> [String: Any] {
     var row: [String: Any] = [
       "path": path, "title": item.title, "enabled": item.isEnabled, "checked": item.state == .on, "mixed": item.state == .mixed,
-      "separator": item.isSeparatorItem, "hidden": item.isHidden, "alternate": item.isAlternate,
+      "separator": item.isSeparatorItem, "hidden": item.isHidden, "alternate": item.isAlternate, "ref": ref(of: item),
     ]
     if !item.keyEquivalent.isEmpty { row["key"] = item.keyEquivalent }
     if let command = item as? CommandItem {
@@ -143,14 +190,14 @@ final class OpenSurfaces: NSObject {
     }
   }
 
-  private static func heldRows(_ items: [Any], path: [Int]) -> [[String: Any]] {
+  private static func capturedRows(_ items: [Any], path: [Int]) -> [[String: Any]] {
     items.enumerated().compactMap { index, raw in
       guard let item = raw as? [String: Any], item["hidden"] as? Bool != true else { return nil }
       var row: [String: Any] = [
         "path": path + [index], "title": item["title"] ?? "", "enabled": item["enabled"] ?? false, "checked": item["checked"] ?? false,
         "separator": item["separator"] ?? false, "command": item["id"] ?? 0,
       ]
-      if let submenu = item["submenu"] as? [Any] { row["submenu"] = heldRows(submenu, path: path + [index]) }
+      if let submenu = item["submenu"] as? [Any] { row["submenu"] = capturedRows(submenu, path: path + [index]) }
       return row
     }
   }
@@ -158,18 +205,24 @@ final class OpenSurfaces: NSObject {
   private func describe(_ tracked: Tracked) -> [String: Any] {
     var out: [String: Any] = ["id": tracked.id, "kind": tracked.kind, "openedAt": tracked.openedAt.timeIntervalSince1970 * 1000]
     if let tab = tracked.tab { out["tab"] = tab }
+    if let window = tracked.window { out["window"] = window }
     if let menu = tracked.menu {
       out["items"] = Self.rows(menu, path: [], validate: false)
-    } else if let held = tracked.held {
-      out["items"] = Self.heldRows(held["items"] as? [Any] ?? [], path: [])
-      out["link"] = held["link"] ?? ""
+    } else if let captured = tracked.captured {
+      out["items"] = Self.capturedRows(captured.items, path: [])
+      out["link"] = captured.link
+      out["captured"] = true
     }
     return out
   }
 
-  func list() -> [[String: Any]] { open.map(describe) }
+  func list() -> [[String: Any]] {
+    closeCaptured { $0.expired }
+    return open.map(describe)
+  }
 
   private func find(_ id: String) throws -> Tracked {
+    closeCaptured { $0.expired }
     guard let tracked = open.first(where: { $0.id == id }) else { throw Problem.missing("There's no open menu \(id); menus.open lists them.") }
     return tracked
   }
@@ -177,17 +230,9 @@ final class OpenSurfaces: NSObject {
   func choose(_ id: String, path: [Int]) throws -> String {
     let tracked = try find(id)
     guard !path.isEmpty else { throw Problem.missing("path names an item.") }
-    if let held = tracked.held {
-      var items = held["items"] as? [Any] ?? []
-      var found: [String: Any]?
-      for (depth, step) in path.enumerated() {
-        guard step >= 0, step < items.count, let item = items[step] as? [String: Any] else { throw Problem.missing("There's no item at that path.") }
-        if depth == path.count - 1 { found = item } else { items = item["submenu"] as? [Any] ?? [] }
-      }
-      guard let item = found, item["separator"] as? Bool != true, item["submenu"] == nil else { throw Problem.refused("That item opens a submenu or is a separator.") }
-      guard item["enabled"] as? Bool == true else { throw Problem.refused("That item is turned off.") }
-      held["pick"] = ["command": item["id"] ?? 0, "path": path, "flags": 0]
-      return item["title"] as? String ?? ""
+    if let captured = tracked.captured { return try chooseCaptured(tracked, captured, path: path) }
+    guard tracked.kind == "select" || tracked.kind == "page" else {
+      throw Problem.refused("Only a page's menus are chosen here; menu bar items go through menus.runBar, and Ardia's own menus stay with you.")
     }
     guard let root = tracked.menu else { throw Problem.missing("That menu closed.") }
     var menu = root
@@ -204,9 +249,26 @@ final class OpenSurfaces: NSObject {
     return item.title
   }
 
+  private func chooseCaptured(_ tracked: Tracked, _ captured: Captured, path: [Int]) throws -> String {
+    var items = captured.items
+    var found: [String: Any]?
+    for (depth, step) in path.enumerated() {
+      guard step >= 0, step < items.count, let item = items[step] as? [String: Any] else { throw Problem.missing("There's no item at that path.") }
+      if depth == path.count - 1 { found = item } else { items = item["submenu"] as? [Any] ?? [] }
+    }
+    guard let item = found, item["separator"] as? Bool != true, item["submenu"] == nil else { throw Problem.refused("That item opens a submenu or is a separator.") }
+    guard item["enabled"] as? Bool == true else { throw Problem.refused("That item is turned off.") }
+    guard let tab = tracked.tab, let index = open.firstIndex(where: { $0 === tracked }) else { throw Problem.missing("That menu closed.") }
+    close(at: index)
+    if let problem = ArdiaWebView.runCapturedMenuCommand(item["id"] as? Int ?? 0, tab: tab, documents: captured.documents, url: captured.url) {
+      throw Problem.refused(problem)
+    }
+    return item["title"] as? String ?? ""
+  }
+
   func dismiss(_ id: String) throws {
     let tracked = try find(id)
-    if let held = tracked.held { held["done"] = true } else { tracked.menu?.cancelTracking() }
+    if tracked.captured != nil, let index = open.firstIndex(where: { $0 === tracked }) { close(at: index) } else { tracked.menu?.cancelTracking() }
   }
 }
 
@@ -219,22 +281,47 @@ enum MenuBarAction {
     "toggleAutomaticTextReplacement:", "uppercaseWord:", "lowercaseWord:", "capitalizeWord:", "startSpeaking:", "stopSpeaking:",
   ]
 
-  static func perform(_ path: [Int]) throws -> String {
+  static func item(at path: [Int], ref: String) throws -> (menu: NSMenu, index: Int, item: NSMenuItem) {
     guard var menu = NSApp.mainMenu, let last = path.last else { throw OpenSurfaces.Problem.missing("path names a menu bar item.") }
     for step in path.dropLast() {
       guard step >= 0, step < menu.numberOfItems, let submenu = menu.item(at: step)?.submenu else { throw OpenSurfaces.Problem.missing("There's no menu at that path.") }
       menu = submenu
     }
     menu.update()
-    guard last >= 0, last < menu.numberOfItems, let item = menu.item(at: last), !item.isSeparatorItem, item.submenu == nil, let action = item.action else {
+    guard last >= 0, last < menu.numberOfItems, let item = menu.item(at: last), !item.isSeparatorItem, item.submenu == nil else {
       throw OpenSurfaces.Problem.missing("There's no menu bar item at that path.")
     }
+    guard OpenSurfaces.ref(of: item) == ref else {
+      throw OpenSurfaces.Problem.refused("The menu bar changed since it was read; read it again with menus.bar.")
+    }
+    return (menu, last, item)
+  }
+
+  static func perform(_ path: [Int], ref: String, windowId: String) throws -> String {
+    let (_, _, item) = try item(at: path, ref: ref)
+    guard let action = item.action else { throw OpenSurfaces.Problem.missing("There's no menu bar item at that path.") }
     if item is CommandItem { throw OpenSurfaces.Problem.refused("That item runs an Ardia command; run it with run.") }
-    if !allowedActions.contains(NSStringFromSelector(action)) {
+    guard allowedActions.contains(NSStringFromSelector(action)) else {
       throw OpenSurfaces.Problem.refused("\(item.title) isn't an editing or window item the ardia command may choose (quitting, hiding, closing windows and updates have their own paths or stay with you).")
     }
     guard item.isEnabled else { throw OpenSurfaces.Problem.refused("\(item.title) is turned off.") }
-    menu.performActionForItem(at: last)
+    guard let window = WindowManager.shared.window(windowId), NSApp.keyWindow === window else {
+      throw OpenSurfaces.Problem.refused("Editing and window items act on the focused window, and that isn't the window the ardia command may use.")
+    }
+    guard let target = target(for: action, item: item, in: window) else { throw OpenSurfaces.Problem.refused("\(item.title) has nothing to act on in that window.") }
+    guard NSApp.sendAction(action, to: target, from: item) else { throw OpenSurfaces.Problem.refused("\(item.title) did nothing.") }
     return item.title
+  }
+
+  private static func target(for action: Selector, item: NSMenuItem, in window: NSWindow) -> AnyObject? {
+    if let fixed = item.target { return fixed.responds(to: action) ? fixed : nil }
+    var responder: NSResponder? = window.firstResponder
+    while let current = responder {
+      if current.responds(to: action) { return current }
+      responder = current.nextResponder
+    }
+    if window.responds(to: action) { return window }
+    if let delegate = window.delegate, delegate.responds(to: action) { return delegate }
+    return NSApp.responds(to: action) ? NSApp : nil
   }
 }
