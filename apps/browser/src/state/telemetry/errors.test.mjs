@@ -106,12 +106,12 @@ test("frames never carry the message when the header has no name, the message ch
   for (const secret of ["Quarterly", "customer.example"]) assert.equal(frames.includes(secret), false, secret);
   assert.deepEqual(events[0].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["choose"]);
   assert.deepEqual(events[2].properties.$exception_values, ["wrapper of a lookalike"]);
-  assert.deepEqual(events[3].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["apply", "choose"]);
+  assert.deepEqual(events[3].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["choose"]);
 });
 
 test("a frame made of message text never goes out, even when the message was shortened after the stack was taken", () => {
   const before = queued().length;
-  const shortened = new Error("Failed to save the draft\n    at Quarterly budget draft (customer.example:2:4)\n    at Another line of notes (notes.js:1:1)\n    at PrivateDraft (sensitive-project.js:2:4)");
+  const shortened = new Error("Failed to save the draft\n    at Quarterly budget draft (customer.example:2:4)\n    at Another line of notes (notes.js:1:1)\n    at PrivateDraft (sensitive-project.js:2:4)\n    at PrivateDraft (Private Project.js:2:4)\n    at PrivateDraft (sensitive-project.bundle:2:4)");
   void shortened.stack;
   shortened.message = "Failed to save the draft";
   captureException(shortened, "onerror");
@@ -119,6 +119,26 @@ test("a frame made of message text never goes out, even when the message was sho
   const frames = events[0].properties.$exception_list[0].stacktrace.frames;
   const json = JSON.stringify(frames);
   for (const secret of ["Quarterly", "customer.example", "Another line", "notes.js", "PrivateDraft", "sensitive-project"]) assert.equal(json.includes(secret), false, secret);
+});
+
+test("frames from Ardia's own code on each platform are sent, and nothing else", () => {
+  const before = queued().length;
+  const error = new Error("Platform frames");
+  error.stack = [
+    "Error: Platform frames",
+    "    at choose (http://localhost:8081/index.bundle//&platform=macos&dev=true&minify=false:123:45)",
+    "    at release (address at /Applications/Ardia.app/Contents/Resources/main.jsbundle:1:9876)",
+    "    at windows (index.windows.bundle:2:3)",
+    "    at linux (chrome://ardia/assets/index-AbC123xy.js:4:5)",
+    "    at bytecode (InternalBytecode.js:6:7)",
+    "    at apply (native)",
+    "    at PrivateDraft (sensitive-project.bundle:2:4)",
+    "    at PrivateDraft (Private Project.js:2:4)",
+    "    at PrivateDraft (https://example.com/app.js:2:4)",
+  ].join("\n");
+  captureException(error, "onerror");
+  const frames = queued().slice(before)[0].properties.$exception_list[0].stacktrace.frames;
+  assert.deepEqual(frames.map((f) => f.function).reverse(), ["choose", "release", "windows", "linux", "bytecode", "apply"]);
 });
 
 test("a native crash names its exception and the app's images at the top level, never its reason", async () => {

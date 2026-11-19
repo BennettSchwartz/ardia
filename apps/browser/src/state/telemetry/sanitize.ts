@@ -163,7 +163,7 @@ const LOCATION = /^(.*?)(?::(\d+))?(?::(\d+))?$/;
 
 const HEADERLESS_FRAME = /^\s*at |^[^@\n]*@(?:\S+:\d+(?::\d+)?|\[native code\])\s*$/;
 
-function stackFrames(error: unknown): ExceptionFrame[] {
+function stackFrames(error: unknown, keep: (file: string) => boolean): ExceptionFrame[] {
   if (!error || typeof error !== "object") return [];
   const { stack, name, message } = error as { stack?: unknown; name?: unknown; message?: unknown };
   if (typeof stack !== "string") return [];
@@ -171,20 +171,18 @@ function stackFrames(error: unknown): ExceptionFrame[] {
   const text = typeof message === "string" ? message : "";
   const headers = [kind && text ? `${kind}: ${text}` : "", text, kind].filter(Boolean);
   const header = headers.find((h) => stack.startsWith(h) && (stack.length === h.length || stack[h.length] === "\n"));
-  if (header !== undefined) return parseStack(stack.slice(header.length));
-  return HEADERLESS_FRAME.test(stack.split("\n", 1)[0]!) ? parseStack(stack) : [];
+  if (header !== undefined) return parseStack(stack.slice(header.length), 50, keep);
+  return HEADERLESS_FRAME.test(stack.split("\n", 1)[0]!) ? parseStack(stack, 50, keep) : [];
 }
 
-const CODE_FILE = /\.(?:bundle|jsbundle|hbc)$|^InternalBytecode\.js$/;
+const ARDIA_CODE = /^(?:native|(?:[^\s()]*\/)?InternalBytecode\.js|chrome:\/\/ardia\/[\w./-]+\.js|(?:[^\s()]*\/)?(?:index\.bundle|main\.jsbundle|index\.windows\.bundle)(?:[/?][^\s()]*)?)$/;
 const CODE_FUNCTION = /^(?:async |new )?[\w$.<>#:-]+(?: \[as [\w$]+\])?$/;
 
 export function errorFrames(error: unknown): ExceptionFrame[] {
-  return stackFrames(error)
-    .filter((frame) => frame.filename === "native" || frame.filename === "<unknown>" || CODE_FILE.test(frame.filename))
-    .map((frame) => (CODE_FUNCTION.test(frame.function) ? frame : { ...frame, function: "<anonymous>" }));
+  return stackFrames(error, (file) => ARDIA_CODE.test(file)).map((frame) => (CODE_FUNCTION.test(frame.function) ? frame : { ...frame, function: "<anonymous>" }));
 }
 
-export function parseStack(stack: unknown, limit = 50): ExceptionFrame[] {
+export function parseStack(stack: unknown, limit = 50, keep: (file: string) => boolean = () => true): ExceptionFrame[] {
   if (typeof stack !== "string") return [];
   const frames: ExceptionFrame[] = [];
   const lines = stack.split("\n");
@@ -202,6 +200,7 @@ export function parseStack(stack: unknown, limit = 50): ExceptionFrame[] {
       [fn, location] = [jsc[1], jsc[2]];
     }
     const loc = LOCATION.exec((location ?? "").replace(/^address at /, "")) ?? [];
+    if (!keep((loc[1] ?? "").trim())) continue;
     const filename = frameFile(loc[1]);
     frames.push({
       platform: "custom",
