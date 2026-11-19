@@ -41,7 +41,7 @@ export type OpenWindowOptions = {
   maximized?: boolean;
 };
 
-export type WindowGeometry = { frame: Rect4; zoomed: boolean; fullScreen: boolean; pageFullScreen?: boolean; miniaturized: boolean; visible: boolean; display: string | null; refused?: "offscreen" | "invalid" };
+export type WindowGeometry = { frame: Rect4; zoomed: boolean; fullScreen: boolean; pageFullScreen?: boolean; miniaturized: boolean; visible: boolean; display: string | null; refused?: "offscreen" | "invalid"; transition?: "busy" | "timeout" };
 
 export type DragPreviewShape = "hidden" | "pill" | "card";
 

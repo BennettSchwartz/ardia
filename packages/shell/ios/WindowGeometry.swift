@@ -3,6 +3,7 @@ import ArdiaCore
 
 extension WindowManager {
   static let fullScreenTransitionLimit: TimeInterval = 6
+  static let fullScreenRecoveryLimit: TimeInterval = 30
   static let coordinateLimit: CGFloat = 100_000
 
   func geometry(id: String) -> [String: Any]? {
@@ -43,32 +44,36 @@ extension WindowManager {
   }
 
   func setFullScreen(id: String, on: Bool, done: @escaping ([String: Any]?) -> Void) {
+    if let owner = FullScreenRequest.owners[id] {
+      guard owner.age >= Self.fullScreenRecoveryLimit else { return done(marked(id, "transition", "busy")) }
+      owner.release()
+    }
     guard let window = window(id), inFullScreen(id, window) != on, isMainWindow(window),
           !ArdiaChromeWindowHost.windowFullScreenIs(forPage: window)
     else { return done(geometry(id: id)) }
-    var observers: [NSObjectProtocol] = []
-    var finished = false
-    let finish = { [weak self] in
-      guard !finished else { return }
-      finished = true
-      for observer in observers { NotificationCenter.default.removeObserver(observer) }
-      done(self?.geometry(id: id))
+    let request = FullScreenRequest(windowId: id, done: done)
+    let finished = on ? NSWindow.didEnterFullScreenNotification : NSWindow.didExitFullScreenNotification
+    for name in [finished, NSWindow.willCloseNotification] {
+      request.observe(name, of: window) { [weak self, weak request] in
+        guard let request, request.owns else { return }
+        request.release()
+        request.reply(self?.geometry(id: id))
+      }
     }
-    let ended: [NSNotification.Name] = [NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification, NSWindow.willCloseNotification]
-    for name in ended {
-      observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
-        DispatchQueue.main.async(execute: finish)
-      })
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullScreenTransitionLimit) { [weak self, weak request] in
+      guard let request, request.owns else { return }
+      request.reply(self?.marked(id, "transition", "timeout"))
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullScreenTransitionLimit, execute: finish)
     window.toggleFullScreen(nil)
   }
 
-  private func refused(_ id: String, _ reason: String) -> [String: Any]? {
+  private func marked(_ id: String, _ key: String, _ value: String) -> [String: Any]? {
     guard var answer = geometry(id: id) else { return nil }
-    answer["refused"] = reason
+    answer[key] = value
     return answer
   }
+
+  private func refused(_ id: String, _ reason: String) -> [String: Any]? { marked(id, "refused", reason) }
 
   private func inFullScreen(_ id: String, _ window: NSWindow) -> Bool {
     isFullScreen(id) || window.styleMask.contains(.fullScreen)
@@ -86,5 +91,41 @@ extension WindowManager {
     }
     guard let best = NSScreen.screens.max(by: { overlap($0) < overlap($1) }), overlap(best) > 0 else { return nil }
     return best
+  }
+}
+
+final class FullScreenRequest {
+  static var owners: [String: FullScreenRequest] = [:]
+
+  let windowId: String
+  private let started = Date()
+  private var observers: [NSObjectProtocol] = []
+  private var done: (([String: Any]?) -> Void)?
+
+  init(windowId: String, done: @escaping ([String: Any]?) -> Void) {
+    self.windowId = windowId
+    self.done = done
+    Self.owners[windowId] = self
+  }
+
+  var owns: Bool { Self.owners[windowId] === self }
+  var age: TimeInterval { Date().timeIntervalSince(started) }
+
+  func observe(_ name: NSNotification.Name, of window: NSWindow, then: @escaping () -> Void) {
+    observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
+      DispatchQueue.main.async(execute: then)
+    })
+  }
+
+  func release() {
+    for observer in observers { NotificationCenter.default.removeObserver(observer) }
+    observers = []
+    if owns { Self.owners[windowId] = nil }
+  }
+
+  func reply(_ answer: [String: Any]?) {
+    guard let done else { return }
+    self.done = nil
+    done(answer)
   }
 }

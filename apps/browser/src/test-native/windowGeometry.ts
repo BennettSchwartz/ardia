@@ -2,7 +2,13 @@ import type { Rect4, WindowEvent, WindowGeometry, WindowsNative } from "@ardia/s
 
 export const windowGeometries = new Map<string, WindowGeometry>();
 
-export const geometryWorld = { screens: [[0, 0, 1920, 1080]] as Rect4[], transitionMs: 0 };
+export const geometryWorld = { screens: [[0, 0, 1920, 1080]] as Rect4[], transitionMs: 0, stalls: false };
+
+const transitions = new Map<string, () => void>();
+
+export function finishStalledTransition(id: string) {
+  transitions.get(id)?.();
+}
 
 type GeometryFakes = Pick<WindowsNative, "windowGeometry" | "setWindowFrame" | "setWindowZoomed" | "setWindowFullScreen">;
 
@@ -31,12 +37,19 @@ export function windowGeometryFakes(isOpen: (id: string) => boolean, emit: (even
       return Promise.resolve(copy(g));
     },
     setWindowFullScreen: (id, on) => {
+      if (transitions.has(id)) return Promise.resolve({ ...copy(of(id))!, transition: "busy" as const });
       const g = of(id);
       if (!g || g.fullScreen === on || g.pageFullScreen) return Promise.resolve(copy(g));
-      queueMicrotask(() => emit({ type: "fullScreen", id, on }));
+      const end = () => {
+        transitions.delete(id);
+        g.fullScreen = on;
+        emit({ type: "fullScreen", id, on });
+      };
+      transitions.set(id, end);
+      if (geometryWorld.stalls) return new Promise((resolve) => setTimeout(() => resolve({ ...copy(g)!, transition: "timeout" as const }), geometryWorld.transitionMs));
       return new Promise((resolve) =>
         setTimeout(() => {
-          g.fullScreen = on;
+          end();
           resolve(copy(g));
         }, geometryWorld.transitionMs),
       );
