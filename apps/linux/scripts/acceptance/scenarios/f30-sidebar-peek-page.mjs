@@ -30,17 +30,38 @@ export default {
         const width = await shell.eval("window.innerWidth");
         const path = side === "left" ? EDGE_PATHS.left : EDGE_PATHS.right.map((x) => width - (900 - x));
         await shell.eval(`(() => {
-          const record = globalThis.sidebarPeekRecord = { sent: [], requests: 0, peekFrames: 0, stopped: false };
+          const record = globalThis.sidebarPeekRecord = { sent: [], regionRequests: 0, peekFrames: 0, opens: 0, closes: 0, handleFrames: 0, handleUncovered: 0, stopped: false };
           const send = chrome.send.bind(chrome);
           chrome.send = (name, params) => {
-            const call = params?.[2];
-            if (name === "ardiaRequest") record.requests++;
+            const call = name === "ardiaRequest" ? params?.[2] : undefined;
             if (call?.method === "tab.viewport") record.sent.push(call.args.visible);
+            if (call?.method === "shell.inputRegions" && Array.isArray(call.args?.overlays)) record.regionRequests++;
             return send(name, params);
           };
+          const handleBeside = (mark) => {
+            for (let node = mark.parentElement; node; node = node.parentElement) {
+              const handle = [...node.children].find((child) => getComputedStyle(child).cursor === "col-resize");
+              if (handle) return handle;
+            }
+            return null;
+          };
+          let shown = false;
           const sample = () => {
             if (record.stopped) return void (chrome.send = send);
-            if (document.querySelector('[data-testid="ardia-sidebar-peek"]')) record.peekFrames++;
+            const mark = document.querySelector('[data-testid="ardia-sidebar-peek"]');
+            if (mark && !shown) record.opens++;
+            if (!mark && shown) record.closes++;
+            shown = !!mark;
+            if (mark) {
+              record.peekFrames++;
+              const handle = handleBeside(mark);
+              if (handle) {
+                record.handleFrames++;
+                const region = mark.getBoundingClientRect();
+                const grip = handle.getBoundingClientRect();
+                if (grip.left < region.left - 0.5 || grip.right > region.right + 0.5) record.handleUncovered++;
+              }
+            }
             requestAnimationFrame(sample);
           };
           requestAnimationFrame(sample);
@@ -55,11 +76,13 @@ export default {
           await shell.session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: Math.round(width / 2), y: 400 });
           await pause(900);
         }
-        const record = await shell.eval("(() => { const r = globalThis.sidebarPeekRecord; r.stopped = true; return { sent: r.sent, requests: r.requests, peekFrames: r.peekFrames }; })()");
+        const record = await shell.eval("(() => { const { stopped, ...r } = globalThis.sidebarPeekRecord; globalThis.sidebarPeekRecord.stopped = true; return r; })()");
         await t.evidence(`viewports-${side}-${addressBar}`, record);
         await t.screenshot(shell, `peek-${side}-${addressBar}`);
-        assert.ok(record.peekFrames > 0, "the sidebar must actually peek out");
-        assert.ok(record.requests > 0, "the host requests must pass through the recorder");
+        assert.ok(record.opens >= 2 && record.closes >= 2, `the sidebar must peek out and slide away twice: ${js(record)}`);
+        assert.ok(record.regionRequests > 0, "the shell's host requests must be read by the recorder");
+        assert.ok(record.handleFrames > 0, "the resize handle must be found beside the peek");
+        assert.equal(record.handleUncovered, 0, "the peek's input region must cover the resize handle on every frame");
         assert.ok(!record.sent.includes(false), `the page was hidden during the peek: ${js(record.sent)}`);
         return { viewports: record.sent.length, peekFrames: record.peekFrames };
       });

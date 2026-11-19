@@ -899,6 +899,8 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   `plainViewport`'s samples hit it and hid the page for a frame, a white flash on every peek (#2736); the handle's
   overhang did the same on a frame where it crossed a sample. `usage_counts.sidebar_peek_page_hides` counts a page that
   stopped drawing while the sidebar peeked, in every window like `sidebar_peeks`; it should stay near 0 against it.
+  It reads the same peek state that mounts the region, which is set in an effect after the commit that places the
+  panel, so a hide in a frame between the two goes uncounted.
 - **Header.** The menu button shows here whenever the window buttons are hidden (full screen); otherwise it is the
   `…` beside them. The profile name beside it follows the Mac's rule
   (`ProfileIndicator.tsx`): only in an Incognito window or with two or more profiles, cut when at least 52 px of it
