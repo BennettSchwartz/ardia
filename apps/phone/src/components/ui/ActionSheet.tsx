@@ -64,7 +64,7 @@ function MaterialDialogCard({ title, message, actions, cancel = "Cancel", onCanc
   const reduceMotion = useReduceMotion();
   const window = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const width = materialDialogWidth(window.fontScale, window.width - insets.left - insets.right);
+  const width = materialDialogWidth(window.width - insets.left - insets.right);
   const maxHeight = window.height - insets.top - insets.bottom - 2 * materialDialogLook.screenMargin;
   const spoken = useRef<ViewInstance>(null);
   const firstButton = useRef<ViewInstance>(null);
@@ -92,7 +92,7 @@ function MaterialDialogCard({ title, message, actions, cancel = "Cancel", onCanc
               <View ref={spoken} testID="drawnConfirmationHeading" accessible accessibilityRole="header" accessibilityLabel={heading} {...cancelAction}>
                 {title ? <Text style={[materialDialogLook.title, { color: paint.title }]}>{title}</Text> : null}
                 {message ? (
-                  <Text textBreakStrategy="balanced" style={[materialDialogLook.message, title ? styles.dialogMessage : null, { color: paint.message }]}>
+                  <Text style={[materialDialogLook.message, title ? styles.dialogMessage : null, { color: paint.message }]}>
                     {message}
                   </Text>
                 ) : null}
@@ -111,7 +111,7 @@ function MaterialDialogCard({ title, message, actions, cancel = "Cancel", onCanc
                   android_ripple={{ color: paint.ripple }}
                   style={styles.dialogButton}
                 >
-                  <Text style={[materialDialogLook.button, { color: button.destructive ? paint.destructive : paint.action }]}>{button.title}</Text>
+                  <Text style={[materialDialogLook.button, { color: button.dismisses ? paint.dismiss : button.destructive ? paint.destructive : paint.action }]}>{button.title}</Text>
                 </Pressable>
               ))}
             </View>
@@ -122,7 +122,7 @@ function MaterialDialogCard({ title, message, actions, cancel = "Cancel", onCanc
   );
 }
 
-export const materialDialogWidth = (fontScale: number, room: number) => Math.min(materialDialogLook.width * Math.max(1, fontScale), room - 2 * materialDialogLook.screenMargin);
+export const materialDialogWidth = (room: number) => Math.min(materialDialogLook.maxWidth, room - 2 * materialDialogLook.screenMargin);
 
 function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Props) {
   const theme = useTheme();

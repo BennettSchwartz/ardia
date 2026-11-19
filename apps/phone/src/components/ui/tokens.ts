@@ -225,7 +225,7 @@ const iPhoneMenuLook = {
 const androidMenuLook: typeof iPhoneMenuLook = {
   width: 250,
   radius: 16,
-  rim: 0,
+  rim: 0.5,
   row: 48,
   heading: 36,
   divider: 17,
@@ -246,7 +246,7 @@ const androidMenuLook: typeof iPhoneMenuLook = {
   dividerInset: 0,
   dividerLine: 1,
   label: { fontSize: 16, lineHeight: 24, letterSpacing: 0.5 },
-  labelLines: 3,
+  labelLines: 1,
   iconSide: "leading",
   disabledOpacity: 0.38,
   frost: "thin",
@@ -300,14 +300,14 @@ const androidMenuInk: typeof iPhoneMenuInk = {
     dim: ink.clear,
   },
   dark: {
-    fill: "#2A2427",
-    solid: "#2A2427",
+    fill: "#3A3337",
+    solid: "#3A3337",
     label: "#EBE0E4",
     icon: "#D3C2C8",
     destructive: "#FFB4AB",
     highlight: "rgba(235,224,228,0.1)",
-    divider: "#4F4449",
-    rim: ink.clear,
+    divider: "#5A4F54",
+    rim: "rgba(255,255,255,0.12)",
     specular: ink.clear,
     heading: "#D3C2C8",
     dim: ink.clear,
@@ -342,7 +342,7 @@ export const actionSheetInk = {
 } as const;
 
 export const materialDialogLook = {
-  width: 312,
+  maxWidth: 560,
   radius: 28,
   padding: 24,
   messageGap: 16,
@@ -359,8 +359,8 @@ export const materialDialogLook = {
 } as const;
 
 export const materialDialogInk = {
-  light: { surface: "#EDE7EA", title: "#1F1A1D", message: "#4F4449", action: "#894A67", destructive: "#BA1A1A", ripple: "rgba(137,74,103,0.12)", scrim: "rgba(0,0,0,0.32)" },
-  dark: { surface: "#322C2F", title: "#EBE0E4", message: "#D3C2C8", action: "#FFB0D0", destructive: "#FFB4AB", ripple: "rgba(255,176,208,0.12)", scrim: "rgba(0,0,0,0.32)" },
+  light: { surface: "#EDE7EA", title: "#1F1A1D", message: "#4F4449", dismiss: "#4F4449", action: "#894A67", destructive: "#BA1A1A", ripple: "rgba(137,74,103,0.12)", scrim: "rgba(0,0,0,0.32)" },
+  dark: { surface: "#362F33", title: "#EBE0E4", message: "#D3C2C8", dismiss: "#D3C2C8", action: "#FFB0D0", destructive: "#FFB4AB", ripple: "rgba(255,176,208,0.12)", scrim: "rgba(0,0,0,0.32)" },
 } as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;

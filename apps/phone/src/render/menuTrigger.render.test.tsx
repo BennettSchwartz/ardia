@@ -501,8 +501,8 @@ test("a confirmation's button labels wrap instead of truncating, and the card gr
   expect(confirmCardWidth(1, 393)).toBeCloseTo(240.3);
   expect(confirmCardWidth(1.5, 393)).toBeCloseTo(360.45);
   expect(confirmCardWidth(2, 393)).toBe(361);
-  expect(materialDialogWidth(1, 393)).toBe(312);
-  expect(materialDialogWidth(1.5, 393)).toBe(345);
+  expect(materialDialogWidth(393)).toBe(345);
+  expect(materialDialogWidth(1000)).toBe(560);
   const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
   const label = sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Close All Tabs")[0]!;
   expect(label.props.numberOfLines).toBeUndefined();

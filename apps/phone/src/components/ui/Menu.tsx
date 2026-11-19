@@ -150,7 +150,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const checks = rows.some((item) => typeof item === "object" && !("heading" in item) && !isSubmenu(item) && item.checked === true);
   const leading = menuLook.iconSide === "leading";
   const shift = checks ? CHECK_SHIFT : 0;
-  const labelLeft = (icon: boolean) => (icon && leading ? menuLook.labelInsetIcon : menuLook.labelInset) + shift - PRESS;
+  const iconGutter = MATERIAL && rows.some((item) => typeof item === "object" && !("heading" in item) && item.icon !== undefined);
+  const labelLeft = (icon: boolean) => ((icon || iconGutter) && leading ? menuLook.labelInsetIcon : menuLook.labelInset) + shift - PRESS;
   const iconLeft = menuLook.iconCentre + shift - PRESS - menuLook.iconSlot / 2;
   const pressed = (on: boolean, disabled?: boolean) => [styles.row, on && !MATERIAL ? { backgroundColor: paint.highlight } : null, disabled ? styles.disabled : null];
   const ripple = MATERIAL ? { android_ripple: { color: paint.highlight } } : null;
@@ -168,7 +169,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
       );
     if ("heading" in item)
       return (
-        <Text key={`h${index}`} accessibilityRole="header" style={[font.footnote, styles.heading, { paddingLeft: menuLook.labelInset + shift, color: paint.heading }]}>
+        <Text key={`h${index}`} accessibilityRole="header" style={[font.footnote, styles.heading, { paddingLeft: labelLeft(false) + PRESS, color: paint.heading }]}>
           {item.heading}
         </Text>
       );
