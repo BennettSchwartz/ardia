@@ -24,11 +24,13 @@ public class SharedFoldersModule: Module {
     }
 
     AsyncFunction("read") { (path: String, identity: [String: Int]?) -> [String: Any] in
-      SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).read()
+      guard let identity else { return ["exists": false, "error": Self.unconfirmed] }
+      return SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).read()
     }.runOnQueue(Self.work)
 
     AsyncFunction("apply") { (path: String, ops: String, identity: [String: Int]?) throws -> [String: Any] in
-      try SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).apply(json: ops)
+      guard let identity else { throw SharedFolderDirectory.failure(Self.unconfirmed) }
+      return try SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).apply(json: ops)
     }.runOnQueue(Self.work)
 
     AsyncFunction("resolve") { (path: String, promise: Promise) in
@@ -54,6 +56,7 @@ public class SharedFoldersModule: Module {
     OnDestroy { [weak self] in self?.watcher?.stop() }
   }
 
+  private static let unconfirmed = "Ardia can’t confirm which folder this is any more. Stop syncing it, then add it again."
   private static let dataDirectory = LaunchConfig.shared.dataDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }
   private static let testParent = LaunchConfig.shared.instance("sharedFolders").map { URL(fileURLWithPath: $0, isDirectory: true) }
 
