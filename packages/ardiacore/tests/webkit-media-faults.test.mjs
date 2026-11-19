@@ -6,6 +6,13 @@ import { createContext, runInContext } from "node:vm";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const pageScript = read("../ios/WebKitPageScript.swift");
 const faultsSwift = read("../ios/WebKitMediaFaults.swift");
+const chromiumPageScript = read("../ios/page_script.js");
+const fieldProviderKit = (() => {
+  const from = chromiumPageScript.indexOf("  const fieldProviderKit = ");
+  const to = chromiumPageScript.indexOf("  const nativeMutationObserver = ", from);
+  assert.ok(from >= 0 && to > from, "the field provider kit isn't in page_script.js");
+  return chromiumPageScript.slice(from, to);
+})();
 const tab = read("../ios/WebKitTab.swift");
 const engines = read("../../../apps/browser/src/state/engines/engines.ts");
 
@@ -23,7 +30,7 @@ const rawString = (text, name) => {
   const from = text.indexOf('"""', start) + 3;
   return text.slice(from, text.indexOf('"""#', from));
 };
-const filled = (script) => script.replace("\\#(WebKitMediaFaults.sitesJSON)", JSON.stringify(sites)).replace("\\#(WebKitMediaFaults.pageScript)", rawString(faultsSwift, "pageScript"));
+const filled = (script) => script.replace("\\#(WebKitMediaFaults.sitesJSON)", JSON.stringify(sites)).replace("\\#(WebKitMediaFaults.pageScript)", rawString(faultsSwift, "pageScript")).replace("\\#(fieldProviderKit)", () => fieldProviderKit);
 const bridge = filled(rawString(pageScript, "mediaBridge"));
 const source = filled(rawString(pageScript, "source"));
 
@@ -113,6 +120,7 @@ function page({ protocol = "https:", hostname = sites[0] } = {}) {
     addEventListener() {},
     performance: { now: () => 0 },
     setTimeout() {},
+    requestAnimationFrame() {},
     webkit: { messageHandlers: { ardia: { postMessage: (message) => posted.push(JSON.parse(JSON.stringify(message))) } } },
   };
   window.window = window;
