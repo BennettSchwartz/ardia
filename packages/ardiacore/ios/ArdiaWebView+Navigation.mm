@@ -69,10 +69,10 @@ NSString *PNGDataURL(NSImage *image) {
     NSMutableDictionary *withInitial = [navigation mutableCopy];
     withInitial[@"initialDocumentAccessed"] = @(_tab.initialDocumentAccessed);
     withInitial[@"committedInitial"] = @(_tab.committedInitial);
+    [self noteDocumentCommits];
+    withInitial[@"committedAt"] = @(_commits.at);
     if (ArdiaWebView.reportsCommits) {
-      [self noteDocumentCommits];
       withInitial[@"committedUrl"] = [self committedURL];
-      withInitial[@"committedAt"] = @(_commits.at);
       if (_commits.httpStatus > 0) withInitial[@"httpStatus"] = @(_commits.httpStatus);
     }
     navigation = withInitial;

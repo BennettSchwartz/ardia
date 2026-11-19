@@ -880,7 +880,7 @@
       else {
         if (!observer && FrameMutationObserver) {
           observer = new FrameMutationObserver(scanSoon);
-          observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "href"] });
+          observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["src", "href", "class", "style", "hidden"] });
         }
         onReady(scan);
       }

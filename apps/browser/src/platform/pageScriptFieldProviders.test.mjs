@@ -109,8 +109,9 @@ function frame({ barcodes = true, timers = null, isTop = true, toRGBA = () => nu
       this.observing = false;
       observers.push(this);
     }
-    observe() {
+    observe(target, options) {
       this.observing = true;
+      this.options = options;
     }
     disconnect() {
       this.observing = false;
@@ -463,6 +464,15 @@ test("a QR image inside a hidden container is scanned once it is shown", async (
   page.observers[0].callback();
   await page.settle();
   assert.deepEqual(page.codes(), [{ kind: "verificationCode", data: { url: totp, generation: 1 } }]);
+});
+
+test("revealing a QR image through an ancestor's class, style or hidden change triggers a scan", async () => {
+  const page = frame();
+  page.configure(LOGIN);
+  await page.settle();
+  const { attributes, subtree, attributeFilter } = page.observers[0].options;
+  assert.ok(attributes && subtree);
+  for (const name of ["class", "style", "hidden", "src", "href"]) assert.ok(attributeFilter.includes(name), name);
 });
 
 test("a QR image laid out too small or stretched is checked again once its layout changes", async () => {
