@@ -328,27 +328,34 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   choke point (`socketSharedChokePoint.ts`). Every request for a method the catalogue marks as changing something
   (`mutates`; every method declares it, and a test fails if one doesn't), `run` and plugin methods included, runs in a
   socket-origin context. Its first synchronous stretch, and each stretch that resumes after an await and re-checks
-  control through `stillOn` before it changes anything, is checked when the stretch ends, in the next microtask, so
-  before any shared-folder round reads the store (rounds read only from a timer or an awaited callback). The check
+  control through `stillOn` before it changes anything, is checked when the stretch ends, in the next microtask. The check
   compares the synced projection of every bound group and everything inside it, which is exactly what the
   shared-folder engine would write: each link's name and URL, their order, and nested groups. If it changed, only the
   bound groups' trees go back: their groups, member tabs, the splits those tabs are in, and their places and the active
   tab in their windows. Everything else stays as it is now. The request then answers `refused` ("shared folder groups
-  change only from the sidebar"). When the shared-folder engine's own merge writes the store during an open check, the
-  check takes the engine's result as its new starting point, so sync's own changes are never undone or blamed on the
-  socket. A stretch of another request starting while a check is open ends that check first, so each check covers one
+  change only from the sidebar"). A write that isn't the socket's and can land while a check is open goes through a hook that ends the open check
+  first (refusing the request if the socket had already changed the projection), makes the write, then opens the
+  check again on the result: the shared-folder engine's merge (`syncWriteHooks`), and the sidebar's and other UI writes
+  that follow an await, such as a close confirmed in a sheet, a rename typed into a prompt, or a profile picked from a
+  menu (`uiWriteHooks`). So neither is undone or blamed on the socket, and neither absorbs the socket's own change. A stretch of another request starting while a check is open ends that check first, so each check covers one
   request. A guard called after its request has answered (a live refresh that goes on, the guards handed to
   `goBackAsking` and `closeWindowAsked`) only checks control and opens no check. Read-only requests open none either.
   Muting, sleeping, activating, colour, icon and collapsing don't touch the projection, so they still work, and so do
   closing or parking a window that shows the folder. A socket-reachable action that awaits before it writes the store
-  takes the request's guard and calls it after each await (`closeTab`, `closeGroup`, `sleepTab`); a test lists every
-  async function the socket and `run`'s command table import and fails if one writes after an await without its guard
-  (`socketAwaitGuards.test.mjs`). Earlier, more specific refusals remain where they read better or where a rollback
+  takes the request's guard and calls it after each await, or, when the write is a person's answer to a sheet, menu,
+  prompt or picker, makes it through `uiWriteHooks`. `scripts/socketGuardLint.mjs` checks this with the TypeScript
+  compiler. It starts from every function in `state/automation` and `run`'s command table and follows calls, plain
+  wrappers of async helpers, store actions reached through helpers or destructuring, and `.then`/`.catch`/`.finally`
+  callbacks, up to five calls deep. It fails on any store write after an await that isn't preceded by a guard call
+  (`socketGuardLint.test.mjs`). `run` answers synchronously, so a guard called after an await inside one of its
+  commands opens no check: `run` `closeTab` and `closeTabGroup` on a shared folder's tree are protected by the
+  up-front refusal below, not by the check. Earlier, more specific refusals remain where they read better or where a rollback
   can't reach, because the action reaches a page or the engine before any check runs:
   - `apply`'s per-op check (`workspaceSharedGuard.ts`);
   - `pins.createFolder` and `pins.addToFolder` for a member;
   - `tabs.navigate`, `tabs.back`, `tabs.forward` and `run` `back`/`forward` on a member with no pinned home;
   - `run` `closeTab` and `closeTabGroup` when the tab or its group is in a shared folder's tree;
+  - `profiles.delete` of a profile that has a shared folder;
   - `airTraffic.addRule`/`updateRule` for a group in a shared folder's tree.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
