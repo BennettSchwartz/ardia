@@ -4,48 +4,13 @@ const { S, tick, socketClient, freshWindow } = await import("./fixtures/socketHa
 const { usePages } = await import("../tabs/pageState.ts");
 const { webviews } = await import("../../platform/webviews.ts");
 const stub = await import("../../test-native/index.ts");
-const { showPasswordPrompt, showAutofillPrompt, answerAutofillPrompt } = await import("../site/prompts.ts");
-const { startPermissionPrompts } = await import("../site/permissions.ts");
-const { currentEngineProfile } = await import("../browser/current.ts");
+const { showAutofillPrompt, answerAutofillPrompt } = await import("../site/prompts.ts");
 const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
 setConsentPeriod(true, "socket-native-ui-round2-test");
 
 const { call, ok } = socketClient(33);
 
-let slowId = 9000;
-async function slowCall(method, params) {
-  const id = ++slowId;
-  const before = stub.controlSocket.replies.length;
-  stub.emitControlRequest({ connection: 33, generation: stub.controlSocket.generation, line: JSON.stringify({ id, method, params }) });
-  for (let waited = 0; waited < 8000; waited += 50) {
-    const reply = stub.controlSocket.replies.slice(before).find((r) => r.connection === 33);
-    if (reply) return JSON.parse(reply.line);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`no reply to ${method}`);
-}
-
 const item = (path, title, more) => ({ path, title, enabled: true, checked: false, separator: false, ...more });
-
-test("a password answer carries the offer it was listed for, so a replacement the engine already delivered is refused", async () => {
-  const { tab } = await freshWindow("https://login.example/");
-  let nativeOffer = 5;
-  const seen = [];
-  webviews.set(tab, { answerPasswordPrompt: async (action, expected) => (seen.push(expected), expected.offerSerial === nativeOffer) });
-  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [], offerSerial: 5 });
-  const [row] = await ok("passwords.prompts");
-  nativeOffer = 6;
-  const reply = await call("passwords.respond", { tab, id: row.id, decision: "save" });
-  assert.equal(reply.error?.code, "failed");
-  assert.equal(seen[0].offerSerial, 5, "the native check gets the listed offer");
-  assert.ok(usePages.getState().pages[tab].passwordPrompt, "the prompt stays up");
-  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [] });
-  const [unnumbered] = await ok("passwords.prompts");
-  seen.length = 0;
-  assert.equal((await call("passwords.respond", { tab, id: unnumbered.id, decision: "save" })).error?.code, "failed");
-  assert.deepEqual(seen, [], "an offer without a native serial never reaches the engine");
-  webviews.delete(tab);
-});
 
 test("the on-screen autofill buttons answer only the prompt they were drawn for", async () => {
   const { tab } = await freshWindow("https://shop.example/");
@@ -103,7 +68,7 @@ test("a menu bar with no key window sends window actions to the window it was li
   stub.surfaces.performed.length = 0;
   const [listed] = await ok("menus.open");
   await ok("menus.choose", { menu: "kb1", path: minimize.path, ref: minimize.ref });
-  assert.equal(stub.surfaces.performed.at(-1).windowId, listed.window);
+  assert.deepEqual([stub.surfaces.performed.at(-1).menu, stub.surfaces.performed.at(-1).windowId], ["kb1", listed.window], "native gets the tracked menu and the listed window, and refuses when no window is key");
 });
 
 test("menus.choose resolves a path only inside the tracked menu", async () => {
@@ -132,32 +97,3 @@ test("turning control off during the native check stops a menu bar command befor
   assert.equal(Object.keys(S().tabs).length, tabsBefore, "run never ran");
 });
 
-test("allow is confirmed by the site's setting, and an answer the setting doesn't show is an unknown outcome, not ok", async () => {
-  const { tab } = await freshWindow("https://cam.example/");
-  startPermissionPrompts();
-  const profile = currentEngineProfile(S().tabs[tab].profileId);
-  stub.emitPermission({ id: "c1", tabId: tab, origin: "https://cam.example/", permissions: ["camera"] });
-  stub.emitPermission({ id: "c2", tabId: tab, origin: "https://cam.example/", permissions: ["microphone"] });
-  await tick();
-  stub.permissionReadback.onAnswer = ({ id }) =>
-    id === "c1" && setTimeout(() => stub.siteSettingsDb.set(`${profile}\nhttps://cam.example`, { camera: "allow" }), 400);
-  assert.deepEqual((await slowCall("permissions.respond", { id: "c1", decision: "allow" })).result, { ok: true, id: "c1", decision: "allow" });
-  assert.equal(usePages.getState().pages[tab].permission.id, "c2");
-  stub.permissionReadback.onAnswer = null;
-  const started = Date.now();
-  const reply = await slowCall("permissions.respond", { id: "c2", decision: "block" });
-  assert.equal(reply.error?.code, "failed");
-  assert.match(reply.error.message, /outcome is unknown/);
-  assert.ok(Date.now() - started >= 4500);
-  assert.equal(usePages.getState().pages[tab].permission.id, "c2", "the queue waits for a confirmation");
-});
-
-test("a permission whose kinds have no readable setting is refused", async () => {
-  const { tab } = await freshWindow("https://cam.example/");
-  startPermissionPrompts();
-  stub.emitPermission({ id: "s1", tabId: tab, origin: "https://cam.example/", permissions: ["screen"] });
-  await tick();
-  stub.resolvedPermissions.length = 0;
-  assert.equal((await call("permissions.respond", { id: "s1", decision: "allow" })).error.code, "refused");
-  assert.deepEqual(stub.resolvedPermissions, []);
-});

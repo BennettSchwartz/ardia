@@ -40,7 +40,7 @@ test("menus.choose on the tracking menu bar goes through the runBar rules, never
   assert.equal((await call("menus.choose", { menu: "bar1", path: selectAll.path, ref: quit.ref })).error.code, "refused", "a ref for another item");
   const done = await ok("menus.choose", { menu: "bar1", path: selectAll.path, ref: selectAll.ref });
   assert.equal(done.action, "selectAll:");
-  assert.deepEqual(stub.surfaces.performed, [{ path: selectAll.path, ref: selectAll.ref, windowId }], "the native allowlist decides, at the window it names");
+  assert.deepEqual(stub.surfaces.performed, [{ menu: "bar1", path: selectAll.path, ref: selectAll.ref, windowId }], "the native allowlist decides, inside the tracked menu, at the window it names");
   assert.deepEqual(stub.surfaces.chosen, [], "the menu's own item is never performed directly");
 });
 
@@ -78,23 +78,20 @@ test("every menu needs a known owner outside private windows", async () => {
   assert.equal((await call("menus.runBar", { path: [2, 4], ref: "sel:selectAll:@Edit\u001fSelect All", window: priv })).error.code, "refused");
 });
 
-test("a password answer for a prompt that was replaced is refused", async () => {
+test("a password answer is refused: for a replaced prompt as closed, for the current one until the engine names offers", async () => {
   const { tab } = await freshWindow("https://login.example/");
   const answers = [];
-  webviews.set(tab, { answerPasswordPrompt: async (...a) => (answers.push(a), true) });
-  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [], offerSerial: 1 });
+  webviews.set(tab, { resolvePasswordPrompt: (...a) => answers.push(a) });
+  showPasswordPrompt(tab, { state: "save", origin: "https://login.example", username: "a", passwordLength: 4, federation: "", usernames: [] });
   const [first] = await ok("passwords.prompts");
-  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "b", passwordLength: 4, federation: "", usernames: [], offerSerial: 2 });
+  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "b", passwordLength: 4, federation: "", usernames: [] });
   const [second] = await ok("passwords.prompts");
   assert.notEqual(first.id, second.id);
   assert.equal((await call("passwords.respond", { tab, id: first.id, decision: "update" })).error.code, "no_window");
-  assert.equal((await call("passwords.respond", { tab, id: second.id, decision: "save" })).error.code, "bad_request");
+  assert.equal((await call("passwords.respond", { tab, id: second.id, decision: "update" })).error.code, "refused");
   assert.deepEqual(answers, []);
-  await ok("passwords.respond", { tab, id: second.id, decision: "update" });
-  assert.equal(answers.length, 1);
   webviews.delete(tab);
 });
-
 test("an autofill answer for a replaced prompt is refused, and a native refusal is a failure", async () => {
   const { tab } = await freshWindow("https://shop.example/");
   let accepts = true;
@@ -141,29 +138,15 @@ test("an update address prompt is described from its fields, never the engine's 
   assert.equal(listed[0].description, "Update a saved address: address, phone change");
 });
 
-test("a permission whose native request is gone fails instead of answering", async () => {
-  const { tab } = await freshWindow("https://cam.example/");
-  startPermissionPrompts();
-  stub.emitPermission({ id: "g1", tabId: tab, origin: "https://cam.example", permissions: ["camera"] });
-  stub.emitPermission({ id: "g2", tabId: tab, origin: "https://cam.example", permissions: ["microphone"] });
-  await tick();
-  stub.gonePermissions.add("g1");
-  assert.equal((await call("permissions.respond", { id: "g1", decision: "allow" })).error.code, "failed");
-  assert.equal(usePages.getState().pages[tab].permission.id, "g2", "the gone prompt leaves and the next shows");
-});
-
-test("allowOnce needs a known kind list made only of kinds a one-time grant covers", async () => {
-  for (const [id, permissions] of [["o1", []], ["o2", ["camera", "notifications"]]]) {
+test("every permission decision is refused, whatever the kinds", async () => {
+  for (const [id, permissions] of [["o1", []], ["o2", ["camera", "notifications"]], ["o3", ["camera"]]]) {
     const { tab } = await freshWindow("https://cam.example/");
     startPermissionPrompts();
     stub.emitPermission({ id, tabId: tab, origin: "https://cam.example", permissions });
     await tick();
-    const reply = await call("permissions.respond", { id, decision: "allowOnce" });
-    assert.equal(reply.error.code, "refused");
-    assert.match(reply.error.message, /Only camera, microphone and location/);
+    for (const decision of ["allowOnce", "allow"]) assert.equal((await call("permissions.respond", { id, decision })).error.code, "refused", `${id} ${decision}`);
   }
 });
-
 test("password prompts list at most 20 usernames with the full count, in replies and events", async () => {
   const { tab } = await freshWindow("https://login.example/");
   await ok("subscribe", { events: ["password.prompted"] });
@@ -174,7 +157,7 @@ test("password prompts list at most 20 usernames with the full count, in replies
   const [row] = await ok("passwords.prompts");
   assert.equal(row.usernames.length, 20);
   assert.equal(row.usernameCount, 50);
-  assert.ok(row.usernames.every((u, i) => u.id === `u${i}` && u.name.length <= 256));
+  assert.ok(row.usernames.every((u) => /^u-[0-9a-f]{16}$/.test(u.id) && u.name.length <= 256));
   const event = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line)).find((e) => e.event === "password.prompted");
   assert.equal(event.data.usernames.length, 20);
   assert.equal(event.data.usernameCount, 50);

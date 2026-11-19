@@ -7,7 +7,6 @@ const { webviews } = await import("../../platform/webviews.ts");
 const { takeCliCounts } = await import("../telemetry/cliCounts.ts");
 const stub = await import("../../test-native/index.ts");
 const { showPasswordPrompt } = await import("../site/prompts.ts");
-const { currentEngineProfile } = await import("../browser/current.ts");
 const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
 setConsentPeriod(true, "socket-native-ui-test");
 
@@ -20,47 +19,23 @@ async function promptOn(tab, id, permissions) {
   await tick();
 }
 
-function readsBack(profileValue) {
-  stub.permissionReadback.onAnswer = ({ id, result, remember }) => {
-    const origin = "https://cam.example";
-    const kinds = { p10: ["camera"], p11: ["notifications"], p20: ["location"], p21: ["microphone"] }[id] ?? [];
-    if (!remember) return;
-    for (const profile of profileValue) {
-      const key = `${profile}\n${origin}`;
-      stub.siteSettingsDb.set(key, { ...(stub.siteSettingsDb.get(key) ?? {}), ...Object.fromEntries(kinds.map((k) => [k, result === "accept" ? "allow" : "block"])) });
-    }
-  };
-}
-
-test("a permission prompt on screen is listed and answered through the prompt's own path", async () => {
+test("a permission prompt on screen is listed, and answering it is refused until the engine reports results", async () => {
   const { windowId, tab } = await freshWindow("https://cam.example/");
-  readsBack([currentEngineProfile(S().tabs[tab].profileId)]);
   await promptOn(tab, "p10", ["camera"]);
   await promptOn(tab, "p11", ["notifications"]);
   const listed = await ok("permissions.prompts");
   assert.deepEqual(listed, [{ id: "p10", window: windowId, tab, origin: "https://cam.example", permissions: ["camera"], queued: 1 }]);
   stub.resolvedPermissions.length = 0;
-  assert.deepEqual(await ok("permissions.respond", { id: "p10", decision: "allow" }), { ok: true, id: "p10", decision: "allow" });
-  assert.deepEqual(stub.resolvedPermissions, [{ id: "p10", result: "accept", remember: true }]);
-  assert.equal(usePages.getState().pages[tab].permission.id, "p11", "the next prompt shows");
-  assert.equal((await call("permissions.respond", { id: "p11", decision: "allowOnce" })).error.code, "refused");
-  await ok("permissions.respond", { id: "p11", decision: "block" });
-  assert.deepEqual(stub.resolvedPermissions.at(-1), { id: "p11", result: "deny", remember: true });
-  assert.equal((await call("permissions.respond", { id: "p11", decision: "allow" })).error.code, "no_window");
-  assert.equal((await call("permissions.respond", { id: "p12", decision: "maybe" })).error.code, "bad_request");
-  stub.permissionReadback.onAnswer = null;
-});
-
-test("allowOnce and dismiss are refused, since nothing the engine shows confirms them", async () => {
-  const { tab } = await freshWindow("https://cam.example/");
-  await promptOn(tab, "p20", ["location"]);
-  stub.resolvedPermissions.length = 0;
-  assert.equal((await call("permissions.respond", { id: "p20", decision: "allowOnce" })).error.code, "refused");
-  assert.equal((await call("permissions.respond", { id: "p20", decision: "dismiss" })).error.code, "refused");
+  for (const decision of ["allow", "allowOnce", "block", "dismiss"]) {
+    const reply = await call("permissions.respond", { id: "p10", decision });
+    assert.equal(reply.error.code, "refused", decision);
+    assert.match(reply.error.message, /ac_permissions\.mm/);
+  }
   assert.deepEqual(stub.resolvedPermissions, []);
-  assert.equal(usePages.getState().pages[tab].permission.id, "p20");
+  assert.equal(usePages.getState().pages[tab].permission.id, "p10");
+  assert.equal((await call("permissions.respond", { id: "p99", decision: "allow" })).error.code, "no_window");
+  assert.equal((await call("permissions.respond", { id: "p10", decision: "maybe" })).error.code, "bad_request");
 });
-
 test("a prompt in a private window stays invisible", async () => {
   await freshWindow();
   const priv = S().createWindow({ kind: "private", url: "https://cam.example/" });
@@ -70,23 +45,23 @@ test("a prompt in a private window stays invisible", async () => {
   assert.equal((await call("permissions.respond", { id: "p30", decision: "allow" })).error.code, "no_window");
 });
 
-test("password and autofill prompts are answered with their own buttons, never showing the password", async () => {
+test("password prompts are listed but not answered, and autofill prompts are answered with their own buttons", async () => {
   const { tab } = await freshWindow("https://login.example/");
   const answers = [];
   webviews.set(tab, {
-    answerPasswordPrompt: async (...a) => (answers.push(["password", ...a]), true),
+    resolvePasswordPrompt: (...a) => answers.push(["password", ...a]),
     answerAutofillPrompt: async (...a) => (answers.push(["autofill", ...a]), true),
   });
-  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "me", passwordLength: 9, federation: "", usernames: ["me", "you"], offerSerial: 3 });
+  showPasswordPrompt(tab, { state: "update", origin: "https://login.example", username: "me", passwordLength: 9, federation: "", usernames: ["me", "you"] });
   const [row] = await ok("passwords.prompts");
   assert.equal(row.state, "update");
   assert.equal("passwordLength" in row, false);
-  assert.equal((await call("passwords.respond", { tab, id: row.id, decision: "save" })).error.code, "bad_request");
-  assert.deepEqual(row.usernames, [{ id: "u0", name: "me" }, { id: "u1", name: "you" }]);
-  assert.equal((await call("passwords.respond", { tab, id: row.id, decision: "update", usernameId: "u7" })).error.code, "bad_request");
-  await ok("passwords.respond", { tab, id: row.id, decision: "update", usernameId: "u1" });
-  assert.deepEqual(answers.at(-1), ["password", "update", { state: "update", origin: "https://login.example", username: "me", offerSerial: 3 }, "you"]);
-  assert.equal(usePages.getState().pages[tab].passwordPrompt, null);
+  assert.deepEqual(row.usernames.map((u) => u.name), ["me", "you"]);
+  const reply = await call("passwords.respond", { tab, id: row.id, decision: "update", usernameId: row.usernames[1].id });
+  assert.equal(reply.error.code, "refused");
+  assert.match(reply.error.message, /ac_password_prompt\.mm/);
+  assert.deepEqual(answers, []);
+  assert.ok(usePages.getState().pages[tab].passwordPrompt);
   patchPage(tab, { autofillPrompt: { id: 4, kind: "saveCard", origin: "https://login.example", title: "Save card?", message: "", accept: "Save", decline: "No thanks", footer: "", lines: ["Visa 1234"] } });
   const [card] = await ok("autofill.prompts");
   assert.equal("lines" in card, false);
@@ -95,7 +70,6 @@ test("password and autofill prompts are answered with their own buttons, never s
   assert.equal((await call("autofill.respond", { tab, id: 4, decision: "accept" })).error.code, "no_window");
   webviews.delete(tab);
 });
-
 test("open menus are listed, chosen from and closed through the native menu", async () => {
   const { windowId, tab } = await freshWindow();
   stub.surfaces.open = [
@@ -146,7 +120,7 @@ test("menus.runBar sends Ardia commands through run and other items through the 
   assert.equal((await call("menus.runBar", { path: [1, 2], ref: "cmd:newWindow@File\u001fOff" })).error.code, "refused");
   assert.equal((await call("menus.runBar", { path: [1, 1], ref: "x" })).error.code, "no_window");
   assert.deepEqual(await ok("menus.runBar", { path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", window: windowId }), { ok: true, title: "performed", action: "copy:" });
-  assert.deepEqual(stub.surfaces.performed.at(-1), { path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", windowId });
+  assert.deepEqual(stub.surfaces.performed.at(-1), { menu: null, path: [2, 0], ref: "sel:copy:@Edit\u001fCopy", windowId });
   assert.equal((await ok("menus.bar")).length, 2);
 });
 
