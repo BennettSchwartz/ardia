@@ -314,7 +314,7 @@ final class TalkToMe {
     if case .failed = session.phase { return stop() }
     if let step = feed.advance(answer: session.answer, finished: finished) {
       if step.restarted { speaker.stop() }
-      if !step.text.isEmpty { speaker.speak(step.text) }
+      for line in step.text.split(whereSeparator: \.isNewline) { speaker.speak(String(line)) }
     }
     if case .other = feed.language { return stop() }
     if finished, !speaker.isSpeaking { stop() }
