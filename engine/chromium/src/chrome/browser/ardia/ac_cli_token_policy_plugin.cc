@@ -15,6 +15,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "chrome/browser/profiles/profile.h"
@@ -107,9 +108,28 @@ const std::set<std::string_view>& PluginKeyCommands() {
   return *commands;
 }
 
+bool IsClipboardKey(const base::DictValue& params) {
+  const int modifiers = params.FindInt("modifiers").value_or(0) & 15;
+  const int code = params.FindInt("windowsVirtualKeyCode").value_or(0);
+  const std::string* key = params.FindString("key");
+  for (const PluginClipboardKey& entry : kPluginClipboardKeys) {
+    if (entry.modifiers != modifiers) {
+      continue;
+    }
+    if (entry.dom_key[0] ? (key && *key == entry.dom_key)
+                         : code == entry.windows_key_code) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::string KeyEventRefusal(const base::DictValue& params) {
   if (params.Find("nativeVirtualKeyCode") || params.Find("isSystemKey")) {
     return "with a native key code or a system key";
+  }
+  if (IsClipboardKey(params)) {
+    return "with a key that cuts, copies or pastes";
   }
   const base::Value* commands = params.Find("commands");
   if (!commands) {
@@ -125,6 +145,29 @@ std::string KeyEventRefusal(const base::DictValue& params) {
     }
   }
   return std::string();
+}
+
+bool FrameInTargetContents(const std::string* target_id,
+                           const std::string* frame_token) {
+  if (!frame_token) {
+    return true;
+  }
+  content::DevToolsAgentHost* host =
+      target_id ? content::ArdiaDevToolsAgentHostForId(*target_id) : nullptr;
+  content::WebContents* contents = host ? host->GetWebContents() : nullptr;
+  if (!contents) {
+    return false;
+  }
+  bool found = false;
+  contents->ForEachRenderFrameHostWithAction(
+      [&](content::RenderFrameHost* frame) {
+        if (frame->GetDevToolsFrameToken().ToString() != *frame_token) {
+          return content::RenderFrameHost::FrameIterationAction::kContinue;
+        }
+        found = true;
+        return content::RenderFrameHost::FrameIterationAction::kStop;
+      });
+  return found;
 }
 
 std::string ScreenshotRefusal(base::DictValue& params,
@@ -366,14 +409,24 @@ void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info) {
   }
   info->Remove("browserContextId");
   const std::string* opener = info->FindString("openerId");
-  if (opener && !PluginMayAttachToTargetId(scope, opener)) {
-    info->Remove("openerId");
+  const bool opener_in_scope = opener && PluginMayAttachToTargetId(scope, opener);
+  if (!opener_in_scope ||
+      !FrameInTargetContents(opener, info->FindString("openerFrameId"))) {
     info->Remove("openerFrameId");
-    info->Set("canAccessOpener", false);
+  }
+  if (!opener_in_scope) {
+    info->Remove("openerId");
+    if (info->Find("canAccessOpener")) {
+      info->Set("canAccessOpener", false);
+    }
   }
   const std::string* parent = info->FindString("parentId");
   if (parent && !PluginMayAttachToTargetId(scope, parent)) {
     info->Remove("parentId");
+    info->Remove("parentFrameId");
+  } else if (!FrameInTargetContents(info->FindString("targetId"),
+                                    info->FindString("parentFrameId"))) {
+    info->Remove("parentFrameId");
   }
 }
 

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { session, sleep } from "../../../scripts/lib/instance.mjs";
+import { launchVariables, session, sleep } from "../../../scripts/lib/instance.mjs";
 
 const usage = `usage: cli-token-kinds-check.mjs <Ardia.app>
 Checks the two kinds of token connection in one hidden instance with two windows, over the real token server (no
@@ -34,7 +34,8 @@ const work = mkdtempSync(join(tmpdir(), "ac-token-kinds-"));
 const data = join(work, "d");
 mkdirSync(data);
 
-const PICKERS = `<button id=open style="position:fixed;left:0;top:40px;width:200px;height:40px">open</button>
+const PICKERS = `<textarea id=area style="position:fixed;left:240px;top:40px;width:200px;height:60px"></textarea>
+<button id=open style="position:fixed;left:0;top:40px;width:200px;height:40px">open</button>
 <button id=save style="position:fixed;left:0;top:90px;width:200px;height:40px">save</button>
 <button id=dir style="position:fixed;left:0;top:140px;width:200px;height:40px">dir</button>
 <script>
@@ -116,7 +117,8 @@ function connect(url) {
 const refused = (reply) => !!reply.error;
 const text = (reply) => (reply.error ? reply.error.message : JSON.stringify(reply.result).slice(0, 120));
 
-execFileSync("open", ["-g", "-n", "--env", "ARDIA_BACKGROUND=1", "--env", `ARDIA_DATA_DIR=${data}`, app]);
+const testEnv = Object.entries(launchVariables({ test: { privatePasteboard: true } })).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+execFileSync("open", ["-g", "-n", "--env", "ARDIA_BACKGROUND=1", "--env", `ARDIA_DATA_DIR=${data}`, ...testEnv, app]);
 const controlFile = join(data, "Chromium", "ArdiaControl.json");
 let pid = null;
 try {
@@ -243,6 +245,63 @@ try {
   check("plugin: Input.dispatchKeyEvent with paste is refused", refused(paste) && /plugin/.test(paste.error?.message ?? ""), text(paste));
   const nativeKey = await key({ nativeVirtualKeyCode: 0 });
   check("plugin: Input.dispatchKeyEvent with nativeVirtualKeyCode is refused", refused(nativeKey) && /plugin/.test(nativeKey.error?.message ?? ""), text(nativeKey));
+  await cli.send("Emulation.setFocusEmulationEnabled", { enabled: true }, csOne);
+  const cliValue = async (expression) => (await cli.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, csOne)).result?.result?.value;
+  const cliKey = async (key, code, keyCode, modifiers, commands) => {
+    await cli.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key, code, windowsVirtualKeyCode: keyCode, modifiers, ...(commands ? { commands } : {}) }, csOne);
+    await cli.send("Input.dispatchKeyEvent", { type: "keyUp", key, code, windowsVirtualKeyCode: keyCode, modifiers }, csOne);
+  };
+  const probe = `ardia-clipboard-probe-${process.pid}`;
+  const fillArea = (value, select) => cliValue(`(() => { const a = document.getElementById("area"); a.value = ${JSON.stringify(value)}; a.focus(); ${select ? "a.select();" : "a.setSelectionRange(a.value.length, a.value.length);"} return true })()`);
+  const areaValue = () => cliValue(`document.getElementById("area").value`);
+  await fillArea(probe, true);
+  await cliKey("c", "KeyC", 67, 4, ["copy"]);
+  await fillArea("", false);
+  await cliKey("v", "KeyV", 86, 4, ["paste"]);
+  await sleep(300);
+  const roundTrip = await areaValue();
+  check("cli: the private pasteboard round-trips (the CLI copies and pastes in a page)", roundTrip === probe, JSON.stringify(roundTrip));
+  const clipboardKeys = [...readFileSync(new URL("../../../engine/chromium/src/chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h", import.meta.url), "utf8").matchAll(/\{(\d+), (\d+), "([A-Za-z]*)"\}/g)]
+    .map(([, keyCode, modifiers, domKey]) => ({ keyCode: Number(keyCode), modifiers: Number(modifiers), domKey }));
+  const pluginFocus = () => plugin.send("Runtime.evaluate", { expression: "document.getElementById('area').focus(), true", contextId: isolated }, ps);
+  const pluginKey = async (fields) => {
+    const down = await plugin.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...fields }, ps);
+    await plugin.send("Input.dispatchKeyEvent", { type: "keyUp", ...fields, commands: undefined }, ps);
+    return down;
+  };
+  for (const entry of clipboardKeys) {
+    await fillArea("plugin-selected-text", true);
+    await pluginFocus();
+    const reply = await pluginKey({ modifiers: entry.modifiers, ...(entry.domKey ? { key: entry.domKey } : { windowsVirtualKeyCode: entry.keyCode }) });
+    await sleep(250);
+    const after = await areaValue();
+    check(`plugin: clipboard key ${entry.domKey || entry.keyCode} with modifiers ${entry.modifiers} is refused and pastes nothing`, refused(reply) && !String(after).includes(probe), `${text(reply)} area=${JSON.stringify(after)}`);
+  }
+  await fillArea("", false);
+  await pluginFocus();
+  await pluginKey({ key: "v", code: "KeyV", windowsVirtualKeyCode: 86, modifiers: 4 });
+  await sleep(300);
+  const cmdV = await areaValue();
+  check("plugin: Cmd+V pastes nothing", !String(cmdV).includes(probe), JSON.stringify(cmdV));
+  await fillArea("", false);
+  await cliKey("v", "KeyV", 86, 4, ["paste"]);
+  await sleep(300);
+  const stillProbe = await areaValue();
+  check("plugin: its copy and cut attempts left the pasteboard as the CLI set it", stillProbe === probe, JSON.stringify(stillProbe));
+  await fillArea("select me", false);
+  await pluginFocus();
+  const cmdA = await pluginKey({ key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 4, commands: ["selectAll"] });
+  const selection = await cliValue(`(() => { const a = document.getElementById("area"); return a.selectionStart + ":" + a.selectionEnd })()`);
+  check("plugin: Cmd+A selects all", !refused(cmdA) && selection === "0:9", `${text(cmdA)} ${selection}`);
+  await fillArea("", false);
+  await pluginFocus();
+  for (const character of "hey") {
+    await plugin.send("Input.dispatchKeyEvent", { type: "keyDown", key: character, text: character, windowsVirtualKeyCode: character.toUpperCase().charCodeAt(0) }, ps);
+    await plugin.send("Input.dispatchKeyEvent", { type: "keyUp", key: character, windowsVirtualKeyCode: character.toUpperCase().charCodeAt(0) }, ps);
+  }
+  const typed = await areaValue();
+  check("plugin: plain typing still types", typed === "hey", JSON.stringify(typed));
+
   const shot = await plugin.send("Page.captureScreenshot", { fromSurface: false }, ps);
   check("plugin: Page.captureScreenshot answers from the page surface even when asked for the window", !refused(shot) && !!shot.result?.data, text(shot));
   const clipped = await plugin.send("Page.captureScreenshot", { clip: { x: 0, y: 0, width: 100000, height: 100, scale: 1 } }, ps);
@@ -285,8 +344,8 @@ try {
   await arm("directory", [folder]);
   const listed = await click("dir");
   check("cli: showDirectoryPicker takes the answered folder without a permission prompt", listed === "dir:a.txt,b.txt,out.txt", listed);
-  const readwrite = await cli.send("Runtime.evaluate", { expression: "Promise.race([window.dirHandle.requestPermission({ mode: 'readwrite' }), new Promise((r) => setTimeout(() => r('no answer'), 3000))])", awaitPromise: true, returnByValue: true, userGesture: true }, cs);
-  check("cli: a read-only directory answer doesn't grant the page's later readwrite request", readwrite.result?.result?.value !== "granted", text(readwrite));
+  const readwrite = await cli.send("Runtime.evaluate", { expression: "Promise.race([window.dirHandle.queryPermission({ mode: 'read' }).then((read) => window.dirHandle.queryPermission({ mode: 'readwrite' }).then((write) => read + '/' + write))])", awaitPromise: true, returnByValue: true }, cs);
+  check("cli: a read-only directory answer leaves the folder granted for reading and not for writing", !refused(readwrite) && !readwrite.result?.exceptionDetails && readwrite.result?.result?.value === "granted/prompt", text(readwrite));
   await arm("open", []);
   check("cli: an empty answer cancels the picker", (await click("open")) === "error:AbortError");
   const wrongKind = await arm("save", [join(folder, "x.txt")]);
@@ -310,10 +369,31 @@ try {
   const worldAgain = (await plugin.send("Page.createIsolatedWorld", { frameId: frameAgain, worldName: "ardia-plugin" }, ps)).result?.executionContextId;
   const threeTarget = (await urlsOf(plugin)).find((t) => t.url === `${origin}/three`);
   const s3 = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
-  await appEval(`ac.actions.moveTabToWindow("t3", "w2"); ac.actions.moveTabToWindow("t3", "w1"); return true`);
-  await sleep(2500);
+  const inWindow = (tab, win) => until(`${tab} in ${win}`, async () =>
+    ((await appEval(`return ac.engine.call("tabs.strips")`))?.strips ?? []).some((s) => s.appWindow === win && s.tabs.some((t) => t.key === tab)) || null, 8000).then(() => true, () => false);
+  await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
+  const reachedOther = await inWindow("t3", "w2");
+  await appEval(`ac.actions.moveTabToWindow("t3", "w1"); return true`);
+  const cameBack = await inWindow("t3", "w1");
+  await sleep(1500);
   const outAndBack = await plugin.send("DOM.getDocument", {}, s3);
-  check("plugin: a tab moved out of the window and straight back stays detached", !!s3 && refused(outAndBack) && plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3), text(outAndBack));
+  check("plugin: a tab moved to the other window (confirmed natively) and back stays detached", reachedOther && cameBack && !!s3 && refused(outAndBack) && plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3), `reached w2 ${reachedOther}, back in w1 ${cameBack}, ${text(outAndBack)}`);
+
+  const t3Target = (await urlsOf(cli)).find((t) => t.url === `${origin}/three`);
+  const direct = await connect(`ws://127.0.0.1:${control.port}/devtools/page/${t3Target?.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null);
+  const directOrder = [];
+  if (direct) {
+    direct.ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (m.id === 888001) directOrder.push(`reply:${m.error?.message ?? "result"}`); });
+    direct.closed.then(() => directOrder.push("close"));
+    const directWorld = (await direct.send("Page.createIsolatedWorld", { frameId: t3Target.targetId })).result?.executionContextId;
+    direct.raw(888001, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(1), 3000))", contextId: directWorld, awaitPromise: true });
+    await sleep(200);
+    await appEval(`ac.actions.moveTabToWindow("t3", "w2"); return true`);
+    await until("the direct socket to close", async () => directOrder.includes("close") || null, 8000).catch(() => null);
+  }
+  check("plugin: a direct page socket gets tab_out_of_scope for its command in flight before it closes", (directOrder[0] ?? "").startsWith("reply:ardia: tab_out_of_scope") && directOrder[1] === "close", directOrder.join(" | ") || "no direct socket");
+  await appEval(`ac.actions.moveTabToWindow("t3", "w1"); return true`);
+  await inWindow("t3", "w1");
 
   const lateMark = plugin.replies.length;
   plugin.raw(777001, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(document.title), 1500))", contextId: worldAgain, awaitPromise: true, returnByValue: true }, ps);

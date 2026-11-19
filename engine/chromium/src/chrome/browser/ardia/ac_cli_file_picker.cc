@@ -126,11 +126,7 @@ uint64_t NextTicketSerial() {
   return ++serial;
 }
 
-void EndTicket(uint64_t serial) {
-  if (Ticket() && Ticket()->serial == serial) {
-    Ticket().reset();
-  }
-}
+
 
 void DropAnswer(const content::WebContents* contents) {
   auto it = Answers().find(contents);
@@ -259,12 +255,20 @@ void GrantExpected(content::RenderFrameHost* frame,
       frame->GetLastCommittedOrigin() != candidate.origin) {
     return;
   }
-  const uint64_t serial = NextTicketSerial();
-  Ticket() = GrantTicket{serial,      candidate.frame, candidate.document,
-                         candidate.origin, path,      true,
+  Ticket() = GrantTicket{NextTicketSerial(), candidate.frame,
+                         candidate.document,  candidate.origin,
+                         path,                true,
                          write};
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(&EndTicket, serial));
+}
+
+void PickerReset(content::RenderFrameHost* frame) {
+  Ticket().reset();
+  if (!frame) {
+    return;
+  }
+  const content::GlobalRenderFrameHostId id = frame->GetGlobalId();
+  std::erase_if(Candidates(),
+                [&](const GrantCandidate& c) { return c.frame == id; });
 }
 
 bool ClaimGrant(content::RenderFrameHost* frame,
@@ -348,6 +352,7 @@ void InstallFilePickerAnswers() {
   g_ardia_file_picker_answer = &AnswerPicker;
   g_ardia_file_picker_grant_expected = &GrantExpected;
   g_ardia_file_picker_grant_claim = &ClaimGrant;
+  g_ardia_file_picker_reset = &PickerReset;
 }
 
 base::DictValue FilePickerAnswerTotals() {

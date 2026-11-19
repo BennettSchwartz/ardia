@@ -95,19 +95,28 @@ void TokenClient::WatchTab(const std::string& session) {
   if (!tab) {
     return;
   }
-  auto subscription = tab->RegisterWillDetach(base::BindRepeating(
+  TabWatch watch;
+  watch.will_detach = tab->RegisterWillDetach(base::BindRepeating(
       [](base::WeakPtr<TokenClient> self, std::string watched,
          tabs::TabInterface* tab, tabs::TabInterface::DetachReason reason) {
-        if (self && reason ==
-                        tabs::TabInterface::DetachReason::kInsertIntoOtherWindow) {
+        if (self) {
           self->TabLeftWindow(watched);
         }
       },
       weak_factory_.GetWeakPtr(), session));
+  watch.did_insert = tab->RegisterDidInsert(base::BindRepeating(
+      [](base::WeakPtr<TokenClient> self, tabs::TabInterface* tab) {
+        if (!self) {
+          return;
+        }
+        base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+            FROM_HERE, base::BindOnce(&TokenClient::CheckScope, self));
+      },
+      weak_factory_.GetWeakPtr()));
   if (session.empty()) {
-    root_tab_watch_ = std::move(subscription);
+    root_tab_watch_ = std::move(watch);
   } else {
-    tab_watches_[session] = std::move(subscription);
+    tab_watches_[session] = std::move(watch);
   }
 }
 
@@ -273,7 +282,7 @@ void TokenClient::CloseOutOfScope() {
   outstanding_.clear();
   wedged_ = true;
   if (closer_) {
-    std::move(closer_).Run();
+    std::move(closer_).Run(false);
   }
 }
 

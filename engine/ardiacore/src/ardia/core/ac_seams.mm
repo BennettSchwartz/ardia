@@ -31,6 +31,7 @@
 #include "ardia/core/ac_installed_bubble.h"
 #include "ardia/core/ac_launch_switches.h"
 #include "ardia/core/ac_windowless_page.h"
+#include "ui/base/clipboard/clipboard_mac.h"
 #include "ui/base/cocoa/drag_permission.h"
 #import "ardia/core/ardiacore_api_internal.h"
 #import "ardia/core/ardiacore_internal.h"
@@ -189,6 +190,9 @@ void InstallChromeHooks() {
   ardia::InstallCliVisibleTabs();
   if (TestFlag("nativeDragRefused")) {
     ui::ArdiaRefuseDragSessionInitiation();
+  }
+  if (TestFlag("privatePasteboard")) {
+    ui::ArdiaUsePrivatePasteboard();
   }
 }
 

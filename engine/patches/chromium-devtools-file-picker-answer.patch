@@ -44,18 +44,40 @@ diff --git a/content/browser/file_system_access/file_system_access_manager_impl.
  #include <algorithm>
  #include <iterator>
  #include <memory>
-@@ -92,6 +94,10 @@
+@@ -92,6 +94,11 @@
  #include "third_party/blink/public/mojom/choosers/file_chooser.mojom.h"
  #endif
  
 +void (*g_ardia_file_picker_grant_expected)(content::RenderFrameHost* frame,
 +                                           const base::FilePath& path,
 +                                           bool write) = nullptr;
++void (*g_ardia_file_picker_reset)(content::RenderFrameHost* frame) = nullptr;
 +
  namespace content {
  
  using blink::mojom::FileSystemAccessStatus;
-@@ -2062,6 +2068,11 @@ void FileSystemAccessManagerImpl::OnCheckPathsAgainstEnterprisePolicy(
+@@ -691,6 +698,20 @@ void FileSystemAccessManagerImpl::ChooseEntries(
+     return;
+   }
+ 
++  if (g_ardia_file_picker_reset) {
++    g_ardia_file_picker_reset(RenderFrameHost::FromID(context.frame_id));
++    callback = base::BindOnce(
++        [](GlobalRenderFrameHostId frame, ChooseEntriesCallback done,
++           blink::mojom::FileSystemAccessErrorPtr result,
++           std::vector<blink::mojom::FileSystemAccessEntryPtr> entries) {
++          if (g_ardia_file_picker_reset) {
++            g_ardia_file_picker_reset(RenderFrameHost::FromID(frame));
++          }
++          std::move(done).Run(std::move(result), std::move(entries));
++        },
++        context.frame_id, std::move(callback));
++  }
++
+   // Non-compromised renderers shouldn't be able to send an invalid id.
+   if (!IsValidId(options->starting_directory_id)) {
+     receivers_.ReportBadMessage("Invalid starting directory ID in browser");
+@@ -2062,6 +2083,11 @@ void FileSystemAccessManagerImpl::OnCheckPathsAgainstEnterprisePolicy(
              entries.front(), binding_context.storage_key,
              HandleType::kDirectory,
              FileSystemAccessPermissionContext::AccessTrigger::kOpen);
@@ -67,6 +89,16 @@ diff --git a/content/browser/file_system_access/file_system_access_manager_impl.
      // Ask for both read and write permission at the same time. The permission
      // context should coalesce these into one prompt.
      if (request_directory_write_access) {
+@@ -2076,6 +2102,9 @@ void FileSystemAccessManagerImpl::OnCheckPathsAgainstEnterprisePolicy(
+         base::BindOnce(&FileSystemAccessManagerImpl::DidChooseDirectory, this,
+                        binding_context, entries.front(), std::move(callback),
+                        shared_handle_state));
++    if (g_ardia_file_picker_grant_expected) {
++      g_ardia_file_picker_grant_expected(nullptr, base::FilePath(), false);
++    }
+     return;
+   }
+ 
 diff --git a/content/browser/file_system_access/file_system_chooser.cc b/content/browser/file_system_access/file_system_chooser.cc
 --- a/content/browser/file_system_access/file_system_chooser.cc
 +++ b/content/browser/file_system_access/file_system_chooser.cc

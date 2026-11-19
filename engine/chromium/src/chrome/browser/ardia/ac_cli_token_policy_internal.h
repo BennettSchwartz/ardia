@@ -118,7 +118,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   bool MayAttachToRenderFrameHost(content::RenderFrameHost* frame) override;
   bool MayReadLocalFiles() override;
   bool MayWriteLocalFiles() override;
-  void SetCloser(base::OnceClosure close) override;
+  void SetCloser(base::OnceCallback<void(bool drop_queued)> close) override;
   void SetChannel(base::RepeatingCallback<void(std::string)> to_browser,
                   base::RepeatingCallback<void(std::string)> to_client) override;
 
@@ -180,12 +180,16 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::set<std::string> told_targets_;
   std::set<std::string> left_;
   bool root_left_ = false;
-  std::map<std::string, base::CallbackListSubscription> tab_watches_;
-  base::CallbackListSubscription root_tab_watch_;
+  struct TabWatch {
+    base::CallbackListSubscription will_detach;
+    base::CallbackListSubscription did_insert;
+  };
+  std::map<std::string, TabWatch> tab_watches_;
+  TabWatch root_tab_watch_;
   std::string isolated_world_name_;
   std::map<std::string, Contexts> contexts_;
   std::map<std::pair<std::string, int>, std::string> outstanding_;
-  base::OnceClosure closer_;
+  base::OnceCallback<void(bool drop_queued)> closer_;
   base::RepeatingCallback<void(std::string)> to_browser_;
   base::RepeatingCallback<void(std::string)> to_client_;
   base::RepeatingTimer scope_timer_;
