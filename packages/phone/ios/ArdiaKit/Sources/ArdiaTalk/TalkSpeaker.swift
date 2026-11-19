@@ -43,8 +43,8 @@ public final class TalkSpeaker {
     self.format = format
     engine.attach(node)
     engine.attach(timePitch)
-    engine.connect(node, to: timePitch, format: format)
-    engine.connect(timePitch, to: engine.mainMixerNode, format: format)
+    try engine.connectNode(node, to: timePitch, format: format)
+    try engine.connectNode(timePitch, to: engine.mainMixerNode, format: format)
     configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
       MainActor.assumeIsolated { self?.stop() }
     }
@@ -131,7 +131,7 @@ public final class TalkSpeaker {
       engine.prepare()
       try engine.start()
     }
-    if !node.isPlaying { node.play() }
+    if !node.isPlaying { try node.playAudio() }
   }
 
   private func schedule(_ samples: [Float], generation current: Int) {

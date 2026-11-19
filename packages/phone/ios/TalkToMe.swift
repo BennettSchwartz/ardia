@@ -100,7 +100,7 @@ final class TalkToMe {
   private init() {
     let defaults = UserDefaults.standard
     isOn = defaults.bool(forKey: Self.onKey)
-    readsAutomatically = defaults.object(forKey: Self.automaticKey) as? Bool ?? false
+    readsAutomatically = defaults.bool(forKey: Self.automaticKey)
     let saved = defaults.string(forKey: Self.voiceKey) ?? Self.defaultVoice
     voice = Self.voices.contains { $0.id == saved } ? saved : Self.defaultVoice
     let savedSpeed = defaults.double(forKey: Self.speedKey)
@@ -135,13 +135,13 @@ final class TalkToMe {
       return
     }
     if AssetPackManager.shared.assetPackIsAvailableLocally(withID: Self.assetPackID) {
-      download = .ready(bytes: Self.packDirectory().map(Self.folderSize))
+      download = .ready(bytes: Self.packDirectory().flatMap(Self.folderSize))
       if isOn, speaker == nil { prepareSpeaker() }
       return
     }
     download = .absent(bytes: nil)
     Task {
-      guard let pack = try? await AssetPackManager.shared.assetPack(withID: Self.assetPackID), case .absent = download else { return }
+      guard let pack = try? await AssetPackManager.shared.manifest.assetPack(withID: Self.assetPackID), case .absent = download else { return }
       download = .absent(bytes: pack.downloadSize)
     }
     if isOn { startDownloadIfNeeded() }
@@ -202,19 +202,19 @@ final class TalkToMe {
     }
     defer { updates.cancel() }
     do {
-      let pack = try await manager.assetPack(withID: Self.assetPackID)
+      guard let pack = try await manager.manifest.assetPack(withID: Self.assetPackID) else { throw ManagedBackgroundAssetsError.assetPackNotFound(withID: Self.assetPackID) }
       try await manager.ensureLocalAvailability(of: pack)
       try Task.checkCancellation()
       downloadTask = nil
       downloadProgress = nil
-      download = .ready(bytes: Self.packDirectory().map(Self.folderSize))
+      download = .ready(bytes: Self.packDirectory().flatMap(Self.folderSize))
       BrowseForMeHost.shared.countTalkToMe("voice_downloads")
       if isOn { prepareSpeaker() }
     } catch {
       guard !Task.isCancelled, downloadTask != nil else { return }
       downloadTask = nil
       downloadProgress = nil
-      if (error as NSError).code == NSUserCancelledError {
+      if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSUserCancelledError {
         download = .absent(bytes: nil)
         return
       }
@@ -412,9 +412,8 @@ final class TalkToMe {
 
   private func watchAudio() {
     let center = NotificationCenter.default
-    observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
-      let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init) == .began
-      MainActor.assumeIsolated { if began { self?.interrupted() } }
+    observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.interrupted() }
     })
     observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
       let lost = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init) == .oldDeviceUnavailable

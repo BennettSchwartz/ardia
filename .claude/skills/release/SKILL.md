@@ -343,7 +343,8 @@ The release itself is then a second run with `dry_run=false` on the same commit.
 
 **iPhone TestFlight.** Add `-f iphone=true` to both desktop runs only when the owner asks for TestFlight as part of the
 release. Both use the iPhone version pinned in `ios-release.yml`, and the real run uploads to Internal. Use the
-separate `public-link` run for public testers. A request to get a build on the owner's phone means installing a local
+separate `public-link` run for public testers. When `apps/phone/ios/AssetPacks/` changed since the last upload, build and
+upload Talk to Me's asset pack before the build (`docs/phone.md` › TestFlight › Talk to Me's asset pack). A request to get a build on the owner's phone means installing a local
 Xcode development build or the iOS Release `device` IPA over USB or Xcode's paired wireless connection. See
 `docs/phone.md` for both paths.
 
