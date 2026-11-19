@@ -10,6 +10,15 @@ export function finishStalledTransition(id: string) {
   transitions.get(id)?.();
 }
 
+export function beginWindowControlTransition(id: string, on: boolean, emit: (event: WindowEvent) => void) {
+  const g = windowGeometries.get(id);
+  transitions.set(id, () => {
+    transitions.delete(id);
+    if (g) g.fullScreen = on;
+    emit({ type: "fullScreen", id, on });
+  });
+}
+
 type GeometryFakes = Pick<WindowsNative, "windowGeometry" | "setWindowFrame" | "setWindowZoomed" | "setWindowFullScreen">;
 
 const overlaps = (a: Rect4, b: Rect4) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3];

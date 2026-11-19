@@ -34,8 +34,8 @@ type ExtensionEngine = {
   list(profile: string): Promise<InstalledExtension[]>;
   install(path: string, profile: string, digest?: string, staged?: string): Promise<string>;
   reload(id: string, profile: string): Promise<void>;
-  uninstall(id: string, profile: string): Promise<void>;
-  configure?(id: string, profile: string, options: Record<string, unknown>): Promise<void>; inspect?(path: string): Promise<CallResult<"extensions.inspectUnpacked">>;
+  uninstall(id: string, profile: string, managed?: string): Promise<void>;
+  configure?(id: string, profile: string, options: Record<string, unknown>): Promise<void>; inspect?(path: string, profile: string): Promise<CallResult<"extensions.inspectUnpacked">>;
 };
 const testGlobals = globalThis as {
   acTestTabStrip?: TabStripHost;
@@ -501,10 +501,10 @@ const fakeModules = {
     },
     discardStaged: ({ staged }) => (discardedStages.push(staged), null),
     setEnabled: async ({ id }) => (await extensionAnswers.change("setEnabled", id), { ok: true }),
-    uninstall: async ({ profile, id }) => (await extensionAnswers.change("uninstall", id), await extensionEngine()?.uninstall(id, profile), { ok: true }),
+    uninstall: async ({ profile, id, managed }) => (await extensionAnswers.change("uninstall", id), await extensionEngine()?.uninstall(id, profile, managed), { ok: true }),
     reload: async ({ profile, id }) => (await extensionAnswers.change("reload", id), await extensionEngine()?.reload(id, profile), { ok: true }),
     configure: async ({ profile, id, options }) => (await extensionAnswers.change("configure", id), await extensionEngine()?.configure?.(id, profile, options), { ok: true }),
-    inspectUnpacked: ({ path }) => extensionEngine()?.inspect?.(path) ?? Promise.reject(Object.assign(new Error("Manifest file is missing or unreadable"), { code: "ERR_EXTENSION_INVALID" })),
+    inspectUnpacked: ({ path, profile }) => extensionEngine()?.inspect?.(path, profile) ?? Promise.reject(Object.assign(new Error("Manifest file is missing or unreadable"), { code: "ERR_EXTENSION_INVALID" })),
     chooseFolder: () => null,
     installCrx: ({ profile, path }) => {
       const failure = crxInstallFailure.next;

@@ -107,7 +107,7 @@ function fakeExtensions() {
     },
     inspect: async (path) => {
       if (!path.endsWith("/ext")) throw new Error("Manifest file is missing or unreadable");
-      return { ...pkg, path, digest: "fixture", staged: `/data/stage${path}` };
+      return { ...pkg, path, digest: "fixture", staged: `/data/stage${path}`, installId: "folderext", installPath: `/data/live${path}` };
     },
   };
   globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };

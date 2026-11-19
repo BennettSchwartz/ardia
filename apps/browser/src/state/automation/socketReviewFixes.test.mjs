@@ -120,7 +120,8 @@ test("history.removed counts each URL as it is escaped on the line, envelope inc
   stub.chromeHistoryEvent({ kind: "deleted", profile: "", all: false, urls });
   await wait(10);
   const line = stub.controlSocket.broadcasts.slice(from).find((b) => b.connections.includes(conn)).line;
-  assert.ok(Buffer.byteLength(line) + 1 <= HISTORY_EVENT_LINE_BYTES, `the line is ${Buffer.byteLength(line)} bytes`);
+  const { DROPPED_MARKER_ROOM } = await import("./socketWire.ts");
+  assert.ok(Buffer.byteLength(line) + 1 + DROPPED_MARKER_ROOM <= HISTORY_EVENT_LINE_BYTES, `the line is ${Buffer.byteLength(line)} bytes, with room for a dropped marker`);
   const event = JSON.parse(line);
   assert.equal(event.data.truncated, true);
   assert.ok(event.data.urls.length > 100, `${event.data.urls.length} URLs kept, not a summary`);
@@ -171,6 +172,20 @@ test("full screen: a transition AppKit hasn't ended answers as a timeout and kee
     assert.equal(left.fullScreen, false);
   } finally {
     stub.geometryWorld.stalls = false;
+    done();
+  }
+});
+
+test("full screen: a transition started from the window's own controls makes a request wait its turn", async () => {
+  const { windowId, done } = await geometrySetup();
+  try {
+    await ok("windows.geometry", { window: windowId });
+    stub.beginWindowControlTransition(windowId, true, () => {});
+    const busy = await call("windows.setFullScreen", { window: windowId, on: true });
+    assert.equal(busy.error?.code, "refused", JSON.stringify(busy));
+    stub.finishStalledTransition(windowId);
+    assert.equal((await ok("windows.setFullScreen", { window: windowId, on: false })).fullScreen, false);
+  } finally {
     done();
   }
 });
