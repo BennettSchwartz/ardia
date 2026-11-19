@@ -55,6 +55,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (NSString *)baseProfileOf:(NSString *)profile NS_SWIFT_NAME(baseProfile(of:));
 + (void)resolvePermission:(NSString *)requestId result:(NSString *)result remember:(BOOL)remember
     NS_SWIFT_NAME(resolvePermission(_:result:remember:));
++ (BOOL)answerPermission:(NSString *)requestId result:(NSString *)result remember:(BOOL)remember
+    NS_SWIFT_NAME(answerPermission(_:result:remember:));
 
 @end
 

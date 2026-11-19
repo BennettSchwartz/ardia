@@ -480,6 +480,13 @@ void NotePasswordPromptSource(ArdiaWebView *view, ArdiaCoreTab *source) {
   [PasswordPromptSources() setObject:route forKey:view];
 }
 
+ArdiaCoreTab *PeekPasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *own) {
+  NSPointerArray *route = [PasswordPromptSources() objectForKey:view];
+  if (!route) return own;
+  ArdiaCoreTab *source = (__bridge ArdiaCoreTab *)[route pointerAtIndex:0];
+  return source.closed ? nil : source;
+}
+
 ArdiaCoreTab *PasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *own) {
   NSPointerArray *route = [PasswordPromptSources() objectForKey:view];
   if (!route) return own;

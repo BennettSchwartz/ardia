@@ -73,6 +73,7 @@ export type EngineCalls = {
   "downloads.setSettings": [Profile & Partial<Pick<DownloadSettings, "folder" | "askWhereToSave">>, DownloadSettings];
 
   "permissions.resolve": [{ id: string; result: PermissionResult; remember: boolean }, null];
+  "permissions.answer": [{ id: string; result: PermissionResult; remember: boolean }, boolean];
   "permissions.resolveExternalApp": [{ id: string; open: boolean; remember: boolean }, null];
   "permissions.externalAppAllowances": [Profile, ExternalAppAllowance[]];
   "permissions.removeExternalAppAllowance": [Profile & { origin: string; scheme: string }, null];

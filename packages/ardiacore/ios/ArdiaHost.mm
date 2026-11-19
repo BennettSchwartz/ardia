@@ -20,6 +20,15 @@ using namespace ardia_host;
 
 namespace ardia_host {
 
+NSMutableSet<NSString *> *PendingPermissions() {
+  static NSMutableSet<NSString *> *pending = [NSMutableSet set];
+  return pending;
+}
+
+}
+
+namespace ardia_host {
+
 id<NSApplicationDelegate> (^gMakeDelegate)(void);
 
 id<NSApplicationDelegate> gAppDelegate;
@@ -382,7 +391,14 @@ static NSDictionary<NSString *, id> *OffscreenRefusal(NSString *reason) {
 }
 
 + (void)resolvePermission:(NSString *)requestId result:(NSString *)result remember:(BOOL)remember {
+  [ardia_host::PendingPermissions() removeObject:requestId ?: @""];
   [ArdiaCoreEngine resolvePermission:requestId result:result remember:remember];
+}
+
++ (BOOL)answerPermission:(NSString *)requestId result:(NSString *)result remember:(BOOL)remember {
+  if (![ardia_host::PendingPermissions() containsObject:requestId ?: @""]) return NO;
+  [self resolvePermission:requestId result:result remember:remember];
+  return YES;
 }
 
 + (NSArray<NSDictionary<NSString *, id> *> *)displayMediaSources {

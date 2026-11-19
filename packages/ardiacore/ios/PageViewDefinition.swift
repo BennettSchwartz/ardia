@@ -96,6 +96,12 @@ enum PageViewDefinition {
       AsyncFunction("resolveAutofillPrompt") { (view: V, promptId: Int, action: String) in
         view.page.resolveAutofillPrompt(promptId, action: action)
       }.runOnQueue(.main)
+      AsyncFunction("answerPasswordPrompt") { (view: V, action: String, expected: [String: String], username: String?) -> Bool in
+        view.page.answerPasswordPrompt(action, expected: expected, username: username)
+      }.runOnQueue(.main)
+      AsyncFunction("answerAutofillPrompt") { (view: V, promptId: Int, action: String) -> Bool in
+        view.page.answerAutofillPrompt(promptId, action: action)
+      }.runOnQueue(.main)
       AsyncFunction("executeExtensionAction") { (view: V, extensionId: String) -> String? in
         view.page.executeExtensionAction(extensionId)
       }.runOnQueue(.main)

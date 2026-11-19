@@ -37,13 +37,15 @@ final class WebKitPermissions {
     ArdiaEvents.emit("permissions.requested", data: ["id": id, "tabId": tabId ?? NSNull(), "origin": origin, "permissions": kinds])
   }
 
-  func resolve(_ id: String, result: String, remember: Bool) {
-    guard let request = pending.removeValue(forKey: id) else { return }
+  @discardableResult
+  func resolve(_ id: String, result: String, remember: Bool) -> Bool {
+    guard let request = pending.removeValue(forKey: id) else { return false }
     let allowed = result == "accept"
     if remember && result != "dismiss" {
       stores.update(request.store) { state in for key in request.keys { state.remembered[key] = allowed } }
     }
     request.decide(allowed)
+    return true
   }
 
   func drop(browserId: Int32) {

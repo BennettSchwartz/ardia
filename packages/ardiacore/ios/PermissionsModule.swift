@@ -20,6 +20,11 @@ public class PermissionsModule: Module {
       PageEngines.owner(of: id).resolvePermission(id, result: result.rawValue, remember: try args.bool("remember"))
       reply.ok()
     },
+    "answer": { args, reply in
+      let id = try args.text("id")
+      let result = try args.choice("result", PermissionResult.self)
+      reply.ok(PageEngines.owner(of: id).answerPermission(id, result: result.rawValue, remember: try args.bool("remember")))
+    },
     "resolveExternalApp": { args, reply in
       let id = try args.text("id")
       PageEngines.owner(of: id).resolveExternalApp(id, open: try args.bool("open"), remember: try args.bool("remember"))

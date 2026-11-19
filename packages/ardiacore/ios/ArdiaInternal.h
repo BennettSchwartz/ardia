@@ -37,6 +37,7 @@ NSString *_Nullable AppTabIdContaining(NSView *_Nullable view);
 void HoldUntilHosted(ArdiaCoreTab *tab, NSString *event, NSDictionary *payload);
 void ReleaseHeldEvents(ArdiaCoreTab *tab);
 void DropHeldEvent(NSString *event, NSString *eventId);
+NSMutableSet<NSString *> *PendingPermissions(void);
 
 NSString *AppDisposition(NSString *chromeDisposition);
 
@@ -74,6 +75,7 @@ bool AskPermissionInPopupWindow(ArdiaCoreTab *tab, NSDictionary *request);
 void DropPopupWindowPermission(NSString *requestId);
 void NotePasswordPromptSource(ArdiaWebView *view, ArdiaCoreTab *_Nullable source);
 ArdiaCoreTab *_Nullable PasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *_Nullable own);
+ArdiaCoreTab *_Nullable PeekPasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *_Nullable own);
 
 }
 
