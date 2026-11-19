@@ -4,8 +4,10 @@ import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile } from "../browser/model";
 import type { PasswordManager } from "../settings/settings";
-import { effectivePasswordManager, profilePasswordManager, profilesSharingData, regularProfileId } from "./passwordManagerChoice";
-import { readDocument, writeDocument } from "../../platform/documents";
+import { effectivePasswordManager, profilePasswordManager, profilesSharingData, regularProfileId, sharedPasswordManagerChoice } from "./passwordManagerChoice";
+import { readDocument, saveDocument } from "../../platform/documents";
+import { consentToken, type ConsentToken } from "../telemetry/client";
+import { noteApplePasswordsRecordFailed } from "../telemetry/passwordManagerCounts";
 import { useExtensions } from "../extensions/store";
 import { usePages } from "../tabs/pageState";
 import { resource, store as storeResource } from "../settings/resources";
@@ -63,26 +65,45 @@ function heldOffProfiles(): Set<string> {
   }
 }
 
-function holdOff(profile: string, held: boolean) {
-  const profiles = heldOffProfiles();
-  if (profiles.has(profile) === held) return;
-  if (held) profiles.add(profile);
-  else profiles.delete(profile);
-  try {
-    writeDocument(HELD_OFF_DOCUMENT, JSON.stringify({ offerToSaveHeldOff: [...profiles].sort() }));
-  } catch {}
+let recording: Promise<unknown> = Promise.resolve();
+
+function recordHeldOff(profile: string, held: boolean): Promise<boolean> {
+  const saved = recording.then(async () => {
+    const profiles = heldOffProfiles();
+    if (profiles.has(profile) === held) return true;
+    if (held) profiles.add(profile);
+    else profiles.delete(profile);
+    const contents = JSON.stringify({ offerToSaveHeldOff: [...profiles].sort() });
+    await saveDocument(HELD_OFF_DOCUMENT, contents);
+    return readDocument(HELD_OFF_DOCUMENT) === contents;
+  });
+  const landed = saved.catch(() => false);
+  recording = landed;
+  return landed;
 }
 
-type PendingWrite = { on: boolean; sending: boolean };
+const clearHeldOff = (profile: string, consent: ConsentToken | null) =>
+  recordHeldOff(profile, false).then((landed) => {
+    if (!landed) noteApplePasswordsRecordFailed(consent);
+  });
+
+type PendingWrite = { on: boolean; sending: boolean; consent: ConsentToken | null };
 const pending = new Map<string, PendingWrite>();
 
 async function sendOfferToSave(profile: string, write: PendingWrite) {
-  if (!write.on && (await getPasswordAutofill(profile)) && pending.get(profile) === write) holdOff(profile, true);
+  if (!write.on && (await getPasswordAutofill(profile))) {
+    if (pending.get(profile) !== write) return;
+    if (!(await recordHeldOff(profile, true))) {
+      if (pending.get(profile) === write) pending.delete(profile);
+      noteApplePasswordsRecordFailed(write.consent);
+      return;
+    }
+  }
   if (pending.get(profile) !== write) return;
   await setPasswordAutofill(write.on, profile);
   if (pending.get(profile) !== write) return;
   pending.delete(profile);
-  if (write.on) holdOff(profile, false);
+  if (write.on) void clearHeldOff(profile, write.consent);
   storeResource(passwordAutofill, [profile], write.on);
 }
 
@@ -97,7 +118,7 @@ function writeOfferToSave(profile: string) {
 }
 
 function offerToSave(profile: string, on: boolean) {
-  pending.set(profile, { on, sending: false });
+  pending.set(profile, { on, sending: false, consent: consentToken() });
   writeOfferToSave(profile);
 }
 
@@ -107,9 +128,22 @@ function followMode(profile: string, mode: PasswordManager) {
   pending.delete(profile);
 }
 
-export function forgetPendingOfferToSave(profile: string) {
+export function forgetPendingOfferToSave(profile: string, consent: ConsentToken | null): Promise<void> {
   pending.delete(profile);
-  holdOff(profile, false);
+  return clearHeldOff(profile, consent);
+}
+
+function unifySharedChoices() {
+  const s = browser();
+  const grouped = new Set<string>();
+  for (const id of Object.keys(s.profiles)) {
+    if (grouped.has(id)) continue;
+    const sharing = profilesSharingData(s, id);
+    for (const member of sharing) grouped.add(member);
+    const choice = sharedPasswordManagerChoice(s, id);
+    if (!choice) continue;
+    for (const member of sharing) if (s.profiles[member]?.passwordManager !== choice) s.updateProfile(member, { passwordManager: choice });
+  }
 }
 
 let started = false;
@@ -121,6 +155,7 @@ export function startPasswordManager() {
   let appleProfiles = "";
   let handledByExtension: string[] = [];
   let seen = new Set<string>();
+  let unifying = false;
 
   const pushApple = () => {
     const apple = [...modes].filter(([, mode]) => mode === "apple").map(([profile]) => profile).sort();
@@ -164,14 +199,25 @@ export function startPasswordManager() {
     pushApple();
   };
 
-  syncModes();
+  const syncProfiles = () => {
+    if (unifying) return;
+    unifying = true;
+    try {
+      unifySharedChoices();
+    } finally {
+      unifying = false;
+    }
+    syncModes();
+  };
+
+  syncProfiles();
   syncWindows();
   syncReady();
   void syncExtensions();
   useExtensions.subscribe((s, prev) => s.lists !== prev.lists && void syncExtensions());
   usePages.subscribe((s, prev) => s.ready !== prev.ready && syncReady());
   useBrowser.subscribe((s, prev) => {
-    if (s.settings !== prev.settings || s.profiles !== prev.profiles) syncModes();
+    if (s.settings !== prev.settings || s.profiles !== prev.profiles) syncProfiles();
     if (s.windows !== prev.windows) syncWindows();
   });
 }

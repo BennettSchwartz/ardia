@@ -128,7 +128,7 @@ export async function setPreloadPagesFor(profile: string, on: boolean) {
 }
 
 export async function setPasswordAutofillFor(profile: string, on: boolean) {
-  forgetPendingOfferToSave(profile);
+  await forgetPendingOfferToSave(profile, consentToken());
   if (!(await written(setPasswordAutofill(on, profile)))) return;
   const now = await getPasswordAutofill(profile).catch(() => on);
   store(passwordAutofill, [profile], now);

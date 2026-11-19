@@ -16,13 +16,15 @@ const CODE_FIELDS: Record<VerificationCodeStep, string> = {
   failed: "verification_code_setups_failed",
 };
 
+const RECORD_FAILED = "apple_passwords_record_failed";
+
 const CHOICE_FIELDS: Record<PasswordManager, string> = {
   apple: "password_manager_chose_apple",
   ardia: "password_manager_chose_ardia",
   none: "password_manager_chose_none",
 };
 
-const FIELDS = [...Object.values(PANEL_FIELDS).flat(), ...Object.values(CODE_FIELDS), ...Object.values(CHOICE_FIELDS)];
+const FIELDS = [...Object.values(PANEL_FIELDS).flat(), ...Object.values(CODE_FIELDS), ...Object.values(CHOICE_FIELDS), RECORD_FAILED];
 
 let counts: Record<string, number> = {};
 const bump = (field: string, consent?: ConsentToken | null) => countFor(consent, () => void (counts[field] = (counts[field] ?? 0) + 1), { [field]: 1 });
@@ -30,6 +32,8 @@ const bump = (field: string, consent?: ConsentToken | null) => countFor(consent,
 export const noteApplePasswordsPanel = (opener: ApplePasswordsOpener, shown: boolean) => bump(PANEL_FIELDS[opener][shown ? 0 : 1]);
 
 export const noteVerificationCodeSetup = (step: VerificationCodeStep, consent?: ConsentToken | null) => bump(CODE_FIELDS[step], consent);
+
+export const noteApplePasswordsRecordFailed = (consent?: ConsentToken | null) => bump(RECORD_FAILED, consent);
 
 export const notePasswordManagerChosen = (manager: PasswordManager) => bump(CHOICE_FIELDS[manager]);
 
