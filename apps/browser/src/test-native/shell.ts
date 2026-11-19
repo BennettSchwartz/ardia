@@ -170,6 +170,7 @@ const menus: Modules["ArdiaMenus"] = {
 
 const dialogs: Modules["ArdiaDialogs"] = {
   confirm: () => Promise.resolve({ confirmed: false, suppressed: false }),
+  dismissShownOnly: () => Promise.resolve(),
   prompt: () => Promise.resolve(null),
   pickFiles: () => Promise.resolve([]),
   pickFolder: () => Promise.resolve(null),
