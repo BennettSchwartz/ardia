@@ -1,6 +1,7 @@
 import type { BrowserState } from "../browser/store";
 import { closesWindow } from "../browser/model";
 import { commandTarget } from "../commands/commandTarget";
+import { COMMAND_INTERACTION } from "../commands/commandInteraction";
 import { rootOf } from "../groups/groupNesting";
 import { leavesEmptyWindow } from "../omnibox/newTabBarPolicy";
 import { groupOf } from "../pins/tabGrouping";
@@ -11,9 +12,7 @@ import { asksBeforeClosingLastTab } from "../windows/windowClose";
 import { quitWarningMayAsk } from "../windows/quitWarning";
 import type { RunPlan } from "./automationMethods";
 
-export type RunNeedsUser = "asks" | "picker";
-
-const PICKERS: ReadonlySet<string> = new Set(["openFile", "exportBookmarks", "savePage", "printWithSystemDialog", "share"]);
+export type RunNeedsUser = "asks" | "interactive";
 
 function closeTabAsks(s: BrowserState, windowId: string, tabId: string | null) {
   if (!tabId || !s.tabs[tabId] || !closesWindow(s, tabId) || leavesEmptyWindow(s, tabId)) return false;
@@ -49,14 +48,19 @@ export function runNeedsUser(s: BrowserState, plan: RunPlan): RunNeedsUser | nul
     case "utility":
       return plan.command === "closeTab" && quitWarningMayAsk() ? "asks" : null;
     case "little": {
+      if (plan.command === "openProfileMenu") return "interactive";
       const tab = target.tabId ? s.tabs[target.tabId] : undefined;
       const closesPanel = s.windowUi[target.windowId]?.panel.open && !!tab?.url;
       return plan.command === "closeTab" && !closesPanel && quitWarningMayAsk() ? "asks" : null;
     }
-    case "window":
-      if (PICKERS.has(plan.command) && !(plan.command === "share" && plan.arg?.startsWith("via:")) && (plan.command === "openFile" || target.windowId)) return "picker";
-      if (!target.windowId) return null;
+    case "peek":
+      return null;
+    case "window": {
+      const interaction = COMMAND_INTERACTION[plan.command];
+      if (interaction === "interactive") return "interactive";
+      if (interaction === "quiet" || !target.windowId) return null;
       return windowCommandAsks(s, plan, target.windowId, target.tabId, !!target.targeted) ? "asks" : null;
+    }
     default:
       return null;
   }

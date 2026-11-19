@@ -35,6 +35,8 @@ import { noteSocketCall } from "../telemetry/cliCounts";
 import { fittedEvent, fittedReply } from "./socketWire";
 import { runNeedsUser } from "./runAsks";
 import { dismissSocketAsks } from "./socketAsk";
+import { dropAllHistoryHandles, dropHistoryHandles } from "./historyHandles";
+import { dropLateResults, forgetTabCalls } from "./tabCalls";
 import { backgroundInstance } from "../app/appSettings";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
@@ -169,7 +171,7 @@ export function runMethod(params: Record<string, unknown>, background = backgrou
   if ("error" in plan) return plan;
   const needsUser = background ? runNeedsUser(useBrowser.getState(), plan) : null;
   if (needsUser === "asks") return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
-  if (needsUser === "picker") return failure("refused", `${plan.command} opens a picker, and this Ardia runs in the background, where nobody can pick, so it didn't run.`);
+  if (needsUser === "interactive") return failure("refused", `${plan.command} opens something only a person can answer (a sheet, dialog, picker, menu, print preview or Cast), and this Ardia runs in the background, so it didn't run.`);
   try {
     runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId });
   } catch (error) {
@@ -227,7 +229,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
     case "offscreen":
       return offscreenMethod(params, stillOn);
     case "apply":
-      return applyMethod(params, stillOn);
+      return applyMethod(params, stillOn, connection);
     case "subscribe":
       return subscribe(connection, params);
     case "answer": {
@@ -237,7 +239,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
     case "run":
       return runMethod(params);
   }
-  const area = runSpec(spec, params, servingWhile(stillOn));
+  const area = runSpec(spec, params, servingWhile(stillOn, connection));
   if (area) return area;
   const plugin = pluginMethods?.(method, params, stillOn);
   if (plugin) return plugin;
@@ -248,6 +250,8 @@ function handleClose({ connection }: { connection: number }) {
   launchSent.delete(connection);
   callers.delete(connection);
   dropResponder(connection);
+  dropHistoryHandles(connection);
+  dropLateResults(connection);
   if (subscriptions.delete(connection)) refreshFeed();
 }
 
@@ -277,6 +281,8 @@ async function start(consent: ConsentToken | null) {
 async function stop() {
   generation = null;
   dismissSocketAsks();
+  dropAllHistoryHandles();
+  forgetTabCalls();
   noteSocketServing(false);
   subscriptions.clear();
   launchSent.clear();
@@ -295,6 +301,8 @@ function sync() {
   if (!on) {
     generation = null;
     dismissSocketAsks();
+    dropAllHistoryHandles();
+    forgetTabCalls();
     noteSocketServing(false);
     stopResponders();
     runWritten([...unwrittenRuns]);

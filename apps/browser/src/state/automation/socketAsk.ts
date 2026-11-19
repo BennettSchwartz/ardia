@@ -1,15 +1,17 @@
-import { confirm, dismissShownOnlyDialogs } from "../../platform/dialogs";
+import { canDismissShownOnlyDialogs, confirm, dismissShownOnlyDialogs } from "../../platform/dialogs";
 import type { CloseAsk } from "../windows/windowClose";
 import { lastFocusedEligibleWindow } from "./automationWindows";
 import { now } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
+import { STOPPED } from "./socketCatalog";
 
 export const UNSEEN = "Ardia would have to ask first, and nobody can see that question here (its window isn't on screen, or Ardia runs in the background)";
 
 const waiting = new Set<() => void>();
 
-export function askWhereSeen(outcome: string): CloseAsk {
+export function askWhereSeen(outcome: string, serving: () => boolean): CloseAsk {
   return async (options) => {
+    if (!serving()) throw new OpError("failed", STOPPED);
     let dismiss = () => {};
     const dismissed = new Promise<"dismissed">((resolve) => (dismiss = () => resolve("dismissed")));
     waiting.add(dismiss);
@@ -25,7 +27,7 @@ export function askWhereSeen(outcome: string): CloseAsk {
 }
 
 export function dismissSocketAsks() {
-  if (!waiting.size) return;
+  if (!waiting.size || !canDismissShownOnlyDialogs()) return;
   for (const dismiss of [...waiting]) dismiss();
   void dismissShownOnlyDialogs().catch(() => {});
 }

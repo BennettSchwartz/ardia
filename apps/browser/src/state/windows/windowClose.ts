@@ -65,7 +65,10 @@ export function closeWindowAsked(windowId: string, guard: CloseGuard): Promise<G
 }
 
 export async function closeAfterAsking(windowId: string, { mayClose = () => true, ask = confirm }: CloseGuard = {}): Promise<GuardedClose> {
-  const { decision, suppressWarning } = await decideWindowClose(windowId, ask, mayClose);
+  const { decision, suppressWarning } = await decideWindowClose(windowId, ask, mayClose).catch((error: unknown) => {
+    useBrowser.getState().dropStaleLastWindowMark();
+    throw error;
+  });
   if (suppressWarning && mayClose()) useBrowser.getState().updateSettings({ warnBeforeClosingWindow: false });
   if (decision === "cancel") {
     useBrowser.getState().dropStaleLastWindowMark();
