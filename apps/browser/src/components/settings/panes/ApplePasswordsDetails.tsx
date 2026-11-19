@@ -1,11 +1,11 @@
 import { applePasswordsAvailable, openPasswordsApp } from "../../../state/site/passwords";
-import { ICLOUD_PASSWORDS_EXTENSION_ID, iCloudPasswordsExtensionOf, useEffectivePasswordManager } from "../../../state/site/passwordManager";
+import { choosePasswordManager, ICLOUD_PASSWORDS_EXTENSION_ID, iCloudPasswordsExtensionOf, useProfilePasswordManager } from "../../../state/site/passwordManager";
 import { addFromWebStore, setEnabled } from "../../../state/extensions/actions";
 import { useExtensionList } from "../../../state/extensions/store";
 import { InstallDialogHost } from "../../extensions/ExtensionOverlays";
 import { Box, Button, type Option, PopUp } from "../../ui";
+import { useEffect, useState } from "react";
 import { plural } from "../../../state/browser/model";
-import { updateSettings } from "../../../state/settings/actions";
 import type { PasswordManager } from "../../../state/settings/settings";
 import { SETTINGS_WINDOW_ID } from "../../../state/settings/settingsWindows";
 import { unlockPasswordsFor } from "../../../state/site/savedPasswords";
@@ -22,21 +22,37 @@ function managerOptions(): Option<PasswordManager>[] {
   ];
 }
 
-export function PasswordManagerRow() {
-  const mode = useEffectivePasswordManager();
+export function PasswordManagerRow({ profileId }: { profileId: string }) {
+  const mode = useProfilePasswordManager(profileId);
   return (
     <Row anchor="profiles.passwordManager">
-      <PopUp value={mode} options={managerOptions()} onChange={(passwordManager) => (notePasswordManagerChosen(passwordManager), updateSettings({ passwordManager }))} minWidth={210} />
+      <PopUp value={mode} options={managerOptions()} onChange={(manager) => (notePasswordManagerChosen(manager), choosePasswordManager(profileId, manager))} minWidth={210} />
     </Row>
   );
 }
+
+export const OFFER_TO_SAVE_HANDED_OVER: Record<Exclude<PasswordManager, "ardia">, string> = {
+  apple: "Apple Passwords fills and saves logins in this profile, so Ardia doesn't offer to save them.",
+  none: "Your password manager extension handles logins in this profile, so Ardia doesn't offer to save them.",
+};
 
 export const OTHER_MANAGER_DESCRIPTION: Record<Exclude<PasswordManager, "ardia">, string> = {
   apple: "Uses the macOS Passwords app and iCloud Keychain across your Apple devices.",
   none: "Built-in password prompts are off so your password manager extension can handle logins.",
 };
 
+function useICloudPasswordsExtensionSupported() {
+  const [supported, setSupported] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void iCloudPasswordsExtensionSupported().then((value) => live && setSupported(value));
+    return () => void (live = false);
+  }, []);
+  return supported;
+}
+
 export function ApplePasswordsDetails({ profile }: { profile: string }) {
+  const extensionSupported = useICloudPasswordsExtensionSupported();
   const extensions = useExtensionList(profile);
   const iCloudExt = iCloudPasswordsExtensionOf(extensions);
   const extensionState = !iCloudExt ? "notInstalled" : iCloudExt.enabled ? "enabled" : "disabled";
@@ -52,7 +68,7 @@ export function ApplePasswordsDetails({ profile }: { profile: string }) {
         <Row title="Passwords app" description="Manage saved passwords, passkeys, verification codes and Wi-Fi passwords in macOS Passwords.">
           <Button title="Open Passwords" kind="primary" onPress={() => void openPasswordsApp()} />
         </Row>
-        {iCloudPasswordsExtensionSupported() ? (
+        {extensionSupported ? (
           <Row
             title="iCloud Passwords"
             description={extensionState === "enabled" ? "Paired with the macOS Passwords helper." : "Optional: pair with the iCloud Passwords extension from the Chrome Web Store."}

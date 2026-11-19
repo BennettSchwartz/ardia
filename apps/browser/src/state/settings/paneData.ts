@@ -29,7 +29,7 @@ import { currentSettings } from "../browser/current";
 import { engineProfile } from "../browser/model";
 import { currentSyncFolder, folderInfo } from "../sync/engine";
 import { extensionsProfileId, refreshExtensions } from "../extensions/actions";
-import { passwordAutofill } from "../site/passwordManager";
+import { forgetPendingOfferToSave, passwordAutofill } from "../site/passwordManager";
 import { cached, load, loadAll, need, resource, store, useAllLoaded, type Needed } from "./resources";
 import type { SettingsPane } from "./settingsWindows";
 import { FOLLOW_EVERY_MS, FOLLOW_FOR_MS, switchOutcome, updaterBusy } from "./updateStatus";
@@ -128,6 +128,7 @@ export async function setPreloadPagesFor(profile: string, on: boolean) {
 }
 
 export async function setPasswordAutofillFor(profile: string, on: boolean) {
+  forgetPendingOfferToSave(profile);
   if (!(await written(setPasswordAutofill(on, profile)))) return;
   const now = await getPasswordAutofill(profile).catch(() => on);
   store(passwordAutofill, [profile], now);

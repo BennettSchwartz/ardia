@@ -96,8 +96,8 @@ export const emitPermission = (request: EngineEvents["permissions.requested"]) =
 export const passwordAutofill = new Map<string, boolean>();
 export const passwordManagerEngine = {
   available: true,
-  extensionSupported: false,
-  enabled: false,
+  extensionSupported: false as boolean | Promise<boolean>,
+  profiles: [] as string[],
   extensionProfiles: [] as string[],
   opened: 0,
   setupUrls: [] as string[],
@@ -453,10 +453,10 @@ const fakeModules = {
         passwordManagerEngine.calls.push(["offerToSave", profile, enabled]);
         return null;
       },
-      setApplePasswords: ({ enabled, extensionProfiles = [] }) => {
-        passwordManagerEngine.enabled = enabled;
+      setApplePasswords: ({ profiles, extensionProfiles = [] }) => {
+        passwordManagerEngine.profiles = [...profiles];
         passwordManagerEngine.extensionProfiles = [...extensionProfiles];
-        passwordManagerEngine.calls.push(extensionProfiles.length ? ["applePasswords", enabled, extensionProfiles] : ["applePasswords", enabled]);
+        passwordManagerEngine.calls.push(extensionProfiles.length ? ["applePasswords", profiles, extensionProfiles] : ["applePasswords", profiles]);
         return null;
       },
       openPasswordsApp: () => (passwordManagerEngine.opened++, true),

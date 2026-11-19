@@ -129,8 +129,8 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setDisplayMediaPicker:(BOOL)enabled;
 + (void)setSelectionPopoverEnabled:(BOOL)enabled NS_SWIFT_NAME(setSelectionPopoverEnabled(_:));
 + (void)setBlockAutoplayEverywhere:(BOOL)enabled NS_SWIFT_NAME(setBlockAutoplayEverywhere(_:));
-+ (void)setApplePasswordsEnabled:(BOOL)enabled extensionProfiles:(NSArray<NSString *> *)profiles
-    NS_SWIFT_NAME(setApplePasswordsEnabled(_:extensionProfiles:));
++ (void)setApplePasswordsProfiles:(NSArray<NSString *> *)profiles extensionProfiles:(NSArray<NSString *> *)extensionProfiles
+    NS_SWIFT_NAME(setApplePasswords(profiles:extensionProfiles:));
 - (BOOL)showAppleAutoFill:(NSString *)kind;
 - (BOOL)showAppleAutoFillFromMenu:(NSString *)kind;
 - (void)resolveDisplayMedia:(NSString *)requestId sourceId:(nullable NSString *)sourceId audio:(BOOL)audio

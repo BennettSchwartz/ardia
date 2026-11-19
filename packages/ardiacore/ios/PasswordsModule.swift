@@ -46,8 +46,8 @@ public class PasswordsModule: Module {
       ArdiaServices.profileToggles(profile: args.profile, set: ["passwords": NSNumber(value: enabled)]) { _, error in reply.service(nil, error) }
     },
     "setApplePasswords": { args, reply in
-      let profiles = (args.values["extensionProfiles"] as? [Any])?.compactMap { $0 as? String } ?? []
-      ArdiaWebView.setApplePasswordsEnabled(try args.bool("enabled"), extensionProfiles: profiles)
+      let names = { (key: String) in (args.values[key] as? [Any])?.compactMap { $0 as? String } ?? [] }
+      ArdiaWebView.setApplePasswords(profiles: names("profiles"), extensionProfiles: names("extensionProfiles"))
       reply.ok()
     },
     "openPasswordsApp": { _, reply in ApplePasswordsApp.open { reply.ok($0) } },

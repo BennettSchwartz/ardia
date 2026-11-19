@@ -103,7 +103,7 @@ export type EngineCalls = {
   "passwords.export": [Profile, { status: PasswordExportStatus; path?: string }];
   "passwords.autofillEnabled": [Profile, boolean];
   "passwords.setAutofillEnabled": [Profile & { enabled: boolean }, null];
-  "passwords.setApplePasswords": [{ enabled: boolean; extensionProfiles?: string[] }, null];
+  "passwords.setApplePasswords": [{ profiles: string[]; extensionProfiles?: string[] }, null];
   "passwords.openPasswordsApp": [{}, boolean];
   "passwords.setUpVerificationCode": [{ url: string }, boolean];
 

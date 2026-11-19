@@ -8,7 +8,8 @@ import { currentEngineProfile, currentSettings, currentTab } from "../browser/cu
 import { noteExternalApp } from "../telemetry/externalAppCounts";
 import { noteExternalAppRequest } from "../telemetry/track";
 import { showToast } from "../app/toasts";
-import { effectivePasswordManager } from "./passwordManager";
+import { effectivePasswordManager, profilePasswordManager } from "./passwordManager";
+import { useBrowser } from "../browser/store";
 import { parseVerificationCodeSetup } from "./verificationCodes";
 import { noteVerificationCodeSetup } from "../telemetry/passwordManagerCounts";
 import { consentToken } from "../telemetry/client";
@@ -29,10 +30,14 @@ export function popupBlocked(tabId: string, popup: BlockedPopup) {
   if (first && tab) void shouldPromptForPopups(currentEngineProfile(tab.profileId), popup.origin).then((ask) => ask && setPopover(tabId, "popups"));
 }
 
-const passwordManager = () => effectivePasswordManager(currentSettings());
+const passwordManager = (tabId: string) => {
+  const s = useBrowser.getState();
+  const tab = s.tabs[tabId];
+  return tab ? profilePasswordManager(s, tab.profileId) : effectivePasswordManager(currentSettings());
+};
 
 export function showPasswordPrompt(tabId: string, prompt: PasswordPrompt) {
-  if (prompt.state !== "saved" && passwordManager() !== "ardia") {
+  if (prompt.state !== "saved" && passwordManager(tabId) !== "ardia") {
     void webviews.get(tabId)?.resolvePasswordPrompt(prompt.state === "update" ? "nope" : "dismiss");
     return patchPage(tabId, { passwordPrompt: null });
   }
@@ -46,7 +51,7 @@ export function showAutofillPrompt(tabId: string, prompt: AutofillPrompt | null,
 
 export function showVerificationCodePrompt(tabId: string, data: VerificationCodeSetup) {
   const { url, origin } = (data ?? {}) as { url?: unknown; origin?: unknown };
-  if (typeof url !== "string" || passwordManager() !== "apple") return;
+  if (typeof url !== "string" || passwordManager(tabId) !== "apple") return;
   const offered = pageOf(tabId).verificationCodesOffered;
   if (offered.includes(url)) return;
   const setup = parseVerificationCodeSetup(url);

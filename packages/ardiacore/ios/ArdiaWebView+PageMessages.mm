@@ -35,13 +35,16 @@ BOOL gDisplayMediaPicker = YES;
 
 static BOOL gSelectionPopover = YES;
 static BOOL gBlockAutoplayEverywhere = NO;
-static BOOL gApplePasswords = NO;
+static NSSet<NSString *> *gApplePasswordsProfiles = [NSSet set];
 static NSSet<NSString *> *gApplePasswordsExtensionProfiles = [NSSet set];
+static BOOL ApplePasswordsOn(NSString *profile) {
+  return [gApplePasswordsProfiles containsObject:ardia_host::OriginalProfileName(profile)];
+}
 static BOOL ApplePasswordsKey(NSString *profile) {
-  return gApplePasswords && ![gApplePasswordsExtensionProfiles containsObject:profile ?: @""];
+  return ApplePasswordsOn(profile) && ![gApplePasswordsExtensionProfiles containsObject:ardia_host::OriginalProfileName(profile)];
 }
 static NSString *ApplePasswordsJSON(NSString *profile) {
-  return !gApplePasswords ? @"false" : ApplePasswordsKey(profile) ? @"true" : @"\"codes\"";
+  return !ApplePasswordsOn(profile) ? @"false" : ApplePasswordsKey(profile) ? @"true" : @"\"codes\"";
 }
 static NSString *const kInsertFromPasswordsAction = @"_handleInsertFromPasswordsCommand:";
 static NSDictionary<NSString *, NSString *> *AppleAutoFillActions() {
@@ -89,7 +92,7 @@ void AnswerHello(ArdiaCoreTab *tab, NSString *profile, NSString *frameId, BOOL m
     if (gDisplayMediaPicker) config[@"displayMediaPicker"] = @YES;
     if (main && ArdiaFieldTimingEnabled()) config[@"fieldTiming"] = @YES;
     if (main) config[@"selectionPopover"] = @(gSelectionPopover);
-    if (gApplePasswords && (main || (sender.length && [sender isEqualToString:OriginOf(to.url)])))
+    if (ApplePasswordsOn(profile) && (main || (sender.length && [sender isEqualToString:OriginOf(to.url)])))
       config[@"applePasswords"] = ApplePasswordsKey(profile) ? @YES : @"codes";
     config[@"peek"] = gPeekModifier;
     config[@"split"] = SplitLinkModifier();
@@ -135,10 +138,11 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   for (ArdiaWebView *view in LiveViews().allObjects) [view pushSelectionPopover];
 }
 
-+ (void)setApplePasswordsEnabled:(BOOL)enabled extensionProfiles:(NSArray<NSString *> *)profiles {
-  NSSet<NSString *> *extension = [NSSet setWithArray:profiles ?: @[]];
-  if (enabled == gApplePasswords && [extension isEqualToSet:gApplePasswordsExtensionProfiles]) return;
-  gApplePasswords = enabled;
++ (void)setApplePasswordsProfiles:(NSArray<NSString *> *)profiles extensionProfiles:(NSArray<NSString *> *)extensionProfiles {
+  NSSet<NSString *> *apple = [NSSet setWithArray:profiles ?: @[]];
+  NSSet<NSString *> *extension = [NSSet setWithArray:extensionProfiles ?: @[]];
+  if ([apple isEqualToSet:gApplePasswordsProfiles] && [extension isEqualToSet:gApplePasswordsExtensionProfiles]) return;
+  gApplePasswordsProfiles = apple;
   gApplePasswordsExtensionProfiles = extension;
   for (ArdiaWebView *view in LiveViews().allObjects) [view pushApplePasswords];
 }
@@ -240,7 +244,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
     }
   } else if ([kind isEqualToString:@"verificationCodeSetup"] && dict) {
     NSString *url = Field<NSString>(dict, @"url");
-    if (gApplePasswords && [self sameSiteFrame:main origin:sender] && url.length && url.length <= 2048 &&
+    if (ApplePasswordsOn(_profile) && [self sameSiteFrame:main origin:sender] && url.length && url.length <= 2048 &&
         [url rangeOfString:@"^otpauth(-migration)?://" options:NSRegularExpressionSearch | NSCaseInsensitiveSearch].location == 0)
       [self emit:@"verificationCodeSetup" payload:@{@"url" : url, @"origin" : sender ?: @"", @"main" : @(main)}];
   } else if ([kind isEqualToString:@"drm"] && dict) {

@@ -3,7 +3,6 @@ import type { SettingsPane } from "../../../state/settings/settingsWindows";
 import { keyText } from "../../../state/commands/keyText";
 import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
 import { PLATFORM_TERMS } from "../../../lib/platformTerms";
-import { effectivePasswordManager } from "../../../state/site/passwordManagerChoice";
 
 const syncOn = (_: unknown, env: SettingsEnv) => !!env.syncOn;
 
@@ -113,7 +112,7 @@ export const profileRows = {
           title: "Save and fill passwords",
           description: "Offers to save logins and fills saved ones.",
           keywords: ["password manager", "logins", "credentials", "keychain", "offer to save and fill passwords"],
-          shown: (s) => PLATFORM_FEATURES.passwordAutofillSwitch && effectivePasswordManager(s) === "ardia",
+          shown: () => PLATFORM_FEATURES.passwordAutofillSwitch,
         },
         passwords: {
           title: "Passwords",

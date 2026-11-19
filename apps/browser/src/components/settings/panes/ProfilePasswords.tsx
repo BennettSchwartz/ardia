@@ -32,8 +32,8 @@ import { goToSettingsPane, SETTINGS_DETAIL } from "../../../state/settings/setti
 import { ProfileSubPage } from "./ProfileSubPage";
 import { useGrowingRows } from "../../../state/settings/growingRows";
 import { notePasswordListShown } from "../../../state/telemetry/exportCounts";
-import { useEffectivePasswordManager } from "../../../state/site/passwordManager";
-import { ApplePasswordsDetails, OTHER_MANAGER_DESCRIPTION, PasswordManagerRow, SavedInArdiaDetails } from "./ApplePasswordsDetails";
+import { useProfilePasswordManager } from "../../../state/site/passwordManager";
+import { ApplePasswordsDetails, OFFER_TO_SAVE_HANDED_OVER, OTHER_MANAGER_DESCRIPTION, PasswordManagerRow, SavedInArdiaDetails } from "./ApplePasswordsDetails";
 
 function passwordManagerAppsNote() {
   const apps = `1Password, Bitwarden, KeePassXC and Proton Pass extensions connect to their ${PLATFORM_TERMS.computer} apps.`;
@@ -50,14 +50,15 @@ export function PasswordsSection({ profileId }: { profileId: string }) {
   const [addressesAsked] = useResource(autofillToggleAsked, profile, "addresses");
   const [cardsAsked] = useResource(autofillToggleAsked, profile, "cards");
   const open = (detail: string) => goToSettingsPane("profiles", profileId, detail);
+  const mode = useProfilePasswordManager(profileId);
 
   return (
     <>
       <SectionHeader title="Passwords and autofill" />
       <Group>
-        <PasswordManagerRow />
-        <Row anchor="profiles.offerToSavePasswords" description={keptByExtensionNote(autofill, passwordsAsked)}>
-          <Toggle value={autofill} onChange={(v) => setPasswordAutofillFor(profile, v)} />
+        <PasswordManagerRow profileId={profileId} />
+        <Row anchor="profiles.offerToSavePasswords" description={mode === "ardia" ? keptByExtensionNote(autofill, passwordsAsked) : OFFER_TO_SAVE_HANDED_OVER[mode]}>
+          <Toggle value={mode === "ardia" && autofill} disabled={mode !== "ardia"} onChange={(v) => setPasswordAutofillFor(profile, v)} />
         </Row>
         <Row anchor="profiles.passwords" onPress={() => open(SETTINGS_DETAIL.passwords)} />
         <Row anchor="profiles.addresses" description={keptByExtensionNote(enabled?.addresses, addressesAsked)}>
@@ -83,7 +84,7 @@ export function PasswordsPage({ profileId }: { profileId: string }) {
   const [showArdiaList, setShowArdiaList] = useState(false);
   const profile = currentEngineProfile(profileId);
   const unlocked = usePasswordsUnlocked(profile);
-  const mode = useEffectivePasswordManager();
+  const mode = useProfilePasswordManager(profileId);
   const arrived = useRef(0);
 
   const load = () => {
