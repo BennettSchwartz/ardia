@@ -255,7 +255,9 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
 - **Shared folders** (`state/sharedFolders`). `share` makes the folder in iCloud Drive's Ardia folder (or `parent`
   when iCloud Drive is off) and syncs it once; instead of the macOS share sheet, the reply carries the folder's path and
   file URL for the command to share. `add` binds a folder someone shared as a new pinned folder, as Add Shared Folder
-  does without its folder picker. `stop` is Stop Syncing: the group and the files stay.
+  does without its folder picker. `stop` is Stop Syncing: the group and the files stay. It cancels the batch being
+  written, if any, and answers only once that batch has finished; when it can't confirm that within 10 seconds it
+  answers `failed`, with the binding already gone.
   Paths are resolved once to the real folder (`resolve` in `SharedFoldersModule.swift`): the binding stores that path and
   the folder's device and inode. The native layer (`SharedFolderDirectory.swift`) opens the root once with `O_NOFOLLOW`,
   checks its device and inode, and does every scan, read, write, rename, mkdir and unlink relative to folder descriptors
@@ -264,8 +266,11 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   refused by device and inode as well as by path, so `/System/Volumes/Data/Users` and the home folder's data-volume path are refused too (`resolve` rejects with `ERR_SHARED_FOLDER_REFUSED`, answered as `refused`); `parent` must already exist and is
   held by descriptor and checked against its identity through creation, never recreated. `create` returns the new
   folder's identity in the same call, and a folder `share` made but couldn't use is removed only while it is still that
-  empty folder. A binding made before identities existed (from the sidebar, or an older Ardia) is upgraded to its real
-  path and identity the first time it syncs or `add` looks for it. Binding is compare-and-set for the sidebar and the
+  empty folder. A binding made before identities existed (from the sidebar, or an older Ardia) is never filled in from
+  whatever is at its old path now: it shows "Pick the folder again to keep syncing" (`state: "reconnect"`), reads and
+  writes nothing, and the sidebar's Reconnect Folder… asks the person to pick it; the reconnected binding starts from
+  a fresh merge base. `add` with the old path finds that binding instead of making another. A folder syncs with one
+  profile at a time: `add` in another profile answers `refused`, naming the group that has it. Binding is compare-and-set for the sidebar and the
   socket alike: whichever finishes making a folder second keeps the first one's binding and removes its own. `add` reads
   the folder before saving anything, so a missing, unreadable or too big folder (over 20,000 items or 32 MB of links and
   order files, counted while listing) answers an error and adds nothing. Requests for one group run one at a time;
@@ -274,20 +279,37 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   write already under way when control goes off commits nothing. When the first sync fails, `share` answers `failed`
   with the reason instead of the URL, as the sidebar shows a toast instead of the share sheet; the binding stays, as it
   does there.
-  A binding that can't get an identity (a legacy one whose path is now refused or gone) never syncs: it shows as an
-  error in the sidebar and `list`, and the native `read` and `apply` refuse a missing identity rather than open a path.
+  The native `read` and `apply` refuse a missing identity rather than open a path.
   Folder names drop control characters (NUL included), `/` and `:`, and `create` tries at most 1,000 numbered names.
   `create` compares the identity it `fstatat`s right after `mkdirat` with the folder it then opens. A rename checks the
   source's identity just before `renameatx_np` with `RENAME_EXCL` and moves it back if what landed isn't that file; a
   folder is removed by renaming it to a unique hidden name, checking its identity there, and only then removing it (a
-  replacement is renamed back). File coordination and iCloud download requests stay path-based, because
+  replacement is renamed back). `rmdir` checks the folder's identity before it touches the order file or any other
+  housekeeping file in it, and puts them back if it can't remove the folder. Replacing a link swaps the new file in
+  with `renameatx_np(RENAME_SWAP)` after checking the old one's identity, then checks that what it swapped out is that
+  file and swaps back if not; deleting a link renames it to a hidden name, checks its identity and URL there, and only
+  then unlinks it. What remains is the moment between the last check and the rename or swap, and a rename back that
+  fails because the name was taken in between, which leaves the other file under the hidden name; nothing is ever
+  removed in that case. `mkdir` and `rmdir` check that the parent's path still names the held folder, and `mkdir` onto
+  a folder that already exists is a conflict, so a name another device made (in another Unicode form, say) is merged
+  on the next read instead of written into. The planner reserves names the way APFS compares them (Unicode
+  normalization and case together). File coordination and iCloud download requests stay path-based, because
   `NSFileCoordinator` and iCloud work by path; each coordinated read, write and delete first checks that the path
   still names the held folder, and a folder whose path moved is a conflict or an error, never a write elsewhere. Staged
-  files land with `renameatx_np` into the held descriptor. Every byte read while scanning counts toward the 32 MB cap,
-  whether or not it decodes. Add, from the sidebar or the socket, runs one at a time per folder identity and binds only
+  files land with `renameatx_np` into the held descriptor. iCloud download requests (`startDownloadingUbiquitousItem`)
+  stay path-based outside the checked callbacks: at worst they ask iCloud to download a file in the folder now at that
+  path, and nothing is read or written there. Every byte read while scanning counts toward the 32 MB cap, whether or
+  not it decodes, and so does a binary link's size once converted to XML (over 64 KB, it's held as unreadable). A scan
+  stops after 30 seconds, and a file that doesn't answer its coordination in time is an error for that read, not a
+  missing link. Each folder has its own native queue, so a slow folder never holds up the others. A socket round's
+  write batch carries a cancel token: the engine cancels it as soon as the round's control check fails or the binding
+  changes, and native `apply` checks it before each change and again after each file-coordination wait, then stops
+  with `cancelled`, committing nothing. Add, from the sidebar or the socket, runs one at a time per folder identity and binds only
   when no binding in the profile has that identity. `add` checks control after every await before it changes anything.
-  A sidebar change made by a socket round (remote links applied) starts its follow-up round under that round's guard,
-  so a round revoked during its save never comes back as one that writes.
+  A sidebar change made by a socket round (remote links applied) is tagged with that round's guard. A follow-up the
+  store starts runs under that guard, and any later round, from the store, the folder watcher or the minute poll,
+  writes nothing for a tagged change whose guard was revoked: the disk side wins, and the round only records the
+  folder as it is on disk.
   A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone: `apply` answers
   `refused` ("shared folder groups change only from the sidebar") for any op that would change such a group's members,
   their order, a tab or group title inside it, or its nesting, including moving a tab or group into or out of it,
