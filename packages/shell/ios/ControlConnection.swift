@@ -6,7 +6,8 @@ final class ControlConnection {
   static let maxPendingRequests = 32
   static let lineDeadline: TimeInterval = 30
   static let retireDeadline: TimeInterval = 5
-  private static var retiring: [ObjectIdentifier: ControlConnection] = [:]
+  static let maxRetiring = 16
+  private(set) static var retiring: [ControlConnection] = []
   private static let readSize = 65536
 
   let id: Int
@@ -60,7 +61,7 @@ final class ControlConnection {
   }
 
   func send(_ data: Data) {
-    guard !closed, !finishingLine else { return }
+    guard !closed, !finishingLine, !draining else { return }
     guard output.addKept(data) else { return retire() }
     if !writeArmed { flush() }
   }
@@ -78,7 +79,8 @@ final class ControlConnection {
     input = []
     report(output.keepOnlyHead())
     announce()
-    Self.retiring[ObjectIdentifier(self)] = self
+    Self.retiring.append(self)
+    if Self.retiring.count > Self.maxRetiring { Self.retiring.first?.close() }
     let item = DispatchWorkItem { [weak self] in self?.close() }
     deadline = item
     queue.asyncAfter(deadline: .now() + Self.retireDeadline, execute: item)
@@ -108,7 +110,7 @@ final class ControlConnection {
     input = []
     announce()
     report(unwritten)
-    Self.retiring.removeValue(forKey: ObjectIdentifier(self))
+    Self.retiring.removeAll { $0 === self }
   }
 
   private func stopReading() {
@@ -185,6 +187,7 @@ final class ControlConnection {
 
   private func drainAfterPeerClosed() {
     draining = true
+    output.keepOnlyReplies()
     if !readSuspended {
       readSuspended = true
       readSource?.suspend()

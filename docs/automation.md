@@ -42,8 +42,8 @@ default applies at once.
 
 Newline-delimited JSON, UTF-8, one object per line, `\n` terminated.
 
-- Requests: `{"id": 1, "method": "…", "params": {…}}`. `id` is a safe integer or a string of at most 256 UTF-8 bytes,
-  echoed in the reply; a longer id is refused with `bad_request` and `"id": null`, so no reply grows past the line limit
+- Requests: `{"id": 1, "method": "…", "params": {…}}`. `id` is a safe integer or a well-formed string (no lone surrogate) of at most 256 UTF-8
+  bytes, echoed in the reply; any other id is refused with `bad_request` and `"id": null`, so no reply grows past the line limit
   because of its id. `params` is optional.
 - Replies: `{"id": 1, "result": …}` or `{"id": 1, "error": {"code": "…", "message": "…"}}`. A line that isn't a JSON
   object, or has no usable `id`, gets an error with `"id": null` and the connection stays open.
@@ -84,7 +84,8 @@ bookmark searches) and their fixed page title.
   title (else the command bar's, else the id), `scope` is `"page"`, `"window"` or `null`.
 - `run` `{"command", "arg"?, "window"?, "tab"?}` → `{"ok": true}` once the command was dispatched (not necessarily finished).
   A command that would ask the user first (`closeTab` on a window's last tab with **Ask before closing the last tab**,
-  `closeTabGroup` with its warning on or on a shared folder, `back` across page engines) answers `refused` in a
+  `closeTabGroup` with its warning on or on a shared folder, `back` across page engines), or that opens a picker
+  (`openFile`, `exportBookmarks`, `savePage`, `printWithSystemDialog`, `share` without `via:`), answers `refused` in a
   background instance, where nobody could answer, and doesn't run; elsewhere its question shows in its window and the
   reply still comes at dispatch, as for a click on the menu.
   `command` is a catalog id, `arg` one of its variant ids. It runs through `runCommand`, exactly as the menu or a
@@ -198,7 +199,7 @@ profile goes where the store puts moved tabs.
 | `tab.pin` / `tab.unpin` | `tabs`, `as`? (`tile`/`row`) | `pinTabs`; unpinning a tab of a pinned group takes it out (`placeTabs`), as Unpin does. A split's panes pin together, as rows: `as: "tile"` on one is `bad_request` |
 | `tab.activate` | `tab` | `activate` |
 | `tab.mute` / `tab.unmute` | `tabs` | `setMuted`; unmute also unmutes the site, as the menu does |
-| `tab.sleep` | `tabs` | Pinned tabs unload (`closeTabs`, as their ✕); others are discarded by Chrome. A tab is left alone (`shown`) when it, a pinned copy sharing its page, or a pane of its split is shown in any window. `outcomes`: `asleep`, `already`, `shown`, `refused`, `unsupported`. Each tab's discard has 10 s: past that the op fails (`failed`, naming the tab; the tabs before it are in `changed`) and the batch stops there, so a stuck engine call never holds up other clients' batches |
+| `tab.sleep` | `tabs` | Pinned tabs unload (`closeTabs`, as their ✕); others are discarded by Chrome. A tab is left alone (`shown`) when it, a pinned copy sharing its page, or a pane of its split is shown in any window. `outcomes`: `asleep`, `already`, `shown`, `refused`, `unsupported`. Each tab's discard has 10 s: past that the op fails (`failed`, "outcome unknown"; `changed` lists the tabs it did put to sleep) and the batch stops there, so a stuck engine call never holds up other clients' batches. The tab stays busy (`refused`) until the engine answers, and the next `apply` reports that answer once under `late` |
 | `tab.wake` | `tabs` | Loads a sleeping tab in the background (`updateTab` with its woken page, or a reload for a discarded one). `outcomes`: `awake`, `already`, `failed`. A reload has 10 s, as `tab.sleep`'s discard does |
 | `tab.close` | `tabs` | `closeTabs`: as ✕, so pinned tabs unload; never closes a window (a window left empty gets a New Tab) |
 | `tab.rename` / `tab.icon` | `tab`, `title` / `icon` (null resets) | `updateTab` `customTitle` / `customIcon`, as Rename… and Change Icon… |
