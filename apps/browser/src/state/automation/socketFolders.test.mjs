@@ -6,6 +6,7 @@ const { takeCliCounts } = await import("../telemetry/cliCounts.ts");
 const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
 const { cacheKey } = await import("../favicons/favicons.ts");
 const { encodeSetupCode } = await import("../presets/setupCode.ts");
+const { keepGroupsOpen } = await import("../groups/closeGuard.ts");
 const stub = await import("../../test-native/index.ts");
 
 const S = () => useBrowser.getState();
@@ -87,6 +88,36 @@ test("a folder mirrored into another window is found in the window of the tabs b
   assert.equal(grown.window, other);
   assert.ok(grown.tabs.includes(extra));
   assert.equal(await code("pins.addToFolder", { folder: made.id, tabs: [d], window: other }), "bad_request");
+});
+
+test("tile folders refuse to empty a shared sidebar folder, as apply does", async () => {
+  const { tabs: [a, b, c] } = await setup();
+  const shared = S().groupTabs([b], { pinned: true, name: "Shared" });
+  keepGroupsOpen((id) => id === shared);
+  try {
+    assert.equal(await code("pins.createFolder", { tabs: [b] }), "refused");
+    assert.deepEqual(S().groups[shared]?.tabIds, [b], "the shared folder keeps its tab");
+    const made = await ok("pins.createFolder", { tabs: [a] });
+    assert.equal(await code("pins.addToFolder", { folder: made.id, tabs: [b] }), "refused");
+    assert.deepEqual(S().groups[shared]?.tabIds, [b]);
+    assert.equal(S().tabs[b].pin?.as === "tile", false);
+    assert.ok((await ok("pins.addToFolder", { folder: made.id, tabs: [c] })).tabs.includes(c));
+  } finally {
+    keepGroupsOpen(() => false);
+  }
+});
+
+test("tile folders refuse a split's pane before changing anything, as the sidebar's folder drop does", async () => {
+  const { tabs: [a, b, c, d] } = await setup();
+  S().createSplit([b, c]);
+  const split = JSON.stringify(S().splits);
+  assert.equal(await code("pins.createFolder", { tabs: [a, b] }), "bad_request");
+  assert.deepEqual([S().tabs[a].pin, S().tabs[b].pin, S().tabs[c].pin], [null, null, null], "nothing was pinned");
+  assert.equal(JSON.stringify(S().splits), split, "the split is untouched");
+  const made = await ok("pins.createFolder", { tabs: [d] });
+  assert.equal(await code("pins.addToFolder", { folder: made.id, tabs: [c] }), "bad_request");
+  assert.deepEqual([S().tabs[b].pin, S().tabs[c].pin], [null, null]);
+  assert.equal(JSON.stringify(S().splits), split);
 });
 
 test("favicons: from the app's cache or the profile's icon database, as base64", async () => {

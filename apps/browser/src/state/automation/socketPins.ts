@@ -5,6 +5,7 @@ import { eligibleKind } from "./automationWindows";
 import type { MethodSpec } from "./socketCatalog";
 import { id, ids, obj, text, WINDOW } from "./socketSchema";
 import { expect, now, tabOf, windowOrFocused } from "./socketTargets";
+import { guardEmptied, noSplitTiles } from "./workspaceChecks";
 import { OpError } from "./workspaceTargets";
 
 const MAX_NAME = 200;
@@ -50,8 +51,15 @@ function sameSpace(tabIds: string[]) {
   return tabs.map((t) => t.id);
 }
 
+function intoFolderChecks(tabIds: string[]) {
+  const s = now();
+  noSplitTiles(s, tabIds, { pinned: true, row: false }, "into a tile folder");
+  guardEmptied(s, new Set(tabIds));
+}
+
 function createFolder(params: Record<string, unknown>) {
   const tabIds = sameSpace(params.tabs as string[]);
+  intoFolderChecks(tabIds);
   const { state, folderId } = newTileFolder(now(), tabIds, nameOf(params.name));
   expect(!!folderId, "the folder wasn't made.");
   useBrowser.setState(state);
@@ -80,6 +88,7 @@ function addTabs(params: Record<string, unknown>) {
   const moving = sameSpace([onto, ...(params.tabs as string[])]).filter((t) => t !== onto);
   if (moving.some((t) => now().tabs[t]!.windowId !== windowId)) throw new OpError("bad_request", "Those tabs aren't in the folder's window.");
   expect(pinSection(now().tabs[onto]) === "tile", "the folder's tabs aren't tiles.");
+  intoFolderChecks(moving);
   useBrowser.setState((s) => addToTileFolder(s, moving, onto));
   expect(moving.every((t) => tileFolderOf(now().tabs[t])?.id === folderId), "not every tab went into the folder.");
   return folderRow(now(), windowId, folderId);
