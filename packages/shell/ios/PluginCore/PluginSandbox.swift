@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct PluginSandbox {
   let home: String
@@ -13,7 +14,7 @@ struct PluginSandbox {
 
   static let machAllowed = [
     "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership", "com.apple.logd", "com.apple.bsd.dirhelper",
-    "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon", "com.apple.FSEvents",
+    "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
   ]
 
   static let machAllowedOnline = [
@@ -39,10 +40,16 @@ struct PluginSandbox {
 
   static let certificateSourceLimit = 4 << 20
 
+  static let extraCertificateBundleName = "extra-certificates.pem"
+
+  struct Certificates: Equatable {
+    var replacement: String
+    var extra: String
+  }
+
   struct NetworkEnvironment: Equatable {
     var variables: [String] = []
     var droppedProxies: [String] = []
-    var certificates: String?
   }
 
   static func carriesCredentials(_ value: String) -> Bool {
@@ -50,42 +57,80 @@ struct PluginSandbox {
     return url.user != nil || url.password != nil || (url.host == nil && value.contains("@"))
   }
 
+  static func derLength(_ der: Data) -> Int? {
+    let bytes = [UInt8](der.prefix(6))
+    guard bytes.count >= 2, bytes[0] == 0x30 else { return nil }
+    if bytes[1] < 0x80 { return 2 + Int(bytes[1]) }
+    let count = Int(bytes[1] & 0x7f)
+    guard count >= 1, count <= 4, bytes.count >= 2 + count else { return nil }
+    let length = bytes[2..<(2 + count)].reduce(0) { ($0 << 8) | Int($1) }
+    return 2 + count + length
+  }
+
+  static func certificateDER(_ body: Substring) -> Data? {
+    guard let der = Data(base64Encoded: String(body.filter { !$0.isWhitespace })), derLength(der) == der.count else { return nil }
+    guard SecCertificateCreateWithData(nil, der as CFData) != nil else { return nil }
+    return der
+  }
+
   static func certificateBlocks(in text: String) -> [String] {
     let begin = "-----BEGIN CERTIFICATE-----"
     let end = "-----END CERTIFICATE-----"
     var blocks: [String] = []
     var rest = Substring(text)
-    while let start = rest.range(of: begin), let stop = rest[start.upperBound...].range(of: end) {
-      let body = rest[start.upperBound..<stop.lowerBound].filter { !$0.isWhitespace }
+    while let start = rest.range(of: begin) {
+      let after = rest[start.upperBound...]
+      guard let stop = after.range(of: end) else { break }
+      if let nextBegin = after.range(of: begin), nextBegin.lowerBound < stop.lowerBound {
+        rest = rest[nextBegin.lowerBound...]
+        continue
+      }
       rest = rest[stop.upperBound...]
-      guard let der = Data(base64Encoded: String(body)), !der.isEmpty, der.first == 0x30 else { continue }
+      guard let der = certificateDER(after[..<stop.lowerBound]) else { continue }
       blocks.append("\(begin)\n\(der.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n\(end)\n")
     }
     return blocks
   }
 
-  static func certificateBundle(from given: [String: String], system: String = systemCertificates) -> String {
-    var sources = [system]
+  static func readSource(_ path: String, limit: Int = certificateSourceLimit) -> Data? {
+    let fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC)
+    guard fd >= 0 else { return nil }
+    defer { close(fd) }
+    var info = stat()
+    guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_size <= off_t(limit) else { return nil }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+    while data.count <= limit {
+      let count = buffer.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+      if count <= 0 { break }
+      data.append(contentsOf: buffer[0..<count])
+    }
+    return data.count <= limit ? data : nil
+  }
+
+  static func certificates(from given: [String: String], system: String = systemCertificates) -> Certificates {
+    var extraSources: [String] = []
     for name in certificateEnvironment {
-      if let path = given[name], !path.isEmpty, !sources.contains(path) { sources.append(path) }
+      if let path = given[name], !path.isEmpty, path != system, !extraSources.contains(path) { extraSources.append(path) }
+    }
+    func blocks(_ sources: [String]) -> [String] {
+      sources.compactMap { readSource($0) }.flatMap { certificateBlocks(in: String(decoding: $0, as: UTF8.self)) }
     }
     var seen = Set<String>()
-    var bundle = ""
-    for source in sources {
-      guard let handle = FileHandle(forReadingAtPath: source) else { continue }
-      defer { try? handle.close() }
-      guard let data = try? handle.read(upToCount: certificateSourceLimit + 1), data.count <= certificateSourceLimit else { continue }
-      for block in certificateBlocks(in: String(decoding: data, as: UTF8.self)) where seen.insert(block).inserted { bundle += block }
-    }
-    return bundle
+    let systemBlocks = blocks([system]).filter { seen.insert($0).inserted }
+    let extraBlocks = blocks(extraSources).filter { seen.insert($0).inserted }
+    return Certificates(replacement: (systemBlocks + extraBlocks).joined(), extra: extraBlocks.joined())
   }
 
-  static func certificateVariables(dataFolder: String) -> [String] {
-    let bundle = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
-    return ["SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)"]
+  static func certificateVariables(dataFolder: String, staged: Certificates?) -> [String] {
+    guard let staged, !staged.replacement.isEmpty else { return ["SSL_CERT_FILE=\(systemCertificates)", "GIT_SSL_CAINFO=\(systemCertificates)"] }
+    let replacement = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
+    var variables = ["SSL_CERT_FILE=\(replacement)", "GIT_SSL_CAINFO=\(replacement)"]
+    if !staged.extra.isEmpty { variables.append("NODE_EXTRA_CA_CERTS=\((dataFolder as NSString).appendingPathComponent(extraCertificateBundleName))") }
+    return variables
   }
 
-  static func networkEnvironment(from given: [String: String], network: Bool, system: String = systemCertificates) -> NetworkEnvironment {
+  static func networkEnvironment(from given: [String: String], network: Bool) -> NetworkEnvironment {
     guard network else { return NetworkEnvironment() }
     var result = NetworkEnvironment()
     for name in proxyEnvironment {
@@ -96,8 +141,6 @@ struct PluginSandbox {
       }
       result.variables.append("\(name)=\(value)")
     }
-    let bundle = certificateBundle(from: given, system: system)
-    result.certificates = bundle.isEmpty ? nil : bundle
     return result
   }
 

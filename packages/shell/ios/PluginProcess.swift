@@ -60,13 +60,24 @@ final class PluginProcess: PluginRun {
 
   static func errnoText(_ code: Int32 = errno) -> String { String(cString: strerror(code)) }
 
+  static let certificateCache = PluginCertificateCache()
+
+  static func stagedCertificates(in data: OpenedFolder, from given: [String: String]) -> PluginSandbox.Certificates? {
+    guard let ready = certificateCache.current(for: given), !ready.replacement.isEmpty else { return nil }
+    guard PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.certificateBundleName, contents: ready.replacement) else { return nil }
+    if !ready.extra.isEmpty, !PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.extraCertificateBundleName, contents: ready.extra) {
+      return PluginSandbox.Certificates(replacement: ready.replacement, extra: "")
+    }
+    return ready
+  }
+
   static func environment(name: String, data: OpenedFolder, network: Bool = false) -> [String] {
-    let carried = PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment, network: network)
+    let given = ProcessInfo.processInfo.environment
+    let carried = PluginSandbox.networkEnvironment(from: given, network: network)
     if !carried.droppedProxies.isEmpty {
       NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, carried.droppedProxies.joined(separator: ", "))
     }
-    let staged = carried.certificates.map { PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.certificateBundleName, contents: $0) } ?? false
-    let certificates = staged ? PluginSandbox.certificateVariables(dataFolder: data.path) : []
+    let certificates = network ? PluginSandbox.certificateVariables(dataFolder: data.path, staged: stagedCertificates(in: data, from: given)) : []
     let folder = data.path as NSString
     return [
       "PATH=" + PluginSandbox.searchPath.joined(separator: ":"),

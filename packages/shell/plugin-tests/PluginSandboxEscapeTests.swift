@@ -13,6 +13,9 @@ final class PluginSandboxEscapeTests: XCTestCase {
     #include <notify.h>
     #include <sys/mman.h>
     #include <sys/sysctl.h>
+    #include <sys/attr.h>
+    #include <sys/xattr.h>
+    #include <dirent.h>
     #include <libproc.h>
     #include <servers/bootstrap.h>
     #include <signal.h>
@@ -120,6 +123,31 @@ final class PluginSandboxEscapeTests: XCTestCase {
         size_t size = sizeof value;
         if (sysctlbyname(argv[2], &value, &size, NULL, 0) != 0) return failed();
         printf("read %d\\n", value);
+        return 0;
+      }
+      if (!strcmp(mode, "xattr")) {
+        char value[256];
+        ssize_t size = getxattr(argv[2], argv[3], value, sizeof value, 0, 0);
+        if (size < 0) return failed();
+        printf("xattr %.*s\\n", (int)size, value);
+        return 0;
+      }
+      if (!strcmp(mode, "finderinfo")) {
+        struct attrlist list = {0};
+        list.bitmapcount = ATTR_BIT_MAP_COUNT;
+        list.commonattr = ATTR_CMN_FNDRINFO;
+        struct { uint32_t length; char info[32]; } __attribute__((packed)) answer;
+        if (getattrlist(argv[2], &list, &answer, sizeof answer, 0) != 0) return failed();
+        printf("finderinfo\\n");
+        return 0;
+      }
+      if (!strcmp(mode, "listdir")) {
+        DIR *dir = opendir(argv[2]);
+        if (!dir) return failed();
+        int count = 0;
+        while (readdir(dir)) count++;
+        closedir(dir);
+        printf("listed %d\\n", count);
         return 0;
       }
       if (!strcmp(mode, "decision")) {
@@ -519,29 +547,86 @@ final class PluginSandboxEscapeTests: XCTestCase {
     -----END CERTIFICATE-----
     """
 
-  func testHelpersGetProxySettingsAndOnlyCertificatesFromTheFilesTheyName() throws {
-    let system = "\(root)/system.pem"
-    let corporate = "\(home)/corp.pem"
-    try (Self.sampleCertificate + "\n").write(toFile: system, atomically: true, encoding: .utf8)
-    let mixed = "comment line\n" + Self.sampleCertificate + "\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n-----BEGIN CERTIFICATE-----\nnot base64 !!\n-----END CERTIFICATE-----\n"
-    try mixed.write(toFile: corporate, atomically: true, encoding: .utf8)
+  func makeCertificate(_ name: String) throws -> (pem: String, keyDER: String) {
+    let folder = "\(root)/cert-\(name)"
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    let made = try Self.run("/usr/bin/openssl", ["req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", "\(folder)/key.pem", "-out", "\(folder)/cert.pem", "-days", "2", "-subj", "/CN=\(name)"])
+    XCTAssertEqual(made.status, 0, made.output)
+    let der = try Self.run("/usr/bin/openssl", ["pkey", "-in", "\(folder)/key.pem", "-outform", "DER", "-out", "\(folder)/key.der"])
+    XCTAssertEqual(der.status, 0, der.output)
+    return (try String(contentsOfFile: "\(folder)/cert.pem", encoding: .utf8), try Data(contentsOf: URL(fileURLWithPath: "\(folder)/key.der")).base64EncodedString())
+  }
+
+  static func body(_ pem: String) -> String {
+    pem.components(separatedBy: "\n").filter { !$0.hasPrefix("-----") }.joined()
+  }
+
+  func testHelpersGetProxySettingsButNoSecrets() {
     let given = [
       "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "HTTP_PROXY": "http://user:pass@proxy.example:3128",
-      "all_proxy": "socks5://alice@proxy.example:1080", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret", "NODE_EXTRA_CA_CERTS": corporate,
+      "all_proxy": "socks5://alice@proxy.example:1080", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret",
     ]
-    XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false, system: system), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
-    let carried = PluginSandbox.networkEnvironment(from: given, network: true, system: system)
+    XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
+    let carried = PluginSandbox.networkEnvironment(from: given, network: true)
     XCTAssertEqual(Set(carried.variables), ["HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost"])
     XCTAssertEqual(Set(carried.droppedProxies), ["HTTP_PROXY", "all_proxy"], "proxies with a user name or password are dropped")
-    let bundle = try XCTUnwrap(carried.certificates)
-    XCTAssertFalse(bundle.contains("PRIVATE KEY") || bundle.contains("MIIEvQIBADAN") || bundle.contains("comment") || bundle.contains("not base64"), "only certificate blocks are kept")
-    XCTAssertEqual(bundle.components(separatedBy: "-----BEGIN CERTIFICATE-----").count - 1, 1, "the same certificate twice is kept once")
-    XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData), [
-      "SSL_CERT_FILE=\(pluginData)/certificates.pem", "NODE_EXTRA_CA_CERTS=\(pluginData)/certificates.pem", "GIT_SSL_CAINFO=\(pluginData)/certificates.pem",
+  }
+
+  func testCertificatesKeepOnlyWholeX509BlocksAndExtrasStaySeparate() throws {
+    let a = try makeCertificate("Ardia Test A")
+    let b = try makeCertificate("Ardia Test B")
+    let c = try makeCertificate("Ardia Test C")
+    let system = "\(root)/system.pem"
+    let corporate = "\(home)/corp.pem"
+    try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let trailing = Data(base64Encoded: Self.body(a.pem))! + Data([0x00, 0x01])
+    let mixed = [
+      "comment line", b.pem,
+      "-----BEGIN PRIVATE KEY-----\n\(b.keyDER)\n-----END PRIVATE KEY-----",
+      "-----BEGIN CERTIFICATE-----\n\(b.keyDER)\n-----END CERTIFICATE-----",
+      "-----BEGIN CERTIFICATE-----\n\(trailing.base64EncodedString())\n-----END CERTIFICATE-----",
+      "-----BEGIN CERTIFICATE-----\nnot base64 !!",
+      c.pem,
+      a.pem,
+    ].joined(separator: "\n")
+    try mixed.write(toFile: corporate, atomically: true, encoding: .utf8)
+    let kept = PluginSandbox.certificates(from: ["NODE_EXTRA_CA_CERTS": corporate], system: system)
+    let names = { (bundle: String) in PluginSandbox.certificateBlocks(in: bundle).map { block -> String in
+      let der = Data(base64Encoded: Self.body(block))!
+      let certificate = SecCertificateCreateWithData(nil, der as CFData)!
+      return SecCertificateCopySubjectSummary(certificate) as String? ?? "?"
+    } }
+    XCTAssertEqual(names(kept.replacement), ["Ardia Test A", "Ardia Test B", "Ardia Test C"], "the system roots, then each distinct extra, nothing else")
+    XCTAssertEqual(names(kept.extra), ["Ardia Test B", "Ardia Test C"], "the additive bundle holds only the extras")
+    XCTAssertFalse(kept.replacement.contains(b.keyDER), "a key, even labelled CERTIFICATE, is never kept")
+    XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData, staged: kept), [
+      "SSL_CERT_FILE=\(pluginData)/certificates.pem", "GIT_SSL_CAINFO=\(pluginData)/certificates.pem", "NODE_EXTRA_CA_CERTS=\(pluginData)/extra-certificates.pem",
     ])
+    XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData, staged: nil), ["SSL_CERT_FILE=/etc/ssl/cert.pem", "GIT_SSL_CAINFO=/etc/ssl/cert.pem"], "until a bundle is staged, the system roots")
     let huge = "\(root)/huge.pem"
-    try String(repeating: Self.sampleCertificate + "\n", count: (PluginSandbox.certificateSourceLimit / 600) + 2).write(toFile: huge, atomically: true, encoding: .utf8)
-    XCTAssertNil(PluginSandbox.networkEnvironment(from: ["SSL_CERT_FILE": huge], network: true, system: "\(root)/none.pem").certificates, "a file past the size limit isn't read")
+    try String(repeating: c.pem, count: (PluginSandbox.certificateSourceLimit / c.pem.utf8.count) + 2).write(toFile: huge, atomically: true, encoding: .utf8)
+    XCTAssertEqual(names(PluginSandbox.certificates(from: ["SSL_CERT_FILE": huge], system: system).replacement), ["Ardia Test A"], "a file past the size limit isn't read")
+  }
+
+  func testCertificateSourcesNeverBlockAndAreReadOffTheCaller() throws {
+    let fifo = "\(root)/roots.fifo"
+    XCTAssertEqual(mkfifo(fifo, 0o600), 0)
+    let started = Date()
+    let kept = PluginSandbox.certificates(from: ["SSL_CERT_FILE": fifo], system: "\(root)/none.pem")
+    XCTAssertLessThan(Date().timeIntervalSince(started), 1, "a FIFO is refused without waiting for a writer")
+    XCTAssertEqual(kept, PluginSandbox.Certificates(replacement: "", extra: ""))
+    let a = try makeCertificate("Ardia Cache")
+    let system = "\(root)/cache.pem"
+    try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let cache = PluginCertificateCache(system: system)
+    XCTAssertNil(cache.current(for: [:]), "the first ask returns at once and reads on a background queue")
+    var ready: PluginSandbox.Certificates?
+    let deadline = Date().addingTimeInterval(5)
+    while ready == nil && Date() < deadline {
+      ready = cache.current(for: [:])
+      if ready == nil { Thread.sleep(forTimeInterval: 0.05) }
+    }
+    XCTAssertEqual(ready.map { PluginSandbox.certificateBlocks(in: $0.replacement).count }, 1)
   }
 
   func testTheCertificateBundleIsWrittenAtomicallyInsideTheDataFolder() throws {
@@ -555,6 +640,25 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertEqual(try String(contentsOfFile: outsideFile, encoding: .utf8), "outside", "a link left in its place isn't followed")
     XCTAssertEqual(try String(contentsOfFile: "\(pluginData)/certificates.pem", encoding: .utf8), Self.sampleCertificate)
     XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: pluginData).filter { $0.hasPrefix(".certificates.pem.") }, [], "no temporary file is left")
+  }
+
+  func testAProgramOnAMountedDiskRunsButReadsNothingBesideItself() throws {
+    let image = "\(root)/tools.dmg"
+    let volume = "ArdiaTools\(Self.short())"
+    XCTAssertEqual(try Self.run("/usr/bin/hdiutil", ["create", "-size", "4m", "-fs", "HFS+", "-volname", volume, "-ov", image]).status, 0)
+    XCTAssertEqual(try Self.run("/usr/bin/hdiutil", ["attach", "-nobrowse", "-noverify", image]).status, 0)
+    let mount = "/Volumes/\(volume)"
+    defer { _ = try? Self.run("/usr/bin/hdiutil", ["detach", mount, "-force"]) }
+    try FileManager.default.createDirectory(atPath: "\(mount)/bin", withIntermediateDirectories: true)
+    try "#!/bin/sh\nexec /bin/cat \"$@\"\n".write(toFile: "\(mount)/bin/tool", atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: "\(mount)/bin/tool")
+    try "beside-secret".write(toFile: "\(mount)/secret", atomically: true, encoding: .utf8)
+    XCTAssertEqual(try Self.run("\(mount)/bin/tool", ["\(mount)/secret"]).output, "beside-secret", "control")
+    let runs = try sandboxed("\(mount)/bin/tool", ["/dev/null"])
+    XCTAssertEqual(runs.status, 0, "the program itself runs: \(runs.output)")
+    let beside = try sandboxed("\(mount)/bin/tool", ["\(mount)/secret"])
+    XCTAssertNotEqual(beside.status, 0)
+    XCTAssertFalse(beside.output.contains("beside-secret"))
   }
 
   func testAProgramOnAnotherDiskOrInAnotherHomeReadsOnlyItself() {
@@ -633,7 +737,7 @@ final class PluginSandboxEscapeTests: XCTestCase {
 
   func testDataUnderTheRealLibraryWorksAndItsSiblingsStayDenied() throws {
     let realHome = PluginSandbox.resolved(NSHomeDirectory())!
-    let base = "\(realHome)/Library/Caches/ardia-plugin-escape-\(Self.short())"
+    let base = "\(realHome)/Library/Caches/ardia plugin-escape é'\(Self.short())"
     scratch.append(base)
     let libraryData = "\(base)/data"
     let libraryConfig = "\(libraryData)/config"
@@ -644,45 +748,118 @@ final class PluginSandboxEscapeTests: XCTestCase {
     try "plugin file".write(toFile: "\(libraryPlugin)/readme", atomically: true, encoding: .utf8)
     try "sibling-secret".write(toFile: "\(sibling)/secret", atomically: true, encoding: .utf8)
     try FileManager.default.createSymbolicLink(atPath: "\(libraryPluginData)/link", withDestinationPath: "\(sibling)/secret")
-    let box = PluginSandbox(home: realHome, appData: libraryData, configFolder: libraryConfig, pluginFolder: libraryPlugin, pluginData: libraryPluginData, program: "/bin/sh", network: false)
-    func inside(_ script: String) throws -> Outcome { try Self.run("/usr/bin/sandbox-exec", try box.arguments() + ["/bin/sh", "-c", script], in: libraryPlugin) }
-    let worked = try inside("echo written > '\(libraryPluginData)/note' && cat '\(libraryPluginData)/note' '\(libraryPlugin)/readme'")
-    XCTAssertEqual(worked.output, "written\nplugin file", "its own data and folder work under the real Library: \(worked.output)")
-    let stats = try inside(PluginSandbox.ancestors(of: libraryPluginData, below: realHome).map { "/usr/bin/stat -f %N '\($0)' >/dev/null || echo 'no stat: \($0)'" }.joined(separator: "; "))
-    XCTAssertFalse(stats.output.contains("no stat"), "every folder between home and its data can be stat'd: \(stats.output)")
+    XCTAssertEqual(setxattr(base, "dev.ardia.escape", "named", 5, 0, 0), 0)
+    let box = PluginSandbox(home: realHome, appData: libraryData, configFolder: libraryConfig, pluginFolder: libraryPlugin, pluginData: libraryPluginData, program: probe, network: false)
+    func inside(_ arguments: [String]) throws -> Outcome { try Self.run("/usr/bin/sandbox-exec", try box.arguments() + [probe] + arguments, in: libraryPlugin) }
+    let shell = PluginSandbox(home: realHome, appData: libraryData, configFolder: libraryConfig, pluginFolder: libraryPlugin, pluginData: libraryPluginData, program: "/bin/sh", network: false)
+    let worked = try Self.run("/usr/bin/sandbox-exec", try shell.arguments() + ["/bin/sh", "-c", "echo written > \"$1/note\" && cat \"$1/note\" \"$2/readme\"", "sh", libraryPluginData, libraryPlugin], in: libraryPlugin)
+    XCTAssertEqual(worked.output, "written\nplugin file", "its own data and folder work under the real Library, odd characters and all: \(worked.output)")
+    for ancestor in PluginSandbox.ancestors(of: libraryPluginData, below: realHome) {
+      let stat = try Self.run("/usr/bin/sandbox-exec", try shell.arguments() + ["/usr/bin/stat", "-f", "%N", ancestor], in: libraryPlugin)
+      XCTAssertEqual(stat.status, 0, "metadata on the named ancestor \(ancestor): \(stat.output)")
+    }
+    XCTAssertEqual(try Self.run(probe, ["listdir", base]).status, 0, "control: the ancestor lists outside")
+    XCTAssertEqual(try inside(["listdir", base]).status, EPERM, "an ancestor can't be listed")
+    XCTAssertEqual(try Self.run(probe, ["xattr", base, "dev.ardia.escape"]).output, "xattr named\n", "control")
+    XCTAssertEqual(try inside(["xattr", base, "dev.ardia.escape"]).status, EPERM, "an ancestor's extended attributes can't be read")
+    XCTAssertEqual(try Self.run(probe, ["finderinfo", sibling]).status, 0, "control")
+    XCTAssertEqual(try inside(["finderinfo", base]).status, 0, "Finder info is metadata, so a named ancestor answers it")
+    XCTAssertEqual(try inside(["finderinfo", sibling]).status, EPERM, "a folder that isn't a named ancestor doesn't")
     XCTAssertEqual(try Self.run("/bin/cat", ["\(sibling)/secret"]).output, "sibling-secret", "control")
     for path in ["\(sibling)/secret", "\(libraryPluginData)/link", "/System/Volumes/Data\(sibling)/secret"] {
-      let read = try inside("cat '\(path)'")
-      XCTAssertFalse(read.output.contains("sibling-secret"), "\(path) is readable inside")
+      XCTAssertEqual(try Self.run("/bin/cat", [path]).output, "sibling-secret", "control: \(path) reads outside")
+      let read = try Self.run("/usr/bin/sandbox-exec", try shell.arguments() + ["/bin/cat", path], in: libraryPlugin)
+      XCTAssertNotEqual(read.status, 0, path)
+      XCTAssertTrue(read.output.contains("Operation not permitted"), "\(path): \(read.output)")
     }
   }
 
-  func testFileWatchingWorksForItsOwnFolderAndShowsNothingItCantRead() throws {
-    let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
-    try XCTSkipUnless(node != nil, "no node to run fs.watch with")
-    let secret = "watch-secret-\(Self.short())"
-    let watched = "\(pluginData)/watched"
-    try FileManager.default.createDirectory(atPath: watched, withIntermediateDirectories: true)
-    let script = """
-      const fs = require("fs");
-      const seen = { own: false, leaked: false };
-      try { fs.watch(process.argv[1], () => (seen.own = true)).on("error", () => {}); } catch {}
-      try { fs.watch("/", { recursive: true }, (_, name) => { if (name && String(name).includes(process.argv[2])) seen.leaked = true; }).on("error", () => {}); } catch {}
-      setTimeout(() => fs.writeFileSync(process.argv[1] + "/touched", "x"), 400);
-      setTimeout(() => { console.log(JSON.stringify(seen)); process.exit(0); }, 2500);
-      """
-    func run(_ inside: Bool) throws -> String {
-      let writer = DispatchWorkItem { [home] in
+  static let fileEventsSource = #"""
+#include <CoreServices/CoreServices.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+
+static const char *needle;
+static const char *own;
+static int sawOwn = 0;
+static int leaked = 0;
+static int events = 0;
+
+static void callback(ConstFSEventStreamRef stream, void *info, size_t count, void *paths, const FSEventStreamEventFlags flags[], const FSEventStreamEventId ids[]) {
+  char **list = paths;
+  for (size_t i = 0; i < count; i++) {
+    events++;
+    if (own && strstr(list[i], own)) sawOwn = 1;
+    if (needle && strstr(list[i], needle)) {
+      leaked = 1;
+      printf("leak %s\n", list[i]);
+    }
+  }
+}
+
+int main(int argc, char **argv) {
+  if (argc < 5) return 98;
+  const char *root = argv[1];
+  own = argv[2];
+  needle = argv[3];
+  FSEventStreamEventId since = strcmp(argv[4], "now") == 0 ? kFSEventStreamEventIdSinceNow : strtoull(argv[4], NULL, 10);
+  struct stat st;
+  stat("/", &st);
+  printf("currentEventId %llu\n", (unsigned long long)FSEventsGetCurrentEventId());
+  CFUUIDRef uuid = FSEventsCopyUUIDForDevice(st.st_dev);
+  printf("uuid %s\n", uuid ? "returned" : "refused");
+  if (uuid) CFRelease(uuid);
+  FSEventStreamEventId before = FSEventsGetLastEventIdForDeviceBeforeTime(st.st_dev, CFAbsoluteTimeGetCurrent() - 60);
+  printf("lastBeforeTime %llu\n", (unsigned long long)before);
+  CFStringRef path = CFStringCreateWithCString(NULL, root, kCFStringEncodingUTF8);
+  CFArrayRef paths = CFArrayCreate(NULL, (const void **)&path, 1, &kCFTypeArrayCallBacks);
+  FSEventStreamRef stream = FSEventStreamCreate(NULL, callback, NULL, paths, since, 0.1, kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
+  if (!stream) {
+    printf("stream refused\n");
+    return 90;
+  }
+  dispatch_queue_t queue = dispatch_queue_create("fse", NULL);
+  FSEventStreamSetDispatchQueue(stream, queue);
+  if (!FSEventStreamStart(stream)) {
+    printf("stream start refused\n");
+    return 89;
+  }
+  printf("started\n");
+  fflush(stdout);
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, atof(argc > 5 ? argv[5] : "3"), false);
+  FSEventStreamStop(stream);
+  FSEventStreamInvalidate(stream);
+  printf("events %d own %d leaked %d\n", events, sawOwn, leaked);
+  return 0;
+}
+"""#
+
+  func testFileEventsAreRefusedSoNothingOutsideLeaks() throws {
+    try Self.fileEventsSource.write(toFile: "\(root)/fse.c", atomically: true, encoding: .utf8)
+    let watcher = "\(plugin)/fse"
+    let built = try Self.run("/usr/bin/xcrun", ["clang", "-O", "-framework", "CoreServices", "-o", watcher, "\(root)/fse.c"])
+    XCTAssertEqual(built.status, 0, built.output)
+    let secret = "fse-secret-\(Self.short())"
+    func run(inside: Bool, network: Bool) throws -> String {
+      let realHome = PluginSandbox.resolved(NSHomeDirectory())!
+      let writer = DispatchWorkItem {
         Thread.sleep(forTimeInterval: 1.0)
-        try? "x".write(toFile: "\(home)/\(secret)", atomically: false, encoding: .utf8)
+        try? "x".write(toFile: "\(realHome)/\(secret)", atomically: false, encoding: .utf8)
+        try? FileManager.default.removeItem(atPath: "\(realHome)/\(secret)")
       }
       DispatchQueue.global().async(execute: writer)
-      let arguments = ["-e", script, watched, secret]
-      let outcome = inside ? try sandboxed(node!, arguments) : try Self.run(node!, arguments, in: plugin)
-      try? FileManager.default.removeItem(atPath: "\(home)/\(secret)")
-      return outcome.output.trimmingCharacters(in: .whitespacesAndNewlines)
+      let arguments = ["/", "none", secret, "now", "2.5"]
+      return (inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)).output
     }
-    XCTAssertEqual(try run(false), #"{"own":true,"leaked":true}"#, "control: outside, watching / shows a write in the home folder")
-    XCTAssertEqual(try run(true), #"{"own":true,"leaked":false}"#, "inside, its own folder is watched and nothing from the home folder shows")
+    let outside = try run(inside: false, network: true)
+    XCTAssertTrue(outside.contains("started"), "control: a stream on / must start outside, or this test proves nothing: \(outside)")
+    XCTAssertTrue(outside.contains("leak "), "control: outside, the stream shows the write in the home folder: \(outside)")
+    for network in [true, false] {
+      let inside = try run(inside: true, network: network)
+      XCTAssertTrue(inside.contains("uuid refused"), "the device's event UUID is refused (network \(network)): \(inside)")
+      XCTAssertTrue(inside.contains("stream start refused") || inside.contains("stream refused"), "a stream can't start (network \(network)): \(inside)")
+      XCTAssertFalse(inside.contains("leak "), "nothing leaks (network \(network))")
+    }
   }
 }

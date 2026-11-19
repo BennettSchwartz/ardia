@@ -436,12 +436,17 @@ settings only once it is saved, so a failed save changes nothing.
   `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`. A helper with `network` also gets the proxy
   settings Ardia itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case), except a
   proxy whose address carries a user name or password, which is dropped with one line in Ardia's log (an authenticated
-  proxy is a follow-up the person would choose per plugin), and `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS` and
-  `GIT_SSL_CAINFO` pointing at `PluginData/<name>/certificates.pem`, staged at each start from the certificates in
-  `/etc/ssl/cert.pem` and in the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name: only `CERTIFICATE`
-  blocks, decoded and encoded again, from files of at most 4 MB, so a key or anything else in those files never reaches
-  the helper. The bundle is written through the already-open data folder, to a private file renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain isn't
-  trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the
+  proxy is a follow-up the person would choose per plugin), and certificate settings that follow each tool's own
+  meaning: `SSL_CERT_FILE` and `GIT_SSL_CAINFO` replace a tool's roots, so they point at
+  `PluginData/<name>/certificates.pem` (the system roots plus the extra ones); `NODE_EXTRA_CA_CERTS` adds to node's
+  roots, so it points at `PluginData/<name>/extra-certificates.pem` (the extra ones only, and only when there are any).
+  The extra roots come from the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name. Only `CERTIFICATE`
+  blocks that are each exactly one X.509 certificate are kept (a key labelled `CERTIFICATE`, trailing bytes or a block
+  that never ends is skipped), from regular files of at most 4 MB opened without blocking (a FIFO is refused). They are
+  read on a background queue and cached; a helper that starts before the cache is ready gets the system roots
+  (`/etc/ssl/cert.pem`) directly. The bundles are written through the already-open data folder, to a private file
+  renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain
+  isn't trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the
   default because it is the one system-wide root list every runtime can read. Never a token. A sandbox Ardia can't set up means the helper
   doesn't start; it never runs unsandboxed.
 - **Data folder.** `PluginData/<name>` is opened once per start and must be a real folder Ardia's user owns, with
@@ -451,7 +456,8 @@ settings only once it is saved, so a failed save changes nothing.
   program's install folder (the folder above the `bin` it is in, so `/opt/homebrew/opt/node/bin/node` reads its own
   libraries; `/bin/sh` or `~/bin/x` read only themselves, since that folder would be `/` or your home, and so does a
   program on another disk or in another account's home, under `/Volumes` or `/Users`). Each folder between a protected
-  root and the plugin's folder, its program or its data can be stat'd (`PATH_UP_<n>`), nothing more. Your home
+  root and the plugin's folder, its program or its data gets metadata reads (`PATH_UP_<n>`, metadata on named
+  ancestors): stat and Finder info answer, listing and extended attributes don't. Your home
   folder, Ardia's data folder and its config folder are unreadable and unwritable, wherever they are (a scratch data
   folder outside your home included): your files, every browser profile, cookies, passwords and Ardia's own state. So
   are `/Users` (every account's home, `/Users/Shared` included) and `/Volumes` (mounted disks and disk images). The
@@ -470,12 +476,13 @@ settings only once it is saved, so a failed save changes nothing.
 - **What else it refuses.** Launching apps or opening URLs (`lsopen`), Apple Events, creating launchd jobs, posting
   distributed or Darwin notifications, writing any preferences or reading any but the global domain, opening IOKit
   user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments, and looking up any
-  system service off a short list: user and group lookups, logging, per-user temp folders, preference reads, file
-  events (FSEvents, so `fs.watch` works; fseventsd reports only paths the helper can read: watching `/` from inside
-  shows nothing from your home), and, with `network` only, the resolver, network settings and TLS trust (trustd fetches
+  system service off a short list: user and group lookups, logging, per-user temp folders, preference reads, and,
+  with `network` only, the resolver, network settings and TLS trust (trustd fetches
   issuers over the network on a helper's behalf) (`PluginSandbox.machAllowed`, `machAllowedOnline`). Nothing it runs follows
   live changes to your locale or other global preferences: notification posts and lookups are refused, and nothing
-  measured needed them. It can't inspect or
+  measured needed them. File events are refused too: fseventsd doesn't filter by the client's sandbox (a stream on `/`
+  from inside showed writes in the home folder, live and in history replay, and gave out the device's event UUID), so
+  `fs.watch` fails inside and a runtime that needs it polls (the AI runtime's file watches do). It can't inspect or
   signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal next to a control
   outside the sandbox. Two controls are weaker: Apple Events only check that Finder runs (a real send would raise a
   privacy prompt), and sysctl writes are checked through the sandbox's own decision (`sandbox_check`), since the
