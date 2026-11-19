@@ -769,10 +769,9 @@
       if (el.localName === "img" && !el.complete) return "later";
       if (el.localName === "img" ? el.naturalWidth < QR_MIN : el.localName !== "canvas") return "never";
       const r = el.getBoundingClientRect();
-      if (!r.width || !r.height) return "later";
-      if (r.width < QR_MIN || r.height < QR_MIN || r.width > QR_MAX || r.height > QR_MAX) return "never";
+      if (r.width < QR_MIN || r.height < QR_MIN || r.width > QR_MAX || r.height > QR_MAX) return "later";
       const ratio = r.width / r.height;
-      if (ratio < 0.8 || ratio > 1.25) return "never";
+      if (ratio < 0.8 || ratio > 1.25) return "later";
       return !el.checkVisibility || el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ? "yes" : "later";
     };
     const forgetFound = () => {
@@ -783,11 +782,12 @@
     };
     const noteCode = (raw, generation) => {
       const url = verificationSetupURL(raw);
-      if (!url || !findsCodes() || config.generation !== generation) return;
+      if (!url || !findsCodes() || config.generation !== generation) return false;
       const key = codeKey(url);
-      if (found.has(key)) return;
+      if (found.has(key)) return true;
       found.add(key);
       send("verificationCode", { url, generation });
+      return true;
     };
     const scanLinks = guard(() => {
       if (!findsCodes()) return;
@@ -814,9 +814,10 @@
         const scans = qrCanvasScans;
         apply(promiseThen, apply(detect, qrDetector, [el]), [
           guard((codes) => {
-            if (canvas && codes.length) scans.set(el, QR_CANVAS_SCANS);
+            let accepted = false;
+            for (let i = 0; i < codes.length; i++) if (noteCode(codes[i] && codes[i].rawValue, generation)) accepted = true;
+            if (canvas && accepted) scans.set(el, QR_CANVAS_SCANS);
             else if (canvas && scans.get(el) < QR_CANVAS_SCANS) setTimeout(scanSoon, QR_CANVAS_RETRY_MS);
-            for (let i = 0; i < codes.length; i++) noteCode(codes[i] && codes[i].rawValue, generation);
           }),
           () => {},
         ]);

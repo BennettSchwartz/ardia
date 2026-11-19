@@ -465,6 +465,41 @@ test("a QR image inside a hidden container is scanned once it is shown", async (
   assert.deepEqual(page.codes(), [{ kind: "verificationCode", data: { url: totp, generation: 1 } }]);
 });
 
+test("a QR image laid out too small or stretched is checked again once its layout changes", async () => {
+  const page = frame();
+  const totp = "otpauth://totp/Site:me?secret=JBSWY3DPEHPK3PXP";
+  const small = image({ qr: totp });
+  small.getBoundingClientRect = () => ({ width: 20, height: 20 });
+  page.document.images = [small];
+  page.configure(LOGIN);
+  await page.settle();
+  assert.equal(page.detected.length, 0);
+  small.getBoundingClientRect = () => ({ width: 180, height: 60 });
+  page.observers[0].callback();
+  await page.settle();
+  assert.equal(page.detected.length, 0);
+  small.getBoundingClientRect = () => ({ width: 180, height: 180 });
+  page.observers[0].callback();
+  await page.settle();
+  assert.deepEqual(page.codes(), [{ kind: "verificationCode", data: { url: totp, generation: 1 } }]);
+});
+
+test("a canvas whose first QR code isn't a setup code keeps its retries for a setup code drawn later", async () => {
+  const timers = [];
+  const page = frame({ timers });
+  const totp = "otpauth://totp/Site:me?secret=JBSWY3DPEHPK3PXP";
+  const canvas = image({ localName: "canvas", src: "", qr: "https://site.example/download-the-app" });
+  page.document.images = [canvas];
+  page.configure(LOGIN);
+  await page.settle();
+  assert.equal(page.detected.length, 1);
+  assert.deepEqual(page.codes(), []);
+  canvas.qr = totp;
+  page.focus(input({ autocomplete: "one-time-code" }));
+  await page.settle();
+  assert.deepEqual(page.codes(), [{ kind: "verificationCode", data: { url: totp, generation: 1 } }]);
+});
+
 test("a QR code drawn into a canvas after its first scan is found later, with a bounded number of tries", async () => {
   const timers = [];
   const page = frame({ timers });

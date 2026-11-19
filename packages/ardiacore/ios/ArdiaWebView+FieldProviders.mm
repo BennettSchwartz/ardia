@@ -203,22 +203,28 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
   NSDictionary *superseded = page[@"queryPending"];
   if (superseded) ((void (^)(NSDictionary *))superseded[@"completion"])(@{@"shown" : @NO, @"reason" : @"notFocused"});
   NSString *query = NSUUID.UUID.UUIDString;
+  __block void (^answer)(NSDictionary *) = [completion copy];
+  void (^answerOnce)(NSDictionary *) = ^(NSDictionary *result) {
+    void (^waiting)(NSDictionary *) = answer;
+    answer = nil;
+    if (waiting) waiting(result);
+  };
   page[@"query"] = query;
   page[@"queryPending"] = @{
     @"view" : view,
     @"profile" : profile ?: @"",
     @"generation" : @(generation),
     @"deadline" : @(CACurrentMediaTime() + kFocusQuerySeconds),
-    @"completion" : [completion copy],
+    @"completion" : answerOnce,
   };
   __weak id weakOwner = owner;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kFocusQuerySeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     NSMutableDictionary *waiting = weakOwner ? [FieldProviderPages() objectForKey:weakOwner] : nil;
-    if (![waiting[@"query"] isEqualToString:query]) return;
-    NSDictionary *pending = waiting[@"queryPending"];
-    [waiting removeObjectForKey:@"query"];
-    [waiting removeObjectForKey:@"queryPending"];
-    ((void (^)(NSDictionary *))pending[@"completion"])(@{@"shown" : @NO, @"reason" : @"notFocused"});
+    if ([waiting[@"query"] isEqualToString:query]) {
+      [waiting removeObjectForKey:@"query"];
+      [waiting removeObjectForKey:@"queryPending"];
+    }
+    answerOnce(@{@"shown" : @NO, @"reason" : @"notFocused"});
   });
   ask(query);
 }
@@ -229,6 +235,10 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
   [page removeObjectForKey:@"focus"];
   [page removeObjectForKey:@"focusSeq"];
   [page[@"tokens"] removeAllObjects];
+  NSDictionary *pending = page[@"queryPending"];
+  [page removeObjectForKey:@"query"];
+  [page removeObjectForKey:@"queryPending"];
+  if (pending) ((void (^)(NSDictionary *))pending[@"completion"])(@{@"shown" : @NO, @"reason" : @"notFocused"});
 }
 
 + (void)dropVerificationCodesOf:(id)owner frame:(NSString *)frame {
