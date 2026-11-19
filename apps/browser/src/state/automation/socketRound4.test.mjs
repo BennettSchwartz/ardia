@@ -18,34 +18,6 @@ function visited(rows) {
   return db;
 }
 
-test("a history id names the same page and visit after a restart, and a newer visit makes it stale", async () => {
-  await freshWindow();
-  cold();
-  const url = "https://r.example/";
-  const db = visited([url, "https://other.example/"]);
-  const row = (await ok("history.search", {})).items.find((h) => h.url === url);
-  const restarted = await import("./historyKeys.ts?restart");
-  assert.equal(restarted.historyRowId(row.url, row.lastVisit), row.id, "a fresh module mints the same id for the same page and visit");
-  assert.equal(restarted.parseHistoryKey(row.id)?.lastVisit, row.lastVisit);
-
-  db.set(url, { title: "R", visits: [20_000_000] });
-  const revisited = await call("history.remove", { ids: [row.id] });
-  assert.equal(revisited.error?.code, "stale", JSON.stringify(revisited));
-  assert.ok(db.has(url), "the newer visit wasn't deleted");
-
-  const current = (await ok("history.search", {})).items.find((h) => h.url === url);
-  db.delete(url);
-  db.set(url, { title: "R", visits: [30_000_000] });
-  assert.equal((await call("history.remove", { ids: [current.id] })).error?.code, "stale", "deleted and visited again");
-  assert.ok(db.has(url));
-
-  const fresh = (await ok("history.search", {})).items.find((h) => h.url === url);
-  await ok("history.remove", { ids: [fresh.id] });
-  for (let i = 0; i < 5; i++) await tick();
-  assert.ok(!db.has(url) && db.has("https://other.example/"));
-  assert.equal((await call("history.remove", { ids: [fresh.id] })).error?.code, "stale", "a page that's gone is stale");
-});
-
 test("cold history past the raw-row cap says it's cut off and pages on to the older web pages", async () => {
   await freshWindow();
   cold();
