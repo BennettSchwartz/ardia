@@ -100,13 +100,13 @@ function later(tabId: string, url: string) {
   );
 }
 
-export function runReaderCommand(command: string, tabId: string): boolean {
+export function runReaderCommand(command: string, tabId: string, mayWrite?: () => boolean): boolean {
   if (command !== "toggleReader") return false;
-  void toggleReader(tabId);
+  void toggleReader(tabId, mayWrite);
   return true;
 }
 
-export async function toggleReader(tabId: string) {
+export async function toggleReader(tabId: string, mayWrite?: () => boolean) {
   const s = useBrowser.getState();
   const tab = s.tabs[tabId];
   if (!tab || !readable(tab.url)) return;
@@ -114,7 +114,7 @@ export async function toggleReader(tabId: string) {
   const pushes = lookPushes;
   const consent = consentToken();
   const report = await callPage(tabId, readerToggleCall(lookFrom(s)));
-  if (!report) return;
+  if (!report || (mayWrite && !mayWrite())) return;
   if (report.noArticle) {
     noteReaderNoArticle(consent);
     settle(tabId, url, report, false, pushes);
@@ -125,12 +125,12 @@ export async function toggleReader(tabId: string) {
   settle(tabId, url, report, true, pushes);
 }
 
-export async function closeReader(tabId: string) {
+export async function closeReader(tabId: string, mayWrite?: () => boolean) {
   const url = useBrowser.getState().tabs[tabId]?.url;
   if (!url || !readerState(tabId).active) return;
   const pushes = lookPushes;
   const report = await callPage(tabId, readerCall("hide"));
-  if (report) settle(tabId, url, report, undefined, pushes);
+  if (report && (!mayWrite || mayWrite())) settle(tabId, url, report, undefined, pushes);
 }
 
 function shownTabIds(s: BrowserState): Set<string> {

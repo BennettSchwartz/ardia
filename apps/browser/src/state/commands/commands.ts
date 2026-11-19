@@ -1,3 +1,4 @@
+import { uiWriteHooks } from "../browser/uiWriteHooks";
 import { copyText } from "../../platform/clipboard";
 import { openExternalURL } from "../../platform/app";
 import { pickFiles, prompt } from "../../platform/dialogs";
@@ -152,7 +153,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
   const page = tab?.url ? tab : undefined;
   const web = tabId ? webviews.get(tabId) : undefined;
   const ui = s.windowUi[windowId];
-  if (page && (runHidingCommand(command, page.id) || runReaderCommand(command, page.id))) return;
+  if (page && (runHidingCommand(command, page.id) || runReaderCommand(command, page.id, mayWrite))) return;
   if (!targeted && runSidebarCommand(command, arg, windowId)) return;
 
   switch (command) {
@@ -289,7 +290,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "duplicateTab":
       return tab ? void s.duplicateTab(tab.id) : undefined;
     case "moveTabToProfile":
-      return tab && arg ? void moveTabToProfile(tab.id, newOrId(arg)) : undefined;
+      return tab && arg ? void moveTabToProfile(tab.id, newOrId(arg), mayWrite) : undefined;
     case "moveTabToWindow":
       return tab && arg ? moveTabToWindow(tab.id, newOrId(arg)) : undefined;
     case "bookmarkPage":
@@ -302,7 +303,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
       return node?.kind === "url" && tab ? s.navigate(tab.id, node.url) : undefined;
     }
     case "togglePageEngine":
-      return void (tabId && togglePageEngine(tabId));
+      return void (tabId && togglePageEngine(tabId, mayWrite));
     case "toggleMute":
       return page ? (arg === "site" ? toggleSiteMute(page.id) : toggleMute(page.id)) : undefined;
     case "downloads":
@@ -323,11 +324,11 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "mergeAllWindows":
       return s.mergeAllWindows(windowId);
     case "switchProfile":
-      return arg ? switchProfile(windowId, arg, true) : undefined;
+      return arg ? switchProfile(windowId, arg, true, mayWrite) : undefined;
     case "nextProfile":
-      return cycleProfile(windowId, 1);
+      return cycleProfile(windowId, 1, mayWrite);
     case "previousProfile":
-      return cycleProfile(windowId, -1);
+      return cycleProfile(windowId, -1, mayWrite);
     case "openExtension":
       return arg ? openExtensionFromMenu(windowId, arg, tabId) : undefined;
     case "addExtension":
@@ -337,7 +338,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "autofill":
       return void requestAutofill(windowId, arg, tabId);
     case "newProfile":
-      return void requestCreateProfile(windowId).then((id) => id && switchProfile(windowId, id));
+      return void requestCreateProfile(windowId).then((id) => id && uiWriteHooks.around(() => switchProfile(windowId, id)));
   }
 }
 
@@ -350,9 +351,9 @@ async function addBookmarkToFolder(windowId: string, tabId: string, folder: stri
   if (folder === "new") {
     const title = await prompt({ title: "New Folder", placeholder: "Folder name", confirmTitle: "Create", windowId });
     if (!title) return;
-    parentId = useBrowser.getState().addBookmarkFolder({ profileId, title });
+    uiWriteHooks.around(() => void (parentId = useBrowser.getState().addBookmarkFolder({ profileId, title })));
   }
-  useBrowser.getState().addBookmark({ profileId, url: tab.url, title: tab.title, favicon: tab.favicon, parentId });
+  uiWriteHooks.around(() => useBrowser.getState().addBookmark({ profileId, url: tab.url, title: tab.title, favicon: tab.favicon, parentId }));
 }
 
 async function openFiles(windowId: string | null) {
@@ -360,8 +361,10 @@ async function openFiles(windowId: string | null) {
   if (!urls.length) return;
   const s = useBrowser.getState();
   const target = resolveWindowId(s, windowId);
-  if (!target) return void openWindow({ url: urls[0] });
-  let last: string | undefined;
-  for (const url of urls) last = useBrowser.getState().newTab(target, { url });
-  if (last) useBrowser.getState().activate(last);
+  if (!target) return uiWriteHooks.around(() => void openWindow({ url: urls[0] }));
+  uiWriteHooks.around(() => {
+    let last: string | undefined;
+    for (const url of urls) last = useBrowser.getState().newTab(target, { url });
+    if (last) useBrowser.getState().activate(last);
+  });
 }
