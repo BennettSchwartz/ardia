@@ -70,7 +70,7 @@ test("password prompts are listed but not answered, and autofill prompts are ans
   assert.equal((await call("autofill.respond", { tab, id: 4, decision: "accept" })).error.code, "no_window");
   webviews.delete(tab);
 });
-test("open menus are listed, chosen from and closed through the native menu", async () => {
+test("open menus are listed and closed through the native menu, and page menus are never chosen from", async () => {
   const { windowId, tab } = await freshWindow();
   stub.surfaces.open = [
     { id: "m1", kind: "select", tab, window: windowId, items: [{ path: [0], title: "apple", enabled: true, checked: true, separator: false }] },
@@ -80,11 +80,13 @@ test("open menus are listed, chosen from and closed through the native menu", as
   const open = await ok("menus.open");
   assert.deepEqual(open.map((m) => [m.id, m.window, m.tab]), [["m1", windowId, tab], ["m2", windowId, tab], ["m3", windowId, null]]);
   assert.equal((await call("menus.choose", { menu: "m1", path: [] })).error.code, "bad_request");
-  assert.deepEqual(await ok("menus.choose", { menu: "m1", path: [1] }), { ok: true, menu: "m1", kind: "select", title: "chosen" });
-  assert.deepEqual(stub.surfaces.chosen.at(-1), { id: "m1", path: [1] });
+  for (const menu of ["m1", "m2"]) {
+    const reply = await call("menus.choose", { menu, path: [0] });
+    assert.equal(reply.error.code, "refused", menu);
+    assert.match(reply.error.message, /only from the menu bar/);
+  }
   await ok("menus.dismiss", { menu: "m2" });
-  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m3"]);
-  assert.equal((await call("menus.choose", { menu: "m1", path: [0] })).error.code, "no_window");
+  assert.deepEqual((await ok("menus.open")).map((m) => m.id), ["m1", "m3"]);
 });
 
 test("a page's menu in a private window is not listed", async () => {

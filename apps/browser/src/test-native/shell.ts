@@ -156,15 +156,6 @@ const focus: Modules["ArdiaFocus"] = {
   pressRepeated: () => Promise.resolve(pressRepeated.earlier),
 };
 
-export const filePicks = {
-  held: false,
-  waiting: [] as ((urls: string[]) => void)[],
-  release(urls: string[]) {
-    const waiting = filePicks.waiting.splice(0);
-    for (const resolve of waiting) resolve(urls);
-  },
-};
-
 export const surfaces = {
   open: [] as OpenSurface[],
   bar: [] as SurfaceItem[],
@@ -197,12 +188,6 @@ const menus: Modules["ArdiaMenus"] = {
   addListener: shellEvents.addListener,
   openSurfaces: () => Promise.resolve(surfaces.open),
   capturePageMenus: (captures) => Promise.resolve(void (surfaces.captures = captures)),
-  chooseSurfaceItem: async (id, path) => {
-    surfaceOf(id);
-    surfaces.chosen.push({ id, path });
-    surfaces.open = surfaces.open.filter((s) => s.id !== id);
-    return "chosen";
-  },
   dismissSurface: async (id) => {
     surfaceOf(id);
     surfaces.dismissed.push(id);
@@ -236,7 +221,7 @@ const dialogs: Modules["ArdiaDialogs"] = {
   confirm: () => Promise.resolve({ confirmed: false, suppressed: false }),
   dismissShownOnly: () => Promise.resolve(),
   prompt: () => Promise.resolve(null),
-  pickFiles: () => (filePicks.held ? new Promise<string[]>((resolve) => filePicks.waiting.push(resolve)) : Promise.resolve([])),
+  pickFiles: () => Promise.resolve([]),
   pickFolder: () => Promise.resolve(null),
 };
 

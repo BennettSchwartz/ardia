@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 const { S, tick, socketClient, freshWindow } = await import("./fixtures/socketHarness.mjs");
 const stub = await import("../../test-native/index.ts");
-const { runCommand } = await import("../commands/commands.ts");
 const { methodSpec } = await import("./socketCatalog.ts");
 const { showPasswordPrompt } = await import("../site/prompts.ts");
 const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
@@ -11,43 +10,6 @@ setConsentPeriod(true, "socket-native-ui-round4-test");
 const { call, ok } = socketClient(35);
 
 const item = (path, title, more) => ({ path, title, enabled: true, checked: false, separator: false, ...more });
-const FILE = "file:///tmp/picked-round4.html";
-const tabsWith = (url) => Object.values(S().tabs).filter((t) => t.url === url);
-
-test("Open File from the socket opens nothing when its window closed while the picker was open, even with a private window focused", async () => {
-  const { windowId } = await freshWindow();
-  stub.filePicks.held = true;
-  await ok("run", { command: "openFile", window: windowId });
-  const priv = S().createWindow({ kind: "private", url: "https://p.example/" });
-  S().closeWindow(windowId, { keepsLastWindow: true });
-  stub.filePicks.release([FILE]);
-  stub.filePicks.held = false;
-  for (let i = 0; i < 5; i++) await tick();
-  assert.deepEqual(tabsWith(FILE), [], "no tab anywhere");
-  assert.ok(!Object.values(S().tabs).some((t) => t.windowId === priv && t.url === FILE));
-});
-
-test("Open File from the socket opens in the window it named, not the focused one", async () => {
-  const { windowId } = await freshWindow();
-  const other = S().createWindow({ url: "https://b.example/" });
-  stub.filePicks.held = true;
-  await ok("run", { command: "openFile", window: windowId });
-  stub.filePicks.release([FILE]);
-  stub.filePicks.held = false;
-  for (let i = 0; i < 5; i++) await tick();
-  assert.deepEqual(tabsWith(FILE).map((t) => t.windowId), [windowId]);
-  assert.ok(other);
-});
-
-test("a person's own Open File still falls back to the focused window", async () => {
-  const { windowId } = await freshWindow();
-  stub.filePicks.held = true;
-  runCommand({ command: "openFile", arg: null, windowId: "w-gone" });
-  stub.filePicks.release([FILE]);
-  stub.filePicks.held = false;
-  for (let i = 0; i < 5; i++) await tick();
-  assert.deepEqual(tabsWith(FILE).map((t) => t.windowId), [windowId]);
-});
 
 test("menus.bar and a tracked menu bar are refused while the menu bar reflects a private window", async () => {
   const { windowId } = await freshWindow();

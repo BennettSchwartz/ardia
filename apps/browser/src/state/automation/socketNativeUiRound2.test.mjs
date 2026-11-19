@@ -26,9 +26,10 @@ test("the on-screen autofill buttons answer only the prompt they were drawn for"
   webviews.delete(tab);
 });
 
-test("menus.bar and a tracked menu bar leave out rows for private or unknown windows", async () => {
+test("menus.bar and a tracked menu bar leave out rows for closed or unknown windows", async () => {
   const { windowId } = await freshWindow("https://a.example/");
-  const priv = S().createWindow({ kind: "private", url: "https://secret.example/" });
+  const priv = S().createWindow({ url: "https://secret.example/" });
+  S().closeWindow(priv, { keepsLastWindow: true });
   const windowMenu = item([5], "Window", {
     submenu: [
       item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" }),

@@ -72,8 +72,7 @@ test("every menu needs a known owner outside private windows", async () => {
     { id: "n9", kind: "page", tab, keyless: true, items: [] },
   ];
   const listed = await ok("menus.open");
-  assert.deepEqual(listed.map((m) => m.id), ["n6", "n8"]);
-  assert.ok(S().windows[listed[1].window], "a menu bar with no key window belongs to the last focused window");
+  assert.deepEqual(listed.map((m) => m.id), ["n6"], "no menu bar is listed while a private window is open");
   trackingMenuBar(windowId);
   assert.equal((await call("menus.runBar", { path: [2, 4], ref: "sel:selectAll:@Edit\u001fSelect All", window: priv })).error.code, "refused");
 });
