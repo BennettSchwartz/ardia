@@ -161,12 +161,21 @@ export const surfaces = {
   bar: [] as SurfaceItem[],
   captures: false,
   chosen: [] as { id: string; path: number[] }[],
-  performed: [] as { path: number[]; ref: string; windowId: string }[],
-  checked: [] as { path: number[]; ref: string }[],
+  performed: [] as { menu: string | null; path: number[]; ref: string; windowId: string }[],
+  checked: [] as { menu: string | null; path: number[]; ref: string }[],
   dismissed: [] as string[],
   checkHook: null as (() => void) | null,
   emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
 };
+
+function itemWithPath(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
+  for (const item of items) {
+    if (item.path.join() === path.join()) return item;
+    const below = item.submenu && itemWithPath(item.submenu, path);
+    if (below) return below;
+  }
+  return undefined;
+}
 
 function surfaceOf(id: string) {
   const found = surfaces.open.find((s) => s.id === id);
@@ -190,13 +199,16 @@ const menus: Modules["ArdiaMenus"] = {
     surfaces.open = surfaces.open.filter((s) => s.id !== id);
   },
   menuBar: () => Promise.resolve(surfaces.bar),
-  performMenuBarItem: async (path, ref, windowId) => {
-    surfaces.performed.push({ path, ref, windowId });
+  performMenuBarItem: async (menu, path, ref, windowId) => {
+    surfaces.performed.push({ menu, path, ref, windowId });
     return "performed";
   },
-  checkMenuBarItem: async (path, ref) => {
-    surfaces.checked.push({ path, ref });
+  checkMenuBarItem: async (menu, path, ref) => {
+    surfaces.checked.push({ menu, path, ref });
     surfaces.checkHook?.();
+    const items = menu === null ? surfaces.bar : surfaceOf(menu).items ?? [];
+    const found = itemWithPath(items, path);
+    if (!found || found.ref !== ref || !found.enabled) throw Object.assign(new Error("The menu bar changed since it was read; read it again."), { code: "refused" });
   },
   showMenu: () => Promise.resolve(null),
   updateMenu: () => Promise.resolve(),

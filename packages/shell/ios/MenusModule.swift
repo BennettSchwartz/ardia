@@ -74,8 +74,8 @@ public class MenusModule: Module {
     }.runOnQueue(.main)
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
     AsyncFunction("menuBar") { () -> [[String: Any]] in NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? [] }.runOnQueue(.main)
-    AsyncFunction("performMenuBarItem") { (path: [Int], ref: String, windowId: String) throws -> String in
-      try MenusModule.surfaceCall { try MenuBarAction.perform(path, ref: ref, windowId: windowId) }
+    AsyncFunction("performMenuBarItem") { (menu: String?, path: [Int], ref: String, windowId: String) throws -> String in
+      try MenusModule.surfaceCall { try MenuBarAction.perform(menu: menu, path: path, ref: ref, windowId: windowId) }
     }.runOnQueue(.main)
     AsyncFunction("devTrackMenuBar") { (index: Int, tracking: Bool) -> Bool in
       guard LaunchConfig.shared.testFlag("menuBarTracking"), index >= 0, index < NSApp.mainMenu?.numberOfItems ?? 0,
@@ -83,7 +83,9 @@ public class MenusModule: Module {
       NotificationCenter.default.post(name: tracking ? NSMenu.didBeginTrackingNotification : NSMenu.didEndTrackingNotification, object: menu)
       return true
     }.runOnQueue(.main)
-    AsyncFunction("checkMenuBarItem") { (path: [Int], ref: String) throws in try MenusModule.surfaceCall { _ = try MenuBarAction.item(at: path, ref: ref) } }.runOnQueue(.main)
+    AsyncFunction("checkMenuBarItem") { (menu: String?, path: [Int], ref: String) throws in
+      try MenusModule.surfaceCall { _ = try OpenSurfaces.shared.trackedBarItem(menu, path: path, ref: ref) }
+    }.runOnQueue(.main)
 
     AsyncFunction("menuShortcuts") { () -> [[String: Any]] in MainMenu.shortcutList() }.runOnQueue(.main)
 

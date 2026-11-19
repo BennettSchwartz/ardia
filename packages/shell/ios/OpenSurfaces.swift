@@ -15,7 +15,6 @@ final class OpenSurfaces: NSObject {
     let url: String
     let link: String
     let items: [Any]
-    let frame: NSDictionary?
   }
 
   private final class Tracked {
@@ -155,7 +154,7 @@ final class OpenSurfaces: NSObject {
   private func captured(_ box: [String: Any]?) {
     guard let box, capturesPageMenus, let tab = box["tab"] as? String, let window = WindowManager.shared.id(of: box["window"] as? NSWindow) else { return }
     closeCaptured { _ in true }
-    let menu = Captured(documents: box["documents"] as? Int ?? -1, url: box["url"] as? String ?? "", link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [], frame: box["frame"] as? NSDictionary)
+    let menu = Captured(documents: box["documents"] as? Int ?? -1, url: box["url"] as? String ?? "", link: box["link"] as? String ?? "", items: box["items"] as? [Any] ?? [])
     let tracked = Tracked(id: newId("m"), kind: "page", menu: nil, captured: menu, tab: tab, window: window)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
@@ -202,7 +201,7 @@ final class OpenSurfaces: NSObject {
     }
     guard let command = item as? CommandItem, let arg = command.arg else { return nil }
     if WindowManager.shared.window(arg) != nil { return arg }
-    return command.command == "moveTabToWindow" ? "" : nil
+    return command.command == "moveTabToWindow" && arg != "new" ? "" : nil
   }
 
   static func rows(_ menu: NSMenu, path: [Int], validate: Bool) -> [[String: Any]] {
@@ -255,7 +254,7 @@ final class OpenSurfaces: NSObject {
     do {
       let tracked = try find(id)
       guard !path.isEmpty else { throw Problem.missing("path names an item.") }
-      if let captured = tracked.captured { return try chooseCaptured(tracked, captured, path: path, done: done) }
+      if tracked.captured != nil { throw Problem.refused(Self.capturedPickNeedsEngine) }
       done(.success(try chooseTracked(tracked, path: path)))
     } catch {
       done(.failure(error))
@@ -281,23 +280,34 @@ final class OpenSurfaces: NSObject {
     return item.title
   }
 
-  private func chooseCaptured(_ tracked: Tracked, _ captured: Captured, path: [Int], done: @escaping (Result<String, Error>) -> Void) throws {
-    var items = captured.items
-    var found: [String: Any]?
-    for (depth, step) in path.enumerated() {
-      guard step >= 0, step < items.count, let item = items[step] as? [String: Any] else { throw Problem.missing("There's no item at that path.") }
-      if depth == path.count - 1 { found = item } else { items = item["submenu"] as? [Any] ?? [] }
+  static let capturedPickNeedsEngine =
+    "A captured page menu is listed only: picking from it waits for engine support that runs the item for the frame the menu came from (runContextMenuCommand in ac_context_menu.mm)."
+
+  func trackedBarItem(_ id: String?, path: [Int], ref: String) throws -> NSMenuItem {
+    var menu: NSMenu
+    var steps = path
+    if let id {
+      let tracked = try find(id)
+      guard tracked.kind == "menuBar", let root = tracked.menu else { throw Problem.refused("Menu \(id) isn't the menu bar.") }
+      guard path.starts(with: tracked.pathPrefix) else { throw Problem.missing("That path isn't in menu \(id).") }
+      menu = root
+      steps = Array(path.dropFirst(tracked.pathPrefix.count))
+    } else {
+      guard let bar = NSApp.mainMenu else { throw Problem.missing("There's no menu bar.") }
+      menu = bar
     }
-    guard let item = found, item["separator"] as? Bool != true, item["submenu"] == nil else { throw Problem.refused("That item opens a submenu or is a separator.") }
-    guard item["enabled"] as? Bool == true else { throw Problem.refused("That item is turned off.") }
-    guard let tab = tracked.tab, let index = open.firstIndex(where: { $0 === tracked }) else { throw Problem.missing("That menu closed.") }
-    close(at: index)
-    let title = item["title"] as? String ?? ""
-    ArdiaWebView.runCapturedMenuCommand(
-      item["id"] as? Int ?? 0, tab: tab, documents: captured.documents, url: captured.url, mainFrame: captured.frame?["mainFrame"] as? NSNumber
-    ) { problem in
-      done(problem.map { .failure(Problem.refused($0)) } ?? .success(title))
+    guard let last = steps.last else { throw Problem.missing("path names a menu bar item.") }
+    for step in steps.dropLast() {
+      guard step >= 0, step < menu.numberOfItems, let submenu = menu.item(at: step)?.submenu else { throw Problem.missing("There's no menu at that path.") }
+      menu = submenu
     }
+    menu.update()
+    guard last >= 0, last < menu.numberOfItems, let item = menu.item(at: last), !item.isSeparatorItem, item.submenu == nil, !item.isHidden else {
+      throw Problem.missing("There's no menu bar item at that path.")
+    }
+    guard Self.ref(of: item) == ref else { throw Problem.refused("The menu bar changed since it was read; read it again.") }
+    guard item.isEnabled else { throw Problem.refused("\(item.title) is turned off.") }
+    return item
   }
 
   func dismiss(_ id: String) throws {
@@ -314,48 +324,34 @@ enum MenuBarAction {
     "toggleAutomaticQuoteSubstitution:", "toggleAutomaticDashSubstitution:", "toggleAutomaticLinkDetection:", "toggleAutomaticDataDetection:",
     "toggleAutomaticTextReplacement:", "uppercaseWord:", "lowercaseWord:", "capitalizeWord:", "startSpeaking:", "stopSpeaking:",
   ]
+  static let appWideActions: Set<String> = ["miniaturizeAll:", "arrangeInFront:", "arrangeWindowsInFront:"]
 
-  static func item(at path: [Int], ref: String) throws -> (menu: NSMenu, index: Int, item: NSMenuItem) {
-    guard var menu = NSApp.mainMenu, let last = path.last else { throw OpenSurfaces.Problem.missing("path names a menu bar item.") }
-    for step in path.dropLast() {
-      guard step >= 0, step < menu.numberOfItems, let submenu = menu.item(at: step)?.submenu else { throw OpenSurfaces.Problem.missing("There's no menu at that path.") }
-      menu = submenu
-    }
-    menu.update()
-    guard last >= 0, last < menu.numberOfItems, let item = menu.item(at: last), !item.isSeparatorItem, item.submenu == nil else {
-      throw OpenSurfaces.Problem.missing("There's no menu bar item at that path.")
-    }
-    guard OpenSurfaces.ref(of: item) == ref else {
-      throw OpenSurfaces.Problem.refused("The menu bar changed since it was read; read it again with menus.bar.")
-    }
-    return (menu, last, item)
-  }
-
-  static func perform(_ path: [Int], ref: String, windowId: String) throws -> String {
-    let (_, _, item) = try item(at: path, ref: ref)
+  static func perform(menu id: String?, path: [Int], ref: String, windowId: String) throws -> String {
+    let item = try OpenSurfaces.shared.trackedBarItem(id, path: path, ref: ref)
     guard let action = item.action else { throw OpenSurfaces.Problem.missing("There's no menu bar item at that path.") }
     if item is CommandItem { throw OpenSurfaces.Problem.refused("That item runs an Ardia command; run it with run.") }
-    guard allowedActions.contains(NSStringFromSelector(action)) else {
+    let name = NSStringFromSelector(action)
+    guard allowedActions.contains(name) else {
       throw OpenSurfaces.Problem.refused("\(item.title) isn't an editing or window item the ardia command may choose (quitting, hiding, closing windows and updates have their own paths or stay with you).")
     }
-    guard item.isEnabled else { throw OpenSurfaces.Problem.refused("\(item.title) is turned off.") }
-    guard let window = WindowManager.shared.window(windowId), NSApp.keyWindow == nil || NSApp.keyWindow === window else {
-      throw OpenSurfaces.Problem.refused("Editing and window items act on the key window, and that isn't the window the ardia command named.")
+    guard let key = NSApp.keyWindow else {
+      throw OpenSurfaces.Problem.refused("No window is key, so \(item.title) would have no window of its own to act on.")
     }
-    guard let target = target(for: action, item: item, in: window) else { throw OpenSurfaces.Problem.refused("\(item.title) has nothing to act on in that window.") }
+    guard let window = WindowManager.shared.window(windowId), key === window else {
+      throw OpenSurfaces.Problem.refused("\(item.title) acts on the key window, and that isn't the window the ardia command named.")
+    }
+    let target: AnyObject
+    if appWideActions.contains(name) {
+      guard !WindowManager.shared.anyIncognitoWindow else { throw OpenSurfaces.Problem.refused("\(item.title) acts on every window, and a private window is open.") }
+      guard item.target == nil, NSApp.responds(to: action) else { throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to an explicit target.") }
+      target = NSApp
+    } else {
+      guard item.target == nil, window.responds(to: action) else {
+        throw OpenSurfaces.Problem.refused("\(item.title) can't be sent to the named window itself, only along the responder chain, so the ardia command doesn't choose it.")
+      }
+      target = window
+    }
     guard NSApp.sendAction(action, to: target, from: item) else { throw OpenSurfaces.Problem.refused("\(item.title) did nothing.") }
     return item.title
-  }
-
-  private static func target(for action: Selector, item: NSMenuItem, in window: NSWindow) -> AnyObject? {
-    if let fixed = item.target { return fixed.responds(to: action) ? fixed : nil }
-    var responder: NSResponder? = window.firstResponder
-    while let current = responder {
-      if current.responds(to: action) { return current }
-      responder = current.nextResponder
-    }
-    if window.responds(to: action) { return window }
-    if let delegate = window.delegate, delegate.responds(to: action) { return delegate }
-    return NSApp.responds(to: action) ? NSApp : nil
   }
 }

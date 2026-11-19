@@ -92,8 +92,8 @@ export type MenusNative = {
   chooseSurfaceItem(id: string, path: number[]): Promise<string>;
   dismissSurface(id: string): Promise<void>;
   menuBar(): Promise<SurfaceItem[]>;
-  performMenuBarItem(path: number[], ref: string, windowId: string): Promise<string>;
-  checkMenuBarItem(path: number[], ref: string): Promise<void>;
+  performMenuBarItem(menu: string | null, path: number[], ref: string, windowId: string): Promise<string>;
+  checkMenuBarItem(menu: string | null, path: number[], ref: string): Promise<void>;
   showMenu(items: MenuItem[]): Promise<string | null>;
   updateMenu(items: MenuItem[]): Promise<void>;
   setMenuState(state: Omit<MenuState, MenuBookmarkKey>): Promise<void>;

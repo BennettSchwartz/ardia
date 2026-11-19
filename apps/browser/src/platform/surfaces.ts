@@ -9,6 +9,6 @@ export const capturePageMenus = (captures: boolean) => Promise.resolve().then(()
 export const chooseSurfaceItem = (id: string, path: number[]) => Menus().chooseSurfaceItem(id, path);
 export const dismissSurface = (id: string) => Menus().dismissSurface(id);
 export const menuBar = () => Menus().menuBar();
-export const performMenuBarItem = (path: number[], ref: string, windowId: string) => Menus().performMenuBarItem(path, ref, windowId);
-export const checkMenuBarItem = (path: number[], ref: string) => Menus().checkMenuBarItem(path, ref);
+export const performMenuBarItem = (menu: string | null, path: number[], ref: string, windowId: string) => Menus().performMenuBarItem(menu, path, ref, windowId);
+export const checkMenuBarItem = (menu: string | null, path: number[], ref: string) => Menus().checkMenuBarItem(menu, path, ref);
 export const onSurface = (listener: (e: SurfaceEvent) => void) => Menus().addListener("onSurface", listener);
