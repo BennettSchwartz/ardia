@@ -73,13 +73,13 @@ Settings › Advanced.
   and live folders (`sharedFolders.*`, `live.*`), setup codes (`presets.*`) and Air Traffic Control rules
   (`airTraffic.*`) are there too.
 - **One line is at most 1 MiB.** Every line Ardia writes on the socket (a reply, an event, a decide request) is at most
-  1 MiB (1,048,576 bytes before the newline), the limit every shipped command reads (`MAX_LINE` in `control.py` and
+  1 MiB (1,048,576 bytes, newline included), the limit every shipped command reads (`MAX_LINE` in `control.py` and
   `control.rs`); a longer line makes the command drop the connection. Old commands can't change, so Ardia keeps to it:
   pages stop early, a read whose reply wouldn't fit answers `failed` saying what to narrow, a write whose result wouldn't
   fit answers a compact `{ok, oversized, …counts}` so it's never unclear whether the write happened, an event that
   wouldn't fit goes out summarized with `truncated: true`, and a decide request that wouldn't fit isn't sent (Ardia uses
-  its default). A reader that falls behind loses its oldest events, never its connection; the next event it gets carries
-  `dropped: <n>`. Details in `docs/control-socket.md` › The 1 MiB line.
+  its default). A reader that falls behind loses its oldest events, never a reply or a decide message and never its connection
+  in the middle of a line; the next event it gets carries `dropped: <n>`. Details in `docs/control-socket.md` › The 1 MiB line.
 - **The plugin schema.** `docs/plugin.schema.json` is the manifest schema Ardia writes (`apps/browser/scripts/
   write-plugin-schema.mjs`; a test keeps it current). The command ships a copy for `ardia plugins check` offline, and the
   plugins repo's CI compares that copy with ardia main's.
