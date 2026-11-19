@@ -10,6 +10,8 @@ globalThis.acTestNativeModules = {
     read: async () => listing,
     apply: async () => ({ conflicts: [] }),
     create: async (parent, name) => (created.push([parent, name]), `${parent}/${name}`),
+    resolve: async (path) => ({ path: path.replace(/\/+$/, ""), device: 1, inode: path.length }),
+    discard: async () => {},
     watch: () => {},
     addListener: () => ({ remove() {} }),
   },

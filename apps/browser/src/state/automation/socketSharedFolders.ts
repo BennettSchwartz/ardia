@@ -9,7 +9,8 @@ import { canShareGroup, sharedFolderOfGroup } from "../sharedFolders/removal";
 import { bindFolder, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
 import type { BaseEntry } from "../sharedFolders/tree";
 import { eligibleKind, ownEntry } from "./automationWindows";
-import type { MethodSpec } from "./socketCatalog";
+import { bindingAt, canonicalFolder, discardFolder, isAbsolutePath, oneAtATime, readableFolder } from "./sharedFolderPaths";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { id, obj, text, WINDOW } from "./socketSchema";
 import { expect, now, windowOrFocused } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -50,51 +51,94 @@ function groupOf(groupId: unknown): TabGroup {
   return g;
 }
 
-const isPath = (path: unknown): path is string => typeof path === "string" && path.startsWith("/") && !path.split("/").includes("..");
-
 function list() {
   return boundFolders()
     .filter(({ profileId }) => !isIncognitoProfile(profileId) && !!now().profiles[profileId])
     .map(({ profileId, key, folder }) => row(profileId, key, folder));
 }
 
-async function share(params: Record<string, unknown>) {
+function boundRow(profileId: string, key: string) {
+  const folder = sharedFolderOf(profileId, key);
+  if (!folder) throw new OpError("failed", "The folder stopped syncing before Ardia finished; nothing more was changed.");
+  return row(profileId, key, folder);
+}
+
+function syncProblem(profileId: string, key: string): string | null {
+  const sync = useSharedFolders.getState().sync[folderRef(profileId, key)];
+  if (sync?.state === "synced" || sync?.state === "waiting") return null;
+  if (sync?.error) return sync.error;
+  return sync?.state === "missing" ? "Its folder can't be found any more. Stop syncing it, then share it again." : "Its links aren't in the folder yet. Try again in a moment.";
+}
+
+function sameShareable(g: TabGroup) {
+  const s = now();
+  const again = ownEntry(s.groups, g.id);
+  return !!again && pinKeyOf(again) === pinKeyOf(g) && again.profileId === g.profileId && eligibleKind(s, again.windowId) === "normal" && canShareGroup(s, g.id);
+}
+
+async function newFolderFor(g: TabGroup, params: Record<string, unknown>, call: SocketCall) {
+  if (params.parent !== undefined && !isAbsolutePath(params.parent)) throw new OpError("bad_request", "parent is an absolute folder path.");
+  const location = sharedLocation();
+  const given = params.parent as string | undefined;
+  if (given === undefined && !location.iCloudAvailable) throw new OpError("refused", "iCloud Drive is off; pass parent, a folder that syncs some other way.");
+  const parent = given === undefined ? location.path : (await canonicalFolder(given, "parent")).path;
+  call.stillServing();
+  if (!sameShareable(g)) throw new OpError("no_window", `Group ${g.id} changed before its folder was made; nothing was shared.`);
+  const made = await createSharedFolder(parent, groupLabel(now(), g) || "Shared Folder");
+  const found = await canonicalFolder(made, "the new folder").catch(async (error: unknown) => {
+    await discardFolder(made);
+    throw error;
+  });
+  if (!call.serving() || !sameShareable(g) || sharedFolderOf(g.profileId, pinKeyOf(g))) {
+    await discardFolder(made);
+    call.stillServing();
+    throw new OpError("no_window", `Group ${g.id} changed while its folder was being made; nothing was shared.`);
+  }
+  bindFolder(g.profileId, pinKeyOf(g), found.path, { device: found.device, inode: found.inode });
+}
+
+function share(params: Record<string, unknown>, call: SocketCall) {
   available();
   const g = groupOf(params.group);
   if (!canShareGroup(now(), g.id)) throw new OpError("bad_request", "Only a pinned folder at the top of the sidebar can be shared.");
   const key = pinKeyOf(g);
-  if (!sharedFolderOf(g.profileId, key)) {
-    if (params.parent !== undefined && !isPath(params.parent)) throw new OpError("bad_request", "parent is an absolute folder path.");
-    const location = sharedLocation();
-    const parent = (params.parent as string | undefined) ?? (location.iCloudAvailable ? location.path : null);
-    if (!parent) throw new OpError("refused", "iCloud Drive is off; pass parent, a folder that syncs some other way.");
-    const path = await createSharedFolder(parent, groupLabel(now(), g) || "Shared Folder");
-    bindFolder(g.profileId, key, path);
-  }
-  await syncFolderAfterNow(g.profileId, key);
-  const folder = sharedFolderOf(g.profileId, key);
-  expect(!!folder, "the folder isn't shared.");
-  return row(g.profileId, key, folder!);
+  return oneAtATime(folderRef(g.profileId, key), async () => {
+    if (!sameShareable(g)) throw new OpError("no_window", `Group ${g.id} changed before it could be shared.`);
+    if (!sharedFolderOf(g.profileId, key)) await newFolderFor(g, params, call);
+    await syncFolderAfterNow(g.profileId, key, call.serving);
+    call.stillServing();
+    const shown = boundRow(g.profileId, key);
+    const problem = syncProblem(g.profileId, key);
+    if (problem) throw new OpError("failed", `The folder is shared at ${shown.path}, but it couldn't be synced yet: ${problem}`);
+    return shown;
+  });
 }
 
-async function add(params: Record<string, unknown>) {
+async function add(params: Record<string, unknown>, call: SocketCall) {
   available();
-  if (!isPath(params.path)) throw new OpError("bad_request", "path is an absolute folder path.");
-  const path = (params.path as string).replace(/\/+$/, "");
-  const w = windowOrFocused(params.window);
-  const profileId = w.profileId;
-  const known = boundFolders().find((b) => b.profileId === profileId && b.folder.path === path);
-  if (known) {
-    await syncFolderNow(profileId, known.key);
-    return row(profileId, known.key, sharedFolderOf(profileId, known.key)!);
-  }
-  const [next, groupId] = withSharedGroup(now(), w.id, path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
-  expect(!!groupId, "the folder's group wasn't made.");
-  useBrowser.setState(next);
-  const key = pinKeyOf(now().groups[groupId]!);
-  bindFolder(profileId, key, path);
-  await syncFolderNow(profileId, key);
-  return row(profileId, key, sharedFolderOf(profileId, key)!);
+  if (!isAbsolutePath(params.path)) throw new OpError("bad_request", "path is an absolute folder path.");
+  const profileId = windowOrFocused(params.window).profileId;
+  const found = await canonicalFolder(params.path, "path");
+  return oneAtATime(`${profileId}\u0001${found.path}`, async () => {
+    await readableFolder(found);
+    call.stillServing();
+    const known = bindingAt(profileId, found);
+    if (known) {
+      await syncFolderNow(profileId, known.key, call.serving);
+      call.stillServing();
+      return boundRow(profileId, known.key);
+    }
+    const w = windowOrFocused(params.window);
+    if (w.profileId !== profileId) throw new OpError("no_window", "The window changed profile before the folder was added; nothing was added.");
+    const [next, groupId] = withSharedGroup(now(), w.id, found.path.split("/").filter(Boolean).at(-1) ?? "Shared Folder");
+    expect(!!groupId, "the folder's group wasn't made.");
+    useBrowser.setState(next);
+    const key = pinKeyOf(now().groups[groupId]!);
+    bindFolder(profileId, key, found.path, { device: found.device, inode: found.inode });
+    await syncFolderNow(profileId, key, call.serving);
+    call.stillServing();
+    return boundRow(profileId, key);
+  });
 }
 
 function sharedOf(groupId: unknown) {
@@ -104,10 +148,11 @@ function sharedOf(groupId: unknown) {
   return shared;
 }
 
-async function syncNow(params: Record<string, unknown>) {
+async function syncNow(params: Record<string, unknown>, call: SocketCall) {
   const { profileId, key } = sharedOf(params.group);
-  await syncFolderNow(profileId, key);
-  return row(profileId, key, sharedFolderOf(profileId, key)!);
+  await syncFolderNow(profileId, key, call.serving);
+  call.stillServing();
+  return boundRow(profileId, key);
 }
 
 function stop(params: Record<string, unknown>) {

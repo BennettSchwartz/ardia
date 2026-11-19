@@ -7,21 +7,60 @@ public struct SharedFolderDirectory {
   static let maxLinkBytes = 64 * 1024
   static let maxManifestBytes = 1024 * 1024
   static let placeholderSuffix = ".icloud"
+  static let maxEntries = 20_000
+  static let maxScanBytes = 32 * 1024 * 1024
 
   public static let coordination = SyncCoordination(timeout: 20)
 
   public let root: URL
   private let rootReal: String
+  private let givenPath: String
+  private let identity: [String: Int]?
   private let coordination: SyncCoordination?
   private let fileManager = FileManager.default
 
-  public init(root: URL, coordination: SyncCoordination? = SharedFolderDirectory.coordination) {
+  public init(root: URL, identity: [String: Int]? = nil, coordination: SyncCoordination? = SharedFolderDirectory.coordination) {
     self.root = root.standardizedFileURL
+    self.givenPath = root.path
     self.rootReal = Self.realPath(self.root.path) ?? self.root.path
+    self.identity = identity
     self.coordination = coordination
   }
 
+  final class ScanBudget {
+    var entries = 0
+    var bytes = 0
+    var exceeded: Bool { entries > SharedFolderDirectory.maxEntries || bytes > SharedFolderDirectory.maxScanBytes }
+  }
+
+  public static func identity(of path: String) -> [String: Int]? {
+    var info = stat()
+    guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { return nil }
+    return ["device": Int(info.st_dev), "inode": Int(info.st_ino)]
+  }
+
+  var replaced: Bool {
+    guard let identity else { return false }
+    return rootReal != givenPath || Self.identity(of: rootReal) != identity
+  }
+
+  public static func resolve(_ path: String) throws -> [String: Any] {
+    let name = (path as NSString).lastPathComponent
+    guard let real = realPath(path) else {
+      let code = errno
+      throw failure(code == ENOENT ? "There’s no folder at \(path)." : "Can’t open “\(name)”: \(String(cString: strerror(code)))")
+    }
+    guard real != "/", let found = identity(of: real) else { throw failure("“\(name)” isn’t a folder Ardia can sync.") }
+    guard access(real, R_OK | X_OK) == 0 else { throw failure("Can’t read “\(name)”: \(String(cString: strerror(errno)))") }
+    return ["path": real, "device": found["device"]!, "inode": found["inode"]!]
+  }
+
+  public static func discard(_ path: String) {
+    _ = rmdir(path)
+  }
+
   public func read() -> [String: Any] {
+    if replaced { return ["exists": false, "error": "“\(root.lastPathComponent)” isn’t the folder Ardia added any more."] }
     var info = stat()
     if stat(root.path, &info) != 0 {
       let code = errno
@@ -29,7 +68,12 @@ public struct SharedFolderDirectory {
       return ["exists": false, "error": "Can’t open “\(root.lastPathComponent)”: \(String(cString: strerror(code)))"]
     }
     guard info.st_mode & S_IFMT == S_IFDIR else { return ["exists": false] }
-    return ["exists": true, "root": level(URL(fileURLWithPath: rootReal, isDirectory: true), depth: 0)]
+    let budget = ScanBudget()
+    let top = level(URL(fileURLWithPath: rootReal, isDirectory: true), depth: 0, budget: budget)
+    if budget.exceeded {
+      return ["exists": false, "error": "“\(root.lastPathComponent)” holds more than \(Self.maxEntries) items or \(Self.maxScanBytes / 1024 / 1024) MB of links; Ardia syncs smaller folders."]
+    }
+    return ["exists": true, "root": top]
   }
 
   public func apply(json: String) throws -> [String: Any] {
@@ -37,6 +81,7 @@ public struct SharedFolderDirectory {
       throw Self.failure("The folder changes couldn’t be read.")
     }
     guard Self.isDirectoryFollowing(root.path) else { throw Self.failure("The folder “\(root.lastPathComponent)” is missing.") }
+    guard !replaced else { throw Self.failure("“\(root.lastPathComponent)” isn’t the folder Ardia added any more.") }
     var conflicts: [String] = []
     for op in ops {
       let conflict: String?
@@ -111,7 +156,7 @@ public struct SharedFolderDirectory {
     (name as NSString).pathExtension.lowercased() == linkExtension
   }
 
-  private func level(_ directory: URL, depth: Int) -> [String: Any] {
+  private func level(_ directory: URL, depth: Int, budget: ScanBudget) -> [String: Any] {
     let names: [String]
     do {
       names = try fileManager.contentsOfDirectory(atPath: directory.path)
@@ -122,6 +167,8 @@ public struct SharedFolderDirectory {
     var manifest: Any = NSNull()
     var manifestPending = false
     let held = { (name: String, reason: String) in entries.append(["kind": "pending", "file": name, "reason": reason]) }
+    budget.entries += names.count
+    if budget.exceeded { return ["entries": [], "manifest": NSNull(), "manifestPending": true] }
     for name in names.sorted() {
       let url = directory.appendingPathComponent(name)
       let kind = Self.kind(of: url.path)
@@ -150,7 +197,8 @@ public struct SharedFolderDirectory {
         if package || depth >= Self.maxDepth {
           held(name, "unreadable")
         } else {
-          let inner = level(url, depth: depth + 1)
+          let inner = level(url, depth: depth + 1, budget: budget)
+          if budget.exceeded { return ["entries": [], "manifest": NSNull(), "manifestPending": true] }
           if let error = inner["error"] { return ["entries": [], "manifest": NSNull(), "manifestPending": true, "error": error] }
           entries.append(["kind": "dir", "file": name, "level": inner])
         }
@@ -160,6 +208,8 @@ public struct SharedFolderDirectory {
         } else if let reason = waitingFor(url) {
           held(name, reason)
         } else if let text = readText(url, limit: Self.maxLinkBytes) {
+          budget.bytes += text.utf8.count
+          if budget.exceeded { return ["entries": [], "manifest": NSNull(), "manifestPending": true] }
           entries.append(["kind": "link", "file": name, "text": text])
         } else {
           held(name, "unreadable")

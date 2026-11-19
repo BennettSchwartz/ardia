@@ -22,6 +22,7 @@ const POLL_MS = 60_000;
 const CONFLICT_RETRY_MS = 3000;
 
 const store = () => useBrowser.getState();
+const always = () => true;
 
 export function folderPlace(s: BrowserState, profileId: string, key: string): Place {
   if (!s.profiles[profileId]) return { kind: "gone" };
@@ -54,20 +55,21 @@ function schedule(profileId: string, key: string, delay: number) {
   timers.set(ref, setTimeout(fire, delay));
 }
 
-export async function syncFolderAfterNow(profileId: string, key: string): Promise<void> {
+export async function syncFolderAfterNow(profileId: string, key: string, allowed: () => boolean = always): Promise<void> {
   await running.get(folderRef(profileId, key));
-  await syncFolderNow(profileId, key);
+  if (allowed()) await syncFolderNow(profileId, key, allowed);
 }
 
-export function syncFolderNow(profileId: string, key: string): Promise<void> {
+export function syncFolderNow(profileId: string, key: string, allowed: () => boolean = always): Promise<void> {
   const ref = folderRef(profileId, key);
   const busy = running.get(ref);
+  if (busy && allowed !== always) return busy.then(() => (allowed() ? syncFolderNow(profileId, key, allowed) : undefined));
   if (busy) {
     queued.add(ref);
     return busy;
   }
   const bound = sharedFolderOf(profileId, key);
-  const run = round(profileId, key)
+  const run = round(profileId, key, allowed)
     .catch((error: unknown) => {
       if (sharedFolderOf(profileId, key) !== bound) return void queued.add(ref);
       setFolderSync(profileId, key, { state: "error", error: error instanceof Error ? error.message : String(error) });
@@ -80,7 +82,7 @@ export function syncFolderNow(profileId: string, key: string): Promise<void> {
   return run;
 }
 
-async function round(profileId: string, key: string) {
+async function round(profileId: string, key: string, allowed: () => boolean) {
   const ref = folderRef(profileId, key);
   const folder = sharedFolderOf(profileId, key);
   if (!folder) return;
@@ -91,8 +93,9 @@ async function round(profileId: string, key: string) {
     else setFolderSync(profileId, key, { state: "paused" });
     return;
   }
-  const listing = await readSharedFolder(folder.path);
+  const listing = await readSharedFolder(folder.path, folder.identity ?? null);
   const stale = () => sharedFolderOf(profileId, key) !== folder;
+  if (!allowed()) return;
   if (stale()) return void queued.add(ref);
   if (!listing.exists) {
     if (listing.error) return setFolderSync(profileId, key, { state: "error", error: listing.error });
@@ -103,6 +106,7 @@ async function round(profileId: string, key: string) {
   const s = store();
   const here = folderPlace(s, profileId, key);
   if (here.kind !== "shown") return void queued.add(ref);
+  if (!allowed()) return;
   const local = localFolder(s, here.groupId, knownNames(folder.base));
   if (!local) return;
   const { level, waiting } = mergeFolder(folder.base, local.entries, remote);
@@ -114,8 +118,9 @@ async function round(profileId: string, key: string) {
     schedule(profileId, key, CONFLICT_RETRY_MS);
     return setFolderSync(profileId, key, { state: "syncing", error: null });
   }
+  if (!allowed()) return;
   if (stale()) return void queued.add(ref);
-  const { conflicts } = ops.length ? await writeSharedFolder(folder.path, ops) : { conflicts: [] };
+  const { conflicts } = ops.length ? await writeSharedFolder(folder.path, ops, folder.identity ?? null) : { conflicts: [] };
   if (stale()) return void queued.add(ref);
   if (conflicts.length) {
     schedule(profileId, key, CONFLICT_RETRY_MS);

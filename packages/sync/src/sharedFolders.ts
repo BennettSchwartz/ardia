@@ -18,11 +18,17 @@ export type SharedFolderOp =
 
 export type SharedLocation = { path: string; iCloudAvailable: boolean; iCloudPath: string };
 
+export type SharedFolderIdentity = { device: number; inode: number };
+
+export type ResolvedSharedFolder = SharedFolderIdentity & { path: string };
+
 type SharedFoldersNative = {
   location(): SharedLocation;
-  read(path: string): Promise<SharedListing>;
-  apply(path: string, ops: string): Promise<{ conflicts: string[] }>;
+  read(path: string, identity: SharedFolderIdentity | null): Promise<SharedListing>;
+  apply(path: string, ops: string, identity: SharedFolderIdentity | null): Promise<{ conflicts: string[] }>;
   create(parent: string, name: string): Promise<string>;
+  resolve(path: string): Promise<ResolvedSharedFolder>;
+  discard(path: string): Promise<void>;
   watch(paths: string[]): void;
   addListener(name: "onChange", listener: (event: { paths: string[] }) => void): { remove(): void };
 };

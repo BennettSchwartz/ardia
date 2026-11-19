@@ -23,12 +23,20 @@ public class SharedFoldersModule: Module {
       ]
     }
 
-    AsyncFunction("read") { (path: String) -> [String: Any] in
-      SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true)).read()
+    AsyncFunction("read") { (path: String, identity: [String: Int]?) -> [String: Any] in
+      SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).read()
     }.runOnQueue(Self.work)
 
-    AsyncFunction("apply") { (path: String, ops: String) throws -> [String: Any] in
-      try SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true)).apply(json: ops)
+    AsyncFunction("apply") { (path: String, ops: String, identity: [String: Int]?) throws -> [String: Any] in
+      try SharedFolderDirectory(root: URL(fileURLWithPath: path, isDirectory: true), identity: identity).apply(json: ops)
+    }.runOnQueue(Self.work)
+
+    AsyncFunction("resolve") { (path: String) throws -> [String: Any] in
+      try SharedFolderDirectory.resolve(path)
+    }.runOnQueue(Self.work)
+
+    AsyncFunction("discard") { (path: String) in
+      SharedFolderDirectory.discard(path)
     }.runOnQueue(Self.work)
 
     AsyncFunction("create") { (parent: String, name: String) throws -> String in
