@@ -292,8 +292,14 @@ and watches `NSMenuDidBeginTracking`/`NSMenuDidEndTracking`. A `<select>` popup 
 `WebMenuRunner` (`content/app_shim_remote_cocoa/web_menu_runner_mac.mm`), a page's context menu Chromium's
 `MenuControllerCocoa`. Choosing calls the item's own action and the menu ends tracking as after a click. Every menu
 carries its owner: a `<select>` popup the tab and window whose view holds the popup's anchor, a visible context menu
-the tab holding the key window's first responder and that window, the menu bar and Ardia's menus the key window. The
-socket shows a menu only when that window is one the ardia command may use and, for a page's menu, the tab is in it.
+the tab holding the key window's first responder and that window, the menu bar and Ardia's menus the key window. A
+menu bar tracked while the app has no key window (an inactive or hidden app) belongs to the last focused window the
+ardia command may use; a key private window keeps it hidden. A menu of the menu bar that tracks on its own (one of its
+submenus, not the bar) counts as the menu bar, its paths prefixed by its place in the bar so they match `menus.bar` and
+its refs. The socket shows a menu only when its window is one the ardia command may use and, for a page's menu, the
+tab is in it. AppKit won't pop a menu up for an inactive app, so a hidden instance can't really track the menu bar;
+`ARDIA_TEST=menuBarTracking` with `ArdiaMenus.devTrackMenuBar(index, tracking)` posts AppKit's own tracking notifications
+for a real submenu instead, and `menus.choose` then meets the real items.
 
 **Background mode.** A hidden instance (`ARDIA_BACKGROUND=1`) doesn't show a page's context menu: the engine hands it to
 the app (`-tab:runContextMenu:`), which used to hold it open in a nested run loop. That loop is gone. While the socket

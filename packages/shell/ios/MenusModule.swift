@@ -67,9 +67,10 @@ public class MenusModule: Module {
     AsyncFunction("performMenuBarItem") { (path: [Int], ref: String, windowId: String) throws -> String in
       try MenusModule.surfaceCall { try MenuBarAction.perform(path, ref: ref, windowId: windowId) }
     }.runOnQueue(.main)
-    AsyncFunction("devTrackMenuBar") { () -> Bool in
-      guard LaunchConfig.shared.testFlag("menuBarTracking"), let menu = NSApp.mainMenu else { return false }
-      DispatchQueue.main.async { menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil) }
+    AsyncFunction("devTrackMenuBar") { (index: Int, tracking: Bool) -> Bool in
+      guard LaunchConfig.shared.testFlag("menuBarTracking"), index >= 0, index < NSApp.mainMenu?.numberOfItems ?? 0,
+            let menu = NSApp.mainMenu?.item(at: index)?.submenu else { return false }
+      NotificationCenter.default.post(name: tracking ? NSMenu.didBeginTrackingNotification : NSMenu.didEndTrackingNotification, object: menu)
       return true
     }.runOnQueue(.main)
     AsyncFunction("checkMenuBarItem") { (path: [Int], ref: String) throws in try MenusModule.surfaceCall { _ = try MenuBarAction.item(at: path, ref: ref) } }.runOnQueue(.main)

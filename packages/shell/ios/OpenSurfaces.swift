@@ -25,6 +25,7 @@ final class OpenSurfaces: NSObject {
     let tab: String?
     let window: String?
     let keyless: Bool
+    var pathPrefix: [Int] = []
     let openedAt = Date()
     init(id: String, kind: String, menu: NSMenu?, captured: Captured?, tab: String?, window: String?, keyless: Bool = false) {
       self.id = id
@@ -114,8 +115,16 @@ final class OpenSurfaces: NSObject {
     return nil
   }
 
+  private func barPrefix(_ menu: NSMenu) -> [Int]? {
+    guard let bar = NSApp.mainMenu, menu.supermenu === bar, !open.contains(where: { $0.kind == "menuBar" }) else { return nil }
+    let index = bar.indexOfItem(withSubmenu: menu)
+    return index >= 0 ? [index] : nil
+  }
+
   private func began(_ menu: NSMenu?) {
-    guard let menu, menu.supermenu == nil || menu === NSApp.mainMenu, !open.contains(where: { $0.menu === menu }) else { return }
+    guard let menu, !open.contains(where: { $0.menu === menu }) else { return }
+    let prefix = barPrefix(menu)
+    guard menu.supermenu == nil || menu === NSApp.mainMenu || prefix != nil else { return }
     let kind = Self.kind(of: menu)
     let owner: (tab: String?, window: String?) = switch kind {
     case "select": Self.selectOwner().map { ($0.tab, $0.window) } ?? (nil, nil)
@@ -123,6 +132,7 @@ final class OpenSurfaces: NSObject {
     default: (nil, WindowManager.shared.id(of: NSApp.keyWindow))
     }
     let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window, keyless: NSApp.keyWindow == nil)
+    tracked.pathPrefix = prefix ?? []
     open.append(tracked)
     send?("menuOpened", describe(tracked))
   }
@@ -210,7 +220,7 @@ final class OpenSurfaces: NSObject {
     if let window = tracked.window { out["window"] = window }
     if tracked.keyless { out["keyless"] = true }
     if let menu = tracked.menu {
-      out["items"] = Self.rows(menu, path: [], validate: false)
+      out["items"] = Self.rows(menu, path: tracked.pathPrefix, validate: false)
     } else if let captured = tracked.captured {
       out["items"] = Self.capturedRows(captured.items, path: [])
       out["link"] = captured.link
