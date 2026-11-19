@@ -132,7 +132,7 @@ function PluginRow({ name }: { name: string }) {
     <Row
       title={m ? `${m.title}${m.version ? ` ${m.version}` : ""}` : name}
       description={[originText(listing, active), statusOf(m, listing?.problems ?? [], active, review, process)].filter(Boolean).join(" · ")}
-      icon={<Symbol name={m?.page?.icon ?? "puzzlepiece"} size={14} color={theme.icon} style={ICON} />}
+      icon={<Symbol name={m?.icon ?? m?.page?.icon ?? "puzzlepiece"} size={14} color={theme.icon} style={ICON} />}
       onPress={() => goToSettingsPane("plugins", null, name)}
     >
       {isAlwaysOn(listing) ? (
