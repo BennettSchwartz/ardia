@@ -2,15 +2,18 @@ import Darwin
 import Foundation
 
 struct ControlOutput {
-  static let maxEventBytes = 4 * 1024 * 1024
-  static let maxReplyBytes = 34 * 1024 * 1024
+  static let maxLine = 1_048_576
+  static let maxEventBytes = 4 * 1_048_576
+  static let maxBytes = 34 * 1_048_576
+  static let markerRoom = 64
   static let maxWaitingEvents = 1000
 
   enum WriteResult { case drained, blocked, failed }
+  enum Kind { case reply, kept, event }
 
   private struct Chunk {
     var data: Data
-    let event: Bool
+    let kind: Kind
     var ticket = 0
   }
 
@@ -24,43 +27,59 @@ struct ControlOutput {
   private var finished: [Int] = []
 
   var isEmpty: Bool { chunks.isEmpty }
-
-  mutating func addReply(_ data: Data, ticket: Int) -> Bool {
-    guard bytes - eventBytes + data.count <= Self.maxReplyBytes else { return false }
-    bytes += data.count
-    chunks.append(Chunk(data: data, event: false, ticket: ticket))
-    return true
-  }
+  var midLine: Bool { headStarted && offset > 0 }
+  var waitingTickets: [Int] { chunks.map(\.ticket).filter { $0 > 0 } }
 
   mutating func takeFinishedTickets() -> [Int] {
     defer { finished = [] }
     return finished
   }
 
-  var waitingTickets: [Int] { chunks.map(\.ticket).filter { $0 > 0 } }
+  mutating func addReply(_ data: Data, ticket: Int) -> Bool {
+    addKept(Chunk(data: Self.fittedReply(data), kind: .reply, ticket: ticket))
+  }
+
+  mutating func addKept(_ data: Data) -> Bool {
+    guard data.count <= Self.maxLine else { return true }
+    return addKept(Chunk(data: data, kind: .kept))
+  }
 
   mutating func addEvent(_ data: Data) -> Bool {
-    while waitingEvents >= Self.maxWaitingEvents || eventBytes + data.count > Self.maxEventBytes {
-      guard let index = oldestWaitingEvent() else {
+    guard data.count <= Self.maxLine else {
+      dropped += 1
+      return true
+    }
+    while waitingEvents >= Self.maxWaitingEvents || eventBytes + data.count > Self.maxEventBytes || !hasRoom(data.count) {
+      guard dropOldestEvent() else {
         dropped += 1
         return true
       }
-      bytes -= chunks[index].data.count
-      eventBytes -= chunks[index].data.count
-      chunks.remove(at: index)
-      waitingEvents -= 1
-      dropped += 1
     }
     waitingEvents += 1
     bytes += data.count
     eventBytes += data.count
-    chunks.append(Chunk(data: data, event: true))
+    chunks.append(Chunk(data: data, kind: .event))
     return true
+  }
+
+  mutating func keepOnlyHead() -> [Int] {
+    guard midLine else { return [] }
+    let rest = chunks.dropFirst()
+    let unwritten = rest.map(\.ticket).filter { $0 > 0 }
+    for chunk in rest {
+      bytes -= chunk.data.count
+      if chunk.kind == .event {
+        eventBytes -= chunk.data.count
+        waitingEvents -= 1
+      }
+    }
+    chunks.removeLast(rest.count)
+    return unwritten
   }
 
   mutating func write(to fd: Int32) -> WriteResult {
     while !chunks.isEmpty {
-      guard startHead() else { return .failed }
+      startHead()
       let data = chunks[0].data
       let written = data.withUnsafeBytes { raw -> Int in
         guard let base = raw.baseAddress else { return 0 }
@@ -72,7 +91,7 @@ struct ControlOutput {
       }
       offset += written
       bytes -= written
-      if chunks[0].event { eventBytes -= written }
+      if chunks[0].kind == .event { eventBytes -= written }
       if offset == data.count {
         if chunks[0].ticket > 0 { finished.append(chunks[0].ticket) }
         chunks.removeFirst()
@@ -83,23 +102,40 @@ struct ControlOutput {
     return .drained
   }
 
-  private func oldestWaitingEvent() -> Int? {
-    chunks.indices.first { chunks[$0].event && !($0 == 0 && headStarted) }
+  private func hasRoom(_ count: Int) -> Bool { bytes + count + Self.markerRoom <= Self.maxBytes }
+
+  private mutating func addKept(_ chunk: Chunk) -> Bool {
+    while !hasRoom(chunk.data.count) {
+      guard dropOldestEvent() else { return false }
+    }
+    bytes += chunk.data.count
+    chunks.append(chunk)
+    return true
   }
 
-  private mutating func startHead() -> Bool {
-    guard !headStarted else { return true }
-    headStarted = true
-    guard chunks[0].event else { return true }
+  private mutating func dropOldestEvent() -> Bool {
+    guard let index = chunks.indices.first(where: { chunks[$0].kind == .event && !($0 == 0 && headStarted) }) else { return false }
+    bytes -= chunks[index].data.count
+    eventBytes -= chunks[index].data.count
+    chunks.remove(at: index)
     waitingEvents -= 1
-    guard dropped > 0 else { return true }
+    dropped += 1
+    return true
+  }
+
+  private mutating func startHead() {
+    guard !headStarted else { return }
+    headStarted = true
+    guard chunks[0].kind == .event else { return }
+    waitingEvents -= 1
+    guard dropped > 0 else { return }
     let marked = Self.marking(chunks[0].data, dropped: dropped)
     let grown = marked.count - chunks[0].data.count
+    guard grown > 0, grown <= Self.markerRoom, marked.count <= Self.maxLine else { return }
     bytes += grown
     eventBytes += grown
     chunks[0].data = marked
     dropped = 0
-    return true
   }
 
   static func marking(_ line: Data, dropped: Int) -> Data {
@@ -107,5 +143,18 @@ struct ControlOutput {
     var marked = Data("{\"dropped\":\(dropped),".utf8)
     marked.append(line.dropFirst())
     return marked
+  }
+
+  static func fittedReply(_ data: Data) -> Data {
+    guard data.count > maxLine else { return data }
+    let message = "The reply would be over 1 MiB, the most a line can carry; ask for less."
+    var id: Any = NSNull()
+    if let parsed = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? [String: Any], let given = parsed["id"], given is NSNumber || (given as? String).map({ $0.utf8.count <= 4096 }) == true {
+      id = given
+    }
+    let reply: [String: Any] = ["id": id, "error": ["code": "failed", "message": message]]
+    var line = (try? JSONSerialization.data(withJSONObject: reply)) ?? Data("{\"id\":null,\"error\":{\"code\":\"failed\",\"message\":\"\(message)\"}}".utf8)
+    line.append(10)
+    return line
   }
 }
