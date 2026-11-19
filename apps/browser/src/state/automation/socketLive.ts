@@ -76,14 +76,10 @@ function items(params: Record<string, unknown>) {
     return !seen.has(id) && !!seen.add(id);
   });
   const unread = new Set(l.unread[folder.id] ?? []);
-  const shown = page(entries, params);
-  return {
-    ...shown,
-    items: shown.items.map((entry) => {
-      const item = itemOf(entry);
-      return { item, shown: entry.shown, unread: unread.has(item.id), completed: entry.shown === "completed" ? { state: entry.done.state, at: entry.done.at } : null };
-    }),
-  };
+  return page(entries, params, (entry) => {
+    const item = itemOf(entry);
+    return { item, shown: entry.shown, unread: unread.has(item.id), completed: entry.shown === "completed" ? { state: entry.done.state, at: entry.done.at } : null };
+  });
 }
 
 function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] {
