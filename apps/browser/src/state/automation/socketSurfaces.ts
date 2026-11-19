@@ -18,7 +18,7 @@ export const PAGE_PICK_REFUSED =
 export const LIVE_PAGE_MENU_REFUSED =
   "A page's context menu on screen isn't used: nothing in the menu says which tab and window it came from, so the ardia command can't tell whose it is.";
 export const TRACKED_BAR_REFUSED = "The ardia command doesn't use the menu bar while it tracks; run an item from menus.bar with menus.runBar instead.";
-export const NATIVE_ITEMS_NEED_VISIBLE = "A background Ardia runs no native menu item (Minimize, Zoom and the like): only the Ardia commands its background allowlist names.";
+export const NATIVE_ITEMS_NEED_VISIBLE = "A background Ardia runs no native menu item (Minimize, Zoom and the like), and run refuses every command there, so menus.runBar runs nothing in it.";
 export const DYNAMIC_ROW_REFUSED = "That row stands for a menu built from open windows, profiles, pages or history, which the ardia command doesn't read or run.";
 
 const privateOpen = (s: BrowserState) => Object.values(s.windows).some((w) => w.kind === "private");

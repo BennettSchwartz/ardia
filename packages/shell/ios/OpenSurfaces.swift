@@ -208,7 +208,7 @@ final class OpenSurfaces: NSObject {
   }
 
   static let nativeItemsNeedVisible =
-    "A background Ardia runs no native menu item (Minimize, Zoom and the like): only the Ardia commands its background allowlist names."
+    "A background Ardia runs no native menu item (Minimize, Zoom and the like), and run refuses every command there, so menus.runBar runs nothing in it."
   static let privateWindowOpen = "A private window is open, so the ardia command doesn't use the menu bar until it closes."
 
   func dismiss(_ id: String) throws {
