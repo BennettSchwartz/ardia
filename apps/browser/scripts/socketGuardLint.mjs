@@ -6,6 +6,8 @@ const GUARDS = new Set(["stillOn", "mayWrite", "mayDelete", "mayAct", "mayClose"
 const CALL_GUARDS = new Set(["serving", "stillServing"]);
 const PROMISE_CALLBACKS = new Set(["then", "catch", "finally"]);
 const MAX_DEPTH = 5;
+const DEFERRED = /^(setTimeout|setInterval|setImmediate|queueMicrotask|requestAnimationFrame|requestIdleCallback|addEventListener|addListener|subscribe|listen|on[A-Z]\w*)$/;
+const FOREIGN_HOOKS = new Set(["foreignWriteHooks", "syncWriteHooks"]);
 
 export function loadProgram(appDir, extraFiles = {}) {
   const configPath = ts.findConfigFile(appDir, ts.sys.fileExists, "tsconfig.json");
@@ -44,6 +46,12 @@ export function findUnguardedWrites(program, rootFiles) {
   const memo = new Map();
   const problems = new Map();
 
+  const storeHook = (type) => {
+    const getState = type && checker.getPropertyOfType(checker.getApparentType(type), "getState");
+    if (!getState || !checker.getPropertyOfType(checker.getApparentType(type), "setState")) return false;
+    const signature = checker.getTypeOfSymbol(getState).getCallSignatures()[0];
+    return !!signature && storeLike(signature.getReturnType());
+  };
   const storeLike = (type) => !!type && ["tabs", "groups", "activate", "closeTabs"].every((p) => checker.getPropertyOfType(checker.getApparentType(type), p));
   const projectFile = (sf) => !sf.isDeclarationFile && !sf.fileName.includes("node_modules");
 
@@ -60,12 +68,13 @@ export function findUnguardedWrites(program, rootFiles) {
   function isStoreWrite(call) {
     const callee = call.expression;
     if (ts.isPropertyAccessExpression(callee)) {
-      if (callee.name.text === "setState" && ts.isIdentifier(callee.expression) && callee.expression.text === "useBrowser") return true;
+      if (callee.name.text === "setState" && storeHook(checker.getTypeAtLocation(callee.expression))) return true;
       const owner = checker.getTypeAtLocation(callee.expression);
       return storeLike(owner) && checker.getTypeAtLocation(callee).getCallSignatures().length > 0;
     }
     if (ts.isIdentifier(callee)) {
       const { raw } = declarationOf(callee);
+      if (raw && ts.isVariableDeclaration(raw) && raw.initializer && ts.isPropertyAccessExpression(raw.initializer) && raw.initializer.name.text === "setState") return storeHook(checker.getTypeAtLocation(raw.initializer.expression));
       if (raw && ts.isBindingElement(raw)) {
         let node = raw.parent;
         while (node && !ts.isVariableDeclaration(node) && !ts.isParameter(node)) node = node.parent;
@@ -93,16 +102,18 @@ export function findUnguardedWrites(program, rootFiles) {
   const passesGuard = (call, guards) => call.arguments.some((a) => ts.isIdentifier(a) && guards.includes(a.text));
   const terminates = (stmt) => !!stmt && (ts.isReturnStatement(stmt) || ts.isThrowStatement(stmt) || (ts.isBlock(stmt) && terminates(stmt.statements.at(-1))));
 
-  function report(fn, what) {
+  function report(fn, what, full = false) {
     const sf = fn.getSourceFile();
     const key = `${relative(dirname(dirname(sf.fileName)), sf.fileName)}: ${nameOf(fn)}`;
-    if (!problems.has(key)) problems.set(key, `${key} ${what} after an await without calling its guard`);
+    if (!problems.has(key)) problems.set(key, full ? `${key} ${what}` : `${key} ${what} after an await without calling its guard`);
   }
 
   function analyze(fn, depth, inheritedGuards = []) {
-    if (memo.has(fn)) return memo.get(fn);
-    const result = { writesSync: false, guardsFirst: false };
-    memo.set(fn, result);
+    const byDepth = memo.get(fn) ?? new Map();
+    memo.set(fn, byDepth);
+    if (byDepth.has(depth)) return byDepth.get(depth);
+    const result = { writesSync: false, guardsFirst: false, hooksSync: false };
+    byDepth.set(depth, result);
     const guards = guardOf(fn, inheritedGuards);
     let touched = false;
     const write = (ctx, what) => {
@@ -121,7 +132,10 @@ export function findUnguardedWrites(program, rootFiles) {
         ctx.guarded = false;
         return;
       }
-      if (isFunction(node)) return;
+      if (isFunction(node)) {
+        if (node.body) visit(node.body, { ...ctx });
+        return;
+      }
       if (ts.isIfStatement(node) || ts.isConditionalExpression(node)) {
         visit(node.expression ?? node.condition, ctx);
         const yes = { ...ctx };
@@ -132,7 +146,7 @@ export function findUnguardedWrites(program, rootFiles) {
         const flows = [terminates(node.thenStatement) ? null : yes, otherwise && terminates(node.elseStatement) ? null : no].filter(Boolean);
         if (!flows.length) return;
         ctx.afterAwait = flows.some((f) => f.afterAwait);
-        ctx.guarded = flows.every((f) => f.guarded);
+        ctx.guarded = flows.filter((f) => f.afterAwait).every((f) => f.guarded);
         return;
       }
       if (ts.isCallExpression(node)) {
@@ -145,7 +159,19 @@ export function findUnguardedWrites(program, rootFiles) {
           }
           return;
         }
-        ts.forEachChild(node, (child) => visit(child, ctx));
+        if (ts.isPropertyAccessExpression(callee) && callee.name.text === "around" && ts.isIdentifier(callee.expression) && FOREIGN_HOOKS.has(callee.expression.text)) {
+          if (!ctx.afterAwait) {
+            result.hooksSync = true;
+            report(fn, `calls ${callee.expression.text}.around in the socket's own stretch, which would close its open check before the socket's write`, true);
+          }
+          return;
+        }
+        const deferred = DEFERRED.test(ts.isPropertyAccessExpression(callee) ? callee.name.text : ts.isIdentifier(callee) ? callee.text : "");
+        visit(callee, ctx);
+        for (const arg of node.arguments) {
+          if (isFunction(arg) && arg.body) visit(arg.body, deferred ? { afterAwait: true, guarded: false } : { ...ctx });
+          else visit(arg, ctx);
+        }
         if (isGuardCall(node, guards)) return guardNow(ctx);
         if (isStoreWrite(node)) return write(ctx, `writes the store (${callee.getText().slice(0, 60)})`);
         if (depth >= MAX_DEPTH) return;
@@ -153,6 +179,7 @@ export function findUnguardedWrites(program, rootFiles) {
         if (!decl || decl === fn) return;
         const inner = analyze(decl, depth + 1);
         if (inner.guardsFirst && passesGuard(node, guards)) return guardNow(ctx);
+        if (inner.hooksSync && !ctx.afterAwait) report(fn, `reaches a foreign write hook through ${nameOf(decl)} in the socket's own stretch`, true);
         if (inner.writesSync) write(ctx, `writes the store through ${nameOf(decl)}`);
         return;
       }
@@ -164,10 +191,16 @@ export function findUnguardedWrites(program, rootFiles) {
 
   for (const sf of program.getSourceFiles()) {
     if (!roots.has(resolve(sf.fileName))) continue;
+    const callbackOfLater = (node) => {
+      const call = node.parent;
+      if (!call || !ts.isCallExpression(call) || !call.arguments.includes(node)) return false;
+      const name = ts.isPropertyAccessExpression(call.expression) ? call.expression.name.text : ts.isIdentifier(call.expression) ? call.expression.text : "";
+      return PROMISE_CALLBACKS.has(name) || DEFERRED.test(name);
+    };
     const walk = (node, guards) => {
       if (isFunction(node)) {
         const own = guardOf(node, guards);
-        analyze(node, 0, guards);
+        if (!callbackOfLater(node)) analyze(node, 0, guards);
         ts.forEachChild(node, (child) => walk(child, own));
         return;
       }

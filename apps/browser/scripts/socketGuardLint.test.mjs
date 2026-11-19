@@ -9,6 +9,7 @@ const appDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 test("the lint catches a write in a then callback, in a destructured action, and through a plain wrapper of an async helper", () => {
   const file = join(appDir, "src", "state", "automation", "lintProbe.ts");
   const probe = `import { useBrowser } from "../browser/store";
+import { foreignWriteHooks } from "../browser/foreignWriteHooks";
 const store = () => useBrowser.getState();
 const foo = async () => undefined;
 async function later(id: string) {
@@ -26,6 +27,21 @@ export async function viaDestructuring(id: string, mayWrite: () => boolean) {
 export function viaWrapper(id: string) {
   return later(id);
 }
+export async function viaTimer(id: string, mayWrite: () => boolean) {
+  setTimeout(() => store().closeTabs([id]), 0);
+}
+export async function viaForEach(ids: string[], mayWrite: () => boolean) {
+  await foo();
+  ids.forEach((id) => store().closeTabs([id]));
+}
+const alias = useBrowser;
+export async function viaAlias(mayWrite: () => boolean) {
+  await foo();
+  alias.setState({});
+}
+export function viaHook(id: string, mayWrite: () => boolean) {
+  foreignWriteHooks.around(() => store().closeTabs([id]));
+}
 export async function guarded(id: string, mayWrite: () => boolean) {
   await foo();
   if (!mayWrite()) return;
@@ -37,10 +53,17 @@ export async function guarded(id: string, mayWrite: () => boolean) {
   assert.ok(found.some((p) => p.includes("viaThen")), found.join("\n"));
   assert.ok(found.some((p) => p.includes("viaDestructuring")), found.join("\n"));
   assert.ok(found.some((p) => p.includes("later")), found.join("\n"));
+  for (const name of ["viaTimer", "viaForEach", "viaAlias", "viaHook"]) assert.ok(found.some((p) => p.includes(`: ${name} `)), `${name}: ${found.join("\n")}`);
   assert.ok(!found.some((p) => p.includes("guarded")), found.join("\n"));
 });
 
+const KNOWN_SAFE = new Map([
+  ["windows/windowClose.ts: closeAfterAsking", "dropStaleLastWindowMark clears the close's own last-window mark when the close is cancelled or fails; it undoes the close's bookkeeping and has to run whether or not control is still on"],
+]);
+
 test("every socket-reachable action that writes the store after an await calls its guard first", () => {
   const program = loadProgram(appDir);
-  assert.deepEqual(findUnguardedWrites(program, socketRootFiles(appDir)), []);
+  const found = findUnguardedWrites(program, socketRootFiles(appDir));
+  assert.deepEqual(found.filter((p) => ![...KNOWN_SAFE.keys()].some((k) => p.startsWith(`${k} `))), []);
+  for (const [site, reason] of KNOWN_SAFE) assert.ok(reason && found.some((p) => p.startsWith(`${site} `)), `${site} is still flagged, so its allowance is still needed`);
 });
