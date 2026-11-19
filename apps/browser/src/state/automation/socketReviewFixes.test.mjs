@@ -176,6 +176,15 @@ test("full screen: a transition AppKit hasn't ended answers as a timeout and kee
   }
 });
 
+test("history.removed leaves out a URL that fits the cap only without the dropped marker's room", async () => {
+  const { historyRemoval, HISTORY_EVENT_LINE_BYTES } = await import("./libraryEvents.ts");
+  const empty = JSON.stringify({ event: "history.removed", time: 0, data: { profiles: ["p"], all: false, count: 1, urls: [], truncated: false } });
+  const base = Buffer.byteLength(empty) + 1 + 20;
+  const url = `https://cap.example/${"a".repeat(HISTORY_EVENT_LINE_BYTES - base - 2 - 30 - 20)}`;
+  const removal = historyRemoval(["p"], false, [url]);
+  assert.deepEqual([removal.urls.length, removal.truncated], [0, true]);
+});
+
 test("full screen: a transition started from the window's own controls makes a request wait its turn", async () => {
   const { windowId, done } = await geometrySetup();
   try {

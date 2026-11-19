@@ -145,6 +145,7 @@ test("configure answers failed when the readback after its write fails, never th
   gates.listFails = false;
   assert.equal(list[0].incognito, true, "the write happened");
   assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
+  assert.match(reply.error.message, /couldn't read the profile's extensions/);
 });
 
 test("on a platform that can't stage folders, a folder install is refused before any path check or read", async () => {
