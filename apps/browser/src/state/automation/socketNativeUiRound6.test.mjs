@@ -39,7 +39,7 @@ test("a private window opened while the catalog is read stops the command before
   const regularTabs = Object.values(S().tabs).filter((t) => S().windows[t.windowId]?.kind !== "private").length;
   assert.equal(regularTabs, tabsBefore, "run never ran");
 });
-test("a background Ardia refuses every native menu item, and an Ardia command gets exactly run's background answer", async () => {
+test("a background Ardia runs nothing from the menu bar: native items are refused, and an Ardia command gets exactly run's background answer", async () => {
   const { windowId } = await freshWindow();
   const minimize = item([5, 0], "Minimize", { action: "performMiniaturize:", ref: "sel:performMiniaturize:@Window\u001fMinimize" });
   const sidebar = item([1, 0], "Toggle Sidebar", { command: "toggleSidebar", ref: "cmd:toggleSidebar@View\u001fToggle Sidebar" });
@@ -55,8 +55,8 @@ test("a background Ardia refuses every native menu item, and an Ardia command ge
     assert.equal((await call("menus.runBar", { path: print.path, ref: print.ref, window: windowId })).error?.code, "refused", "needs the person");
     const direct = runMethod({ command: "toggleSidebar", arg: null, window: windowId, tab: null }, true);
     const viaBar = await call("menus.runBar", { path: sidebar.path, ref: sidebar.ref, window: windowId });
-    if ("error" in direct) assert.deepEqual(viaBar.error, direct.error);
-    else assert.equal(viaBar.result?.command, "toggleSidebar");
+    assert.ok("error" in direct, "run refuses every command in a background Ardia");
+    assert.deepEqual(viaBar.error, direct.error);
   } finally {
     surfacesModule.surfaceRunMode.background = false;
   }
@@ -82,5 +82,6 @@ test("Open File isn't in commands, and run refuses it before resolving a window,
   const reply = await call("run", { command: "openFile" });
   assert.equal(reply.error?.code, "refused");
   assert.match(reply.error.message, /needs the person to finish it/);
-  assert.match(surfacesModule.SURFACE_METHODS.find((m) => m.name === "menus.runBar").description, /Open File[\s\S]*private window[\s\S]*background Ardia/);
+  const runBar = surfacesModule.SURFACE_METHODS.find((m) => m.name === "menus.runBar").description;
+  for (const refusal of [/Open File/, /private window/, /background Ardia/]) assert.match(runBar, refusal);
 });

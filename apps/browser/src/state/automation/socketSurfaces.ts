@@ -161,7 +161,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
     name: "menus.runBar",
     mutates: true,
     description:
-      "Run a menu bar item from menus.bar: an Ardia command goes through run and its policy (refused when it needs the person, such as Open File or Print); a window item (Minimize, Zoom, Enter Full Screen, Minimize All, Arrange in Front) goes to the named key window or the app, with no menu validation. Refused while any private window is open, for dynamic rows, for every native item in a background Ardia, and for Quit, Hide, Close Window, updates and items that only act through the responder chain",
+      "Run a menu bar item from menus.bar: an Ardia command goes through run and its policy (refused when it needs the person, such as Open File or Print); a window item (Minimize, Zoom, Enter Full Screen, Minimize All, Arrange in Front) goes to the named key window or the app, with no menu validation. In a background Ardia it runs nothing: run refuses every command there, and native items need a visible Ardia. Also refused while any private window is open, for dynamic rows, and for Quit, Hide, Close Window, updates and items that only act through the responder chain",
     params: obj({ path: PATH, ref: REF, window: text("The window to run it in; the last focused one when left out. Window items act only when it is the key window and the item can be sent to that window itself") }, ["path", "ref"]),
     result: "{ok, title, command? | action?}",
     run: runBarItem,
