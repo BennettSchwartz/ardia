@@ -60,9 +60,9 @@ export function ApplePasswordsDetails({ profile }: { profile: string }) {
             {extensionState !== "enabled" && <Button title={extensionState === "disabled" ? "Enable Extension" : "Add Extension…"} onPress={installOrEnableExtension} />}
           </Row>
         ) : null}
-        <Row title="Filling a login" description="Click the Key button inside any username or password field, or right-click the field and choose AutoFill › Passwords, then approve with Touch ID." />
-        <Row title="Verification codes" description="Click the Key button in a 2FA code field to fill a code from Passwords. Right-click a 2FA QR code on a page to add it to Passwords." />
-        <Row title="Saving new logins" description="Ardia offers to open Passwords with the site and username copied when you sign in, or click + in Passwords anytime." />
+        <Row title="Filling a login" description="Click the key button in a username or password field, or choose Edit › AutoFill › Passwords…, then pick the login and approve with Touch ID. Apple doesn't tell the panel which site you're on, so search for it if it isn't near the top." />
+        <Row title="Verification codes" description="Codes from Messages and Mail, and codes saved in Passwords, are offered in the same panel on a code field. When a site shows a two-factor setup QR code, Ardia offers to set it up in Passwords." />
+        <Row title="Saving new logins" description="Apple doesn't let other browsers add logins to Passwords on the Mac yet, so add a new login with + in the Passwords app. Logins already saved in Ardia still fill." />
       </Group>
     </>
   );
