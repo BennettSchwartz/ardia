@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "base/functional/callback.h"
+#include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_visible_tabs.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser.h"
@@ -193,6 +194,7 @@ void InstallChromeHooks() {
   }
   if (TestFlag("privatePasteboard")) {
     ui::ArdiaUsePrivatePasteboard();
+    ardia::NoteCliPrivatePasteboard(ui::ArdiaPrivatePasteboardActive());
   }
 }
 

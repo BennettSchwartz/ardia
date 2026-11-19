@@ -12,6 +12,10 @@ ac_cli_owned_tabs.h
 ac_cli_plugin_clipboard_keys.h
 ac_cli_plugin_credentials.cc
 ac_cli_plugin_credentials.h
+ac_cli_plugin_input.cc
+ac_cli_plugin_input.h
+ac_cli_test_signals.cc
+ac_cli_test_signals.h
 ac_cli_token_policy.cc
 ac_cli_token_policy.h
 ac_cli_token_policy_events.cc

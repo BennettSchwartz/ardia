@@ -18,7 +18,7 @@ no universal access), no Network method and no Network, console or main-world co
 another window (or out and straight back), a command in flight answers tab_out_of_scope, a late reply never arrives,
 and the session is detached. Backend node ids from another tab in the same renderer, another client's world name, paste
 and native key codes, window screenshots and clips outside the viewport are refused or confined, and a target whose
-opener left the window shows no opener. The CLI answers a page's
+opener left the window shows no opener. It aborts before any step unless the engine reports its private pasteboard. The CLI answers a page's
 showOpenFilePicker, showSaveFilePicker and showDirectoryPicker with Ardia.answerFilePicker (no dialog opens), and a
 plugin is refused that command. The app's file eval runs
 through its perf probe, so a release build works.`;
@@ -125,6 +125,12 @@ try {
   await until("ArdiaControl.json", async () => existsSync(controlFile) && statSync(controlFile).size > 0, 90000);
   const control = JSON.parse(readFileSync(controlFile, "utf8"));
   pid = control.pid;
+  const engineStatus = await appEval(`return ac.engine.call("engine.cliControlStatus")`).catch(() => null);
+  if (engineStatus?.privatePasteboard !== true) {
+    console.log("ABORT  the engine didn't confirm the private pasteboard, so no step ran (the general pasteboard is never used)");
+    throw new Error("private pasteboard not confirmed");
+  }
+  check("the engine confirms its private pasteboard before any clipboard step", true);
   const base = `ws://127.0.0.1:${control.port}${control.browser}`;
 
   const cli = await connect(`${base}?token=${control.token}`);

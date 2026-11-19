@@ -153,7 +153,8 @@ class ArdiaDevToolsTokenClient {
       content::RenderFrameHost* render_frame_host) = 0;
   virtual bool MayReadLocalFiles() = 0;
   virtual bool MayWriteLocalFiles() = 0;
-  virtual void SetCloser(base::OnceCallback<void(bool drop_queued)> close) = 0;
+  virtual void SetCloser(
+      base::RepeatingCallback<void(bool drop_queued)> close) = 0;
   virtual void SetChannel(
       base::RepeatingCallback<void(std::string)> to_browser,
       base::RepeatingCallback<void(std::string)> to_client) = 0;

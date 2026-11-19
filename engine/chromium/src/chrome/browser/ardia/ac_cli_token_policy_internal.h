@@ -118,7 +118,8 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   bool MayAttachToRenderFrameHost(content::RenderFrameHost* frame) override;
   bool MayReadLocalFiles() override;
   bool MayWriteLocalFiles() override;
-  void SetCloser(base::OnceCallback<void(bool drop_queued)> close) override;
+  void SetCloser(
+      base::RepeatingCallback<void(bool drop_queued)> close) override;
   void SetChannel(base::RepeatingCallback<void(std::string)> to_browser,
                   base::RepeatingCallback<void(std::string)> to_client) override;
 
@@ -189,7 +190,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::string isolated_world_name_;
   std::map<std::string, Contexts> contexts_;
   std::map<std::pair<std::string, int>, std::string> outstanding_;
-  base::OnceCallback<void(bool drop_queued)> closer_;
+  base::RepeatingCallback<void(bool drop_queued)> closer_;
   base::RepeatingCallback<void(std::string)> to_browser_;
   base::RepeatingCallback<void(std::string)> to_client_;
   base::RepeatingTimer scope_timer_;

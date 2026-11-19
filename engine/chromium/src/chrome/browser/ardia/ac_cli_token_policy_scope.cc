@@ -282,7 +282,7 @@ void TokenClient::CloseOutOfScope() {
   outstanding_.clear();
   wedged_ = true;
   if (closer_) {
-    std::move(closer_).Run(false);
+    closer_.Run(false);
   }
 }
 

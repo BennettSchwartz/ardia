@@ -15,7 +15,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h"
+#include "chrome/browser/ardia/ac_cli_plugin_input.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "chrome/browser/profiles/profile.h"
@@ -75,79 +75,48 @@ const std::set<std::string_view>& PluginMethods() {
   return *methods;
 }
 
-const std::set<std::string_view>& PluginKeyCommands() {
-  static const base::NoDestructor<std::set<std::string_view>> commands({
-      "deletebackward",
-      "deleteforward",
-      "deletewordbackward",
-      "deletewordforward",
-      "insertnewline",
-      "inserttab",
-      "movedown",
-      "movedownandmodifyselection",
-      "moveleft",
-      "moveleftandmodifyselection",
-      "moveright",
-      "moverightandmodifyselection",
-      "movetobeginningofdocument",
-      "movetobeginningofdocumentandmodifyselection",
-      "movetobeginningofline",
-      "movetobeginningoflineandmodifyselection",
-      "movetoendofdocument",
-      "movetoendofdocumentandmodifyselection",
-      "movetoendofline",
-      "movetoendoflineandmodifyselection",
-      "moveup",
-      "moveupandmodifyselection",
-      "movewordleft",
-      "movewordleftandmodifyselection",
-      "movewordright",
-      "movewordrightandmodifyselection",
-      "selectall",
-  });
-  return *commands;
-}
-
-bool IsClipboardKey(const base::DictValue& params) {
-  const int modifiers = params.FindInt("modifiers").value_or(0) & 15;
-  const int code = params.FindInt("windowsVirtualKeyCode").value_or(0);
-  const std::string* key = params.FindString("key");
-  for (const PluginClipboardKey& entry : kPluginClipboardKeys) {
-    if (entry.modifiers != modifiers) {
-      continue;
-    }
-    if (entry.dom_key[0] ? (key && *key == entry.dom_key)
-                         : code == entry.windows_key_code) {
-      return true;
-    }
-  }
-  return false;
+std::optional<std::string> StringParam(const base::DictValue& params,
+                                       const char* name) {
+  const std::string* value = params.FindString(name);
+  return value ? std::optional<std::string>(*value) : std::nullopt;
 }
 
 std::string KeyEventRefusal(const base::DictValue& params) {
-  if (params.Find("nativeVirtualKeyCode") || params.Find("isSystemKey")) {
-    return "with a native key code or a system key";
+  PluginKeyEvent event;
+  const base::Value* code = params.Find("windowsVirtualKeyCode");
+  if (code) {
+    if (!code->is_int()) {
+      return "with a key code that isn't a number";
+    }
+    event.windows_key_code = code->GetInt();
   }
-  if (IsClipboardKey(params)) {
-    return "with a key that cuts, copies or pastes";
-  }
-  const base::Value* commands = params.Find("commands");
-  if (!commands) {
-    return std::string();
-  }
-  if (!commands->is_list()) {
-    return "with those editing commands";
-  }
-  for (const base::Value& command : commands->GetList()) {
-    if (!command.is_string() || !PluginKeyCommands().contains(
-                                    base::ToLowerASCII(command.GetString()))) {
-      return "with that editing command";
+  event.has_native_key_code = params.Find("nativeVirtualKeyCode");
+  event.has_system_key = params.Find("isSystemKey");
+  event.modifiers = params.FindInt("modifiers");
+  event.key = StringParam(params, "key");
+  event.code = StringParam(params, "code");
+  if (const base::Value* commands = params.Find("commands")) {
+    event.commands_valid = commands->is_list();
+    if (commands->is_list()) {
+      for (const base::Value& command : commands->GetList()) {
+        if (!command.is_string()) {
+          event.commands_valid = false;
+          break;
+        }
+        event.commands.push_back(command.GetString());
+      }
     }
   }
-  return std::string();
+  return PluginKeyRefusal(event);
 }
 
-bool FrameInTargetContents(const std::string* target_id,
+std::string MouseEventRefusal(const base::DictValue& params) {
+  return PluginMouseRefusal(StringParam(params, "button"),
+                            params.FindInt("buttons"));
+}
+
+bool FrameInTargetContents(const PluginScope& scope,
+                           const std::string* target_id,
                            const std::string* frame_token) {
   if (!frame_token) {
     return true;
@@ -164,7 +133,7 @@ bool FrameInTargetContents(const std::string* target_id,
         if (frame->GetDevToolsFrameToken().ToString() != *frame_token) {
           return content::RenderFrameHost::FrameIterationAction::kContinue;
         }
-        found = true;
+        found = frame->IsActive() && PluginMayAttachToFrame(scope, frame);
         return content::RenderFrameHost::FrameIterationAction::kStop;
       });
   return found;
@@ -411,7 +380,7 @@ void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info) {
   const std::string* opener = info->FindString("openerId");
   const bool opener_in_scope = opener && PluginMayAttachToTargetId(scope, opener);
   if (!opener_in_scope ||
-      !FrameInTargetContents(opener, info->FindString("openerFrameId"))) {
+      !FrameInTargetContents(scope, opener, info->FindString("openerFrameId"))) {
     info->Remove("openerFrameId");
   }
   if (!opener_in_scope) {
@@ -424,7 +393,7 @@ void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info) {
   if (parent && !PluginMayAttachToTargetId(scope, parent)) {
     info->Remove("parentId");
     info->Remove("parentFrameId");
-  } else if (!FrameInTargetContents(info->FindString("targetId"),
+  } else if (!FrameInTargetContents(scope, info->FindString("targetId"),
                                     info->FindString("parentFrameId"))) {
     info->Remove("parentFrameId");
   }
@@ -461,6 +430,7 @@ std::string PluginRefusal(const PluginScope& scope,
     return TargetRefusal(scope, method, params, context);
   }
   if (domain == "Runtime") {
+    params.Remove("userGesture");
     return RuntimeRefusal(method, params);
   }
   if (method == "DOM.resolveNode" && !params.Find("executionContextId")) {
@@ -475,6 +445,9 @@ std::string PluginRefusal(const PluginScope& scope,
   }
   if (method == "Input.dispatchKeyEvent") {
     return KeyEventRefusal(params);
+  }
+  if (method == "Input.dispatchMouseEvent") {
+    return MouseEventRefusal(params);
   }
   if (method == "Page.captureScreenshot") {
     return ScreenshotRefusal(params, context);

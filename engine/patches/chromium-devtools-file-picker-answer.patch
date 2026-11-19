@@ -56,27 +56,48 @@ diff --git a/content/browser/file_system_access/file_system_access_manager_impl.
  namespace content {
  
  using blink::mojom::FileSystemAccessStatus;
-@@ -691,6 +698,20 @@ void FileSystemAccessManagerImpl::ChooseEntries(
+@@ -779,6 +786,9 @@ void FileSystemAccessManagerImpl::ChooseEntries(
      return;
    }
- 
+   rfhs_with_active_file_pickers_.insert(global_rfh_id);
 +  if (g_ardia_file_picker_reset) {
-+    g_ardia_file_picker_reset(RenderFrameHost::FromID(context.frame_id));
-+    callback = base::BindOnce(
-+        [](GlobalRenderFrameHostId frame, ChooseEntriesCallback done,
-+           blink::mojom::FileSystemAccessErrorPtr result,
-+           std::vector<blink::mojom::FileSystemAccessEntryPtr> entries) {
-+          if (g_ardia_file_picker_reset) {
-+            g_ardia_file_picker_reset(RenderFrameHost::FromID(frame));
-+          }
-+          std::move(done).Run(std::move(result), std::move(entries));
-+        },
-+        context.frame_id, std::move(callback));
++    g_ardia_file_picker_reset(RenderFrameHost::FromID(global_rfh_id));
 +  }
-+
-   // Non-compromised renderers shouldn't be able to send an invalid id.
-   if (!IsValidId(options->starting_directory_id)) {
-     receivers_.ReportBadMessage("Invalid starting directory ID in browser");
+   ChooseEntriesCallback wrapped_callback = std::move(callback).Then(
+       base::BindOnce(&FileSystemAccessManagerImpl::FilePickerDeactivated,
+                      weak_factory_.GetWeakPtr(), global_rfh_id));
+@@ -805,6 +815,9 @@ void FileSystemAccessManagerImpl::FilePickerDeactivated(
+     GlobalRenderFrameHostId global_rfh_id) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   rfhs_with_active_file_pickers_.erase(global_rfh_id);
++  if (g_ardia_file_picker_reset) {
++    g_ardia_file_picker_reset(RenderFrameHost::FromID(global_rfh_id));
++  }
+ }
+ 
+ void FileSystemAccessManagerImpl::ResolveDefaultDirectory(
+@@ -1958,6 +1971,10 @@ void FileSystemAccessManagerImpl::DidVerifySensitiveDirectoryAccessForIndex(
+         std::vector<blink::mojom::FileSystemAccessEntryPtr>());
+     return;
+   } else if (result == SensitiveEntryResult::kTryAgain) {
++    if (g_ardia_file_picker_reset) {
++      g_ardia_file_picker_reset(
++          RenderFrameHost::FromID(binding_context.frame_id));
++    }
+     ShowFilePickerOnUIThread(
+         permission_context(), binding_context.storage_key.origin(),
+         binding_context.frame_id, options,
+@@ -1993,6 +2010,10 @@ void FileSystemAccessManagerImpl::DidVerifySensitiveDirectoryAccess(
+     return;
+   }
+   if (result == SensitiveEntryResult::kTryAgain) {
++    if (g_ardia_file_picker_reset) {
++      g_ardia_file_picker_reset(
++          RenderFrameHost::FromID(binding_context.frame_id));
++    }
+     ShowFilePickerOnUIThread(
+         permission_context(), binding_context.storage_key.origin(),
+         binding_context.frame_id, options,
 @@ -2062,6 +2083,11 @@ void FileSystemAccessManagerImpl::OnCheckPathsAgainstEnterprisePolicy(
              entries.front(), binding_context.storage_key,
              HandleType::kDirectory,

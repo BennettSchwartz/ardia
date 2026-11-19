@@ -159,11 +159,12 @@ void TokenClient::Revoke() {
   wedged_ = true;
   scope_timer_.Stop();
   if (closer_) {
-    std::move(closer_).Run(true);
+    closer_.Run(true);
   }
 }
 
-void TokenClient::SetCloser(base::OnceCallback<void(bool drop_queued)> close) {
+void TokenClient::SetCloser(
+    base::RepeatingCallback<void(bool drop_queued)> close) {
   closer_ = std::move(close);
 }
 
