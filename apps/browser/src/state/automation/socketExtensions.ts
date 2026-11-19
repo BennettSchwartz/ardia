@@ -1,8 +1,19 @@
 import { webStoreExtensionId } from "@ardia/core";
-import { inspectUnpackedExtension } from "../../platform/extensions";
+import { discardStagedExtension, inspectUnpackedExtension } from "../../platform/extensions";
 import { errorText } from "../../lib/errors";
 import { engineProfile } from "../browser/model";
-import { configure, findExtension, openInExtensionProfile, refreshExtensions, takeInstalledId, useExtensions } from "../extensions/actions";
+import {
+  abandonInstall,
+  configure,
+  findExtension,
+  openInExtensionProfile,
+  refreshExtensions,
+  refreshExtensionsAfterChange,
+  showInstallSheet,
+  useExtensions,
+  watchInstall,
+  type InstallOutcome,
+} from "../extensions/actions";
 import { focusWindow } from "../windows/nativeWindow";
 import { extensionProfile, nextInstallKey, type InstallRequest, type InstalledExtension } from "../extensions/store";
 import { useBrowser } from "../browser/store";
@@ -40,25 +51,26 @@ function windowShowing(engine: string, profileId: string): string {
   return made;
 }
 
-type Outcome = { installed: string } | { error: string } | { cancelled: true };
-
 const SHEET_CLOSED = "The window showing the install sheet closed before the user answered.";
 
-function settled(request: InstallRequest): Promise<Outcome> {
+function addTimeProblem(call: SocketCall, profileId: string, engine: string): string | null {
+  try {
+    stillThere(call, profileId, engine);
+    return null;
+  } catch (error) {
+    return errorText(error);
+  }
+}
+
+function settled(request: InstallRequest, check: () => string | null): Promise<InstallOutcome> {
   return new Promise((resolve) => {
-    const check = () => {
-      const id = takeInstalledId(request.key);
-      if (id) return finish({ installed: id });
-      const current = useExtensions.getState().install;
-      if (current?.key !== request.key) return finish(now().windows[request.windowId] ? { cancelled: true } : { error: SHEET_CLOSED });
-      if (current.status === "error") return finish({ error: current.error });
-      if (current.status === "installing" || now().windows[request.windowId]) return;
-      useExtensions.setState({ install: null });
-      finish({ error: SHEET_CLOSED });
-    };
-    const stops = [useExtensions.subscribe(check), useBrowser.subscribe(check)];
-    function finish(outcome: Outcome) {
-      stops.forEach((stop) => stop());
+    const unwatch = watchInstall(request.key, { check, settle: finish });
+    const stop = useBrowser.subscribe((s) => {
+      if (!s.windows[request.windowId]) abandonInstall(request.key, SHEET_CLOSED);
+    });
+    function finish(outcome: InstallOutcome) {
+      unwatch();
+      stop();
       resolve(outcome);
     }
   });
@@ -78,20 +90,26 @@ async function installFolder(call: SocketCall, engine: string, profileId: string
   } catch (error) {
     throw new OpError("bad_request", `${folder} isn't an extension Ardia can load: ${errorText(error)}`);
   }
-  stillThere(call, profileId, engine);
-  const canonical = folderProblem(pkg.path);
-  if (canonical) throw new OpError("bad_request", canonical);
-  if (!pkg.digest) throw new OpError("refused", "Ardia can't pin an unpacked extension's files on this platform, so it can't be sure the user adds what the sheet shows.");
-  refuseWhileSheetShows();
+  try {
+    stillThere(call, profileId, engine);
+    const canonical = folderProblem(pkg.path);
+    if (canonical) throw new OpError("bad_request", canonical);
+    if (!pkg.digest || !pkg.staged) throw new OpError("refused", "Ardia can't pin an unpacked extension's files on this platform, so it can't be sure the user adds what the sheet shows.");
+    refuseWhileSheetShows();
+  } catch (error) {
+    discardStagedExtension(pkg);
+    throw error;
+  }
   const windowId = windowShowing(engine, profileId);
   const request: InstallRequest = { key: nextInstallKey(), windowId, profile: engine, source: "unpacked", status: "ready", pkg };
-  useExtensions.setState({ install: request });
+  if (!showInstallSheet(request)) throw new OpError("refused", "An install sheet is already showing; the user answers it first.");
+  const outcome = settled(request, () => addTimeProblem(call, profileId, engine));
   void focusWindow(windowId);
-  const outcome = await settled(request);
-  if ("error" in outcome) throw new OpError("failed", outcome.error);
-  if ("cancelled" in outcome) return { installed: false, extensions: [] };
-  const added = (await refreshExtensions(engine)).find((x) => x.id === outcome.installed);
-  return { installed: true, extensions: [{ id: outcome.installed, name: added?.name ?? pkg.name, version: added?.version ?? pkg.version }] };
+  const answer = await outcome;
+  if ("error" in answer) throw new OpError("failed", answer.error);
+  if ("cancelled" in answer) return { installed: false, extensions: [] };
+  const added = (await refreshExtensionsAfterChange(engine)).find((x) => x.id === answer.installed);
+  return { installed: true, extensions: [{ id: answer.installed, name: added?.name ?? pkg.name, version: added?.version ?? pkg.version }] };
 }
 
 async function install(params: Record<string, unknown>, call: SocketCall) {
@@ -102,8 +120,8 @@ async function install(params: Record<string, unknown>, call: SocketCall) {
   const extensionId = webStoreExtensionId(params.webStore as string);
   if (!extensionId) throw new OpError("bad_request", "webStore is a Chrome Web Store link or extension id.");
   const already = (await refreshExtensions(engine)).find((x) => x.id === extensionId);
-  if (already) return { waiting: false, installed: true, extensions: [{ id: already.id, name: already.name, version: already.version }] };
   stillThere(call, profileId, engine);
+  if (already) return { waiting: false, installed: true, extensions: [{ id: already.id, name: already.name, version: already.version }] };
   openInExtensionProfile(`https://chromewebstore.google.com/detail/${extensionId}`, engine, { profileId });
   return { waiting: true, id: extensionId };
 }
@@ -112,6 +130,7 @@ function plannedChanges(ext: InstalledExtension, params: Record<string, unknown>
   if (!ext.mayModify) throw new OpError("refused", `${ext.name} is installed by policy, so it can't be changed.`);
   if (params.siteAccess !== undefined && !ext.siteAccess) throw new OpError("refused", `${ext.name} asks for no site access, so there's nothing to choose.`);
   if (params.userScripts !== undefined && !ext.userScriptsAvailable) throw new OpError("refused", `${ext.name} doesn't use user scripts.`);
+  if (params.incognito === true && ext.incognitoAllowed === false) throw new OpError("refused", `${ext.name} says it can't run in Incognito, so Allow in Incognito can't turn on.`);
   const siteAccess = params.siteAccess as SiteAccess | undefined;
   const rest: Parameters<typeof configure>[2] = {};
   if (params.incognito !== undefined) rest.incognito = params.incognito as boolean;
@@ -136,7 +155,8 @@ async function configureExtension(params: Record<string, unknown>, call: SocketC
     if (siteAccess !== undefined) stillThere(call, profileId, engine);
     await configure(engine, ext.id, rest);
   }
-  const after = await extensionIn(engine, ext.id);
+  const after = (await refreshExtensionsAfterChange(engine)).find((x) => x.id === ext.id);
+  if (!after) throw new OpError("no_window", `${ext.name} is gone from that profile.`);
   expect(
     (rest.incognito === undefined || after.incognito === rest.incognito) &&
       (rest.userScripts === undefined || !!after.userScripts === rest.userScripts) &&

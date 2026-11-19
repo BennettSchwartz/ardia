@@ -1,16 +1,10 @@
 import {
-  chooseExtensionFolder,
   configureExtension,
   extensionActionStates,
-  inspectUnpackedExtension,
-  installExtension,
-  listExtensions,
   reloadExtension,
-  resolveExtensionInstallPrompt,
   setExtensionEnabled,
   uninstallExtension,
   type ActionState,
-  type ExtensionInstallPrompt,
   type InstalledExtension,
 } from "../../platform/extensions";
 import { webStoreExtensionId } from "@ardia/core";
@@ -22,71 +16,32 @@ import { focus, openWindow } from "../browser/actions";
 import { webviews } from "../../platform/webviews";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile } from "../browser/model";
-import { engineProfiles } from "../profiles/engineProfiles";
 import { shownPageId } from "../peek/peek";
 import { isOpenRegularWindow, mainWindowFor, originalProfile } from "../windows/small";
 import { focusedWindowOf } from "../windows/ui";
 import { goToSettingsPane, openSettings, replaceSettingsPlace, SETTINGS_DETAIL, useSettingsNav } from "../settings/settingsWindows";
 import { closeSidePanelsOf, toggleSidePanel } from "./sidePanels";
-import { notePrivateWindowExtensionOpen, noteExtensionInstallPromptStale, noteExtensionProfilePageOpen, noteToolbarExtensionMove } from "../telemetry/usage";
+import { notePrivateWindowExtensionOpen, noteExtensionProfilePageOpen, noteToolbarExtensionMove } from "../telemetry/usage";
 import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, nextInstallKey, pageProfile, shownIn, useExtensions, windowExtensions, readyTabOf, tabProfile, type Anchor } from "./store";
-import { errorText } from "../../lib/errors";
-import { noteUnpackedInstall } from "../telemetry/exportCounts";
 import { consentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
+import { refreshExtensions, refreshExtensionsAfterChange } from "./lists";
+import { cancelInstall, confirmInstall, showInstallSheet } from "./installSheet";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
 export * from "./sidePanels";
 export * from "./store";
+export * from "./lists";
+export * from "./installSheet";
 
 const EMPTY: InstalledExtension[] = [];
 const WEB_STORE_HOME = "https://chromewebstore.google.com/category/extensions";
 
-const loading = new Map<string, Promise<InstalledExtension[]>>();
-
-export function refreshExtensions(profile: string): Promise<InstalledExtension[]> {
-  if (!engineProfiles(useBrowser.getState()).includes(profile)) return Promise.resolve(useExtensions.getState().lists[profile] ?? EMPTY);
-  const running = loading.get(profile);
-  if (running) return running;
-  const consent = consentToken();
-  const job = listExtensions(profile)
-    .then((list) => {
-      list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-      useExtensions.setState((e) => ({ lists: { ...e.lists, [profile]: list } }));
-      return list;
-    })
-    .catch((error) => {
-      warnFor(consent, "[extensions] list failed", error);
-      return useExtensions.getState().lists[profile] ?? EMPTY;
-    })
-    .finally(() => loading.delete(profile));
-  loading.set(profile, job);
-  return job;
-}
-
-const trailing = new Map<string, Promise<InstalledExtension[]>>();
-
-export function refreshExtensionsAfterChange(profile: string): Promise<InstalledExtension[]> {
-  const running = loading.get(profile);
-  if (!running) return refreshExtensions(profile);
-  let next = trailing.get(profile);
-  if (!next) {
-    next = running.then(() => {
-      trailing.delete(profile);
-      return refreshExtensions(profile);
-    });
-    trailing.set(profile, next);
-  }
-  return next;
-}
-
-export const findExtension = (profile: string, id: string) => useExtensions.getState().lists[profile]?.find((x) => x.id === id);
-
 export function addFromWebStore(windowId: string, urlOrId: string, profile = extensionProfile(useBrowser.getState(), windowId)) {
   const id = webStoreExtensionId(urlOrId);
   if (!id) {
-    useExtensions.setState({ install: { key: nextInstallKey(), windowId, profile, source: "webStore", status: "error", error: "That isn't a link to an extension in the Chrome Web Store." } });
+    showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "webStore", status: "error", error: "That isn't a link to an extension in the Chrome Web Store." });
     return;
   }
   openInExtensionProfile(`https://chromewebstore.google.com/detail/${id}`, profile, { windowId });
@@ -104,80 +59,6 @@ export function openInExtensionProfile(url: string, profile: string, { windowId,
     s.newTab(target, { url });
     focus(target);
   } else openWindow({ profileId: profileId && engineProfile(s, profileId) === profile ? profileId : s.profileOrder.find((p) => engineProfile(s, p) === profile), url });
-}
-
-export async function loadUnpacked(windowId: string, profile = extensionProfile(useBrowser.getState(), windowId)): Promise<boolean> {
-  const path = await chooseExtensionFolder();
-  if (!path) return false;
-  try {
-    const pkg = await inspectUnpackedExtension(path);
-    useExtensions.setState({ install: { key: nextInstallKey(), windowId, profile, source: "unpacked", status: "ready", pkg } });
-  } catch (error) {
-    useExtensions.setState({ install: { key: nextInstallKey(), windowId, profile, source: "unpacked", status: "error", error: errorText(error) } });
-  }
-  return true;
-}
-
-const STALE_PROMPT = "This install request has closed. Open the extension's page in the Chrome Web Store and add it again.";
-
-const declinePrompt = (prompt: ExtensionInstallPrompt) => void resolveExtensionInstallPrompt(prompt, false).catch(() => {});
-
-export function showInstallPrompt(windowId: string, prompt: ExtensionInstallPrompt) {
-  const current = useExtensions.getState().install;
-  if (current?.status === "prompt") declinePrompt(current.prompt);
-  else cancelInstall();
-  useExtensions.setState({ install: { key: nextInstallKey(), windowId, profile: prompt.profile, source: "webStore", status: "prompt", prompt } });
-}
-
-const installedIds = new Map<number, string>();
-
-export function takeInstalledId(key: number): string | undefined {
-  const id = installedIds.get(key);
-  installedIds.delete(key);
-  return id;
-}
-
-const ownRequest = (key?: number) => {
-  const request = useExtensions.getState().install;
-  return request && (key === undefined || request.key === key) ? request : null;
-};
-
-export async function confirmInstall(key?: number) {
-  const consent = consentToken();
-  const request = ownRequest(key);
-  if (request?.status === "prompt") {
-    useExtensions.setState({ install: null });
-    try {
-      await resolveExtensionInstallPrompt(request.prompt, true);
-    } catch (error) {
-      const stale = (error as { code?: unknown } | null)?.code === "ERR_EXTENSION_PROMPT_STALE";
-      if (stale) noteExtensionInstallPromptStale(consent);
-      if (useExtensions.getState().install) return;
-      useExtensions.setState({ install: { key: request.key, windowId: request.windowId, profile: request.profile, source: request.source, status: "error", error: stale ? STALE_PROMPT : errorText(error) } });
-      return;
-    }
-    for (const ms of [1500, 5000]) setTimeout(() => void refreshExtensions(request.profile), ms);
-    return;
-  }
-  if (request?.status !== "ready") return;
-  useExtensions.setState({ install: { ...request, status: "installing" } });
-  try {
-    installedIds.set(request.key, await installExtension(request.pkg, request.profile));
-    if (request.source === "unpacked") noteUnpackedInstall(consent);
-    if (useExtensions.getState().install?.key === request.key) useExtensions.setState({ install: null });
-    await refreshExtensions(request.profile);
-  } catch (error) {
-    if (useExtensions.getState().install?.key === request.key) {
-      useExtensions.setState({ install: { key: request.key, windowId: request.windowId, profile: request.profile, source: request.source, status: "error", error: errorText(error) } });
-    }
-  }
-}
-
-export function cancelInstall(key?: number) {
-  const request = ownRequest(key);
-  if (!request) return;
-  if (request.status === "prompt") declinePrompt(request.prompt);
-  useExtensions.setState({ install: null });
 }
 
 export async function removeExtension(profile: string, ext: InstalledExtension, windowId?: string) {
@@ -248,7 +129,7 @@ async function changed(what: string, change: () => Promise<void>): Promise<boole
 
 async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>) {
   const done = await changed(what, change);
-  await refreshExtensions(profile);
+  await refreshExtensionsAfterChange(profile);
   return done;
 }
 

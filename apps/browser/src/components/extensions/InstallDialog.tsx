@@ -76,8 +76,8 @@ export function InstallDialog({ request }: { request: InstallRequest }) {
           <Button variant="pill" title="OK" primary onPress={cancel} />
         ) : (
           <>
-            <Button variant="pill" title="Cancel" onPress={cancel} />
-            <Button variant="pill" title={request.status === "installing" ? "Adding…" : action} primary onPress={() => void confirmInstall(request.key)} />
+            <Button variant="pill" title="Cancel" disabled={busy} onPress={cancel} />
+            <Button variant="pill" title={busy ? "Adding…" : action} primary disabled={busy} onPress={() => void confirmInstall(request.key)} />
           </>
         )}
       </DialogActions>
