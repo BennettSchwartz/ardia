@@ -77,7 +77,7 @@ const REFUSALS: Record<string, string> = {
   leftOutSetting: "changes a setting config files can't set",
   control: "touches control itself",
   needsArgument: "needs an argument the socket doesn't pass",
-  needsPerson: "needs the person to choose files (open a file URL in a tab with apply's open op instead)",
+  needsPerson: "needs the person to finish it",
 };
 
 type RunState = Pick<BrowserState, "windows" | "windowOrder" | "ui" | "tabs" | "peeks">;
