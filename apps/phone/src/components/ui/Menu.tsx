@@ -3,11 +3,11 @@ import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View, u
 import { lookIsNative } from "@ardia/phone-native";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, type MenuAlign, type MenuLimits, type Point, type Rect } from "../../lib/menuPlace";
+import { insetRect, MENU_MARGIN, menuAt, menuHeight, menuOnTrigger, menuShrink, type MenuAlign, type MenuLimits, type Point, type Rect } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
 import { focusForScreenReader } from "./coverFocus";
 import { LookFrost, SURFACES_FROST } from "./LookViews";
-import { menuMotion } from "./motion";
+import { materialEnter, materialExit, materialMenuMotion, menuMotion } from "./motion";
 import { measureAnchor, Portal, useOverlayFrame, usePortalLeaving, usePortalLeft } from "./Overlay";
 import { Symbol } from "./Symbol";
 import type { SymbolName } from "./symbolPaths";
@@ -48,8 +48,12 @@ export const useMenuFloor = () => useContext(MenuFloorContext);
 
 const PRESS = menuLook.pressInset;
 
+const MATERIAL = !menuLook.frosted;
+
+const CHECK_TRAILING = menuLook.checkSide === "trailing";
+
 const SCRIM_ACCESSIBILITY = Platform.OS === "android" ? ({ accessible: false, importantForAccessibility: "no" } as const) : ({ accessibilityLabel: "Dismiss" } as const);
-const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
+const CHECK_SHIFT = CHECK_TRAILING ? 0 : menuLook.labelInsetChecked - menuLook.labelInset;
 
 type Props = { items: MenuItem[]; place?: ViewStyle; placer?: MenuPlacer; onDismiss: (chosen?: boolean) => void; dimmed?: boolean; origin?: string; frost?: string | null; shown?: boolean; privately?: boolean };
 
@@ -69,9 +73,10 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const [content, setContent] = useState<number | null>(null);
   const revealed = shown && (placer === undefined || content !== null);
   const side = useRef<boolean | undefined>(undefined);
-  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? MENU_ROW : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined, shrink: undefined };
-  const shrinkX = spot.shrink?.x ?? menuMotion.fromScale;
-  const shrinkY = spot.shrink?.y ?? menuMotion.fromScale;
+  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? menuLook.row : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined, shrink: undefined };
+  const shrinkX = MATERIAL ? 1 : spot.shrink?.x ?? menuMotion.fromScale;
+  const shrinkY = MATERIAL ? 1 : spot.shrink?.y ?? menuMotion.fromScale;
+  const fromScale = MATERIAL ? materialMenuMotion.fromScale : menuMotion.fromScale;
   if (revealed && placer && side.current === undefined) side.current = spot.origin.includes("top");
   const firstRow = useRef<ViewInstance>(null);
   const chosen = useRef(false);
@@ -103,6 +108,10 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const dim = useSharedValue(reduceMotion ? 1 : 0);
   useEffect(() => {
     if (!revealed || leaving || reduceMotion) return;
+    if (MATERIAL) {
+      opened.value = withTiming(1, { duration: materialMenuMotion.openMs, easing: materialEnter });
+      return;
+    }
     opened.value = withSpring(1, menuMotion.open);
     dim.value = withTiming(1, { duration: menuMotion.heldOpen });
   }, [revealed]);
@@ -115,17 +124,21 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
       dim.value = withTiming(0, { duration: menuMotion.contentFade });
       return;
     }
+    if (MATERIAL) {
+      glass.value = withTiming(0, { duration: materialMenuMotion.closeMs, easing: materialExit }, (finished) => finished && runOnJS(left)());
+      return;
+    }
     closed.value = withTiming(1, { duration: closing, easing: Easing.linear });
     glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }, (finished) => finished && runOnJS(left)()) : withDelay(closing - menuMotion.glassFade, withTiming(0, { duration: menuMotion.glassFade }, (finished) => finished && runOnJS(left)()));
     shownContent.value = withTiming(0, { duration: dimmed ? closing : menuMotion.contentFade });
     dim.value = withTiming(0, { duration: menuMotion.heldClose });
   }, [leaving]);
   const grow = useAnimatedStyle(() => {
-    const open = menuMotion.fromScale + (1 - menuMotion.fromScale) * opened.value;
+    const open = fromScale + (1 - fromScale) * opened.value;
     return { transform: [{ scaleX: open * (1 + (shrinkX - 1) * closed.value) }, { scaleY: open * (1 + (shrinkY - 1) * closed.value) }] };
   });
   const dimStyle = useAnimatedStyle(() => ({ opacity: dim.value }));
-  const fade = useAnimatedStyle(() => ({ opacity: glass.value }));
+  const fade = useAnimatedStyle(() => ({ opacity: MATERIAL ? glass.value * opened.value : glass.value }));
   const rowsFade = useAnimatedStyle(() => ({ opacity: shownContent.value }));
   const choose = (action: () => void) => {
     if (chosen.current) return;
@@ -139,7 +152,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const shift = checks ? CHECK_SHIFT : 0;
   const labelLeft = (icon: boolean) => (icon && leading ? menuLook.labelInsetIcon : menuLook.labelInset) + shift - PRESS;
   const iconLeft = menuLook.iconCentre + shift - PRESS - menuLook.iconSlot / 2;
-  const pressed = (on: boolean, disabled?: boolean) => [styles.row, on ? { backgroundColor: paint.highlight } : null, disabled ? styles.disabled : null];
+  const pressed = (on: boolean, disabled?: boolean) => [styles.row, on && !MATERIAL ? { backgroundColor: paint.highlight } : null, disabled ? styles.disabled : null];
+  const ripple = MATERIAL ? { android_ripple: { color: paint.highlight } } : null;
   const label = (text: string, color: string, bold = false) => (
     <Text numberOfLines={menuLook.labelLines} style={[menuLook.label, styles.label, bold ? styles.bold : null, { color }]}>
       {text}
@@ -169,9 +183,10 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
           accessibilityState={{ disabled: item.disabled, expanded: false }}
           disabled={item.disabled}
           onPress={() => openPage(item)}
+          {...ripple}
           style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null), paddingRight: styles.chevronRoom.paddingRight }]}
         >
-          {icon ? <MenuIcon name={icon} color={paint.label} left={iconLeft} /> : null}
+          {icon ? <MenuIcon name={icon} color={paint.icon} left={iconLeft} /> : null}
           {label(item.label, paint.label)}
           <View style={styles.chevron}>
             <Symbol name="chevronRight" size={menuLook.chevronSize} color={paint.label} />
@@ -188,14 +203,15 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
         accessibilityState={{ checked: item.checked, disabled: item.disabled }}
         disabled={item.disabled}
         onPress={() => choose(item.onPress)}
-        style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null) }]}
+        {...ripple}
+        style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null) }, CHECK_TRAILING && checks ? styles.checkRoom : null]}
       >
         {item.checked ? (
-          <View style={styles.check}>
+          <View style={CHECK_TRAILING ? styles.checkTrailing : styles.check}>
             <Symbol name="checkmark" size={menuLook.checkSize} color={color} />
           </View>
         ) : null}
-        {icon ? <MenuIcon name={icon} color={color} left={iconLeft} /> : null}
+        {icon ? <MenuIcon name={icon} color={item.destructive ? color : paint.icon} left={iconLeft} /> : null}
         {label(item.label, color)}
         {!leading && item.icon ? <Symbol name={item.icon} size={menuLook.iconSize} color={color} /> : null}
       </Pressable>
@@ -203,7 +219,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   });
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={revealed && !leaving ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!revealed || leaving} importantForAccessibility={revealed && !leaving ? "auto" : "no-hide-descendants"}>
-      {dimmed ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }, dimStyle]} /> : null}
+      {dimmed && !MATERIAL ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }, dimStyle]} /> : null}
       <Pressable testID="drawnMenuScrim" {...SCRIM_ACCESSIBILITY} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={() => onDismiss()} />
       <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, fade]}>
       <Animated.View
@@ -213,12 +229,12 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
         style={[styles.panel, { boxShadow: menuLook.shadow, borderColor: paint.rim, transformOrigin: spot.origin }, spot.place, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight }, revealed ? null : styles.unseen, grow]}
       >
         <MenuMaterial source={source} fill={paint.fill} solid={paint.solid} radius={menuLook.radius} style={[styles.material, spot.maxHeight === undefined ? null : { maxHeight: spot.maxHeight - 2 * menuLook.rim }]}>
-          <View pointerEvents="none" style={[styles.specular, { backgroundColor: paint.specular }]} />
+          {MATERIAL ? null : <View pointerEvents="none" style={[styles.specular, { backgroundColor: paint.specular }]} />}
           <ScrollView testID="drawnMenuRows" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.rows} bounces={false} overScrollMode="never" onContentSizeChange={(_width, height) => setContent(height + 2 * menuLook.rim)}>
           <Animated.View style={rowsFade}>
           {page ? (
-            <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={backPage} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
-              <MenuIcon name="chevronLeft" color={paint.label} left={iconLeft} />
+            <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={backPage} {...ripple} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
+              <MenuIcon name="chevronLeft" color={paint.icon} left={iconLeft} />
               {label(page.label, paint.label, true)}
             </Pressable>
           ) : null}
@@ -233,7 +249,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
 }
 
 export function MenuMaterial({ source, fill, solid, radius, style, children }: { source: string | null; fill: string; solid: string; radius: number; style?: StyleProp<ViewStyle>; children: ReactNode }) {
-  if (!source || !lookIsNative()) return <View style={[style, { backgroundColor: solid, borderRadius: radius }]}>{children}</View>;
+  if (!source || !lookIsNative() || MATERIAL) return <View style={[style, { backgroundColor: solid, borderRadius: radius }]}>{children}</View>;
   return (
     <LookFrost source={source} variant={menuLook.frost} cornerRadius={radius} fill={ink.clear} style={style}>
       <View testID="menuMaterialFill" pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />
@@ -281,7 +297,7 @@ function fixedPlacer(place: ViewStyle, host: Rect, insets: Insets, width: number
 
 const EXIT_SLACK_MS = 32;
 
-export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close) + EXIT_SLACK_MS;
+export const menuExitMs = (dimmed?: boolean) => (MATERIAL ? materialMenuMotion.closeMs : dimmed ? menuMotion.heldClose : menuMotion.close) + EXIT_SLACK_MS;
 
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 
@@ -319,17 +335,19 @@ const styles = StyleSheet.create({
   unseen: { opacity: 0 },
   material: { overflow: "hidden" },
   scroll: { flexGrow: 0 },
-  rows: { paddingVertical: MENU_PADDING / 2 },
+  rows: { paddingVertical: menuLook.padding / 2 },
   specular: { position: "absolute", top: 0, left: 0, right: 0, height: 1 },
-  row: { flexDirection: "row", alignItems: "center", marginHorizontal: PRESS, minHeight: MENU_ROW, paddingVertical: (MENU_ROW - menuLook.label.lineHeight) / 2, paddingRight: menuLook.labelInset - PRESS, borderRadius: MENU_ROW / 2 },
+  row: { flexDirection: "row", alignItems: "center", marginHorizontal: PRESS, minHeight: menuLook.row, paddingVertical: (menuLook.row - menuLook.label.lineHeight) / 2, paddingRight: menuLook.labelInset - PRESS, borderRadius: menuLook.pressRadius },
   chevronRoom: { paddingRight: menuLook.trailingInset - PRESS + menuLook.chevronSize + 8 },
   chevron: { position: "absolute", right: menuLook.trailingInset - PRESS, top: 0, bottom: 0, justifyContent: "center" },
   label: { flex: 1 },
   bold: { fontWeight: "600" },
-  heading: { minHeight: MENU_HEADING, paddingTop: 8, paddingRight: menuLook.labelInset },
-  divider: { height: MENU_DIVIDER, justifyContent: "center" },
+  heading: { minHeight: menuLook.heading, paddingTop: 8, paddingRight: menuLook.labelInset },
+  divider: { height: menuLook.divider, justifyContent: "center" },
   dividerLine: { height: menuLook.dividerLine, marginHorizontal: menuLook.dividerInset },
   check: { position: "absolute", left: menuLook.checkLeft - PRESS, top: 0, bottom: 0, justifyContent: "center" },
+  checkTrailing: { position: "absolute", right: menuLook.trailingInset - PRESS, top: 0, bottom: 0, justifyContent: "center" },
+  checkRoom: { paddingRight: menuLook.trailingInset - PRESS + menuLook.checkSize + 12 },
   iconSlot: { position: "absolute", width: menuLook.iconSlot, top: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
   disabled: { opacity: menuLook.disabledOpacity },
 });

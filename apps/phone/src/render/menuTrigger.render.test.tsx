@@ -4,6 +4,7 @@ import { act } from "react-test-renderer";
 import { renderSurface, unmount } from "../../test/render/harness";
 import { mockNative, resetNativeMenus } from "./nativeMenusMock";
 import { menuMotion } from "../components/ui/motion";
+import { menuLook } from "../components/ui/tokens";
 
 jest.mock("@ardia/phone-native", () => require("./nativeMenusMock").nativeMenusModule(jest.requireActual("@ardia/phone-native")));
 
@@ -207,7 +208,7 @@ test("each drawn menu and drawn action sheet counts drawn_menus_opened once as i
   onDrawnMenuOpened(() => undefined);
 });
 
-test("the drawn confirmation is a centred card with one action and no Cancel row: its action confirms, and a tap outside, which never reaches what is under it, or Back cancels", () => {
+test("the drawn confirmation is a centred card, with one action and no Cancel row on iPhone and Cancel beside the action on Android: its action confirms, and Cancel, a tap outside, which never reaches what is under it, or Back cancels", () => {
   const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
   const back = pressBack();
   const confirmation = { title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: jest.fn() };
@@ -218,21 +219,26 @@ test("the drawn confirmation is a centred card with one action and no Cancel row
   expect(text).toContain("Close 3 Tabs?");
   expect(text).toContain("They’ll stay in your Archive.");
   const outside = sheet.root.findAll((node) => node.props.testID === "drawnConfirmationOutside" && typeof node.props.onPress === "function")[0]!;
-  expect(sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Cancel")).toHaveLength(0);
+  const cancelLabels = sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Cancel");
   if (Platform.OS === "android") {
+    expect(cancelLabels).toHaveLength(1);
     expect(outside.props.importantForAccessibility).toBe("no");
     const action = sheet.root.findAll((node) => node.props.accessibilityLabel === "Close All Tabs" && typeof node.props.onAccessibilityAction === "function")[0]!;
     expect(action.props.accessibilityActions).toContainEqual({ name: "cancel", label: "Cancel" });
     act(() => action.props.onAccessibilityAction({ nativeEvent: { actionName: "cancel" } }));
+    press(sheet, "Cancel");
+    act(() => outside.props.onPress());
   } else {
+    expect(cancelLabels).toHaveLength(0);
     expect(outside.props.accessibilityLabel).toBe("Cancel");
     act(() => outside.props.onPress());
   }
   back();
-  expect(closed).toHaveBeenCalledTimes(2);
+  const cancels = Platform.OS === "android" ? 4 : 2;
+  expect(closed).toHaveBeenCalledTimes(cancels);
   expect(confirmation.run).not.toHaveBeenCalled();
   press(sheet, "Close All Tabs");
-  expect(closed).toHaveBeenCalledTimes(3);
+  expect(closed).toHaveBeenCalledTimes(cancels + 1);
   expect(confirmation.run).toHaveBeenCalledTimes(1);
   unmount(sheet);
 });
@@ -319,7 +325,7 @@ test("a placed menu stays hidden until its rows are measured, then shows where t
   const shown = flat(panelOf(root).props.style);
   expect(shown.opacity).not.toBe(0);
   expect(hiddenLayer()).toHaveLength(0);
-  expect(shown.top).toBe(600 - 16 - 301);
+  expect(shown.top).toBe(600 - 16 - (300 + 2 * menuLook.rim));
   unmount(root);
 });
 
@@ -333,7 +339,7 @@ test("when a submenu's page is taller, the menu re-measures and stays on its sid
   act(() => rowsOf(root).props.onContentSizeChange(250, 420));
   const page = flat(panelOf(root).props.style);
   expect(page.top).toBeLessThan(500);
-  expect(page.top).toBe(841 - 421);
+  expect(page.top).toBe(841 - (420 + 2 * menuLook.rim));
   expect(page.top + page.maxHeight).toBeLessThanOrEqual(841);
   unmount(root);
 });
@@ -491,17 +497,19 @@ test("drawn_menus_opened is never counted while browsing privately: on the deck'
 });
 
 test("a confirmation's button labels wrap instead of truncating, and the card grows with the text size up to the screen's width", () => {
-  const { ConfirmSheet, confirmCardWidth } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const { ConfirmSheet, confirmCardWidth, materialDialogWidth } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
   expect(confirmCardWidth(1, 393)).toBeCloseTo(240.3);
   expect(confirmCardWidth(1.5, 393)).toBeCloseTo(360.45);
   expect(confirmCardWidth(2, 393)).toBe(361);
+  expect(materialDialogWidth(1, 393)).toBe(312);
+  expect(materialDialogWidth(1.5, 393)).toBe(345);
   const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
   const label = sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Close All Tabs")[0]!;
   expect(label.props.numberOfLines).toBeUndefined();
   const button = sheet.root.findAll((node) => node.props.accessibilityLabel === "Close All Tabs" && typeof node.type === "string")[0]!;
   const style = require("react-native").StyleSheet.flatten(button.props.style);
   expect(style.height).toBeUndefined();
-  expect(style.minHeight).toBe(43.5);
+  expect(style.minHeight).toBe(Platform.OS === "android" ? 40 : 43.5);
   unmount(sheet);
 });
 

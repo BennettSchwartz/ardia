@@ -190,10 +190,14 @@ export const faviconInk = { letter: "#FFFFFF", lightPlate: "rgba(255,255,255,0.9
 
 export const menuShadow = { opacity: 0.18, radius: 24, offsetY: 8 } as const;
 
-export const menuLook = {
+const iPhoneMenuLook = {
   width: 250,
   radius: 30.5,
   rim: 0.5,
+  row: 42,
+  heading: 30,
+  divider: 20.67,
+  padding: 19,
   labelInset: 29,
   labelInsetChecked: 43.7,
   labelInsetIcon: 65,
@@ -201,25 +205,63 @@ export const menuLook = {
   iconCentre: 40,
   iconSlot: 24,
   iconSize: 19,
+  checkSide: "leading" as "leading" | "trailing",
   checkLeft: 22.3,
   checkSize: 11,
   chevronSize: 12,
   pressInset: 10,
+  pressRadius: 21,
   dividerInset: 24,
   dividerLine: 1,
-  label: { fontSize: 17, lineHeight: 20 },
+  label: { fontSize: 17, lineHeight: 20 } as { fontSize: number; lineHeight: number; letterSpacing?: number },
   labelLines: 3,
   iconSide: "leading" as "leading" | "trailing",
   disabledOpacity: 0.4,
-  frost: "thin",
+  frost: "thin" as const,
+  frosted: true,
   shadow: "0px 10px 40px rgba(0,0,0,0.12)",
-} as const;
+};
 
-export const menuInk = {
+const androidMenuLook: typeof iPhoneMenuLook = {
+  width: 250,
+  radius: 16,
+  rim: 0,
+  row: 48,
+  heading: 36,
+  divider: 17,
+  padding: 16,
+  labelInset: 16,
+  labelInsetChecked: 16,
+  labelInsetIcon: 52,
+  trailingInset: 16,
+  iconCentre: 28,
+  iconSlot: 24,
+  iconSize: 20,
+  checkSide: "trailing",
+  checkLeft: 16,
+  checkSize: 14,
+  chevronSize: 12,
+  pressInset: 0,
+  pressRadius: 0,
+  dividerInset: 0,
+  dividerLine: 1,
+  label: { fontSize: 16, lineHeight: 24, letterSpacing: 0.5 },
+  labelLines: 3,
+  iconSide: "leading",
+  disabledOpacity: 0.38,
+  frost: "thin",
+  frosted: false,
+  shadow: "0px 2px 6px 2px rgba(0,0,0,0.15), 0px 1px 2px 0px rgba(0,0,0,0.3)",
+};
+
+export const menuLook = Platform.OS === "android" ? androidMenuLook : iPhoneMenuLook;
+
+const iPhoneMenuInk = {
   light: {
     fill: "rgba(255,255,255,0.57)",
     solid: "#F8F6F7",
     label: "#0A090A",
+    icon: "#0A090A",
     destructive: "#FE373C",
     highlight: "rgba(0,0,0,0.11)",
     divider: "rgba(0,0,0,0.08)",
@@ -232,6 +274,7 @@ export const menuInk = {
     fill: "rgba(150,150,150,0.26)",
     solid: "#504C4D",
     label: "#F9F8F8",
+    icon: "#F9F8F8",
     destructive: "#FF6567",
     highlight: "rgba(255,255,255,0.11)",
     divider: "rgba(255,255,255,0.08)",
@@ -240,7 +283,38 @@ export const menuInk = {
     heading: "rgba(235,235,245,0.6)",
     dim: "rgba(0,0,0,0.48)",
   },
-} as const;
+};
+
+const androidMenuInk: typeof iPhoneMenuInk = {
+  light: {
+    fill: "#F3EDF0",
+    solid: "#F3EDF0",
+    label: "#1F1A1D",
+    icon: "#4F4449",
+    destructive: "#BA1A1A",
+    highlight: "rgba(31,26,29,0.1)",
+    divider: "#D3C2C8",
+    rim: ink.clear,
+    specular: ink.clear,
+    heading: "#4F4449",
+    dim: ink.clear,
+  },
+  dark: {
+    fill: "#2A2427",
+    solid: "#2A2427",
+    label: "#EBE0E4",
+    icon: "#D3C2C8",
+    destructive: "#FFB4AB",
+    highlight: "rgba(235,224,228,0.1)",
+    divider: "#4F4449",
+    rim: ink.clear,
+    specular: ink.clear,
+    heading: "#D3C2C8",
+    dim: ink.clear,
+  },
+};
+
+export const menuInk = Platform.OS === "android" ? androidMenuInk : iPhoneMenuInk;
 
 export const actionSheetLook = {
   width: 240.3,
@@ -265,6 +339,28 @@ export const actionSheetLook = {
 export const actionSheetInk = {
   light: { fill: "rgba(255,252,253,0.92)", solid: "#F9F9F9", rim: "#9E9E9E", title: "#000000", message: "#989898", button: "#DFDFDF", destructive: "#F22F32" },
   dark: { fill: "rgba(72,72,72,0.92)", solid: "#484848", rim: "#2A2A2A", title: "#FFFFFF", message: "#C8C8C8", button: "#555555", destructive: "#FFB8B9" },
+} as const;
+
+export const materialDialogLook = {
+  width: 312,
+  radius: 28,
+  padding: 24,
+  messageGap: 16,
+  buttonsGap: 24,
+  buttonHeight: 40,
+  buttonSide: 12,
+  buttonsBetween: 8,
+  screenMargin: 24,
+  title: { fontSize: 24, lineHeight: 32 },
+  message: { fontSize: 14, lineHeight: 20, letterSpacing: 0.25 },
+  button: { fontSize: 14, lineHeight: 20, fontWeight: "500", letterSpacing: 0.1 },
+  enterScale: 0.92,
+  shadow: "0px 4px 8px 3px rgba(0,0,0,0.15), 0px 1px 3px 0px rgba(0,0,0,0.3)",
+} as const;
+
+export const materialDialogInk = {
+  light: { surface: "#EDE7EA", title: "#1F1A1D", message: "#4F4449", action: "#894A67", destructive: "#BA1A1A", ripple: "rgba(137,74,103,0.12)", scrim: "rgba(0,0,0,0.32)" },
+  dark: { surface: "#322C2F", title: "#EBE0E4", message: "#D3C2C8", action: "#FFB0D0", destructive: "#FFB4AB", ripple: "rgba(255,176,208,0.12)", scrim: "rgba(0,0,0,0.32)" },
 } as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;

@@ -8,9 +8,9 @@ import { useFocusReturn } from "./focusReturn";
 import { screenReaderActions } from "./screenReaderActions";
 import type { Confirmation } from "./Dialog";
 import { countDrawnMenuOpened, MenuMaterial } from "./Menu";
-import { menuMotion } from "./motion";
+import { materialEnter, materialExit, materialMenuMotion, menuMotion } from "./motion";
 import { Portal, usePortalLeaving, usePortalLeft } from "./Overlay";
-import { actionSheetInk, actionSheetLook, ink } from "./tokens";
+import { actionSheetInk, actionSheetLook, ink, materialDialogInk, materialDialogLook } from "./tokens";
 import { useTheme } from "./theme";
 
 export type SheetAction = { title: string; destructive?: boolean; onPress: () => void };
@@ -28,11 +28,101 @@ export function ActionSheet({ onCancel, opener, ...props }: Props) {
     if (returnTo.target) returnFocus(returnTo.target);
   }, [onCancel, returnTo, returnFocus]);
   return (
-    <Portal exitMs={menuMotion.sheetOut}>
-      <SheetCard {...props} onCancel={cancelled} />
+    <Portal exitMs={MATERIAL ? materialMenuMotion.dialogOutMs : menuMotion.sheetOut}>
+      {MATERIAL ? <MaterialDialogCard {...props} onCancel={cancelled} /> : <SheetCard {...props} onCancel={cancelled} />}
     </Portal>
   );
 }
+
+const MATERIAL = Platform.OS === "android";
+
+function useSheetBehaviour(onCancel: () => void, opensOn: () => ViewInstance | null) {
+  const leaving = usePortalLeaving();
+  useEffect(() => {
+    if (leaving) return;
+    return focusForScreenReader(opensOn);
+  }, [leaving]);
+  useEffect(() => {
+    countDrawnMenuOpened();
+  }, []);
+  useEffect(() => {
+    if (leaving) return;
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      onCancel();
+      return true;
+    });
+    return () => back.remove();
+  }, [onCancel, leaving]);
+  return leaving;
+}
+
+const spokenHeading = (title?: string | null, message?: string | null) => (title && message ? `${title}${/[.?!]$/.test(title) ? "" : "."} ${message}` : title || message || "");
+
+function MaterialDialogCard({ title, message, actions, cancel = "Cancel", onCancel }: Props) {
+  const theme = useTheme();
+  const paint = theme.dark ? materialDialogInk.dark : materialDialogInk.light;
+  const reduceMotion = useReduceMotion();
+  const window = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const width = materialDialogWidth(window.fontScale, window.width - insets.left - insets.right);
+  const maxHeight = window.height - insets.top - insets.bottom - 2 * materialDialogLook.screenMargin;
+  const spoken = useRef<ViewInstance>(null);
+  const firstButton = useRef<ViewInstance>(null);
+  const heading = spokenHeading(title, message);
+  const leaving = useSheetBehaviour(onCancel, () => (heading ? spoken : firstButton).current);
+  const left = usePortalLeft();
+  const shown = useSharedValue(reduceMotion ? 1 : 0);
+  useEffect(() => {
+    if (!reduceMotion) shown.value = withTiming(1, { duration: materialMenuMotion.dialogInMs, easing: materialEnter });
+  }, []);
+  useEffect(() => {
+    if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : materialMenuMotion.dialogOutMs, easing: materialExit }, (finished) => finished && runOnJS(left)());
+  }, [leaving]);
+  const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
+  const grow = useAnimatedStyle(() => ({ transform: [{ scale: materialDialogLook.enterScale + (1 - materialDialogLook.enterScale) * shown.value }] }));
+  const cancelAction = screenReaderActions([{ name: "cancel", label: cancel, run: onCancel }]);
+  const buttons = [{ title: cancel, destructive: false, onPress: onCancel, dismisses: true }, ...actions.map((action) => ({ ...action, dismisses: false }))];
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, fade]} pointerEvents={leaving ? "none" : "auto"} collapsable={false} accessibilityElementsHidden={leaving} importantForAccessibility={leaving ? "no-hide-descendants" : "auto"}>
+      <Pressable testID="drawnConfirmationOutside" accessible={false} importantForAccessibility="no" style={[StyleSheet.absoluteFill, { backgroundColor: paint.scrim }]} onPress={onCancel} />
+      <View style={styles.centre} pointerEvents="box-none">
+        <Animated.View testID="drawnActionSheet" accessibilityViewIsModal style={[styles.dialog, { width, maxHeight, backgroundColor: paint.surface, boxShadow: materialDialogLook.shadow }, grow]}>
+          <ScrollView testID="drawnConfirmationScroll" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.dialogContent} bounces={false} overScrollMode="never">
+            {heading ? (
+              <View ref={spoken} testID="drawnConfirmationHeading" accessible accessibilityRole="header" accessibilityLabel={heading} {...cancelAction}>
+                {title ? <Text style={[materialDialogLook.title, { color: paint.title }]}>{title}</Text> : null}
+                {message ? (
+                  <Text textBreakStrategy="balanced" style={[materialDialogLook.message, title ? styles.dialogMessage : null, { color: paint.message }]}>
+                    {message}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+            <View style={[styles.dialogButtons, heading ? styles.dialogButtonsAfterText : null]}>
+              {buttons.map((button, index) => (
+                <Pressable
+                  ref={index === 0 ? firstButton : undefined}
+                  key={`${index}:${button.title}`}
+                  testID={button.dismisses ? "drawnConfirmationCancel" : undefined}
+                  accessibilityRole="button"
+                  accessibilityLabel={button.title}
+                  {...(button.dismisses ? {} : screenReaderActions([{ name: "activate", run: button.onPress }, { name: "cancel", label: cancel, run: onCancel }]))}
+                  onPress={button.onPress}
+                  android_ripple={{ color: paint.ripple }}
+                  style={styles.dialogButton}
+                >
+                  <Text style={[materialDialogLook.button, { color: button.destructive ? paint.destructive : paint.action }]}>{button.title}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+        </Animated.View>
+      </View>
+    </Animated.View>
+  );
+}
+
+export const materialDialogWidth = (fontScale: number, room: number) => Math.min(materialDialogLook.width * Math.max(1, fontScale), room - 2 * materialDialogLook.screenMargin);
 
 function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Props) {
   const theme = useTheme();
@@ -46,30 +136,15 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
   const spoken = useRef<ViewInstance>(null);
   const firstAction = useRef<ViewInstance>(null);
   const announces = Platform.OS === "android";
-  const heading = title && message ? `${title}${/[.?!]$/.test(title) ? "" : "."} ${message}` : title || message || "";
-  const leaving = usePortalLeaving();
+  const heading = spokenHeading(title, message);
+  const leaving = useSheetBehaviour(onCancel, () => (heading ? spoken : firstAction).current);
   const left = usePortalLeft();
   const shown = useSharedValue(1);
   useEffect(() => {
     if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut }, (finished) => finished && runOnJS(left)());
   }, [leaving]);
   const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
-  useEffect(() => {
-    if (leaving) return;
-    return focusForScreenReader(() => (heading ? spoken : firstAction).current);
-  }, [leaving]);
   const cancelAction = announces ? screenReaderActions([{ name: "cancel", label: cancel, run: onCancel }]) : {};
-  useEffect(() => {
-    countDrawnMenuOpened();
-  }, []);
-  useEffect(() => {
-    if (leaving) return;
-    const back = BackHandler.addEventListener("hardwareBackPress", () => {
-      onCancel();
-      return true;
-    });
-    return () => back.remove();
-  }, [onCancel, leaving]);
   return (
     <Animated.View style={[StyleSheet.absoluteFill, fade]} pointerEvents={leaving ? "none" : "auto"} collapsable={false} accessibilityElementsHidden={leaving} importantForAccessibility={leaving ? "no-hide-descendants" : "auto"}>
       <Pressable testID="drawnConfirmationOutside" {...(announces ? { accessible: false, importantForAccessibility: "no" as const } : { accessibilityRole: "button" as const, accessibilityLabel: cancel })} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={onCancel} />
@@ -147,4 +222,10 @@ const styles = StyleSheet.create({
   button: { minHeight: actionSheetLook.buttonHeight, borderRadius: actionSheetLook.buttonHeight / 2, justifyContent: "center", paddingHorizontal: actionSheetLook.buttonSide, paddingVertical: (actionSheetLook.buttonHeight - actionSheetLook.button.lineHeight) / 2 },
   pressed: { opacity: 0.7 },
   centred: { textAlign: "center" },
+  dialog: { borderRadius: materialDialogLook.radius, overflow: "hidden" },
+  dialogContent: { padding: materialDialogLook.padding },
+  dialogMessage: { marginTop: materialDialogLook.messageGap },
+  dialogButtons: { flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", gap: materialDialogLook.buttonsBetween, marginRight: -materialDialogLook.buttonSide / 2 },
+  dialogButtonsAfterText: { marginTop: materialDialogLook.buttonsGap },
+  dialogButton: { minHeight: materialDialogLook.buttonHeight, borderRadius: materialDialogLook.buttonHeight / 2, overflow: "hidden", justifyContent: "center", paddingHorizontal: materialDialogLook.buttonSide },
 });
