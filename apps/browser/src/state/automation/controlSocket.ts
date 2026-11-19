@@ -1,3 +1,6 @@
+import { guardedBySocketOrigin, type SocketOrigin } from "./socketSharedChokePoint";
+import { commandTarget } from "../commands/commandTarget";
+import { refuseSyncedLinkChange } from "./workspaceSharedGuard";
 import { create } from "zustand";
 import {
   broadcastOnControlSocket,
@@ -169,6 +172,16 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
 export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
+  if (plan.command === "back" || plan.command === "forward") {
+    const target = commandTarget(useBrowser.getState(), plan.command, plan.windowId, plan.tabId);
+    if (target.kind === "window" && target.tabId) {
+      try {
+        refuseSyncedLinkChange(target.tabId, plan.command === "back" ? "going back" : "going forward");
+      } catch (error) {
+        return failure("refused", errorText(error));
+      }
+    }
+  }
   const needsUser = background ? runNeedsUser(useBrowser.getState(), plan) : null;
   if (needsUser === "asks") return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
   if (needsUser === "picker") return failure("refused", `${plan.command} opens a picker, and this Ardia runs in the background, where nobody can pick, so it didn't run.`);
@@ -196,6 +209,10 @@ function subscribe(connection: number, params: Record<string, unknown>): Body {
 const connectionAccess = (_connection: number): ConnectionAccess => "owner";
 
 function answer(connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
+  return guardedBySocketOrigin((origin) => answerAs(origin, connection, method, given), (message) => failure("refused", message));
+}
+
+function answerAs(origin: SocketOrigin, connection: number, method: string, given: Record<string, unknown>): Body | Promise<Body> {
   const spec = methodSpec(method);
   if (!spec) return failure("unknown_method", `There's no method ${method}.`);
   const refused = accessProblem(connectionAccess(connection), spec);
@@ -204,7 +221,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
   if (!("params" in checked)) return checked;
   const { params } = checked;
   const serving = generation;
-  const stillOn = () => generation === serving && controlOn();
+  const stillOn = () => (origin.segment(), generation === serving && controlOn());
   switch (method) {
     case "hello": {
       const tooOld = clientProtocolProblem(params, systemInfo().appVersion);

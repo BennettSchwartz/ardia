@@ -279,14 +279,19 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   and unlink relative to folder descriptors it holds while descending (`openat`, `fstatat`, `renameatx_np`,
   `unlinkat`), so a root or subfolder swapped after the check is never followed. Binding is compare-and-set: whichever
   finishes making a folder second keeps the first one's binding and removes its own.
-  A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone: `apply` answers
-  `refused` ("shared folder groups change only from the sidebar") for any op that would change such a group's members,
-  their order, a tab or group title inside it, or its nesting, including moving a tab or group into or out of it,
-  opening a tab into it, placing one beside a member, closing, pinning or unpinning a member, and renaming, moving,
-  ungrouping, closing or deleting the group or a group inside it (`workspaceSharedGuard.ts`, checked before each op
-  runs). Muting, sleeping or activating a member and changing the group's colour, icon or collapsed state still work.
-  `pins.createFolder` and `pins.addToFolder` refuse a member for the same reason, and `airTraffic.addRule` and
-  `updateRule` refuse a `group` that is a shared folder.
+  A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone, with one
+  choke point (`socketSharedChokePoint.ts`). Every socket request, `run` and plugin methods included, runs in a
+  socket-origin context: each synchronous stretch of it (the call itself, and each resumption after an await, which
+  re-checks control) is one store transaction, so no subscriber, the shared-folder sync included, hears its changes
+  until it ends. Before it ends, the synced projection of every bound group and everything inside it (exactly what the
+  shared-folder engine would write: each link's name and URL, their order, nested groups) is compared with what it was;
+  if it changed, the store goes back to its state before that stretch and the request answers `refused` ("shared
+  folder groups change only from the sidebar"). Muting, sleeping, activating, colour, icon and collapsing don't touch
+  the projection, so they still work, and so do closing or parking a window that shows the folder. Earlier, more
+  specific refusals remain where they give a clearer message: `apply`'s per-op check (`workspaceSharedGuard.ts`),
+  `pins.createFolder` and `pins.addToFolder` for a member, `tabs.navigate`, `tabs.back`, `tabs.forward` and `run`
+  `back`/`forward` on a member with no pinned home (whose page is the link it syncs, and whose navigation reaches the
+  page before any rollback could), and `airTraffic.addRule`/`updateRule` for a group in a shared folder's tree.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
   menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no
@@ -361,11 +366,10 @@ the user's live sessions on every site. Both are a different consent than "contr
 Designed, not built in this round, each in its own file under `state/automation/socket<Area>.ts`:
 
 - **Shared folder writes:** `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`,
-  `sharedFolders.sync {group}` and `sharedFolders.stop {group}`, in the follow-up to this round,
-  #2836 (`full-control/app-socket-2a-shared`). They wait for the shared-folder sync engine and its native layer to hold up
-  under a writer outside the sidebar: control checks after every await, no store-triggered round outliving its guard,
-  no sync without a folder identity, sanitized names, one Add per folder identity, refusal by device and inode, and
-  identity-checked renames, removals and creates.
+  `sharedFolders.sync {group}` and `sharedFolders.stop {group}`, in #2836 (`full-control/app-socket-2a-shared`), which is
+  parked: review found data-loss bugs in the shared-folder sync engine and its native layer, and fixing them changes the
+  sidebar's own shared-folder sync, so they need their own focused PR first. The open findings are listed at the top of
+  #2836.
 - **Window geometry:** `windows.setFrame {window, frame}`, `windows.setMaximized`, `windows.setFullScreen`. The store's
   `frame`, `maximized` and `fullScreen` follow the native window (`windows/windowSync.ts`), so these need a native
   call that moves the window (`ArdiaWindows`), which doesn't exist yet; `run` covers full screen through its command.

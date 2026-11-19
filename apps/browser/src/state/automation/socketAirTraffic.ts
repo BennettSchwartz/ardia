@@ -1,8 +1,8 @@
 import type { JsonSchema } from "../../lib/jsonSchema";
 import { isIncognitoProfile } from "../browser/model";
 import { routeGroups } from "../airTraffic/groups";
-import { sharedFolderOf } from "../sharedFolders/store";
-import { SHARED_GROUPS_SIDEBAR_ONLY } from "./workspaceSharedGuard";
+import { SHARED_GROUPS_SIDEBAR_ONLY, sharedRoot } from "./workspaceSharedGuard";
+import { pinKeyOf } from "../browser/model";
 import { previewLink } from "../airTraffic/preview";
 import { cleanRule, cleanTarget, linkTextProblem, sameTarget, MAX_AIR_TRAFFIC_RULES, OPEN_AS, patternProblem, siteHost, sourceAppOf, type AirTrafficRule, type AirTrafficTarget, type LinkCondition, type OpenAs } from "../airTraffic/rules";
 import { currentAirTraffic, placeAirTrafficRule, removeAirTrafficRule, setAirTrafficFallback, targetUsableNow, tryAddAirTrafficRule, updateAirTrafficRule, type RuleDraft } from "../airTraffic/store";
@@ -49,6 +49,11 @@ function profileOf(value: unknown): string | null {
   return value;
 }
 
+function groupKeyInSharedFolder(profileId: string, groupKey: string): boolean {
+  const s = now();
+  return Object.values(s.groups).some((g) => g.profileId === profileId && pinKeyOf(g) === groupKey && !!sharedRoot(s, g.id));
+}
+
 function targetOf(params: Record<string, unknown>, base: AirTrafficTarget): AirTrafficTarget {
   const profileId = params.profile !== undefined ? profileOf(params.profile) : base.profileId;
   const open = (params.open as OpenAs | undefined) ?? base.open;
@@ -57,7 +62,7 @@ function targetOf(params: Record<string, unknown>, base: AirTrafficTarget): AirT
   if (groupKey) {
     if (open !== "tab") throw new OpError("bad_request", "Only links opened as a tab go into a group.");
     if (profileId === null || !targetUsableNow(profileId, groupKey)) throw new OpError("no_window", `There's no group ${groupKey} in that profile; airTraffic.rules lists them.`);
-    if (params.group !== undefined && sharedFolderOf(profileId, groupKey)) throw new OpError("refused", `Group ${groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here.`);
+    if (params.group !== undefined && groupKeyInSharedFolder(profileId, groupKey)) throw new OpError("refused", `Group ${groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here.`);
   }
   return { profileId, open, groupKey: groupKey ?? undefined };
 }

@@ -7,12 +7,12 @@ import { anchorRef, groupRef, OpError, store, tabRefs, type OpResult } from "./w
 
 export const SHARED_GROUPS_SIDEBAR_ONLY = "shared folder groups change only from the sidebar";
 
-function sharedRoot(s: BrowserState, groupId: string): string | null {
+export function sharedRoot(s: BrowserState, groupId: string): string | null {
   const root = rootOf(s.groups, groupId);
   return root && sharedFolderOfGroup(s, root.id) ? root.id : null;
 }
 
-function sharedRootOfTab(s: BrowserState, tabId: string): string | null {
+export function sharedRootOfTab(s: BrowserState, tabId: string): string | null {
   const g = innermostGroupOf(s.groups, tabId);
   return g ? sharedRoot(s, g.id) : null;
 }
@@ -82,4 +82,12 @@ export function refuseSharedTabs(tabIds: string[]) {
   const s = store();
   const hit = tabIds.map((id) => sharedRootOfTab(s, id)).find(Boolean);
   if (hit) throw new OpError("refused", `Group ${hit} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}.`);
+}
+
+export function refuseSyncedLinkChange(tabId: string | null | undefined, what: string) {
+  const s = store();
+  const t = tabId ? s.tabs[tabId] : undefined;
+  if (!t || t.pinnedUrl) return;
+  const hit = sharedRootOfTab(s, t.id);
+  if (hit) throw new OpError("refused", `Tab ${t.id} is a link in shared folder ${hit}, and ${what} would change the link it syncs; ${SHARED_GROUPS_SIDEBAR_ONLY}.`);
 }

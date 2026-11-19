@@ -1,3 +1,4 @@
+import { refuseSyncedLinkChange } from "./workspaceSharedGuard";
 import type { BrowserState } from "../browser/store";
 import { activeTabId, isIncognitoProfile } from "../browser/model";
 import type { ClosedGroup, ClosedTab, ClosedWindow } from "../browser/types";
@@ -55,6 +56,7 @@ function navigate(params: Record<string, unknown>) {
   const t = tabOf(params.tab);
   const url = openableUrl(params.url as string);
   if (typeof url !== "string") throw new OpError("refused", url.error);
+  refuseSyncedLinkChange(t.id, "loading another page");
   now().navigate(t.id, url || "ardia://newtab", { userInitiated: true });
   return tabRow(now(), t.id);
 }
@@ -67,6 +69,7 @@ function livePage(params: Record<string, unknown>, act: (tabId: string) => void)
 
 async function back(params: Record<string, unknown>, call: SocketCall) {
   const t = tabOf(params.tab);
+  refuseSyncedLinkChange(t.id, "going back");
   if (await goBackAsking(t.id, call.serving, askWhereSeen(`Tab ${t.id} stayed on its page`))) return { ok: true };
   call.stillServing();
   throw new OpError("refused", `Tab ${t.id} stayed on its page: the page has changes that going back may lose, and the user chose to stay (or the page moved on meanwhile).`);
@@ -129,7 +132,7 @@ export const TAB_METHODS: MethodSpec[] = [
   { name: "tabs.navigate", mutates: true, description: "Load a URL in a tab, as typing it in the address bar does", params: obj({ tab: TAB, url: text("http, https or file URL, about:blank or ardia://history, bookmarks, downloads, newtab") }, ["tab", "url"]), result: "tab", run: navigate },
   { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => withLivePage(t, (page) => (p.bypassCache ? page.forceReload() : page.reload()), call.serving)) },
   { name: "tabs.back", mutates: true, description: "Go back in a tab's history; when that leaves a page with unsaved changes, the reply waits for the user's answer", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: back },
-  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => goForward(t, call.serving)) },
+  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => (refuseSyncedLinkChange(t, "going forward"), goForward(t, call.serving))) },
   {
     name: "tabs.duplicate",
     mutates: true,
