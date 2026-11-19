@@ -5,8 +5,8 @@ import { focusWindow } from "../windows/nativeWindow";
 import { focusedWindowOf } from "../windows/ui";
 import { eligibleKind, windowTabIds, type AutomationWindowKind } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
-import { closeWindowAsked, type CloseAsk } from "../windows/windowClose";
-import { confirm } from "../../platform/dialogs";
+import { closeWindowAsked } from "../windows/windowClose";
+import { askWhereSeen } from "./socketAsk";
 import { bool, obj, oneOf, PROFILE, text, WINDOW } from "./socketSchema";
 import { expect, now, profileArg, windowOf } from "./socketTargets";
 import { openableUrl } from "./workspaceOps";
@@ -65,17 +65,9 @@ function switchProfile(params: Record<string, unknown>) {
   return windowRow(now(), w.id);
 }
 
-const UNSEEN = "Ardia would have to ask before closing it, and nobody can see that question here (the window isn't on screen, or Ardia runs in the background), so it stayed open.";
-
-const askWhereSeen: CloseAsk = async (options) => {
-  const answer = await confirm({ ...options, onlyIfShown: true });
-  if (answer.unshown) throw new OpError("refused", `Window ${options.windowId ?? ""} stayed open: ${UNSEEN}`);
-  return answer;
-};
-
 async function closeWindow(params: Record<string, unknown>, call: SocketCall, kinds: readonly AutomationWindowKind[] = ["normal", "little"]) {
   const w = windowOf(params.window, kinds);
-  const outcome = await closeWindowAsked(w.id, { mayClose: call.serving, ask: askWhereSeen });
+  const outcome = await closeWindowAsked(w.id, { mayClose: call.serving, ask: askWhereSeen(`Window ${w.id} stayed open`) });
   if (outcome === "busy") throw new OpError("refused", `Window ${w.id} is already closing or asking whether to close.`);
   if (outcome === "cancelled") throw new OpError("refused", `Window ${w.id} stayed open: closing it was cancelled.`);
   if (outcome === "stopped") call.stillServing();
