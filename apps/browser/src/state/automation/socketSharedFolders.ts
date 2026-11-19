@@ -1,4 +1,4 @@
-import { createSharedFolder, sharedFoldersAvailable, sharedLocation } from "../../platform/sharedFolders";
+import { createSharedFolder, identityOf, sharedFoldersAvailable, sharedLocation } from "../../platform/sharedFolders";
 import { useBrowser } from "../browser/store";
 import { isIncognitoProfile, pinKeyOf } from "../browser/model";
 import type { TabGroup } from "../browser/types";
@@ -6,7 +6,7 @@ import { groupLabel } from "../pins/tabGrouping";
 import { fileUrlOf, stopSyncingGroup, withSharedGroup } from "../sharedFolders/actions";
 import { syncFolderAfterNow, syncFolderNow } from "../sharedFolders/engine";
 import { canShareGroup, sharedFolderOfGroup } from "../sharedFolders/removal";
-import { bindFolder, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
+import { bindFolder, bindFolderIfUnbound, boundFolders, folderRef, sharedFolderOf, useSharedFolders, type SharedFolder } from "../sharedFolders/store";
 import type { BaseEntry } from "../sharedFolders/tree";
 import { eligibleKind, ownEntry } from "./automationWindows";
 import { bindingAt, canonicalFolder, discardFolder, isAbsolutePath, oneAtATime, readableFolder } from "./sharedFolderPaths";
@@ -81,20 +81,16 @@ async function newFolderFor(g: TabGroup, params: Record<string, unknown>, call: 
   const location = sharedLocation();
   const given = params.parent as string | undefined;
   if (given === undefined && !location.iCloudAvailable) throw new OpError("refused", "iCloud Drive is off; pass parent, a folder that syncs some other way.");
-  const parent = given === undefined ? location.path : (await canonicalFolder(given, "parent")).path;
+  const checked = given === undefined ? null : await canonicalFolder(given, "parent");
   call.stillServing();
   if (!sameShareable(g)) throw new OpError("no_window", `Group ${g.id} changed before its folder was made; nothing was shared.`);
-  const made = await createSharedFolder(parent, groupLabel(now(), g) || "Shared Folder");
-  const found = await canonicalFolder(made, "the new folder").catch(async (error: unknown) => {
-    await discardFolder(made);
-    throw error;
-  });
-  if (!call.serving() || !sameShareable(g) || sharedFolderOf(g.profileId, pinKeyOf(g))) {
+  const made = await createSharedFolder(checked?.path ?? location.path, groupLabel(now(), g) || "Shared Folder", checked && identityOf(checked));
+  if (!call.serving() || !sameShareable(g)) {
     await discardFolder(made);
     call.stillServing();
     throw new OpError("no_window", `Group ${g.id} changed while its folder was being made; nothing was shared.`);
   }
-  bindFolder(g.profileId, pinKeyOf(g), found.path, { device: found.device, inode: found.inode });
+  if (!bindFolderIfUnbound(g.profileId, pinKeyOf(g), made)) await discardFolder(made);
 }
 
 function share(params: Record<string, unknown>, call: SocketCall) {
@@ -122,7 +118,7 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
   return oneAtATime(`${profileId}\u0001${found.path}`, async () => {
     await readableFolder(found);
     call.stillServing();
-    const known = bindingAt(profileId, found);
+    const known = await bindingAt(profileId, found);
     if (known) {
       await syncFolderNow(profileId, known.key, call.serving);
       call.stillServing();
@@ -134,7 +130,7 @@ async function add(params: Record<string, unknown>, call: SocketCall) {
     expect(!!groupId, "the folder's group wasn't made.");
     useBrowser.setState(next);
     const key = pinKeyOf(now().groups[groupId]!);
-    bindFolder(profileId, key, found.path, { device: found.device, inode: found.inode });
+    bindFolder(profileId, key, found.path, identityOf(found));
     await syncFolderNow(profileId, key, call.serving);
     call.stillServing();
     return boundRow(profileId, key);

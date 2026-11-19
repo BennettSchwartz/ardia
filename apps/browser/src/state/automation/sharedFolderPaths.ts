@@ -1,7 +1,8 @@
-import { discardSharedFolder, readSharedFolder, resolveSharedFolder, type ResolvedSharedFolder } from "../../platform/sharedFolders";
+import { discardSharedFolder, readSharedFolder, resolveSharedFolder, SHARED_FOLDER_REFUSED, type ResolvedSharedFolder } from "../../platform/sharedFolders";
 import { errorText } from "../../lib/errors";
-import { boundFolders } from "../sharedFolders/store";
 import { OpError } from "./workspaceTargets";
+
+export { bindingAt } from "../sharedFolders/bindings";
 
 const SYSTEM_ROOTS = ["/", "/System", "/Library", "/Applications", "/Users", "/Volumes", "/bin", "/sbin", "/usr", "/etc", "/var", "/tmp", "/dev", "/opt", "/cores", "/private", "/private/etc", "/private/var", "/private/tmp", "/Network"];
 
@@ -14,7 +15,8 @@ export async function canonicalFolder(path: string, what: string): Promise<Resol
   try {
     found = await resolveSharedFolder(path);
   } catch (error) {
-    throw new OpError("bad_request", `${what}: ${errorText(error)}`);
+    const refused = (error as { code?: unknown } | null)?.code === SHARED_FOLDER_REFUSED;
+    throw new OpError(refused ? "refused" : "bad_request", `${what}: ${errorText(error)}`);
   }
   const trimmed = found.path.replace(/\/+$/, "") || "/";
   if (SYSTEM_ROOTS.includes(trimmed) || homeOf(trimmed)) throw new OpError("refused", `${what}: ${trimmed} is a system or home folder; pick a folder inside it.`);
@@ -27,13 +29,7 @@ export async function readableFolder(found: ResolvedSharedFolder) {
   if (listing.root.error) throw new OpError("bad_request", listing.root.error);
 }
 
-export function bindingAt(profileId: string, found: ResolvedSharedFolder) {
-  return boundFolders().find(
-    (b) => b.profileId === profileId && (b.folder.path === found.path || (b.folder.identity?.device === found.device && b.folder.identity?.inode === found.inode)),
-  );
-}
-
-export const discardFolder = (path: string) => discardSharedFolder(path).catch(() => undefined);
+export const discardFolder = (folder: ResolvedSharedFolder) => discardSharedFolder(folder).catch(() => false);
 
 const locks = new Map<string, Promise<unknown>>();
 

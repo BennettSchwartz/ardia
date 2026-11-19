@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { readDocument, writeDocument } from "../../platform/documents";
 import { parseSaved, unchanged, versionedJson, type Migrations } from "../../lib/savedDocument";
 import { isFields } from "../../lib/decode";
-import type { SharedFolderIdentity } from "../../platform/sharedFolders";
+import { identityOf as identityOfFolder, type ResolvedSharedFolder, type SharedFolderIdentity } from "../../platform/sharedFolders";
 import type { BaseEntry } from "./tree";
 
 export type SharedFolder = { path: string; base: BaseEntry[]; addedAt: number; identity?: SharedFolderIdentity };
@@ -98,6 +98,18 @@ function patchFolders(profileId: string, key: string, folder: SharedFolder | nul
 
 export function bindFolder(profileId: string, key: string, path: string, identity?: SharedFolderIdentity) {
   patchFolders(profileId, key, withIdentity({ path, base: [], addedAt: Date.now() }, identity));
+}
+
+export function bindFolderIfUnbound(profileId: string, key: string, folder: ResolvedSharedFolder): boolean {
+  if (sharedFolderOf(profileId, key)) return false;
+  bindFolder(profileId, key, folder.path, identityOfFolder(folder));
+  return true;
+}
+
+export function upgradeFolder(profileId: string, key: string, was: SharedFolder, found: ResolvedSharedFolder): boolean {
+  if (sharedFolderOf(profileId, key) !== was || was.identity) return false;
+  patchFolders(profileId, key, { ...was, path: found.path, identity: identityOfFolder(found) });
+  return true;
 }
 
 export function unbindFolder(profileId: string, key: string) {

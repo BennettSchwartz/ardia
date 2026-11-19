@@ -22,19 +22,35 @@ async function passGate(name) {
   await gate;
 }
 
+const inodeOf = (path) => [...path].reduce((n, c) => n + c.charCodeAt(0), 0);
+const identityOf = (path) => ({ device: 7, inode: inodeOf(path) });
+const REFUSED = new Set(["/", "/System", "/Users", "/Library"]);
+const reads = [];
+const resolved = [];
+const madePaths = new Set();
+
 globalThis.acTestNativeModules = {
   ArdiaSharedFolders: {
     location: () => ({ path: "/scratch/Ardia Shared", iCloudAvailable: true, iCloudPath: "/scratch" }),
-    read: async (path) => (await passGate("read"), listings.get(path) ?? empty),
+    read: async (path, identity) => (reads.push([path, identity]), await passGate("read"), listings.get(path) ?? empty),
     apply: async (path, ops) => (applied.push([path, JSON.parse(ops)]), { conflicts: [] }),
-    create: async (parent, name) => (await passGate("create"), created.push([parent, name]), `${parent}/${name}`),
+    create: async (parent, parentIdentity, name) => {
+      await passGate("create");
+      created.push([parent, parentIdentity, name]);
+      let path = `${parent}/${name}`;
+      for (let n = 2; madePaths.has(path); n++) path = `${parent}/${name} ${n}`;
+      madePaths.add(path);
+      return { path, ...identityOf(path) };
+    },
     resolve: async (given) => {
+      resolved.push(given);
       const path = given.replace(/\/+$/, "") || "/";
       const real = aliases.get(path) ?? path;
+      if (REFUSED.has(real) || /^\/Users\/[^/]+$/.test(real)) throw Object.assign(new Error(`${real} is a system or home folder; pick a folder inside it.`), { code: "ERR_SHARED_FOLDER_REFUSED" });
       if (missing.has(real)) throw new Error(`There's no folder at ${path}.`);
-      return { path: real, device: 7, inode: [...real].reduce((n, c) => n + c.charCodeAt(0), 0) };
+      return { path: real, ...identityOf(real) };
     },
-    discard: async (path) => void discarded.push(path),
+    discard: async (path, identity) => (discarded.push([path, identity]), true),
     watch: () => {},
     addListener: () => ({ remove() {} }),
   },
@@ -43,7 +59,8 @@ globalThis.acTestNativeModules = {
 const { useBrowser } = await import("../browser/store.ts");
 const { startAutomation } = await import("./controlSocket.ts");
 const { startPersistence } = await import("../session/persist.ts");
-const { boundFolders, sharedFolderOf, setFolderSync } = await import("../sharedFolders/store.ts");
+const { bindFolder, boundFolders, sharedFolderOf, setFolderSync } = await import("../sharedFolders/store.ts");
+const { shareFolder } = await import("../sharedFolders/actions.ts");
 const { pinKeyOf } = await import("../browser/model.ts");
 const stub = await import("../../test-native/index.ts");
 
@@ -97,7 +114,7 @@ test("control switched off while share makes the folder: nothing is bound and th
   const reply = await pending;
   assert.equal(reply.error?.code, "failed");
   assert.equal(sharedFolderOf(profileId, key), undefined, "no binding after control went off");
-  assert.deepEqual(discarded.at(-1), "/scratch/Ardia Shared/Offline");
+  assert.deepEqual(discarded.at(-1), ["/scratch/Ardia Shared/Offline", identityOf("/scratch/Ardia Shared/Offline")]);
 });
 
 test("control switched off during a socket sync: the round writes no files", async () => {
@@ -123,7 +140,7 @@ test("add binds the canonical path once, whatever the spelling, and refuses / an
   const second = await ok("sharedFolders.add", { path: "/scratch/Real", window: windowId });
   assert.deepEqual(second.groups, first.groups, "two spellings of one folder make one binding");
   assert.equal(boundFolders().filter((b) => b.folder.path === "/scratch/Real").length, 1);
-  assert.deepEqual(boundFolders().find((b) => b.folder.path === "/scratch/Real").folder.identity, { device: 7, inode: [..."/scratch/Real"].reduce((n, c) => n + c.charCodeAt(0), 0) });
+  assert.deepEqual(boundFolders().find((b) => b.folder.path === "/scratch/Real").folder.identity, identityOf("/scratch/Real"));
   const groups = Object.keys(S().groups).length;
   assert.equal((await send("sharedFolders.add", { path: "/" })).error?.code, "refused");
   assert.equal((await send("sharedFolders.add", { path: "/Users" })).error?.code, "refused");
@@ -168,7 +185,7 @@ test("overlapping shares of one group make one folder; a group removed while its
   release2();
   assert.equal((await pending).error?.code, "no_window");
   assert.equal(sharedFolderOf(other.profileId, other.key), undefined);
-  assert.equal(discarded.at(-1), "/scratch/Ardia Shared/Vanish");
+  assert.deepEqual(discarded.at(-1), ["/scratch/Ardia Shared/Vanish", identityOf("/scratch/Ardia Shared/Vanish")]);
 });
 
 test("stop while a sync runs: the sync answers with a clear error instead of a crash", async () => {
@@ -192,4 +209,50 @@ test("share reports a failed initial sync instead of handing out the folder's UR
   assert.match(reply.error.message, /couldn't be synced yet: Can’t open/);
   assert.equal(reply.result, undefined);
   setFolderSync(profileId, key, { state: "synced", error: null });
+});
+
+test("share makes its folder in the checked parent and binds the identity create returned, without resolving the new folder", async () => {
+  const { group, profileId, key } = await setup("Parented");
+  aliases.set("/scratch/parent-link", "/scratch/Parent");
+  const shown = await ok("sharedFolders.share", { group, parent: "/scratch/parent-link/" });
+  assert.deepEqual(created.at(-1), ["/scratch/Parent", identityOf("/scratch/Parent"), "Parented"]);
+  assert.equal(shown.path, "/scratch/Parent/Parented");
+  assert.deepEqual(sharedFolderOf(profileId, key).identity, identityOf("/scratch/Parent/Parented"));
+  assert.ok(!resolved.includes("/scratch/Parent/Parented"), "the new folder isn't resolved by path in a second call");
+  assert.equal((await send("sharedFolders.share", { group: (await setup("Rooted")).group, parent: "/" })).error?.code, "refused");
+});
+
+test("a legacy binding is upgraded to its canonical path and identity the first time it's used, and add finds it by identity", async () => {
+  const { group, profileId, key, windowId } = await setup("Legacy");
+  aliases.set("/scratch/legacy-link", "/scratch/Legacy Real");
+  bindFolder(profileId, key, "/scratch/legacy-link");
+  const groups = Object.keys(S().groups).length;
+  const again = await ok("sharedFolders.add", { path: "/scratch/Legacy Real", window: windowId });
+  assert.deepEqual(again.groups, [group], "the real path finds the legacy binding");
+  assert.equal(Object.keys(S().groups).length, groups, "no second group");
+  assert.equal(sharedFolderOf(profileId, key).path, "/scratch/Legacy Real");
+  assert.deepEqual(sharedFolderOf(profileId, key).identity, identityOf("/scratch/Legacy Real"));
+
+  const other = await setup("Legacy Share");
+  bindFolder(other.profileId, other.key, "/scratch/legacy-share-link");
+  aliases.set("/scratch/legacy-share-link", "/scratch/Legacy Share Real");
+  reads.length = 0;
+  await ok("sharedFolders.share", { group: other.group });
+  assert.deepEqual(reads.at(-1), ["/scratch/Legacy Share Real", identityOf("/scratch/Legacy Share Real")], "share syncs with the identity");
+});
+
+test("the sidebar and the socket sharing one unbound group make one binding; the loser discards its own folder", async () => {
+  const { group, windowId, profileId, key } = await setup("Race");
+  const release = hold("create");
+  const sidebar = shareFolder(windowId, group);
+  await settle();
+  const socket = await ok("sharedFolders.share", { group });
+  release();
+  await sidebar;
+  await settle();
+  assert.equal(sharedFolderOf(profileId, key).path, socket.path, "the socket's binding stands");
+  const lost = created.filter(([, , name]) => name === "Race").length;
+  assert.equal(lost, 2, "both made a folder");
+  const loser = [...madePaths].find((p) => p.startsWith("/scratch/Ardia Shared/Race") && p !== socket.path);
+  assert.deepEqual(discarded.at(-1), [loser, identityOf(loser)], "the sidebar removed the folder it made, by identity");
 });

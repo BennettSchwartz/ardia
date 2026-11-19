@@ -62,7 +62,7 @@ globalThis.acTestNativeModules = {
       await duringApply();
       return { conflicts: nextConflicts.splice(0) };
     },
-    create: async (parent, name) => `${parent}/${name}`,
+    create: async (parent, _parentIdentity, name) => ({ path: `${parent}/${name}`, device: 1, inode: 1 }),
     watch: () => {},
     addListener: () => ({ remove() {} }),
   },

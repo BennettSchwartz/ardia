@@ -12,6 +12,7 @@ import { knownNames, localFolder, signatureOf } from "./local";
 import { mergeFolder } from "./merge";
 import { planFiles } from "./plan";
 import { remoteLevel } from "./remote";
+import { upgradeLegacy } from "./bindings";
 import { boundFolders, folderRef, saveFoldersNow, setFolderBase, setFolderSync, sharedFolderOf, unbindFolder, useSharedFolders } from "./store";
 
 type Place = { kind: "shown"; groupId: string } | { kind: "hidden" } | { kind: "gone" };
@@ -95,7 +96,7 @@ export function syncFolderNow(profileId: string, key: string, allowed: Guard = a
 
 async function round(profileId: string, key: string, allowed: Guard) {
   const ref = folderRef(profileId, key);
-  const folder = sharedFolderOf(profileId, key);
+  const folder = await upgradeLegacy(profileId, key);
   if (!folder) return;
   const place = folderPlace(store(), profileId, key);
   if (place.kind !== "shown") {
