@@ -24,16 +24,23 @@ public class ExtensionsModule: Module {
     panel.begin { response in reply.ok(response == .OK ? panel.url?.path : nil) }
   }
 
+  static let packageReads = DispatchQueue(label: "ardia.extensions.package", qos: .userInitiated)
+
   static func inspectUnpacked(_ args: CallArgs, _ reply: CallReply) throws {
-    let info = ArdiaServices.inspectUnpacked(try args.text("path"))
-    if let error = info["error"] { return reply.fail("ERR_ENGINE", error as? String ?? "\(error)") }
-    reply.ok(info)
+    let path = try args.text("path")
+    packageReads.async {
+      let info = ArdiaServices.inspectUnpacked(path)
+      DispatchQueue.main.async {
+        if let error = info["error"] { return reply.fail("ERR_ENGINE", error as? String ?? "\(error)") }
+        reply.ok(info)
+      }
+    }
   }
 
   static let calls = CallTable(domain: "extensions", handlers: [
     "list": { args, reply in ArdiaServices.listExtensions(profile: args.profile) { reply.service($0, $1) } },
     "inspectUnpacked": inspectUnpacked,
-    "install": { args, reply in ArdiaServices.installExtension(path: try args.text("path"), profile: args.profile) { reply.service($0, $1) } },
+    "install": { args, reply in ArdiaServices.installExtension(path: try args.text("path"), digest: try args.optionalText("digest"), profile: args.profile) { reply.service($0, $1) } },
     "installCrx": { args, reply in ArdiaServices.installCrx(path: try args.text("path"), profile: args.profile) { reply.service($0, $1) } },
     "setEnabled": { args, reply in
       ArdiaServices.setExtension(try args.text("id"), enabled: try args.bool("enabled"), profile: args.profile) { reply.service($0, $1) }

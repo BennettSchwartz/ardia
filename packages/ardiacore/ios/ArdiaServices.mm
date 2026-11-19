@@ -306,8 +306,15 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
 }
 
 + (NSDictionary *)inspectUnpacked:(NSString *)path {
-  NSMutableDictionary *info = [ardia_extensions::ReadManifest(path) mutableCopy];
-  if (!info[@"error"]) info[@"path"] = path;
+  NSString *error = nil;
+  NSString *folder = ardia_extensions::CanonicalFolder(path, &error);
+  if (!folder) return @{@"error" : error};
+  NSMutableDictionary *info = [ardia_extensions::ReadManifest(folder) mutableCopy];
+  if (info[@"error"]) return info;
+  NSString *digest = ardia_extensions::FolderDigest(folder, &error);
+  if (!digest) return @{@"error" : error};
+  info[@"path"] = folder;
+  info[@"digest"] = digest;
   return info;
 }
 
@@ -319,7 +326,20 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   }];
 }
 
-+ (void)installExtension:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
++ (void)installExtension:(NSString *)path digest:(NSString *)digest profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
+  if (!digest.length) return [self installUnpacked:path profile:profile reply:reply];
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    NSString *error = nil;
+    NSString *folder = ardia_extensions::CanonicalFolder(path, &error);
+    NSString *now = [folder isEqualToString:path] ? ardia_extensions::FolderDigest(folder, &error) : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      if (![now isEqualToString:digest]) return reply(nil, @"The extension's folder changed after Ardia showed it, so nothing was added. Load it again to see what it holds now.");
+      [self installUnpacked:folder profile:profile reply:reply];
+    });
+  });
+}
+
++ (void)installUnpacked:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
   [self callBase:@"ac_extensions_install" profile:profile args:@{@"path" : path ?: @""} completion:^(NSDictionary *result) {
     if ([result[@"id"] isKindOfClass:NSString.class]) Changed(profile, result[@"id"], @"installed");
     Answer(result, reply);

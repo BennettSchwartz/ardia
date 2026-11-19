@@ -51,8 +51,8 @@ typedef void (^ArdiaServiceReply)(id _Nullable value, NSString *_Nullable error)
 
 + (void)listExtensions:(NSString *)profile reply:(ArdiaServiceReply)reply NS_SWIFT_NAME(listExtensions(profile:reply:));
 + (NSDictionary<NSString *, id> *)inspectUnpacked:(NSString *)path;
-+ (void)installExtension:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply
-    NS_SWIFT_NAME(installExtension(path:profile:reply:));
++ (void)installExtension:(NSString *)path digest:(nullable NSString *)digest profile:(NSString *)profile reply:(ArdiaServiceReply)reply
+    NS_SWIFT_NAME(installExtension(path:digest:profile:reply:));
 + (void)installCrx:(NSString *)path profile:(NSString *)profile reply:(ArdiaServiceReply)reply
     NS_SWIFT_NAME(installCrx(path:profile:reply:));
 + (void)setExtension:(NSString *)extensionId enabled:(BOOL)enabled profile:(NSString *)profile reply:(ArdiaServiceReply)reply

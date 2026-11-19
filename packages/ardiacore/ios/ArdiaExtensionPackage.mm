@@ -1,10 +1,74 @@
 #import "ArdiaExtensionPackage.h"
 
 #import <CommonCrypto/CommonDigest.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace ardia_extensions {
 
 namespace {
+
+constexpr unsigned long long kMaxReadBytes = 4ull << 20;
+constexpr NSUInteger kMaxPackageFiles = 20000;
+constexpr unsigned long long kMaxPackageBytes = 1ull << 30;
+
+NSData *ReadRegular(NSString *path, unsigned long long limit) {
+  struct stat info;
+  if (lstat(path.fileSystemRepresentation, &info) != 0 || !S_ISREG(info.st_mode) || (unsigned long long)info.st_size > limit) return nil;
+  NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingUncached error:nil];
+  return data.length <= limit ? data : nil;
+}
+
+NSSet<NSString *> *SystemRoots() {
+  static NSSet<NSString *> *roots = [NSSet setWithArray:@[
+    @"/", @"/Applications", @"/Library", @"/System", @"/Users", @"/Volumes", @"/bin", @"/cores", @"/dev", @"/etc", @"/opt",
+    @"/private", @"/private/etc", @"/private/tmp", @"/private/var", @"/sbin", @"/tmp", @"/usr", @"/usr/local", @"/var"
+  ]];
+  return roots;
+}
+
+bool IsSystemFolder(NSString *folder) {
+  if ([SystemRoots() containsObject:folder]) return true;
+  NSArray<NSString *> *parts = folder.pathComponents;
+  if (parts.count == 3 && [parts[1] isEqualToString:@"Users"]) return true;
+  NSString *within = [folder stringByAppendingString:@"/"];
+  for (NSString *tree in @[ @"/System/", @"/bin/", @"/dev/", @"/etc/", @"/private/etc/", @"/sbin/", @"/usr/bin/", @"/usr/lib/", @"/usr/libexec/", @"/usr/sbin/", @"/usr/share/" ])
+    if ([within hasPrefix:tree]) return true;
+  return [folder isEqualToString:NSHomeDirectory()];
+}
+
+bool HashFile(CC_SHA256_CTX *sha, NSString *path, unsigned long long *total) {
+  int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
+  if (fd < 0) return false;
+  struct stat info;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
+    close(fd);
+    return false;
+  }
+  uint64_t size = (uint64_t)info.st_size;
+  CC_SHA256_Update(sha, &size, sizeof size);
+  static const size_t kChunk = 1 << 20;
+  NSMutableData *buffer = [NSMutableData dataWithLength:kChunk];
+  uint64_t read_total = 0;
+  for (;;) {
+    ssize_t got = read(fd, buffer.mutableBytes, kChunk);
+    if (got < 0) {
+      close(fd);
+      return false;
+    }
+    if (got == 0) break;
+    read_total += (uint64_t)got;
+    *total += (unsigned long long)got;
+    if (*total > kMaxPackageBytes) {
+      close(fd);
+      return false;
+    }
+    CC_SHA256_Update(sha, buffer.bytes, (CC_LONG)got);
+  }
+  close(fd);
+  return read_total == size;
+}
 
 NSData *SHA256(NSData *data) {
   NSMutableData *out = [NSMutableData dataWithLength:CC_SHA256_DIGEST_LENGTH];
@@ -21,7 +85,7 @@ NSString *IdForKeyData(NSData *key) {
 }
 
 NSDictionary *LoadJSON(NSString *path) {
-  NSData *data = [NSData dataWithContentsOfFile:path];
+  NSData *data = ReadRegular(path, kMaxReadBytes);
   if (!data) return nil;
   id object = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingJSON5Allowed error:nil];
   return [object isKindOfClass:NSDictionary.class] ? object : nil;
@@ -126,7 +190,7 @@ NSString *DataURL(NSString *folder, NSString *relativePath) {
   NSArray *root = folder.stringByStandardizingPath.pathComponents;
   NSArray *parts = path.pathComponents;
   if (parts.count <= root.count || ![[parts subarrayWithRange:NSMakeRange(0, root.count)] isEqualToArray:root]) return nil;
-  NSData *data = [NSData dataWithContentsOfFile:path];
+  NSData *data = ReadRegular(path, kMaxReadBytes);
   if (!data.length) return nil;
   NSDictionary *types = @{@"png" : @"image/png", @"jpg" : @"image/jpeg", @"jpeg" : @"image/jpeg", @"gif" : @"image/gif",
                           @"svg" : @"image/svg+xml", @"webp" : @"image/webp", @"ico" : @"image/x-icon", @"bmp" : @"image/bmp"};
@@ -178,6 +242,76 @@ NSDictionary *ReadManifest(NSString *folder) {
   out[@"homepageUrl"] = [m[@"homepage_url"] isKindOfClass:NSString.class] ? m[@"homepage_url"] : nil;
   out[@"id"] = [m[@"key"] isKindOfClass:NSString.class] ? IdForKey(m[@"key"]) : nil;
   return out;
+}
+
+NSString *CanonicalFolder(NSString *path, NSString **error) {
+  char resolved[PATH_MAX];
+  if (![path hasPrefix:@"/"] || !realpath(path.fileSystemRepresentation, resolved)) {
+    *error = @"The folder doesn't exist";
+    return nil;
+  }
+  NSString *folder = [NSFileManager.defaultManager stringWithFileSystemRepresentation:resolved length:strlen(resolved)];
+  struct stat info;
+  if (stat(resolved, &info) != 0 || !S_ISDIR(info.st_mode)) {
+    *error = @"That isn't a folder";
+    return nil;
+  }
+  if (IsSystemFolder(folder)) {
+    *error = @"That's a system or home folder, not an extension's own folder";
+    return nil;
+  }
+  return folder;
+}
+
+NSString *FolderDigest(NSString *folder, NSString **error) {
+  NSURL *root = [NSURL fileURLWithPath:folder isDirectory:YES];
+  NSArray<NSURLResourceKey> *keys = @[ NSURLIsSymbolicLinkKey, NSURLIsDirectoryKey, NSURLIsRegularFileKey ];
+  NSDirectoryEnumerator<NSURL *> *walk = [NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:keys options:0 errorHandler:nil];
+  NSMutableDictionary<NSString *, NSString *> *files = [NSMutableDictionary dictionary];
+  NSString *inside = [folder stringByAppendingString:@"/"];
+  for (NSURL *url in walk) {
+    NSDictionary<NSURLResourceKey, id> *values = [url resourceValuesForKeys:keys error:nil];
+    if ([values[NSURLIsDirectoryKey] boolValue] && ![values[NSURLIsSymbolicLinkKey] boolValue]) continue;
+    NSString *path = url.path;
+    if (![path hasPrefix:inside]) continue;
+    NSString *relative = [path substringFromIndex:inside.length];
+    NSString *target = path;
+    if ([values[NSURLIsSymbolicLinkKey] boolValue]) {
+      char resolved[PATH_MAX];
+      NSString *real = realpath(path.fileSystemRepresentation, resolved) ? @(resolved) : nil;
+      struct stat info;
+      if (!real || ![real hasPrefix:inside] || stat(resolved, &info) != 0 || !S_ISREG(info.st_mode)) {
+        *error = [NSString stringWithFormat:@"%@ links outside the extension's folder or to a folder", relative];
+        return nil;
+      }
+      target = real;
+    } else if (![values[NSURLIsRegularFileKey] boolValue]) {
+      *error = [NSString stringWithFormat:@"%@ isn't a regular file", relative];
+      return nil;
+    }
+    files[relative] = target;
+    if (files.count > kMaxPackageFiles) {
+      *error = [NSString stringWithFormat:@"The folder holds more than %lu files", (unsigned long)kMaxPackageFiles];
+      return nil;
+    }
+  }
+  CC_SHA256_CTX sha;
+  CC_SHA256_Init(&sha);
+  unsigned long long total = 0;
+  for (NSString *relative in [files.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+    NSData *name = [relative dataUsingEncoding:NSUTF8StringEncoding];
+    CC_SHA256_Update(&sha, name.bytes, (CC_LONG)name.length);
+    CC_SHA256_Update(&sha, "", 1);
+    if (!HashFile(&sha, files[relative], &total)) {
+      *error = total > kMaxPackageBytes ? @"The folder holds more than 1 GB" : [NSString stringWithFormat:@"%@ couldn't be read", relative];
+      return nil;
+    }
+  }
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256_Final(digest, &sha);
+  NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [hex appendFormat:@"%02x", digest[i]];
+  return hex;
 }
 
 }

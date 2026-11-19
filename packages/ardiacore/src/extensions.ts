@@ -53,6 +53,7 @@ export type ExtensionPackage = {
   optionsPage: string | null;
   sidePanel: string | null;
   path: string;
+  digest?: string;
 };
 
 export type ActionState = {

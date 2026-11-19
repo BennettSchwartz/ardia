@@ -32,7 +32,7 @@ type TabStripHost = {
 };
 type ExtensionEngine = {
   list(profile: string): Promise<InstalledExtension[]>;
-  install(path: string, profile: string): Promise<string>;
+  install(path: string, profile: string, digest?: string): Promise<string>;
   reload(id: string, profile: string): Promise<void>;
   uninstall(id: string, profile: string): Promise<void>;
   configure?(id: string, profile: string, options: Record<string, unknown>): Promise<void>; inspect?(path: string): Promise<CallResult<"extensions.inspectUnpacked">>;
@@ -493,10 +493,10 @@ const fakeModules = {
   ),
   ArdiaExtensions: domain("extensions", {
     list: async ({ profile }) => ({ extensions: (await extensionEngine()?.list(profile)) ?? [] }),
-    install: async ({ profile, path }) => {
+    install: async ({ profile, path, digest }) => {
       const engine = extensionEngine();
       if (!engine) throw Object.assign(new Error("no extension engine in this test"), { code: "ERR_ENGINE" });
-      return { id: await engine.install(path, profile) };
+      return { id: await engine.install(path, profile, digest) };
     },
     setEnabled: async ({ id }) => (await extensionAnswers.change("setEnabled", id), { ok: true }),
     uninstall: async ({ profile, id }) => (await extensionAnswers.change("uninstall", id), await extensionEngine()?.uninstall(id, profile), { ok: true }),
