@@ -1,6 +1,6 @@
-import { chooseSurfaceItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
+import { checkMenuBarItem, chooseSurfaceItem, dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
 import type { BrowserState } from "../browser/store";
-import { isEligibleTab } from "./automationWindows";
+import { eligibleKind, isEligibleTab, lastFocusedEligibleWindow } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { id, obj, text } from "./socketSchema";
 import { now } from "./socketTargets";
@@ -10,12 +10,13 @@ import { runMethod } from "./controlSocket";
 
 const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page"]);
 
-const privateOpen = (s: BrowserState) => Object.values(s.windows).some((w) => w.kind === "private");
-
-export function visibleSurface(s: BrowserState, surface: OpenSurface): (OpenSurface & { window: string | null }) | null {
-  if (surface.tab) return isEligibleTab(s, surface.tab) ? { ...surface, window: s.tabs[surface.tab]!.windowId } : null;
-  if (PAGE_KINDS.has(surface.kind) && privateOpen(s)) return null;
-  return { ...surface, tab: undefined, window: null };
+export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
+  const window = surface.window;
+  if (!window || !eligibleKind(s, window)) return null;
+  if (surface.tab) {
+    if (!isEligibleTab(s, surface.tab) || s.tabs[surface.tab]?.windowId !== window) return null;
+  } else if (PAGE_KINDS.has(surface.kind)) return null;
+  return { ...surface, window, tab: surface.tab ?? null };
 }
 
 async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
@@ -39,8 +40,16 @@ async function surfaceOf(menuId: string) {
 
 async function choose(params: Record<string, unknown>, call: SocketCall) {
   const surface = await surfaceOf(params.menu as string);
+  const path = params.path as number[];
+  if (surface.kind === "menuBar") {
+    if (typeof params.ref !== "string") throw new OpError("bad_request", "A menu bar item is chosen by its ref as well as its path; menus.open and menus.bar give both.");
+    const ran = await runBarEntry(path, params.ref, surface.window, call);
+    await dismissSurface(surface.id).catch(() => undefined);
+    return { ok: true, menu: surface.id, kind: surface.kind, ...ran };
+  }
+  if (!PAGE_KINDS.has(surface.kind)) throw new OpError("refused", "Only a page's menus and the menu bar are chosen from here; Ardia's own menus stay with you.");
   call.stillServing();
-  const title = await nativeCall(() => chooseSurfaceItem(surface.id, params.path as number[]));
+  const title = await nativeCall(() => chooseSurfaceItem(surface.id, path));
   return { ok: true, menu: surface.id, kind: surface.kind, title };
 }
 
@@ -61,26 +70,36 @@ function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
   return found && found.path.length === path.length ? found : undefined;
 }
 
-async function runBarItem(params: Record<string, unknown>, call: SocketCall) {
-  const path = params.path as number[];
+async function runBarEntry(path: number[], ref: string, window: string | null, call: SocketCall) {
   const item = itemAt(await menuBar(), path);
   if (!item || item.separator || item.submenu) throw new OpError("no_window", "There's no menu bar item at that path; menus.bar lists them.");
+  if (item.ref !== ref) throw new OpError("refused", "The menu bar changed since it was read; read it again with menus.bar.");
   if (!item.enabled) throw new OpError("refused", `${item.title} is turned off.`);
+  const s = now();
+  if (window !== null && !eligibleKind(s, window)) throw new OpError("refused", "That window isn't one the ardia command may use.");
   call.stillServing();
   if (typeof item.command === "string") {
-    const ran = runMethod({ command: item.command, arg: item.arg ?? null, window: (params.window as string | undefined) ?? null, tab: null });
+    await nativeCall(() => checkMenuBarItem(path, ref));
+    const ran = runMethod({ command: item.command, arg: item.arg ?? null, window, tab: null });
     if ("error" in ran) {
       const { code, message } = ran.error as { code: OpError["code"]; message: string };
       throw new OpError(code, message);
     }
-    return { ok: true, title: item.title, command: item.command };
+    return { title: item.title, command: item.command };
   }
-  const title = await nativeCall(() => performMenuBarItem(path));
-  return { ok: true, title, action: item.action ?? null };
+  const target = window ?? lastFocusedEligibleWindow(s);
+  if (!target) throw new OpError("no_window", "No window the ardia command may use is focused.");
+  const title = await nativeCall(() => performMenuBarItem(path, ref, target));
+  return { title, action: item.action ?? null };
+}
+
+async function runBarItem(params: Record<string, unknown>, call: SocketCall) {
+  return { ok: true, ...(await runBarEntry(params.path as number[], params.ref as string, (params.window as string | undefined) ?? null, call)) };
 }
 
 const MENU = id("A menu id from menus.open");
 const PATH = { type: "array", items: { type: "integer", minimum: 0 }, minItems: 1, maxItems: 8, description: "The item's path, as menus.open or menus.bar gives it" } as const;
+const REF = text("The item's ref, as menus.open or menus.bar gives it: its command or action and its titles, so a menu rebuilt since can't run another item");
 
 export const SURFACE_METHODS: MethodSpec[] = [
   {
@@ -97,8 +116,8 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.choose",
     mutates: true,
-    description: "Choose an item in an open menu, as a click on it does; the menu closes",
-    params: obj({ menu: MENU, path: PATH }, ["menu", "path"]),
+    description: "Choose an item in an open menu, as a click on it does; the menu closes. A menu bar item needs its ref and goes through the same rules as menus.runBar; Ardia's own menus are refused",
+    params: obj({ menu: MENU, path: PATH, ref: REF }, ["menu", "path"]),
     result: "{ok, menu, kind, title}",
     run: choose,
   },
@@ -115,14 +134,14 @@ export const SURFACE_METHODS: MethodSpec[] = [
     mutates: false,
     description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it",
     params: obj({}),
-    result: "[{path, title, enabled, checked, key?, command?, arg?, action?, submenu?}]",
+    result: "[{path, ref, title, enabled, checked, key?, command?, arg?, action?, submenu?}]",
     run: () => menuBar(),
   },
   {
     name: "menus.runBar",
     mutates: true,
     description: "Run a menu bar item: an Ardia command goes through run, an editing or window item (Copy, Paste, Undo, Minimize) through the menu itself; Quit, Hide, Close Window and updates are refused",
-    params: obj({ path: PATH, window: text("For an Ardia command, the window to run it in; the focused one when left out") }, ["path"]),
+    params: obj({ path: PATH, ref: REF, window: text("The window to run it in; the focused one when left out. Editing and window items act only when it is the focused window") }, ["path", "ref"]),
     result: "{ok, title, command? | action?}",
     run: runBarItem,
   },
@@ -139,7 +158,7 @@ export function startSurfaceEvents(send: EventSend, wants: ReadonlySet<string>) 
       const visible = visibleSurface(now(), event);
       if (!visible) return;
       shown.add(event.id);
-      if (wants.has(name)) send(name, { id: visible.id, kind: visible.kind, windowId: visible.window, tabId: visible.tab ?? null, items: visible.items?.length ?? 0 });
+      if (wants.has(name)) send(name, { id: visible.id, kind: visible.kind, windowId: visible.window, tabId: visible.tab, items: visible.items?.length ?? 0 });
     } else if (shown.delete(event.id) && wants.has(name)) {
       send(name, { id: event.id, kind: event.kind });
     }

@@ -1,4 +1,5 @@
 import {
+  answerPermissionIfPending,
   onPermission,
   onPermissionDismissed,
   resolvePermission,
@@ -82,10 +83,7 @@ function drop(id: string) {
   for (const [tabId, queue] of queues) queues.set(tabId, queue.filter((r) => r.id !== id));
 }
 
-export function answerPermission(tabId: string, requestId: string, result: PermissionResult, remember = result !== "dismiss") {
-  const request = pageOf(tabId).permission;
-  if (!request || request.id !== requestId) return false;
-  void resolvePermission(request.id, result, remember);
+function answered(tabId: string, request: PermissionRequest, result: PermissionResult) {
   if (result === "accept" && request.permissions.includes("notifications")) {
     void ensureNotificationPermission(useBrowser.getState().tabs[tabId]?.windowId);
   }
@@ -93,12 +91,30 @@ export function answerPermission(tabId: string, requestId: string, result: Permi
     void ensureLocationPermission(useBrowser.getState().tabs[tabId]?.windowId);
   }
   next(tabId);
-  return true;
+}
+
+export function answerPermission(tabId: string, requestId: string, result: PermissionResult, remember = result !== "dismiss") {
+  const request = pageOf(tabId).permission;
+  if (!request || request.id !== requestId) return;
+  void resolvePermission(request.id, result, remember);
+  answered(tabId, request, result);
+}
+
+export async function answerPermissionConfirmed(tabId: string, requestId: string, result: PermissionResult, remember: boolean): Promise<"answered" | "gone"> {
+  const request = pageOf(tabId).permission;
+  if (!request || request.id !== requestId) return "gone";
+  const accepted = await answerPermissionIfPending(request.id, result, remember);
+  if (pageOf(tabId).permission?.id !== request.id) return accepted ? "answered" : "gone";
+  if (accepted) answered(tabId, request, result);
+  else next(tabId);
+  return accepted ? "answered" : "gone";
 }
 
 export const queuedPermissions = (tabId: string) => queues.get(tabId)?.length ?? 0;
 
 export const ONE_TIME_KINDS: ReadonlySet<PermissionKind> = new Set(["camera", "microphone", "cameraPanTiltZoom", "location"]);
+
+export const answersJustOnce = (kinds: readonly PermissionKind[]) => kinds.length > 0 && kinds.every((kind) => ONE_TIME_KINDS.has(kind));
 
 export function dismissPermissions(tabId: string) {
   for (const [id, entry] of [...deciding]) {

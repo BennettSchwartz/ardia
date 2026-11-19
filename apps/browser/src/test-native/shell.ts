@@ -159,9 +159,11 @@ const focus: Modules["ArdiaFocus"] = {
 export const surfaces = {
   open: [] as OpenSurface[],
   bar: [] as SurfaceItem[],
-  holds: false,
+  captures: false,
   chosen: [] as { id: string; path: number[] }[],
-  performed: [] as number[][],
+  performed: [] as { path: number[]; ref: string; windowId: string }[],
+  checked: [] as { path: number[]; ref: string }[],
+  dismissed: [] as string[],
   emit: (event: SurfaceEvent) => shellEvents.emit("onSurface", event),
 };
 
@@ -174,7 +176,7 @@ function surfaceOf(id: string) {
 const menus: Modules["ArdiaMenus"] = {
   addListener: shellEvents.addListener,
   openSurfaces: () => Promise.resolve(surfaces.open),
-  holdPageMenus: (holds) => Promise.resolve(void (surfaces.holds = holds)),
+  capturePageMenus: (captures) => Promise.resolve(void (surfaces.captures = captures)),
   chooseSurfaceItem: async (id, path) => {
     surfaceOf(id);
     surfaces.chosen.push({ id, path });
@@ -183,13 +185,15 @@ const menus: Modules["ArdiaMenus"] = {
   },
   dismissSurface: async (id) => {
     surfaceOf(id);
+    surfaces.dismissed.push(id);
     surfaces.open = surfaces.open.filter((s) => s.id !== id);
   },
   menuBar: () => Promise.resolve(surfaces.bar),
-  performMenuBarItem: async (path) => {
-    surfaces.performed.push(path);
+  performMenuBarItem: async (path, ref, windowId) => {
+    surfaces.performed.push({ path, ref, windowId });
     return "performed";
   },
+  checkMenuBarItem: async (path, ref) => void surfaces.checked.push({ path, ref }),
   showMenu: () => Promise.resolve(null),
   updateMenu: () => Promise.resolve(),
   setMenuState: () => Promise.resolve(),

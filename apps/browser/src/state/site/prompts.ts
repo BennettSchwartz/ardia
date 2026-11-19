@@ -23,7 +23,13 @@ export function popupBlocked(tabId: string, popup: BlockedPopup) {
   if (first && tab) void shouldPromptForPopups(currentEngineProfile(tab.profileId), popup.origin).then((ask) => ask && setPopover(tabId, "popups"));
 }
 
+const passwordPromptIds = new WeakMap<PasswordPrompt, string>();
+let passwordPromptSerial = 0;
+
+export const passwordPromptId = (prompt: PasswordPrompt) => passwordPromptIds.get(prompt) ?? null;
+
 export function showPasswordPrompt(tabId: string, prompt: PasswordPrompt) {
+  if (prompt.state !== "saved") passwordPromptIds.set(prompt, `pw${++passwordPromptSerial}`);
   patchPage(tabId, { passwordPrompt: prompt.state === "saved" ? null : prompt });
 }
 
@@ -62,4 +68,28 @@ export function answerAutofillPrompt(tabId: string, action: AutofillPromptAnswer
   void webviews.get(tabId)?.resolveAutofillPrompt(prompt.id, action);
   patchPage(tabId, { autofillPrompt: null });
   return true;
+}
+
+export type ConfirmedAnswer = "answered" | "gone" | "noView" | "refused";
+
+export async function answerPasswordPromptConfirmed(tabId: string, id: string, action: PasswordPromptAnswer, username?: string): Promise<ConfirmedAnswer> {
+  const prompt = pageOf(tabId).passwordPrompt;
+  if (!prompt || passwordPromptId(prompt) !== id) return "gone";
+  const view = webviews.get(tabId);
+  if (!view?.answerPasswordPrompt) return "noView";
+  const keeps = action === "save" || action === "update";
+  const expected = { state: prompt.state, origin: prompt.origin, username: prompt.username };
+  if (!(await view.answerPasswordPrompt(action, expected, keeps ? (username ?? prompt.username) : null))) return "refused";
+  if (pageOf(tabId).passwordPrompt === prompt) patchPage(tabId, { passwordPrompt: null });
+  return "answered";
+}
+
+export async function answerAutofillPromptConfirmed(tabId: string, id: number, action: AutofillPromptAnswer): Promise<ConfirmedAnswer> {
+  const prompt = pageOf(tabId).autofillPrompt;
+  if (!prompt || prompt.id !== id) return "gone";
+  const view = webviews.get(tabId);
+  if (!view?.answerAutofillPrompt) return "noView";
+  if (!(await view.answerAutofillPrompt(id, action))) return "refused";
+  if (pageOf(tabId).autofillPrompt?.id === id) patchPage(tabId, { autofillPrompt: null });
+  return "answered";
 }

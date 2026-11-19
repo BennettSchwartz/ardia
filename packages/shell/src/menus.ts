@@ -63,6 +63,7 @@ export type SurfaceItem = {
   command?: string | number;
   arg?: string;
   action?: string;
+  ref?: string;
   submenu?: SurfaceItem[];
 };
 
@@ -70,6 +71,8 @@ export type OpenSurface = {
   id: string;
   kind: "select" | "page" | "app" | "menuBar" | "other";
   tab?: string;
+  window?: string;
+  captured?: boolean;
   openedAt?: number;
   link?: string;
   items?: SurfaceItem[];
@@ -83,11 +86,12 @@ export type MenusNative = {
   addListener(name: "onCommand", listener: (e: CommandEvent | MenuPickEvent) => void): EventSubscription;
   addListener(name: "onSurface", listener: (e: SurfaceEvent) => void): EventSubscription;
   openSurfaces(): Promise<OpenSurface[]>;
-  holdPageMenus(holds: boolean): Promise<void>;
+  capturePageMenus(captures: boolean): Promise<void>;
   chooseSurfaceItem(id: string, path: number[]): Promise<string>;
   dismissSurface(id: string): Promise<void>;
   menuBar(): Promise<SurfaceItem[]>;
-  performMenuBarItem(path: number[]): Promise<string>;
+  performMenuBarItem(path: number[], ref: string, windowId: string): Promise<string>;
+  checkMenuBarItem(path: number[], ref: string): Promise<void>;
   showMenu(items: MenuItem[]): Promise<string | null>;
   updateMenu(items: MenuItem[]): Promise<void>;
   setMenuState(state: Omit<MenuState, MenuBookmarkKey>): Promise<void>;
