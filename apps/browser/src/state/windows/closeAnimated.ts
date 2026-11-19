@@ -38,6 +38,7 @@ export function closeWindowAnimated(windowId: string, { replacedBy = null, then,
     const now = after.windows[windowId];
     if (!now) return done(false);
     if ([...familyCounts(after, now.tabIds)].some(([key, n]) => n > (leaving.get(key) ?? 0))) {
+      after.dropStaleLastWindowMark();
       focusWindow(windowId);
       return done(false);
     }
