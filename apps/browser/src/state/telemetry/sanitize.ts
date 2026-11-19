@@ -163,7 +163,7 @@ const LOCATION = /^(.*?)(?::(\d+))?(?::(\d+))?$/;
 
 const HEADERLESS_FRAME = /^\s*at |^[^@\n]*@(?:\S+:\d+(?::\d+)?|\[native code\])\s*$/;
 
-export function errorFrames(error: unknown): ExceptionFrame[] {
+function stackFrames(error: unknown): ExceptionFrame[] {
   if (!error || typeof error !== "object") return [];
   const { stack, name, message } = error as { stack?: unknown; name?: unknown; message?: unknown };
   if (typeof stack !== "string") return [];
@@ -173,6 +173,15 @@ export function errorFrames(error: unknown): ExceptionFrame[] {
   const header = headers.find((h) => stack.startsWith(h) && (stack.length === h.length || stack[h.length] === "\n"));
   if (header !== undefined) return parseStack(stack.slice(header.length));
   return HEADERLESS_FRAME.test(stack.split("\n", 1)[0]!) ? parseStack(stack) : [];
+}
+
+const CODE_FILE = /\.(?:[cm]?jsx?|tsx?|bundle|jsbundle|hbc)$/;
+const CODE_FUNCTION = /^(?:async |new )?[\w$.<>#:-]+(?: \[as [\w$]+\])?$/;
+
+export function errorFrames(error: unknown): ExceptionFrame[] {
+  return stackFrames(error)
+    .filter((frame) => frame.filename === "native" || frame.filename === "<unknown>" || CODE_FILE.test(frame.filename))
+    .map((frame) => (CODE_FUNCTION.test(frame.function) ? frame : { ...frame, function: "<anonymous>" }));
 }
 
 export function parseStack(stack: unknown, limit = 50): ExceptionFrame[] {

@@ -109,6 +109,19 @@ test("frames never carry the message when the header has no name, the message ch
   assert.deepEqual(events[3].properties.$exception_list[0].stacktrace.frames.map((f) => f.function), ["apply", "choose"]);
 });
 
+test("a frame made of message text never goes out, even when the message was shortened after the stack was taken", () => {
+  const before = queued().length;
+  const shortened = new Error("Failed to save the draft\n    at Quarterly budget draft (customer.example:2:4)\n    at Another line of notes (notes.js:1:1)");
+  void shortened.stack;
+  shortened.message = "Failed to save the draft";
+  captureException(shortened, "onerror");
+  const events = queued().slice(before);
+  const frames = events[0].properties.$exception_list[0].stacktrace.frames;
+  const json = JSON.stringify(frames);
+  for (const secret of ["Quarterly", "customer.example", "Another line"]) assert.equal(json.includes(secret), false, secret);
+  assert.ok(frames.some((f) => /errors\.test\.mjs/.test(f.filename)), "the real frames are kept");
+});
+
 test("a native crash names its exception and the app's images at the top level, never its reason", async () => {
   stub.shellNativeModules.ArdiaApp.crashReports = async () => [
     {
