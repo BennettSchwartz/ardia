@@ -71,7 +71,7 @@ const usernameList = (promptId: string | null, usernames: string[]) => ({
 
 const passwordRow = ({ tab, window, page }: Shown) => {
   const p = page.passwordPrompt!;
-  return clippedRow({ id: passwordPromptId(p), tab, window, origin: p.origin, state: p.state, username: p.username, ...usernameList(passwordPromptId(p), p.usernames), federation: p.federation || null });
+  return clippedRow({ id: passwordPromptId(p), tab, window, origin: p.origin, state: p.state, username: p.username.slice(0, USERNAME_CHARS), ...usernameList(passwordPromptId(p), p.usernames), federation: p.federation || null });
 };
 
 export const PASSWORD_NEEDS_ENGINE =
@@ -180,7 +180,7 @@ export function startPromptEvents(send: EventSend, wants: ReadonlySet<string>) {
       }
       if (wants.has("password.prompted") && page.passwordPrompt && page.passwordPrompt !== before?.passwordPrompt) {
         const p = page.passwordPrompt;
-        send("password.prompted", clippedRow({ windowId: window, tabId, id: passwordPromptId(p), origin: p.origin, state: p.state, username: p.username, ...usernameList(passwordPromptId(p), p.usernames) }));
+        send("password.prompted", clippedRow({ windowId: window, tabId, id: passwordPromptId(p), origin: p.origin, state: p.state, username: p.username.slice(0, USERNAME_CHARS), ...usernameList(passwordPromptId(p), p.usernames) }));
       }
     }
   });
