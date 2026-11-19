@@ -17,6 +17,7 @@ import { nativeEvents, unfaked } from "./events";
 import { reportModule } from "./report";
 import { telemetryLocalModule } from "./telemetryLocal";
 import { windowGeometries, windowGeometryFakes } from "./windowGeometry";
+export { geometryWorld } from "./windowGeometry";
 
 type Modules = ShellNativeModules;
 
