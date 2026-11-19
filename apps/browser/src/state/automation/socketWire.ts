@@ -53,6 +53,33 @@ export type WireMethod = { mutates: boolean; narrow?: string } | undefined;
 
 const TOO_BIG = (narrow: string) => `The reply would be over 1 MiB, the most a line can carry; ${narrow}.`;
 
+const WROTE = "The change was made; the full result was over 1 MiB, so read it back with the matching read method.";
+const WROTE_PART = "Part of the change was made (applied says how much, error what stopped it); the full result was over 1 MiB, so read it back with the matching read method.";
+const FAILURE_MESSAGE_CHARS = 1024;
+
+function failureOf(result: Record<string, unknown>, counted: boolean): Record<string, unknown> | null {
+  const error = result.error;
+  if (!isRecord(error)) return null;
+  const kept: Record<string, unknown> = { ...summary(error), message: String(error.message ?? "").slice(0, FAILURE_MESSAGE_CHARS) };
+  delete kept.changed;
+  if (isRecord(error.changed)) kept.changed = counted ? summary(error.changed) : error.changed;
+  return kept;
+}
+
+function compactWrite(id: unknown, result: unknown): string {
+  const fields = isRecord(result) ? result : {};
+  const ok = fields.ok !== false;
+  const hint = ok ? WROTE : WROTE_PART;
+  for (const counted of [false, true]) {
+    const failure = failureOf(fields, counted);
+    const line = JSON.stringify({ id, result: { ...summary(result), ok, oversized: true, ...(failure ? { error: failure } : {}), hint } });
+    if (fitsOnLine(line)) return line;
+  }
+  const failure = failureOf(fields, true);
+  const bare = failure ? { index: failure.index, code: failure.code, message: String(failure.message).slice(0, 256) } : null;
+  return JSON.stringify({ id, result: { ok, oversized: true, ...(typeof fields.applied === "number" ? { applied: fields.applied } : {}), ...(bare ? { error: bare } : {}), hint } });
+}
+
 export function fittedReply(id: unknown, body: WireBody, method: WireMethod, consent: ConsentToken | null): string {
   const line = JSON.stringify({ id, ...body });
   if (fitsOnLine(line)) return line;
@@ -61,11 +88,7 @@ export function fittedReply(id: unknown, body: WireBody, method: WireMethod, con
     const error = isRecord(body.error) ? body.error : {};
     return JSON.stringify({ id, error: { code: typeof error.code === "string" ? error.code : "failed", message: String(error.message ?? "").slice(0, 4096) } });
   }
-  if (method?.mutates) {
-    const compact = JSON.stringify({ id, result: { ok: true, oversized: true, ...summary(body.result), hint: "The change was made; the full result was over 1 MiB, so read it back with the matching read method." } });
-    if (fitsOnLine(compact)) return compact;
-    return JSON.stringify({ id, result: { ok: true, oversized: true, hint: "The change was made; the full result was over 1 MiB, so read it back with the matching read method." } });
-  }
+  if (method?.mutates) return compactWrite(id, body.result);
   return JSON.stringify({ id, error: { code: "failed", message: TOO_BIG(method?.narrow ?? "ask for less (a smaller limit, a later offset, a folder, a window or a lower depth)") } });
 }
 
