@@ -15,6 +15,8 @@ export const CAPTURED_PICK_NEEDS_ENGINE =
 export const PRIVATE_WINDOW_OPEN = "A private window is open, so the ardia command doesn't use the menu bar until it closes.";
 export const PAGE_PICK_REFUSED =
   "Picking from a page's menu or <select> popup is refused: its items run page and app actions (Share among them) outside run's policy. Run a menu bar item from menus.bar with menus.runBar instead.";
+export const LIVE_PAGE_MENU_REFUSED =
+  "A page's context menu on screen isn't used: nothing in the menu says which tab and window it came from, so the ardia command can't tell whose it is.";
 export const TRACKED_BAR_REFUSED = "The ardia command doesn't use the menu bar while it tracks; run an item from menus.bar with menus.runBar instead.";
 export const NATIVE_ITEMS_NEED_VISIBLE = "A background Ardia runs no native menu item (Minimize, Zoom and the like): only the Ardia commands its background allowlist names.";
 export const DYNAMIC_ROW_REFUSED = "That row stands for a menu built from open windows, profiles, pages or history, which the ardia command doesn't read or run.";
@@ -38,7 +40,7 @@ function catalogItem(items: SurfaceItem[], ref: string): SurfaceItem | undefined
 }
 
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
-  if (surface.kind === "menuBar") return null;
+  if (surface.kind === "menuBar" || (surface.kind === "page" && !surface.captured)) return null;
   const window = surface.window;
   if (!window || !eligibleKind(s, window)) return null;
   if (surface.tab) {
@@ -62,6 +64,7 @@ async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
 async function surfaceOf(menuId: string) {
   const raw = (await openSurfaces()).find((m) => m.id === menuId);
   if (raw?.kind === "menuBar") throw new OpError("refused", TRACKED_BAR_REFUSED);
+  if (raw?.kind === "page" && !raw.captured) throw new OpError("refused", LIVE_PAGE_MENU_REFUSED);
   const found = raw && visibleSurface(now(), raw);
   if (!found) throw new OpError("no_window", `There's no open menu ${menuId}; menus.open lists them.`);
   return found;
@@ -90,8 +93,6 @@ async function runBarItem(params: Record<string, unknown>, call: SocketCall) {
   if (!item || item.path.join() !== path.join()) throw new OpError("no_window", "There's no menu bar item with that path and ref; menus.bar lists them.");
   if (item.dynamic) throw new OpError("refused", DYNAMIC_ROW_REFUSED);
   if (item.separator || item.submenu) throw new OpError("no_window", `${item.title || "That row"} isn't an item that runs.`);
-  const s = now();
-  if (window !== null && !eligibleKind(s, window)) throw new OpError("refused", "That window isn't one the ardia command may use.");
   if (typeof item.command === "string") {
     refusePrivate(call);
     const ran = runMethod({ command: item.command, arg: item.arg ?? null, window, tab: null }, surfaceRunMode.background);
@@ -102,6 +103,8 @@ async function runBarItem(params: Record<string, unknown>, call: SocketCall) {
     return { ok: true, title: item.title, command: item.command };
   }
   if (surfaceRunMode.background) throw new OpError("refused", NATIVE_ITEMS_NEED_VISIBLE);
+  const s = now();
+  if (window !== null && !eligibleKind(s, window)) throw new OpError("refused", "That window isn't one the ardia command may use.");
   const target = window ?? lastFocusedEligibleWindow(s);
   if (!target) throw new OpError("no_window", "No window the ardia command may use is focused.");
   refusePrivate(call);
@@ -117,7 +120,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.open",
     mutates: false,
-    description: "Menus open now (a page's <select> popup or context menu, an Ardia menu) with their items and their enabled and checked state; never the menu bar",
+    description: "Menus open now (a page's <select> popup, a page's context menu captured in a hidden Ardia, an Ardia menu) with their items and their enabled and checked state; never the menu bar or a context menu on screen, whose source isn't known",
     params: obj({}),
     result: "[{id, kind, window, tab, items}]",
     run: async () => {
@@ -128,6 +131,7 @@ export const SURFACE_METHODS: MethodSpec[] = [
   {
     name: "menus.choose",
     mutates: true,
+    hidden: true,
     description: "Refused for every open menu: picks from a page's menu, a <select> popup, a captured page menu, Ardia's own menus or a tracking menu bar don't run; run a menu bar item from menus.bar with menus.runBar instead",
     params: obj({ menu: MENU, path: PATH, ref: REF }, ["menu", "path"]),
     result: "{ok, menu, kind, title}",

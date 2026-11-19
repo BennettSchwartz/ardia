@@ -17,6 +17,7 @@ export type MethodSpec = {
   params: JsonSchema;
   result: string;
   run?: (params: Record<string, unknown>, call: SocketCall) => unknown;
+  hidden?: boolean;
 };
 
 export type MethodEntry = { name: string; area: string; mutates: boolean; description: string; params: JsonSchema; result: string };
@@ -114,7 +115,7 @@ export function registerSocketMethods(specs: readonly MethodSpec[]) {
 }
 
 export const methodsCatalog = (): MethodEntry[] =>
-  [...CORE_METHODS, ...added].map(({ name, mutates, description, params, result }) => ({ name, area: areaOf(name), mutates, description, params, result }));
+  [...CORE_METHODS, ...added].filter((m) => !m.hidden).map(({ name, mutates, description, params, result }) => ({ name, area: areaOf(name), mutates, description, params, result }));
 
 export const methodSpec = (name: string): MethodSpec | undefined => byName.get(name);
 

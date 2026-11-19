@@ -83,12 +83,6 @@ final class OpenSurfaces: NSObject {
     return "other"
   }
 
-  private static func focusedPage() -> (tab: String, window: String)? {
-    guard let key = NSApp.keyWindow, let responder = key.firstResponder as? NSView,
-          let tab = ArdiaWebView.appTabId(containing: responder), let window = WindowManager.shared.id(of: key) else { return nil }
-    return (tab, window)
-  }
-
   private static func selectOwner() -> (tab: String, window: String)? {
     for window in NSApp.windows where window.isVisible {
       if let anchor = selectAnchor(in: window.contentView), let tab = ArdiaWebView.appTabId(containing: anchor),
@@ -114,7 +108,7 @@ final class OpenSurfaces: NSObject {
     let kind = Self.kind(of: menu)
     let owner: (tab: String?, window: String?) = switch kind {
     case "select": Self.selectOwner().map { ($0.tab, $0.window) } ?? (nil, nil)
-    case "page": Self.focusedPage().map { ($0.tab, $0.window) } ?? (nil, nil)
+    case "page": (nil, nil)
     default: (nil, WindowManager.shared.id(of: NSApp.keyWindow))
     }
     let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window)
@@ -237,9 +231,13 @@ enum MenuCatalog {
 
   static func action(_ ref: String) -> (action: Selector, title: String, target: Target)? { actions[ref] }
 
+  private static func representsWindow(_ item: NSMenuItem) -> Bool {
+    item.target is NSWindow || item.representedObject is NSWindow
+  }
+
   private static func describe(_ menu: NSMenu, path: [Int], dynamic: Set<ObjectIdentifier>, growing: Set<ObjectIdentifier>) -> [[String: Any]] {
     var out: [[String: Any]] = []
-    for (index, item) in menu.items.enumerated() where !item.isHidden {
+    for (index, item) in menu.items.enumerated() where !item.isHidden && !representsWindow(item) {
       let here = path + [index]
       if item.isSeparatorItem {
         out.append(["path": here, "title": "", "separator": true, "ref": "separator@" + here.map(String.init).joined(separator: ".")])
