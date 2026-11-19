@@ -9,7 +9,7 @@ import { countUsage } from "../../state/telemetry/telemetry";
 import { noteDeckBarTop, watchDeckBar } from "../../state/toasts/store";
 import { capsule, ChromeSurface, deckChromeLayout, deckChromeMotion, font, ink, iPhoneOr, PressScale, rolesFor, startLayout, Symbol, tabsCurve, tabsInk, tabsLayout, useTheme, type MenuItem, SystemGlyph } from "../ui";
 import { MenuTrigger } from "../ui/MenuTrigger";
-import { useKeyboardHeight } from "../search/useKeyboardHeight";
+import { useKeyboardTopFromBottom } from "../search/useKeyboardHeight";
 import { FadingGlyphs, GlassPlusButton, type ChromeFade } from "./ChromeButtons";
 
 type Props = {
@@ -132,7 +132,7 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, safeSide, incogni
   const search = useSearchTabs(shown, incognito, onQuery);
   const { focused } = search;
   const row = useRef<ViewInstance>(null);
-  const keyboard = useKeyboardHeight(shown);
+  const keyboard = useKeyboardTopFromBottom(shown);
   const lift = focused && keyboard > 0 ? Math.max(0, barCenterY - deckBarAboveKeyboard(deckHeight, keyboard)) : 0;
   const rise = useSharedValue(0);
   useEffect(() => {
