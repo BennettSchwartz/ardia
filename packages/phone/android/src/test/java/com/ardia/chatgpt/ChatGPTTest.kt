@@ -171,6 +171,15 @@ class ChatGPTTest {
         assertEquals(pending, restored?.pendingTokens)
     }
 
+    @Test
+    fun expiredIdentityCanIdentifyAStoredRotationWithoutAuthorizingItsAccessToken() {
+        val token = jwt(claims("exp" to 100.0))
+        val checked = ChatGPTIdentity.check(token, issuer, "oaiapp_abc", "n1", now = 106_000)
+        assertEquals("user-1", checked.identity.subject)
+        assertTrue(checked.expired)
+        expectFailure<ChatGPTFailure.InvalidIdentity> { checked.requireCurrent() }
+    }
+
     private fun keyPair(): KeyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
 
     private fun unsigned(value: java.math.BigInteger): ByteArray = value.toByteArray().dropWhile { it == 0.toByte() }.toByteArray()

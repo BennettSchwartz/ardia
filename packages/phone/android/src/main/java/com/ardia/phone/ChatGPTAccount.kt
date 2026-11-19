@@ -229,7 +229,7 @@ internal class ChatGPTAccount(context: Context) {
             if (status != 200) throw ChatGPTFailure.api(body, status)
             val tokens = ChatGPTTokens.parse(body)
             val idToken = tokens.idToken ?: throw ChatGPTFailure.InvalidIdentity
-            val identity = verifiedIdentity(idToken, endpoints, outcome.clientId, authorization.nonce)
+            val identity = checkedIdentity(idToken, endpoints, outcome.clientId, authorization.nonce).requireCurrent()
             if (previousSubject != null && identity.subject != previousSubject) throw ChatGPTFailure.AccountMismatch
             ChatGPTConnection(outcome.clientId, identity, tokens, endpoints, chosenModel = connection?.chosenModel)
         }
@@ -261,28 +261,40 @@ internal class ChatGPTAccount(context: Context) {
 
     private suspend fun refresh(previous: ChatGPTConnection, generation: Long) {
         try {
-            val tokens = previous.pendingTokens ?: run {
-                val request = Request.Builder().url(previous.endpoints.token).header("Accept", "application/json").post(ChatGPTAuthorization.refresh(previous.tokens.refreshToken, previous.clientId).toRequestBody(FORM)).build()
-                val (body, status) = ChatGPTHttp.send(request, timeoutSeconds = 30)
-                if (status != 200) throw ChatGPTFailure.api(body, status)
-                ChatGPTTokens.parse(body, previous.tokens.scopes)
+            val pending = previous.pendingTokens
+            if (pending != null) {
+                val idToken = pending.idToken ?: throw ChatGPTFailure.InvalidIdentity
+                val checked = checkedIdentity(idToken, previous.endpoints, previous.clientId, null)
+                val verified = currentConnection(generation).confirmed(checked.identity)
+                if (!checked.expired && !pending.needsRefresh()) {
+                    save(verified.copy(tokens = pending, pendingTokens = null))
+                    return
+                }
             }
-            val latest = currentConnection(generation)
-            val idToken = tokens.idToken
-            if (idToken == null) {
-                save(latest.copy(tokens = tokens, pendingTokens = null))
-                return
-            }
-            if (latest.pendingTokens == null) save(latest.copy(pendingTokens = tokens))
-            val identity = verifiedIdentity(idToken, latest.endpoints, latest.clientId, null)
-            save(currentConnection(generation).confirmed(identity).copy(tokens = tokens, pendingTokens = null))
+            val currentTokens = pending ?: previous.tokens
+            val request = Request.Builder().url(previous.endpoints.token).header("Accept", "application/json").post(ChatGPTAuthorization.refresh(currentTokens.refreshToken, previous.clientId).toRequestBody(FORM)).build()
+            val (body, status) = ChatGPTHttp.send(request, timeoutSeconds = 30)
+            if (status != 200) throw ChatGPTFailure.api(body, status)
+            publishRotation(ChatGPTTokens.parse(body, currentTokens.scopes), generation)
         } catch (failure: ChatGPTFailure) {
             failed(failure, generation)
             throw failure
         }
     }
 
-    private suspend fun verifiedIdentity(idToken: String, endpoints: ChatGPTEndpoints, clientId: String, nonce: String?): ChatGPTIdentity {
+    private suspend fun publishRotation(tokens: ChatGPTTokens, generation: Long) {
+        val latest = currentConnection(generation)
+        val idToken = tokens.idToken
+        if (idToken == null) {
+            save(latest.copy(tokens = tokens, pendingTokens = null))
+            return
+        }
+        save(latest.copy(pendingTokens = tokens))
+        val identity = checkedIdentity(idToken, latest.endpoints, latest.clientId, null).requireCurrent()
+        save(currentConnection(generation).confirmed(identity).copy(tokens = tokens, pendingTokens = null))
+    }
+
+    private suspend fun checkedIdentity(idToken: String, endpoints: ChatGPTEndpoints, clientId: String, nonce: String?): ChatGPTIdentity.Checked {
         val keys = try {
             val (body, status) = ChatGPTHttp.send(Request.Builder().url(endpoints.jwks).build(), timeoutSeconds = 15)
             if (status != 200) throw ChatGPTFailure.Unavailable
@@ -294,7 +306,7 @@ internal class ChatGPTAccount(context: Context) {
         }
         return withContext(Dispatchers.Default) {
             ChatGPTSignature.verify(idToken, keys)
-            ChatGPTIdentity.verify(idToken, endpoints.issuer, clientId, nonce)
+            ChatGPTIdentity.check(idToken, endpoints.issuer, clientId, nonce)
         }
     }
 

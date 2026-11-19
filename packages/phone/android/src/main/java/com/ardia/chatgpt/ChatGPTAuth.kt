@@ -201,10 +201,20 @@ data class ChatGPTTokens(val accessToken: String, val refreshToken: String, val 
 data class ChatGPTIdentity(val subject: String, val email: String?, val name: String?) {
     fun toJson(): JSONObject = JSONObject().put("subject", subject).put("email", email ?: JSONObject.NULL).put("name", name ?: JSONObject.NULL)
 
+    data class Checked(val identity: ChatGPTIdentity, val expired: Boolean) {
+        fun requireCurrent(): ChatGPTIdentity {
+            if (expired) throw ChatGPTFailure.InvalidIdentity
+            return identity
+        }
+    }
+
     companion object {
         fun fromJson(value: JSONObject): ChatGPTIdentity = ChatGPTIdentity(value.getString("subject"), value.optNullable("email"), value.optNullable("name"))
 
-        fun verify(idToken: String, issuer: String, clientId: String, nonce: String?, now: Long = System.currentTimeMillis()): ChatGPTIdentity {
+        fun verify(idToken: String, issuer: String, clientId: String, nonce: String?, now: Long = System.currentTimeMillis()): ChatGPTIdentity =
+            check(idToken, issuer, clientId, nonce, now).requireCurrent()
+
+        fun check(idToken: String, issuer: String, clientId: String, nonce: String?, now: Long = System.currentTimeMillis()): Checked {
             val parts = idToken.split('.')
             if (parts.size != 3) throw ChatGPTFailure.InvalidIdentity
             val header = parts[0].base64UrlJson() ?: throw ChatGPTFailure.InvalidIdentity
@@ -222,12 +232,13 @@ data class ChatGPTIdentity(val subject: String, val email: String?, val name: St
                 clientId in audiences &&
                 (audiences.size == 1 || azp == clientId) &&
                 (azp == null || azp == clientId) &&
-                expires != null && (expires + 5) * 1000 > now &&
+                expires != null && expires.isFinite() && expires > 0 &&
                 claims.opt("iat") is Number &&
                 !subject.isNullOrEmpty() &&
                 (nonce == null || claims.opt("nonce") as? String == nonce)
             if (!valid) throw ChatGPTFailure.InvalidIdentity
-            return ChatGPTIdentity(subject!!, claims.opt("email") as? String, claims.opt("name") as? String)
+            val identity = ChatGPTIdentity(subject!!, claims.opt("email") as? String, claims.opt("name") as? String)
+            return Checked(identity, (expires!! + 5) * 1000 <= now)
         }
     }
 }
