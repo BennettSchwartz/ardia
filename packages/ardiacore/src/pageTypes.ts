@@ -240,6 +240,7 @@ export type WebViewProps = ViewProps & {
 
 export type WebViewHandle = {
   nativeTag(): number | null;
+  isAttached?(): boolean;
   loadUrl(url: string, options?: { userInitiated?: boolean }): Promise<void>;
   goBack(): Promise<void>;
   goForward(): Promise<void>;

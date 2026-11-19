@@ -22,7 +22,9 @@ export function isTabBusy(tabId: string): boolean {
   return false;
 }
 
-export function awaitLate(tabId: string, work: Promise<string>, owner: number) {
+export function awaitLate(tabId: string, work: Promise<string>, scope: { connection: number; serving: () => boolean }) {
+  if (!scope.serving()) return;
+  const owner = scope.connection;
   free(tabId);
   const token = {};
   const startedIn = generation;

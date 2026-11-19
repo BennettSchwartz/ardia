@@ -82,7 +82,7 @@ test("a cold read stops at its raw-row budget and says scanLimit, apart from the
   assert.equal(cut.truncated, true);
   assert.equal(cut.reason, "scanLimit");
   assert.equal(cut.total, null);
-  assert.ok(stub.historyQueries.every((q) => q.maxUrls <= 200_000), "every engine call is bounded");
+  assert.ok(stub.historyQueries.every((q) => q.maxUrls <= 200_001), "every engine call is bounded");
   visited("", Array.from({ length: 20_001 }, (_, i) => `https://p${i}.example/`));
   const window = await a.ok("history.search", { offset: 19_999, limit: 5 });
   assert.equal(window.reason, "window");
