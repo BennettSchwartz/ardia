@@ -259,6 +259,14 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   and unlink relative to folder descriptors it holds while descending (`openat`, `fstatat`, `renameatx_np`,
   `unlinkat`), so a root or subfolder swapped after the check is never followed. Binding is compare-and-set: whichever
   finishes making a folder second keeps the first one's binding and removes its own.
+  A group bound to a shared folder syncs to disk whenever it changes, so the socket leaves it alone: `apply` answers
+  `refused` ("shared folder groups change only from the sidebar") for any op that would change such a group's members,
+  their order, a tab or group title inside it, or its nesting, including moving a tab or group into or out of it,
+  opening a tab into it, placing one beside a member, closing, pinning or unpinning a member, and renaming, moving,
+  ungrouping, closing or deleting the group or a group inside it (`workspaceSharedGuard.ts`, checked before each op
+  runs). Muting, sleeping or activating a member and changing the group's colour, icon or collapsed state still work.
+  `pins.createFolder` and `pins.addToFolder` refuse a member for the same reason, and `airTraffic.addRule` and
+  `updateRule` refuse a `group` that is a shared folder.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
   menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no
@@ -266,7 +274,8 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   sources or filters fetches again after it, and a pass whose sources or filters changed under it drops its results.
   A socket refresh joins only a pass started by the same request; otherwise it waits for the running pass and then
   fetches for itself, so a refresh after control went off and on never returns a revoked pass's old state. A pass checks
-  control before it fetches and before it commits, and the follow-up a settings change queues keeps the guard of the
+  control before it claims the refresh (the Linux document client's claim fences out other writers), before it fetches
+  and before it commits, so a pass whose control was revoked claims and supersedes nothing, and the follow-up a settings change queues keeps the guard of the
   pass that queued it, so its results never land once control is off. `live.items` lists the folder's listed, then hidden, then recently completed items as
   `{item, shown, unread, completed}`, each item once (an item still animating out counts as completed), a page at a
   time, building rows only for the page. An item over 256 KiB of JSON is sent as `{id, source, oversized: true}`, so

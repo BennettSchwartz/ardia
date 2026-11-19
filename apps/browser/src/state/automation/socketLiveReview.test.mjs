@@ -154,3 +154,31 @@ test("live.items pages past a single item too big for a line", async () => {
     assert.equal(first.nextOffset, null);
   });
 });
+
+test("a pass whose guard was revoked claims no refresh: neither the follow-up nor a fresh request after control went off", async () => {
+  const { liveRefreshClaims } = await import("../live/store.ts");
+  const { refreshFolderWhile } = await import("../live/engine.ts");
+  const real = liveRefreshClaims.begin;
+  const claims = [];
+  liveRefreshClaims.begin = (folderId) => (claims.push(folderId), Promise.resolve({ generation: claims.length }));
+  let calls = 0;
+  const held = gated();
+  try {
+    await withGithub(async () => (++calls === 2 ? (await held.gate, [pr("held", 2)]) : [pr("any", calls)]), async (folder) => {
+      const refreshing = send("live.refresh", { folder });
+      await until(() => calls === 2);
+      assert.ok(!(await send("live.update", { folder, filters: { reviewRequests: false } })).error);
+      const before = claims.length;
+      S().updateSettings({ cliControl: false });
+      await settle();
+      held.open();
+      await refreshing.catch(() => undefined);
+      await settle();
+      await refreshFolderWhile(folder, false, () => false);
+      assert.equal(claims.length, before, "no claim after control went off");
+      assert.equal(calls, 2, "nothing fetched");
+    });
+  } finally {
+    liveRefreshClaims.begin = real;
+  }
+});
