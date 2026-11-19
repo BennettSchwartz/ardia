@@ -1110,7 +1110,7 @@ test("on Android a restore asks the native side to return focus, which re-asks o
   unmount(root);
 });
 
-test("the dark confirmation keeps the iPhone's text colours on a darker card and pill, so its message reads at 4.5:1 and its button label at 3:1, where the iPhone's own are 2.5:1 and 1.5:1", () => {
+test("the dark confirmation sits on a darker card and pill than the iPhone's, with a lighter red, so its message and its 17-point button label both read at 4.5:1, where the iPhone's own are 2.5:1 and 1.5:1", () => {
   const { actionSheetInk } = require("../components/ui/tokens") as typeof import("../components/ui/tokens");
   const channel = (value: number) => {
     const c = value / 255;
@@ -1127,8 +1127,8 @@ test("the dark confirmation keeps the iPhone's text colours on a darker card and
   const dark = actionSheetInk.dark;
   expect(contrast(dark.message, dark.solid)).toBeGreaterThanOrEqual(4.5);
   expect(contrast(dark.title, dark.solid)).toBeGreaterThanOrEqual(4.5);
-  expect(contrast(dark.destructive, dark.button)).toBeGreaterThanOrEqual(3);
-  expect(contrast(dark.title, dark.button)).toBeGreaterThanOrEqual(3);
+  expect(contrast(dark.destructive, dark.button)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(dark.title, dark.button)).toBeGreaterThanOrEqual(4.5);
   expect(luminance(dark.button)).toBeGreaterThan(luminance(dark.solid));
   expect(contrast("#C5C5C5", "#797979")).toBeLessThan(3);
   expect(contrast("#FF9B9C", "#959595")).toBeLessThan(2);

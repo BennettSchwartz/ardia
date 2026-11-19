@@ -264,7 +264,7 @@ export const actionSheetLook = {
 
 export const actionSheetInk = {
   light: { fill: "rgba(255,252,253,0.92)", solid: "#F9F9F9", rim: "#9E9E9E", title: "#000000", message: "#989898", button: "#DFDFDF", destructive: "#F22F32" },
-  dark: { fill: "rgba(72,72,72,0.92)", solid: "#525252", rim: "#2A2A2A", title: "#FFFFFF", message: "#C8C8C8", button: "#626262", destructive: "#FF9EA0" },
+  dark: { fill: "rgba(72,72,72,0.92)", solid: "#484848", rim: "#2A2A2A", title: "#FFFFFF", message: "#C8C8C8", button: "#555555", destructive: "#FFB8B9" },
 } as const;
 
 export const trayShadow = { opacity: 0.14, radius: 24, offsetY: -4, elevation: 12 } as const;
