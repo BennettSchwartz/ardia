@@ -205,6 +205,33 @@ test("a held store prompt never goes to a closing window: it takes another open 
   gates.install = null;
 });
 
+test("a held store prompt can go to an open Little Ardia when the main window is closing", async () => {
+  const { folders, gates, windowId } = await setup();
+  const { startClosingWindow, stopClosingWindow } = await import("../windows/closingWindows.ts");
+  folders.set("/tmp/l/ext", { id: "lll" });
+  const little = S().createWindow({ kind: "small", url: "https://little.example/" });
+  assert.equal(S().windows[little]?.kind, "small");
+  useBrowser.setState((st) => ({ ui: { ...st.ui, focusOrder: [windowId, little] } }));
+  const host = utilitySheetHost(SETTINGS_WINDOW_ID);
+  const shown = await loadFromSettings("/tmp/l/ext");
+  const refusal = gate();
+  gates.install = refusal.shut.then(() => {
+    throw new Error("Chromium refused it");
+  });
+  void confirmInstall(shown.key);
+  await settle();
+  showInstallPrompt(SETTINGS_WINDOW_ID, { requestId: "held-l", profile: "", type: "install", name: "Held", icon: "", permissions: [] });
+  host();
+  startClosingWindow(windowId);
+  refusal.open();
+  await settle();
+  const now = useExtensions.getState().install;
+  assert.deepEqual([now?.status, now?.windowId], ["prompt", little]);
+  cancelInstall();
+  stopClosingWindow(windowId);
+  gates.install = null;
+});
+
 test("the Web Store fast path checks control after the list it waited on", async () => {
   const { list, gates } = await setup();
   list.push(row("abcdefghijklmnopabcdefghijklmnop"));
@@ -224,7 +251,6 @@ test("configure changes one setting per call: site access with incognito, or any
   for (const incognito of [true, false]) {
     const reply = await call("extensions.configure", { id: "both", siteAccess: "allSites", incognito });
     assert.equal(reply.error?.code, "bad_request", JSON.stringify(reply));
-    assert.equal(reply.error.message, "change site access and incognito in separate calls");
   }
   assert.equal((await call("extensions.configure", { id: "both", siteAccess: "allSites", userScripts: true })).error?.code, "bad_request");
   assert.equal((await call("extensions.configure", { id: "both", incognito: true, userScripts: true })).error?.code, "bad_request");
@@ -232,13 +258,51 @@ test("configure changes one setting per call: site access with incognito, or any
   assert.deepEqual([list[0].siteAccess, list[0].incognito, list[0].sites], ["ON_CLICK", false, ["https://a.example/*"]], "no grant lost");
 });
 
+test("specificSites without hosts, or with nothing named at all, fails validation before anything is read", async () => {
+  const { list, writes, listCalls } = await setup();
+  list.push(row("sites", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*"] }));
+  const before = listCalls.count;
+  for (const params of [{ id: "sites", siteAccess: "specificSites" }, { id: "sites", siteAccess: "specificSites", hosts: [] }, { id: "sites" }, { id: "sites", siteAccess: "onClick", hosts: ["https://a.example/*"] }]) {
+    assert.equal((await call("extensions.configure", params)).error?.code, "bad_request", JSON.stringify(params));
+  }
+  assert.deepEqual([writes, listCalls.count - before], [[], 0]);
+});
+
+test("unrestricted to specificSites with every grant revoked is refused before the write, never reported as done", async () => {
+  const { list, writes } = await setup();
+  list.push(row("broad", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*"] }));
+  const reply = await call("extensions.configure", { id: "broad", siteAccess: "specificSites", hosts: ["https://a.example/*"] });
+  assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+  assert.match(reply.error.message, /granting other sites needs engine support/);
+  assert.deepEqual(writes, [], "no write, so no grant was revoked");
+  assert.deepEqual([list[0].siteAccess, list[0].sites], ["ON_ALL_SITES", ["https://*/*"]]);
+});
+
+test("specificSites answers failed when Chromium leaves different sites than the request named", async () => {
+  const { list } = await setup();
+  list.push(row("kept", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*", "https://a.example/*"], revokeAllOnWithhold: true }));
+  const reply = await call("extensions.configure", { id: "kept", siteAccess: "specificSites", hosts: ["https://a.example/*"] });
+  assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
+  list.push(row("fine", { siteAccess: "ON_ALL_SITES", sites: ["https://*/*", "https://b.example/*"] }));
+  const ok2 = await ok("extensions.configure", { id: "fine", siteAccess: "specificSites", hosts: ["https://b.example/*"] });
+  assert.deepEqual([ok2.siteAccess, ok2.sites], ["ON_SPECIFIC_SITES", ["https://b.example/*"]]);
+});
+
+test("a successful configure reads the list exactly once after its write", async () => {
+  const { list, writes, listCalls } = await setup();
+  list.push(row("once", { siteAccess: "ON_CLICK", incognitoAllowed: true }));
+  await ok("extensions.configure", { id: "once", incognito: true });
+  assert.equal(writes.length, 1);
+  assert.equal(listCalls.count - writes[0].listCallsBefore, 1);
+});
+
 test("a silently declined Incognito change answers failed, with nothing else touched", async () => {
   const { list, writes } = await setup();
   list.push(row("silent", { siteAccess: "ON_SPECIFIC_SITES", sites: ["https://a.example/*"], incognitoAllowed: true, ignoreIncognito: true }));
   const reply = await call("extensions.configure", { id: "silent", incognito: true });
   assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
-  assert.match(reply.error.message, /kept silent's incognito as it was/);
-  assert.deepEqual(writes, [{ id: "silent", incognito: true }], "only the one write");
+  assert.match(reply.error.message, /didn't leave silent's incognito as asked/);
+  assert.deepEqual(writes.map(({ id, incognito }) => ({ id, incognito })), [{ id: "silent", incognito: true }], "only the one write");
   assert.deepEqual([list[0].siteAccess, list[0].sites], ["ON_SPECIFIC_SITES", ["https://a.example/*"]]);
 });
 

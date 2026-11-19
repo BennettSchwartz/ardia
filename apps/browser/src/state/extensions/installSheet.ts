@@ -3,7 +3,7 @@ import { useBrowser } from "../browser/store";
 import { errorText } from "../../lib/errors";
 import { isUtilityWindowId } from "../settings/settingsWindows";
 import { isWindowClosing } from "../windows/closingWindows";
-import { isOpenRegularWindow } from "../windows/small";
+import { isOpenRegularWindow, isSmallWindow } from "../windows/small";
 import { noteUnpackedInstall } from "../telemetry/exportCounts";
 import { consentToken, type ConsentToken } from "../telemetry/client";
 import { noteExtensionInstallPromptStale } from "../telemetry/usage";
@@ -33,7 +33,7 @@ export function utilitySheetHost(windowId: string): () => void {
 function shownWindowFor(windowId: string): string | null {
   if (windowCanShow(windowId)) return windowId;
   const s = useBrowser.getState();
-  return [...s.ui.focusOrder, ...s.windowOrder].find((id) => isOpenRegularWindow(s.windows[id])) ?? null;
+  return [...s.ui.focusOrder, ...s.windowOrder].find((id) => isOpenRegularWindow(s.windows[id]) || (isSmallWindow(s.windows[id]) && !isWindowClosing(id))) ?? null;
 }
 
 export function showInstallSheet(next: InstallRequest): boolean {
