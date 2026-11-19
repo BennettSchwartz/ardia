@@ -103,14 +103,14 @@ test("with every new capability on, each Settings row the engine unlocks is show
     if (id !== "automations.meetingAlertCondition") assert.ok(without.has(id), `${id} stays hidden on an engine without it`);
   }
   for (const id of ["tabs.videoUpscaling", "advanced.ardiaCommand", "advanced.compactCliPill"]) assert.equal(settings.settingUnavailable(id), true, `${id} still waits for its own backend`);
-  for (const id of ["advanced.pageEngine", "advanced.fairPlayInChromium", "advanced.websiteEngines"]) assert.equal(searchable.has(id), false, id);
+  for (const id of ["advanced.pageEngine", "advanced.websiteEngines"]) assert.equal(searchable.has(id), false, id);
 });
 
 test("with every new capability on, each command, menu entry and shortcut row appears", () => {
   const capabilities = linuxCapabilities(host);
   const hidden = unavailableCommands(capabilities);
   for (const command of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM]) assert.equal(hidden.has(command), false, command);
-  assert.deepEqual([...hidden].sort(), ["toggleJavaScriptFromAppleEvents", "togglePageEngine"]);
+  assert.deepEqual([...hidden].sort(), ["copyLastFreeze", "toggleJavaScriptFromAppleEvents", "togglePageEngine"], "Copy Last Freeze stays hidden: Linux keeps no freeze records");
   for (const command of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM, "hideElement", "showHiddenElements"]) assert.equal(unavailableCommands(linuxCapabilities(bare)).has(command), true, `${command} is hidden without the engine`);
   const items = appMenuItems(menuState, new Map(), hidden);
   for (const id of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM, "reportProblem"]) assert.ok(find(items, id), `${id} is in the menu`);

@@ -4,9 +4,9 @@ export const CONFIG_SETTING_KEYS: readonly SettingKey[] = [
   "warnBeforeQuitting", "warnBeforeClosingWindow", "restoreSession", "separateDownloadFolders", "searchEngine", "searchSuggestions", "commandBarHistory", "showSelectionSearch", "blockNotificationRequests",
   "tabLayout", "autoHideTabs", "sidebarSide", "hideToolbarWhileScrolling", "newTabPosition", "newTabButtonPosition", "appLinksFirst", "newTabOpens",
   "warnBeforeClosingLastTab", "keepTopAppsRunning", "undoReopensClosedTab", "warnBeforeMovingTabsToProfile", "shareTabsAcrossWindows",
-  "extendWebsiteColor", "cmdClickCreatesTabGroup", "optShiftClickOpensInGroup", "peekModifier", "peekLinksToOtherSites", "newTabLinksOpenIn", "popupsOpenAsTabs",
-  "splitLinkModifier", "autoGroupMeetingTabs", "cleanUpInactiveTabsAfterMinutes", "suggestCleanUp", "mutedSites", "showUnreadCounts", "showTopAppBadges", "showTabHoverMenu", "showFullUrlInTabHoverMenu", "closedTopAppTiles", "topAppFolders", "unreadHiddenSites", "neverTranslateSites",
-  "autoPictureInPicture", "blockAutoplayEverywhere", "videoUpscaling", "sidebarWidth", "showSidebarButton",
+  "extendWebsiteColor", "cmdClickCreatesTabGroup", "optShiftClickOpensInGroup", "peekModifier", "peekLinksToOtherSites", "newTabLinksOpenIn", "popupsOpenAsTabs", "peekButtons",
+  "splitLinkModifier", "autoGroupMeetingTabs", "cleanUpInactiveTabsAfterMinutes", "suggestCleanUp", "mutedSites", "showUnreadCounts", "showTopAppBadges", "showTabHoverMenu", "showFullUrlInTabHoverMenu", "closedTopAppTiles", "topAppFolders", "unreadHiddenSites", "neverTranslateSites", "developerModeSites",
+  "autoPictureInPicture", "playingNowAcrossProfiles", "blockAutoplayEverywhere", "videoUpscaling", "sidebarWidth", "showSidebarButton",
   "showClearButton", "tidyTabs", "balancedTopApps", "selectedTabGlow", "interfaceScale", "sidebarTextSize", "sidebarTextContrast", "selectedTopApp", "elementOutlines", "interfaceStyle", "glassTintWithTheme",
   "glassTintAmount", "fadeUnloadedTabs", "strikeSleepingTabs", "warnBeforeClosingTabGroup", "batterySaverWhen", "memorySaver",
   "memorySaverMode", "loadProfilesWhenOpened", "unloadProfilesAfter", "keepActiveSites", "extensionSidePanelWidth", "showFullUrl", "showBookmarks", "bookmarksBar",
@@ -17,7 +17,7 @@ export const CONFIG_SETTING_KEYS: readonly SettingKey[] = [
 
 export const CONFIG_EXCLUDED_KEYS: readonly SettingKey[] = [
   "customSearchUrl", "newTabUrl", "customSearchEngines", "extensionSearchEngines", "allowJavaScriptFromAppleEvents", "cliControl", "defaultProfileId",
-  "pageEngine", "websiteEngines", "protectedVideoInWebKit", "fairPlayInChromium",
+  "pageEngine", "websiteEngines", "protectedVideoInWebKit",
 ];
 
 const ALLOWED: ReadonlySet<string> = new Set(CONFIG_SETTING_KEYS);

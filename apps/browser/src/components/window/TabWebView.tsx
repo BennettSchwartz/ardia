@@ -4,7 +4,8 @@ import type { PageEngine } from "../../state/engines/engines";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet } from "react-native";
 import { focus, switchToTab } from "../../state/browser/actions";
-import { notePictureInPictureBackToTab, notePictureInPictureClickSkip, notePictureInPictureDragged } from "../../state/telemetry/pictureInPictureCounts";
+import { notePictureInPictureBackToTab, notePictureInPictureClickSkip, notePictureInPictureDragged, notePictureInPictureResized } from "../../state/telemetry/pictureInPictureCounts";
+import { noteRendererResponsive, noteRendererUnresponsive } from "../../state/telemetry/freezes";
 import { noteFavicon } from "../../state/favicons/favicons";
 import { adoptIconPage, dropOutlivedFavicon, noteIconPage } from "../../state/favicons/iconPage";
 import { restoredThemeColor } from "../../state/windows/launchLook";
@@ -47,11 +48,12 @@ import { notePagePress, notePagePressRefused } from "../../state/telemetry/tabPr
 import { noteWebKitFocusRestore } from "../../state/telemetry/pageFocusReturns";
 import { noteAutoPictureInPictureKept, notePageOverlay, noteReopenedPage, noteSiteControls, noteWebKitPageKeptHidden } from "../../state/telemetry/usage";
 import { noteWebKitMediaFault } from "../../state/telemetry/webkitMediaFaults";
-import { noteFairPlay } from "../../state/telemetry/fairPlayCounts";
 import { isAdoptKind } from "../../state/tabs/adoptIds";
 import { firstPagePending, isBlankAddress, noteFirstPagePending, reportedAddress, reportedTitle } from "../../state/tabs/pendingAddress";
 import { STATUS_FLIP_BAND } from "./tokens";
 import { startHidingElement } from "../../state/site/hiddenElements";
+import { forgetPeekHandover, notePeekRecipient, peekDonorTaken } from "../../state/peek/donors";
+import { promotedFromPeek } from "../../state/peek/actions";
 
 const webViewTab = (t: Tab | undefined) => ({ navigation: navigationOf(t), adoptId: adoptOf(t), profileId: t?.profileId ?? "", shownUrl: t?.url ?? "" });
 
@@ -63,10 +65,16 @@ export const TabWebView = memo(function TabWebView(props: TabWebViewProps) {
 });
 
 function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }: TabWebViewProps & { engine: PageEngine }) {
+  const asPeek = peekOf !== undefined;
+  const isDonor = () => asPeek && promotedFromPeek(tabId);
+  const handedToTab = () => isDonor() && peekDonorTaken(tabId);
   const { navigation, adoptId, profileId, shownUrl } = useTabValue(tabId, webViewTab, shallowEqual);
   const neighbour = useBrowserWhile(warm, (s) => warm && s.windows[s.tabs[tabId]?.windowId ?? ""]?.profileId !== profileId);
   const tab = () => currentTab(tabId);
-  const ref = useMemo(() => webviewRef(tabId), [tabId]);
+  const ref = useMemo(() => {
+    const register = webviewRef(tabId);
+    return (handle: Parameters<typeof register>[0]) => (handle && peekOf !== undefined && promotedFromPeek(tabId) ? undefined : register(handle));
+  }, [tabId]);
   const autoPictureInPicture = useAutoPictureInPicture(tabId, visible);
   const pageColor = useProfilesValue(profileId, (profiles) => (isIncognitoProfile(profileId) ? "incognito" : (profiles[profileId]?.color ?? "plum")));
   const theme = useProfileTheme(profileId);
@@ -83,7 +91,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
   const arrived = useRef(!!handoff && (handoff.seq === navigation?.seq || isBlankAddress(navigation?.url ?? "")));
   const loadsOnCreate = useRef(engine === "webkit" && !handoff ? navigation?.seq : undefined);
   useEffect(() => {
-    if (!navigation) return;
+    if (!navigation || isDonor()) return;
     noteIssued(tabId, navigation.seq);
     if (arrived.current) {
       arrived.current = false;
@@ -106,6 +114,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
   useEffect(() => {
     persistEngine(tabId, engine);
     return () => {
+      if (handedToTab()) return forgetPeekHandover(tabId);
       noteGone(tabId);
       noteFirstPagePending(tabId, false);
       forgetUnreadIfGone(tabId);
@@ -118,6 +127,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
   const mountedProfile = useRef(profileId);
   useLayoutEffect(
     () => () => {
+      if (handedToTab()) return;
       const t = tab();
       const sameEngine = currentTabEngine(tabId) === engine;
       if (wantsPage(t) && sameEngine && currentEngineProfile(t.profileId) === currentEngineProfile(mountedProfile.current) && !isQuitting()) handOff(tabId, currentEngineProfile(t.profileId), engine);
@@ -156,6 +166,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       contentsBackgroundColor={backdrop}
       shownUrl={shownUrl}
       onReady={() => {
+        if (peekOf === undefined) notePeekRecipient(tabId);
         markTabReady(tabId);
         noteTabReady(tabId);
         noteReady(tabId);
@@ -235,6 +246,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onPictureInPicture={(state) => setPictureInPictureState(tabId, state)}
       onAutoPictureInPictureKept={noteAutoPictureInPictureKept}
       onPictureInPictureDragged={notePictureInPictureDragged}
+      onPictureInPictureResized={notePictureInPictureResized}
       onPictureInPictureSkip={notePictureInPictureClickSkip}
       onMediaFault={noteWebKitMediaFault}
       onDisplayMediaRequest={(request) => requestDisplayMedia(tabId, request)}
@@ -253,8 +265,14 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
         }
         noteUnreadPageEnded(tabId);
       }}
-      onUnresponsive={() => patchPage(tabId, { unresponsive: true })}
-      onResponsive={() => patchPage(tabId, { unresponsive: false })}
+      onUnresponsive={() => {
+        noteRendererUnresponsive(tabId);
+        patchPage(tabId, { unresponsive: true });
+      }}
+      onResponsive={() => {
+        noteRendererResponsive(tabId, false);
+        patchPage(tabId, { unresponsive: false });
+      }}
       onFullscreen={(fullscreen) => patchPage(tabId, { fullscreen })}
       onMediaAccess={(mediaAccess) => patchPage(tabId, { mediaAccess: mediaAccess.camera || mediaAccess.microphone || mediaAccess.screen ? mediaAccess : null })}
       onSecurity={(security) => !prewarmOnly() && patchPage(tabId, { security })}
@@ -283,7 +301,6 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onSelection={(selection) => setPageSelection(tabId, selection)}
       onScroll={(state) => noteScroll(tabId, state)}
       onProtectedMedia={(request) => offerWebKit(tabId, request)}
-      onFairPlay={noteFairPlay}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {

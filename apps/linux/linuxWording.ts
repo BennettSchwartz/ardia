@@ -1,6 +1,7 @@
 import type { Plugin } from "vite";
 import type { Wording } from "./credentialWording";
 import { hasMacModifiers, linuxShortcutText } from "./shortcutText";
+import { PHRASES_ONLY_WITH } from "../browser/src/state/telemetry/platformWording";
 
 export const LINUX_WORDING: readonly Wording[] = [
   {
@@ -47,6 +48,7 @@ export const LINUX_WORDING: readonly Wording[] = [
   {
     file: "state/telemetry/copy.ts",
     replacements: [
+      ...[PHRASES_ONLY_WITH.freezeWatch ?? []].flat().map((phrase): [string, string] => [phrase, ""]),
       ["how many tab changes this Mac sent,", "how many tab changes this computer sent,"],
       ["Sent to ardia.dev with a random ID made on this Mac, and kept", "Sent to ardia.dev with a random ID made on this computer, and kept"],
       [`keptOnThisMac: "Kept on this Mac"`, `keptOnThisMac: "Kept on this computer"`],
@@ -105,6 +107,8 @@ export const LINUX_WORDING: readonly Wording[] = [
       ["and how many times its Open System Settings button was pressed", "and how many times its settings button was pressed"],
       ["how many Dock icon clicks brought a browser window forward", "how many taskbar icon clicks brought a browser window forward"],
       ["How many times ⌘T kept a New Tab bar", "How many times Ctrl+T kept a New Tab bar"],
+      ["How many times ⇧⌘C went to a focused Developer Tools", "How many times Ctrl+Shift+C went to a focused Developer Tools"],
+      ["and how many use ⌥ without ⌘ or ⌃,", "and how many use Alt without Ctrl or Super,"],
       ["How many times ⌥↩ in the command bar", "How many times Alt+Enter in the command bar"],
       ["how often the ⌃Tab switcher opens", "how often the Ctrl+Tab switcher opens"],
       ["how many tabs were closed from it with ⌃W", "how many tabs were closed from it with Ctrl+W"],
@@ -113,7 +117,10 @@ export const LINUX_WORDING: readonly Wording[] = [
       ["closing the Top App in front (⌘W, or a middle click on it)", "closing the Top App in front (Ctrl+W, or a middle click on it)"],
       ["Bringing your last window back from the Dock or at launch", "Bringing your last window back from the taskbar or at launch"],
       ["How many times ⌘Y asked for the History", "How many times Ctrl+Y asked for the History"],
-      ["how many times the macOS Now Playing controls played,", "how many times the desktop's media controls played,"],
+      [
+        "summed up once an hour, and when Ardia can't post one or the system refuses it: how long its title and message were, whether it asked for an icon and whether one was sent, what happened to the icon (one of a few fixed outcomes, such as it failed to download or the system refused it, with the system's error code for that), that it came through Ardia's notification page script, whether posting failed in Ardia itself and the kind of error it was, and the error code the system gave with which of a few known system error families it came from. Never the notification's text or which site",
+        "summed up once an hour. Never the notification's text or which site",
+      ],
     ],
   },
   {
@@ -149,6 +156,10 @@ export const LINUX_WORDING: readonly Wording[] = [
       [
         "`${NOT_BROUGHT} macOS didn't allow Ardia to ask Dia for them. Allow it in System Settings › Privacy & Security › Automation, then import again.`",
         "`${NOT_BROUGHT} Ardia wasn't allowed to ask Dia for them.`",
+      ],
+      [
+        "\"Dia's Favorites weren't imported: they're in its sidebar file, which needs the keychain access you skipped.\"",
+        "\"Dia's Favorites weren't imported: they're in its sidebar file, which needs the keyring access you skipped.\"",
       ],
     ],
   },
