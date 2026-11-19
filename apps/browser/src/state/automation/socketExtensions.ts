@@ -41,6 +41,7 @@ function plannedChanges(ext: InstalledExtension, params: Record<string, unknown>
   if (params.siteAccess !== undefined && !ext.siteAccess) throw new OpError("refused", `${ext.name} asks for no site access, so there's nothing to choose.`);
   if (params.userScripts !== undefined && !ext.userScriptsAvailable) throw new OpError("refused", `${ext.name} doesn't use user scripts.`);
   if (params.incognito !== undefined && ext.path) throw new OpError("refused", `Allow in Incognito for ${ext.name}, an unpacked extension, needs engine support: Chromium doesn't report whether the loaded copy may run there.`);
+  if (params.incognito !== undefined && typeof ext.incognitoAllowed !== "boolean") throw new OpError("refused", `Ardia can't confirm incognito eligibility for ${ext.name}, so Allow in Incognito stays as it is.`);
   if (params.incognito === true && ext.incognitoAllowed === false) throw new OpError("refused", `${ext.name} says it can't run in Incognito, so Allow in Incognito can't turn on.`);
   const siteAccess = params.siteAccess as SiteAccess | undefined;
   const rest: Parameters<typeof configure>[2] = {};
@@ -61,6 +62,13 @@ async function loaded(engine: string): Promise<InstalledExtension[]> {
   }
 }
 
+const SITE_ACCESS_OF: Record<string, SiteAccess> = { ON_ALL_SITES: "allSites", ON_SPECIFIC_SITES: "specificSites", ON_CLICK: "onClick" };
+
+async function restoreSiteAccess(engine: string, ext: InstalledExtension): Promise<boolean> {
+  const before = ext.siteAccess ? SITE_ACCESS_OF[ext.siteAccess] : undefined;
+  return !!before && (await configure(engine, ext.id, { siteAccess: before }));
+}
+
 async function configureExtension(params: Record<string, unknown>, call: SocketCall) {
   const profileId = profileArg(params.profile);
   const engine = engineOf(params);
@@ -73,7 +81,10 @@ async function configureExtension(params: Record<string, unknown>, call: SocketC
   }
   if (Object.keys(rest).length) {
     if (siteAccess !== undefined) stillThere(call, profileId, engine);
-    if (!(await configure(engine, ext.id, rest))) throw new OpError("failed", `Chromium refused ${ext.name}'s ${Object.keys(rest).join(" and ")} change.`);
+    if (!(await configure(engine, ext.id, rest))) {
+      const restored = siteAccess === undefined || (await restoreSiteAccess(engine, ext));
+      throw new OpError("failed", `Chromium refused ${ext.name}'s ${Object.keys(rest).join(" and ")} change${siteAccess === undefined ? "" : restored ? ", so its site access was put back" : ", and putting its site access back failed too"}.`);
+    }
   }
   const after = (await loaded(engine)).find((x) => x.id === ext.id);
   if (!after) throw new OpError("no_window", `${ext.name} is gone from that profile.`);

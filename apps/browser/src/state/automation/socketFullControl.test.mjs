@@ -121,7 +121,7 @@ test("extensions: folders are refused, the Web Store opens its page, and configu
   for (const folder of ["relative/ext", "/tmp/nothing", "/tmp/one/ext"]) assert.equal(await code("extensions.install", { folder }), "refused", "socket folder installs are refused");
   assert.equal(await code("extensions.install", { webStore: "https://example.com/not-a-store" }), "bad_request");
   assert.equal(useExtensions.getState().install, null, "no sheet shows for a refused folder");
-  list.push({ id: "folderext", name: "Folder Ext", version: "1.0", description: "", enabled: true, state: "ENABLED", icon: "", permissions: [], siteAccess: null, sites: [], optionsUrl: null, pinned: false, incognito: false, fileAccess: false, mayModify: true, errors: [] });
+  list.push({ id: "folderext", name: "Folder Ext", version: "1.0", description: "", enabled: true, state: "ENABLED", icon: "", permissions: [], siteAccess: null, sites: [], optionsUrl: null, pinned: false, incognito: false, fileAccess: false, mayModify: true, errors: [], incognitoAllowed: true });
 
   const tabsBefore = Object.keys(S().tabs).length;
   const store = await ok("extensions.install", { webStore: "https://chromewebstore.google.com/detail/name/abcdefghijklmnopabcdefghijklmnop" });

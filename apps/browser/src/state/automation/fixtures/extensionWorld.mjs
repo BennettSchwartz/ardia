@@ -6,6 +6,7 @@ export function extensionWorld() {
   const installs = [];
   const gates = { inspect: null, install: null, list: null, reject: null, listFails: false, breakListsOnWrite: false };
   const reloads = [];
+  const writes = [];
   const uninstalls = [];
   const pkg = { version: "1.0", description: "", manifestVersion: 3, icon: null, permissions: [], optionalPermissions: [], hostPermissions: [], hasAction: false, popup: null, optionsPage: null, sidePanel: null };
   const engine = {
@@ -35,6 +36,8 @@ export function extensionWorld() {
     configure: async (id, _profile, options) => {
       const x = list.find((e) => e.id === id);
       if (gates.breakListsOnWrite) gates.listFails = true;
+      writes.push({ id, ...options });
+      if (options.incognito !== undefined && x.refuseIncognito) throw new Error("Chromium declined Allow in Incognito");
       if (options.incognito !== undefined) x.incognito = options.incognito;
       if (options.userScripts !== undefined) x.userScripts = options.userScripts;
       if (options.siteAccess) {
@@ -50,7 +53,7 @@ export function extensionWorld() {
     },
   };
   globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };
-  return { list, folders, installs, gates, reloads, uninstalls };
+  return { list, folders, installs, gates, reloads, uninstalls, writes };
 }
 
 export function gate() {
