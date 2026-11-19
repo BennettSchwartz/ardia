@@ -64,7 +64,7 @@ export const menuMotion = {
   open: spring(0.3, 0.76),
   fromScale: 0.18,
   contentFade: 67,
-  glassFade: 50,
+  glassFade: 33,
   close: 200,
   heldOpen: 280,
   heldClose: 270,

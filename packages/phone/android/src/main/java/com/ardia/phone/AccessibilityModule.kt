@@ -107,7 +107,9 @@ internal object ScreenReaderFocus {
         return true
     }
 
-    fun focus(view: View?): Boolean = ready(view) && reachable(view!!) && view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+    fun holds(view: View): Boolean = view.createAccessibilityNodeInfo().isAccessibilityFocused
+
+    fun focus(view: View?): Boolean = ready(view) && reachable(view!!) && (holds(view) || view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null))
 
     @Suppress("DEPRECATION")
     fun announce(view: View, text: String) {

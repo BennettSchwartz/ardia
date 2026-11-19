@@ -161,6 +161,23 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun aViewThatAlreadyHoldsTheScreenReadersFocusCountsAsLandedWithoutBeingAskedAgainSoARepeatedRequestEndsAtOnce() {
+        val asked = mutableListOf<Int>()
+        val target = recording(asked, focused = true)
+        activity.setContentView(FrameLayout(activity).apply { addView(target, 200, 100) })
+        layOut()
+        assertTrue(ScreenReaderFocus.holds(target))
+        assertTrue(ScreenReaderFocus.focus(target))
+        assertTrue("a view that has the focus isn't asked for it again", asked.isEmpty())
+        val other = recording(asked)
+        (target.parent as FrameLayout).addView(other, 200, 100)
+        layOut()
+        assertFalse(ScreenReaderFocus.holds(other))
+        assertTrue(ScreenReaderFocus.focus(other))
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS), asked)
+    }
+
+    @Test
     fun anAnnouncementReachesTheScreenReaderAsAnAnnouncementEvent() {
         activity.setContentView(FrameLayout(activity).apply { addView(row, 200, 100) })
         shadowOf(Looper.getMainLooper()).idle()
@@ -169,9 +186,14 @@ class ScreenReaderFocusTest {
         assertTrue(shadowOf(manager).sentAccessibilityEvents.any { it.eventType == AccessibilityEvent.TYPE_ANNOUNCEMENT && it.text.joinToString().contains("Close 3 Tabs?") })
     }
 
-    private fun recording(asked: MutableList<Int>): View = object : View(activity) {
+    private fun recording(asked: MutableList<Int>, focused: Boolean = false): View = object : View(activity) {
         init {
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+
+        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(info)
+            if (focused) info.isAccessibilityFocused = true
         }
 
         override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
