@@ -1,7 +1,9 @@
 #import "ArdiaExtensionPackage.h"
 
 #import <CommonCrypto/CommonDigest.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace ardia_extensions {
 
@@ -10,10 +12,26 @@ namespace {
 constexpr unsigned long long kMaxReadBytes = 4ull << 20;
 
 NSData *ReadRegular(NSString *path, unsigned long long limit) {
+  int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
+  if (fd < 0) return nil;
   struct stat info;
-  if (lstat(path.fileSystemRepresentation, &info) != 0 || !S_ISREG(info.st_mode) || (unsigned long long)info.st_size > limit) return nil;
-  NSData *data = [NSData dataWithContentsOfFile:path options:NSDataReadingUncached error:nil];
-  return data.length <= limit ? data : nil;
+  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) || (unsigned long long)info.st_size > limit) {
+    close(fd);
+    return nil;
+  }
+  NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)info.st_size + 1];
+  size_t used = 0;
+  for (ssize_t got; used < data.length && (got = read(fd, (char *)data.mutableBytes + used, data.length - used)) > 0;) used += (size_t)got;
+  close(fd);
+  if (used != (size_t)info.st_size) return nil;
+  data.length = used;
+  return data;
+}
+
+bool IsLocaleName(id name) {
+  if (![name isKindOfClass:NSString.class]) return false;
+  NSString *s = name;
+  return s.length && ![s containsString:@"/"] && ![s isEqualToString:@"."] && ![s isEqualToString:@".."];
 }
 
 NSSet<NSString *> *SystemRoots() {
@@ -85,12 +103,12 @@ NSDictionary *Messages(NSString *folder, NSDictionary *manifest, NSString **erro
     NSRange sep = [uiLocale rangeOfString:@"_"];
     if (sep.location != NSNotFound) [candidates addObject:[uiLocale substringToIndex:sep.location]];
   }
-  if ([manifest[@"default_locale"] isKindOfClass:NSString.class]) [candidates addObject:manifest[@"default_locale"]];
+  if (manifest[@"default_locale"]) [candidates addObject:manifest[@"default_locale"]];
   [candidates addObjectsFromArray:@[ @"en", @"en_US" ]];
   NSMutableDictionary *merged = [NSMutableDictionary dictionary];
   NSMutableSet<NSString *> *loaded = [NSMutableSet set];
   for (NSString *locale in candidates) {
-    if ([loaded containsObject:locale]) continue;
+    if (!IsLocaleName(locale) || [loaded containsObject:locale]) continue;
     [loaded addObject:locale];
     NSDictionary *messages = LoadJSON([[locales stringByAppendingPathComponent:locale] stringByAppendingPathComponent:@"messages.json"]);
     if (!messages) continue;
@@ -166,6 +184,13 @@ NSString *DataURL(NSString *folder, NSString *relativePath) {
 NSDictionary *ReadManifest(NSString *folder) {
   NSDictionary *m = LoadJSON([folder stringByAppendingPathComponent:@"manifest.json"]);
   if (!m) return @{@"error" : @"Manifest file is missing or unreadable"};
+  id defaultLocale = m[@"default_locale"];
+  if (defaultLocale) {
+    struct stat info;
+    NSString *localeFolder = IsLocaleName(defaultLocale) ? [[folder stringByAppendingPathComponent:@"_locales"] stringByAppendingPathComponent:defaultLocale] : nil;
+    if (!localeFolder || lstat(localeFolder.fileSystemRepresentation, &info) != 0 || !S_ISDIR(info.st_mode))
+      return @{@"error" : @"default_locale isn't the name of a folder in _locales"};
+  }
   NSString *localeError = nil;
   NSDictionary *messages = Messages(folder, m, &localeError);
   if (!messages) return @{@"error" : localeError};
