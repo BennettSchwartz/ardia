@@ -202,8 +202,8 @@ NSArray *CapturedItems(NSArray *items) {
 }
 
 NSString *const kMainFrameFocused =
-    @"(() => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; "
-    @"return !(a && /^(IFRAME|FRAME|OBJECT|EMBED|FENCEDFRAME|PORTAL)$/.test(a.tagName)); })()";
+    @"let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; "
+    @"post(\"result\", JSON.stringify(!(a && /^(IFRAME|FRAME|OBJECT|EMBED|FENCEDFRAME|PORTAL)$/.test(a.tagName))));";
 
 void WhenMainFrameFocused(ArdiaCoreTab *tab, void (^answer)(BOOL focused)) {
   [tab evaluate:kMainFrameFocused completion:^(NSString *json) { answer([json isEqualToString:@"true"]); }];
