@@ -96,6 +96,7 @@ export const emitPermission = (request: EngineEvents["permissions.requested"]) =
 export const passwordAutofill = new Map<string, boolean>();
 export const passwordManagerEngine = {
   available: true,
+  probes: 0,
   extensionSupported: false as boolean | Promise<boolean>,
   profiles: [] as string[],
   extensionProfiles: [] as string[],
@@ -463,7 +464,7 @@ const fakeModules = {
       setUpVerificationCode: ({ url }) => (passwordManagerEngine.setupUrls.push(url), true),
     },
     {
-      applePasswordsAvailable: () => passwordManagerEngine.available,
+      applePasswordsAvailable: () => (passwordManagerEngine.probes++, passwordManagerEngine.available),
       iCloudPasswordsExtensionSupported: () => passwordManagerEngine.extensionSupported,
       save: async (_profile: string, origin: string, username: string, password: string) => {
         const refused = new Error("Could not save the password (invalid, or already saved)");

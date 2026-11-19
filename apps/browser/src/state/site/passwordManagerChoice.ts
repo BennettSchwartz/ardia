@@ -17,10 +17,25 @@ export function effectivePasswordManager(settings: Pick<Settings, "passwordManag
 
 export const regularProfileId = (profileId: string) => (isIncognitoProfile(profileId) ? incognitoOriginal(profileId) : profileId);
 
-export const profilePasswordManager = (s: { settings: Pick<Settings, "passwordManager">; profiles: Record<string, Profile | undefined> }, profileId: string): PasswordManager =>
-  effectivePasswordManager(s.settings, s.profiles[regularProfileId(profileId)]);
+type ChoiceState = { settings: Pick<Settings, "passwordManager">; profiles: Record<string, Profile | undefined>; profileOrder?: readonly string[] };
 
-export function passwordManagerProfileCounts(s: { settings: Pick<Settings, "passwordManager">; profiles: Record<string, Profile | undefined> }): Record<string, string> {
+const dataOf = (profile: Pick<Profile, "id" | "dataId">) => profile.dataId ?? profile.id;
+
+export function profilesSharingData(s: ChoiceState, profileId: string): string[] {
+  const own = s.profiles[regularProfileId(profileId)];
+  if (!own) return [];
+  const data = dataOf(own);
+  const order = [data, ...(s.profileOrder ?? []), ...Object.keys(s.profiles)];
+  return [...new Set(order)].filter((id) => s.profiles[id] && dataOf(s.profiles[id]!) === data);
+}
+
+export function profilePasswordManager(s: ChoiceState, profileId: string): PasswordManager {
+  const sharing = profilesSharingData(s, profileId);
+  const chosen = sharing.map((id) => s.profiles[id]!).find((p) => isPasswordManager(p.passwordManager));
+  return effectivePasswordManager(s.settings, chosen ?? s.profiles[regularProfileId(profileId)]);
+}
+
+export function passwordManagerProfileCounts(s: ChoiceState): Record<string, string> {
   const counts: Record<PasswordManager, number> = { apple: 0, ardia: 0, none: 0 };
   for (const id of Object.keys(s.profiles)) counts[profilePasswordManager(s, id)]++;
   return { password_manager_profiles_apple: String(counts.apple), password_manager_profiles_ardia: String(counts.ardia), password_manager_profiles_none: String(counts.none) };

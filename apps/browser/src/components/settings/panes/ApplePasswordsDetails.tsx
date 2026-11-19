@@ -1,5 +1,6 @@
 import { applePasswordsAvailable, openPasswordsApp } from "../../../state/site/passwords";
-import { choosePasswordManager, ICLOUD_PASSWORDS_EXTENSION_ID, iCloudPasswordsExtensionOf, useProfilePasswordManager } from "../../../state/site/passwordManager";
+import { choosePasswordManager, ICLOUD_PASSWORDS_EXTENSION_ID, iCloudPasswordsExtensionOf, useProfilePasswordManager, useProfilesSharingChoice } from "../../../state/site/passwordManager";
+import { PLATFORM_FEATURES } from "../../../lib/platformFeatures";
 import { addFromWebStore, setEnabled } from "../../../state/extensions/actions";
 import { useExtensionList } from "../../../state/extensions/store";
 import { InstallDialogHost } from "../../extensions/ExtensionOverlays";
@@ -23,9 +24,20 @@ function managerOptions(): Option<PasswordManager>[] {
 }
 
 export function PasswordManagerRow({ profileId }: { profileId: string }) {
+  return PLATFORM_FEATURES.applePasswords ? <PasswordManagerChoice profileId={profileId} /> : null;
+}
+
+function sharedChoiceNote(names: string[]): string | undefined {
+  if (!names.length) return undefined;
+  const others = names.length === 1 ? names[0]! : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names[0]} and ${names.length - 1} others`;
+  return `Also applies to ${others}, which ${names.length === 1 ? "shares" : "share"} this profile's browser data.`;
+}
+
+function PasswordManagerChoice({ profileId }: { profileId: string }) {
   const mode = useProfilePasswordManager(profileId);
+  const sharing = useProfilesSharingChoice(profileId);
   return (
-    <Row anchor="profiles.passwordManager">
+    <Row anchor="profiles.passwordManager" description={sharedChoiceNote(sharing)}>
       <PopUp value={mode} options={managerOptions()} onChange={(manager) => (notePasswordManagerChosen(manager), choosePasswordManager(profileId, manager))} minWidth={210} />
     </Row>
   );

@@ -4,17 +4,29 @@ import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile } from "../browser/model";
 import type { PasswordManager } from "../settings/settings";
-import { effectivePasswordManager, profilePasswordManager, regularProfileId } from "./passwordManagerChoice";
+import { effectivePasswordManager, profilePasswordManager, profilesSharingData, regularProfileId } from "./passwordManagerChoice";
+import { readDocument, writeDocument } from "../../platform/documents";
 import { useExtensions } from "../extensions/store";
 import { usePages } from "../tabs/pageState";
 import { resource, store as storeResource } from "../settings/resources";
 
-export { effectivePasswordManager, profilePasswordManager };
+export { effectivePasswordManager, profilePasswordManager, profilesSharingData };
 
 export const useProfilePasswordManager = (profileId: string): PasswordManager => useBrowser((s) => profilePasswordManager(s, profileId));
 
+export function useProfilesSharingChoice(profileId: string): string[] {
+  const names = useBrowser((s) =>
+    profilesSharingData(s, profileId)
+      .filter((id) => id !== profileId)
+      .map((id) => s.profiles[id]!.name)
+      .join("\n"),
+  );
+  return names ? names.split("\n") : [];
+}
+
 export function choosePasswordManager(profileId: string, manager: PasswordManager) {
-  useBrowser.getState().updateProfile(regularProfileId(profileId), { passwordManager: manager });
+  const s = useBrowser.getState();
+  for (const id of profilesSharingData(s, profileId)) s.updateProfile(id, { passwordManager: manager });
 }
 
 export const ICLOUD_PASSWORDS_EXTENSION_ID = "pejdijmoenmkgeppbflobdenhhabjlaj";
@@ -40,28 +52,65 @@ function shownEngineProfiles(s: BrowserState): Set<string> {
   return shown;
 }
 
-type PendingWrite = { on: boolean };
+const HELD_OFF_DOCUMENT = "password-manager.json";
+
+function heldOffProfiles(): Set<string> {
+  try {
+    const saved = JSON.parse(readDocument(HELD_OFF_DOCUMENT) ?? "{}") as { offerToSaveHeldOff?: unknown };
+    return new Set(Array.isArray(saved.offerToSaveHeldOff) ? saved.offerToSaveHeldOff.filter((p): p is string => typeof p === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function holdOff(profile: string, held: boolean) {
+  const profiles = heldOffProfiles();
+  if (profiles.has(profile) === held) return;
+  if (held) profiles.add(profile);
+  else profiles.delete(profile);
+  try {
+    writeDocument(HELD_OFF_DOCUMENT, JSON.stringify({ offerToSaveHeldOff: [...profiles].sort() }));
+  } catch {}
+}
+
+type PendingWrite = { on: boolean; sending: boolean };
 const pending = new Map<string, PendingWrite>();
+
+async function sendOfferToSave(profile: string, write: PendingWrite) {
+  if (!write.on && (await getPasswordAutofill(profile)) && pending.get(profile) === write) holdOff(profile, true);
+  if (pending.get(profile) !== write) return;
+  await setPasswordAutofill(write.on, profile);
+  if (pending.get(profile) !== write) return;
+  pending.delete(profile);
+  if (write.on) holdOff(profile, false);
+  storeResource(passwordAutofill, [profile], write.on);
+}
 
 function writeOfferToSave(profile: string) {
   const write = pending.get(profile);
-  if (!write) return;
-  void setPasswordAutofill(write.on, profile).then(
-    () => {
-      if (pending.get(profile) !== write) return;
-      pending.delete(profile);
-      storeResource(passwordAutofill, [profile], write.on);
-    },
-    () => {},
+  if (!write || write.sending) return;
+  write.sending = true;
+  void sendOfferToSave(profile, write).then(
+    () => void (write.sending = false),
+    () => void (write.sending = false),
   );
 }
 
 function offerToSave(profile: string, on: boolean) {
-  pending.set(profile, { on });
+  pending.set(profile, { on, sending: false });
   writeOfferToSave(profile);
 }
 
-export const forgetPendingOfferToSave = (profile: string) => void pending.delete(profile);
+function followMode(profile: string, mode: PasswordManager) {
+  if (mode !== "ardia") return offerToSave(profile, false);
+  if (heldOffProfiles().has(profile)) return offerToSave(profile, true);
+  pending.delete(profile);
+}
+
+export function forgetPendingOfferToSave(profile: string) {
+  pending.delete(profile);
+  holdOff(profile, false);
+}
 
 let started = false;
 
@@ -72,7 +121,6 @@ export function startPasswordManager() {
   let appleProfiles = "";
   let handledByExtension: string[] = [];
   let seen = new Set<string>();
-  const ready = new Set<string>();
 
   const pushApple = () => {
     const apple = [...modes].filter(([, mode]) => mode === "apple").map(([profile]) => profile).sort();
@@ -86,8 +134,7 @@ export function startPasswordManager() {
     const next = engineModes(browser());
     for (const [profile, mode] of next) {
       const was = modes.get(profile);
-      if (was === mode) continue;
-      if (was !== undefined || mode !== "ardia") offerToSave(profile, mode === "ardia");
+      if (was !== mode) followMode(profile, mode);
     }
     modes = next;
     pushApple();
@@ -100,13 +147,11 @@ export function startPasswordManager() {
   };
 
   const syncReady = () => {
+    if (!pending.size) return;
     const s = browser();
     for (const tabId of Object.keys(usePages.getState().ready)) {
       const tab = s.tabs[tabId];
-      const profile = tab && engineProfile(s, regularProfileId(tab.profileId));
-      if (profile === undefined || ready.has(profile)) continue;
-      ready.add(profile);
-      writeOfferToSave(profile);
+      if (tab) writeOfferToSave(engineProfile(s, regularProfileId(tab.profileId)));
     }
   };
 
