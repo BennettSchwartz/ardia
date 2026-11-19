@@ -12,6 +12,7 @@
 #include "ardia/core/ac_launch_switches.h"
 #include "ardia/win/ac_calls.h"
 #include "ardia/win/autoplay.h"
+#include "ardia/win/contents_background.h"
 #include "ardia/win/external_apps.h"
 #include "ardia/win/kept_pages.h"
 #include "ardia/win/now_playing.h"
@@ -71,6 +72,8 @@
 #include "content/public/common/url_utils.h"
 #include "pdf/buildflags.h"
 #include "printing/buildflags/buildflags.h"
+#include "third_party/blink/public/common/web_preferences/web_preferences.h"
+#include "third_party/blink/public/mojom/css/preferred_color_scheme.mojom-shared.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -293,6 +296,7 @@ void CallDevTools(content::WebContents* contents,
                   base::DictValue params,
                   std::optional<base::TimeDelta> timeout,
                   DevToolsReply reply) {
+  EndAheadBlank(contents);
   DevToolsCaller::CreateForWebContents(contents);
   DevToolsCaller::FromWebContents(contents)->Call(
       method, std::move(params), timeout, std::move(reply));
@@ -850,6 +854,22 @@ class TestDevToolsClient
 
 WEB_CONTENTS_USER_DATA_KEY_IMPL(TestDevToolsClient);
 
+void PreferDarkForTest(content::WebContents* contents,
+                       const base::DictValue& args,
+                       Reply reply) {
+  if (!ardiacore::TestInstance()) {
+    std::move(reply).Run(Error("preferDarkForTest is for test instances"));
+    return;
+  }
+  blink::web_pref::WebPreferences prefs = contents->GetOrCreateWebPreferences();
+  prefs.preferred_color_scheme =
+      args.FindBool("dark").value_or(true)
+          ? blink::mojom::PreferredColorScheme::kDark
+          : blink::mojom::PreferredColorScheme::kLight;
+  contents->SetWebPreferences(prefs);
+  std::move(reply).Run(Ok());
+}
+
 void TestClientForTest(content::WebContents* contents,
                        const base::DictValue& args,
                        Reply reply) {
@@ -1145,6 +1165,7 @@ constexpr NamedMethod kMethods[] = {
     {"audioFocusForTest", &NowPlaying::AudioFocusForTest},
     {"activeSessionForTest", &NowPlaying::ActiveSessionForTest},
     {"testClient", &TestClientForTest},
+    {"preferDarkForTest", &PreferDarkForTest},
     {"discardEligibilityForTest", &DiscardEligibilityForTest},
     {"setFrozen", &SetFrozen},
     {"resolveUnresponsive", &ResolveUnresponsive},

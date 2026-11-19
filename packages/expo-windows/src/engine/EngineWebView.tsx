@@ -15,7 +15,7 @@ import { WindowIdContext } from "./windowId";
 
 type PageEventsOnWindows = { onPageEvent?: (event: Pick<NativeSyntheticEvent<PageEvent>, "nativeEvent">) => void; onTop?: boolean };
 
-type Props = Pick<NativeProps, "url" | "profile" | "adoptId" | "tabId" | "visible" | "style"> & Partial<Pick<NativeProps, "temporary">> & Partial<Pick<NativeProps, "pageEvents">> & PageEventsOnWindows;
+type Props = Pick<NativeProps, "url" | "profile" | "adoptId" | "tabId" | "visible" | "style" | "contentsBackgroundColor"> & Partial<Pick<NativeProps, "temporary">> & Partial<Pick<NativeProps, "pageEvents">> & PageEventsOnWindows;
 
 
 const SETTLE_MS = [0, 50, 200, 500];
@@ -25,7 +25,7 @@ type Picture = Awaited<ReturnType<WebViewHandle["capturePicture"]>>;
 
 const appWindows = () => requireNativeModule<Pick<AppWindowsModule, "setPageFullScreen" | "capturePage">>("ArdiaAppWindows");
 
-type Shown = { visible: boolean; placed: string; shows: number };
+type Shown = { visible: boolean; placed: string; color: string; shows: number };
 
 function capturePicture(windowId: string, shown: { current: Shown }, scale: number): Promise<Picture> {
   const { visible, placed, shows } = shown.current;
@@ -58,7 +58,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
   const latest = useRef(props);
   latest.current = props;
   const visible = props.visible !== false;
-  const shown = useRef<Shown>({ visible: false, placed: "", shows: 0 });
+  const shown = useRef<Shown>({ visible: false, placed: "", color: "", shows: 0 });
   const fullScreen = useRef(false);
 
   const place = useCallback(() => {
@@ -66,7 +66,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
     if (!wanted) {
       noteShowStep(key, latest.current.visible === false ? "place: not visible" : "place: hidden by full screen");
       if (shown.current.visible) {
-        shown.current = { visible: false, placed: "", shows: shown.current.shows + 1 };
+        shown.current = { visible: false, placed: "", color: "", shows: shown.current.shows + 1 };
         showPage(key, false, null, windowId);
       }
       return;
@@ -84,10 +84,11 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
             holes: holesFor(page, coversIn(windowId, above.current), latest.current.temporary === true, latest.current.onTop === true),
           };
       const placed = JSON.stringify(shape);
-      if (shown.current.visible && shown.current.placed === placed) return noteShowStep(key, "place: deduped");
-      if (!showPage(key, true, shape, windowId)) return noteShowStep(key, `place: not taken ${width}x${height}`);
+      const color = latest.current.contentsBackgroundColor ?? "";
+      if (shown.current.visible && shown.current.placed === placed && shown.current.color === color) return noteShowStep(key, "place: deduped");
+      if (!showPage(key, true, shape, windowId, color || undefined)) return noteShowStep(key, `place: not taken ${width}x${height}`);
       noteShowStep(key, `place: show ${width}x${height}`);
-      shown.current = { visible: true, placed, shows: shown.current.shows + 1 };
+      shown.current = { visible: true, placed, color, shows: shown.current.shows + 1 };
     });
   }, [key, windowId]);
 
@@ -98,7 +99,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
   useEffect(() => {
     const first = latest.current;
     noteShowStep(key, `mount in ${windowId}`);
-    const unmount = mountPage(key, { url: first.url, profile: first.profile, adopt: first.adoptId, windowId }, (name, data) => {
+    const unmount = mountPage(key, { url: first.url, profile: first.profile, adopt: first.adoptId, contentsBackground: first.contentsBackgroundColor || undefined, windowId }, (name, data) => {
       if (name === "ready") {
         noteShowStep(key, "ready");
         place();
@@ -119,7 +120,7 @@ export const EngineWebView = forwardRef<unknown, Props>(function EngineWebView(p
       now.onPageEvent?.({ nativeEvent: { name, data } });
     });
     return () => {
-      shown.current = { visible: false, placed: "", shows: shown.current.shows + 1 };
+      shown.current = { visible: false, placed: "", color: "", shows: shown.current.shows + 1 };
       if (fullScreen.current) {
         fullScreen.current = false;
         setFullScreenPage(windowId, key, false);

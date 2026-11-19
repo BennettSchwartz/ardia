@@ -27,3 +27,4 @@ chromium chromium-win-media-session-muted-ignored.patch
 chromium chromium-win-media-session-page-state.patch
 chromium chromium-win-hand-off-asks-the-app.patch
 chromium chromium-win-hung-predecessor-not-killed.patch
+chromium chromium-win-contents-background.patch
