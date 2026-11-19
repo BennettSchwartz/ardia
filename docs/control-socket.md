@@ -277,7 +277,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
 | search | `search.engines` (`default` is the engine searches use, an extension's when one controls it, with `controlledBy`) | `search.setDefault {id}` (`refused` while an extension controls it, as Settings disables the picker; so is `settings.set {searchEngine}`), `search.add`, `search.update`, `search.remove` |
 | sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {site}` |
-| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore}` (the user adds it on the store page; `folder` is refused), `extensions.configure {id, siteAccess? | incognito? | userScripts?}` (one per call), `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
+| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore}` (the user adds it on the store page; `folder` is refused), `extensions.configure {id, siteAccess \| incognito \| userScripts}` (exactly one; `specificSites` needs `hosts`), `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status`, `sync.devices {profile?}` | `sync.now`, `sync.setType {type, on}`, `sync.setProfile {profile, on}`, `sync.setOpenTabs {profile, on}`, `sync.sendTab {tab, device}` |
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
@@ -360,17 +360,25 @@ since Chromium rereads an unpacked extension's folder by path, so only an engine
 The install sheet that Settings and Web Store prompts show keys each request, so its Add button and Return confirm
 that request only. Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it:
 a Web Store prompt that arrives meanwhile waits and shows after, in its own window if that can still show a sheet,
-otherwise in another open browser window that isn't closing (mid-animation or marked for close), or it is declined. If the window under a sheet closes before Chromium
+otherwise in another open main window or Little Ardia window (both host the install sheet) that isn't closing
+(mid-animation or marked for close), or it is declined. If the window under a sheet closes before Chromium
 answers a failed add, no error sheet is left behind for it.
 
-`extensions.configure` changes one setting per call, as an extension's page in Settings does: site access (only for
-an extension that asks for sites), Allow in Incognito, or Allow User Scripts (only when the extension uses them). A
-request naming site access and incognito together is `bad_request` ("change site access and incognito in separate
-calls"), as is any other pair, before anything is read or written; a policy-installed extension is `refused`. Each
-call is checked against a list read from Chromium for the call, never the cached row, makes its one write, and reads
-the list again with a request started after the write (never one already running): if that read fails, or the
-setting didn't take, the call answers `failed` and nothing else was touched. There is no rollback, so a refused or
+`extensions.configure` changes exactly one setting per call, as an extension's page in Settings does: site access
+(only for an extension that asks for sites), Allow in Incognito, or Allow User Scripts (only when the extension uses
+them). The params schema takes exactly one of them (an `anyOf` of one form per setting), so a request naming none, or
+more than one, fails validation as `bad_request` before anything is read or written; a policy-installed extension is
+`refused`. The expected result is computed from the request before the write. Each call is checked against a list
+read from Chromium for the call, never the cached row, makes its one write, and takes the list that Settings' own
+`configureThenRead` reads once after that write as its only readback: if that read fails, or the setting isn't
+exactly what was asked, the call answers `failed` and nothing else was touched. There is no rollback, so a refused or
 silently declined change can't take a user's site grants or later changes with it.
+
+`siteAccess: "allSites"` and `"onClick"` take no `hosts`. `"specificSites"` requires `hosts`, a non-empty list of the
+match patterns the extension keeps, and succeeds only when Chromium then reports `ON_SPECIFIC_SITES` with exactly those
+sites. Switching to specific sites makes Chromium revoke broad grants (such as `https://*/*`), and the engine call can't
+grant new sites, so a request is `refused` before the write unless `hosts` equals the extension's already-granted
+non-broad sites; granting other sites needs an `engine/` change (`ac_extensions_configure` taking hosts).
 
 Allow in Incognito is checked first for eligibility: when `incognitoAllowed` is missing (Linux and Windows rows don't
 carry it) or `null` (macOS couldn't read the manifest), any Incognito change is `refused` ("can't confirm incognito
@@ -378,9 +386,7 @@ eligibility"), and that includes an unpacked extension whose eligibility is unkn
 readable manifest is then `refused` ("needs engine support"): its manifest on disk can differ from the one Chromium
 loaded, and Chromium's own eligibility flag (`incognito_access.is_enabled`) isn't exported by `ac_extensions_list`.
 A packed or Web Store extension whose manifest says `"incognito": "not_allowed"` can't turn it on. Otherwise the
-Incognito write is read back, so a change Chromium declines without an error answers `failed`. `specificSites` turns
-withholding on and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply
-shows (with `sites`) as success.
+Incognito write is read back, so a change Chromium declines without an error answers `failed`.
 
 ### Window geometry
 
