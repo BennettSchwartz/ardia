@@ -40,49 +40,60 @@ export function folderPlace(s: BrowserState, profileId: string, key: string): Pl
   return shows ? { kind: "gone" } : { kind: "hidden" };
 }
 
-const signatures = new Map<string, string>();
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
-const running = new Map<string, Promise<void>>();
-const queued = new Set<string>();
+type Guard = () => boolean;
 
-function schedule(profileId: string, key: string, delay: number) {
+const signatures = new Map<string, string>();
+const timers = new Map<string, { timer: ReturnType<typeof setTimeout>; allowed: Guard }>();
+const running = new Map<string, Promise<void>>();
+const queued = new Map<string, Guard>();
+
+const either = (a: Guard | undefined, b: Guard): Guard => (!a || a === b ? b : a === always || b === always ? always : () => a() || b());
+
+function schedule(profileId: string, key: string, delay: number, allowed: Guard = always) {
   const ref = folderRef(profileId, key);
-  clearTimeout(timers.get(ref));
+  const was = timers.get(ref);
+  clearTimeout(was?.timer);
+  const guard = either(was?.allowed, allowed);
   const fire = () => {
     timers.delete(ref);
-    void syncFolderNow(profileId, key);
+    void syncFolderNow(profileId, key, guard);
   };
-  timers.set(ref, setTimeout(fire, delay));
+  timers.set(ref, { timer: setTimeout(fire, delay), allowed: guard });
 }
 
-export async function syncFolderAfterNow(profileId: string, key: string, allowed: () => boolean = always): Promise<void> {
+const queue = (ref: string, allowed: Guard) => void queued.set(ref, either(queued.get(ref), allowed));
+
+export async function syncFolderAfterNow(profileId: string, key: string, allowed: Guard = always): Promise<void> {
   await running.get(folderRef(profileId, key));
   if (allowed()) await syncFolderNow(profileId, key, allowed);
 }
 
-export function syncFolderNow(profileId: string, key: string, allowed: () => boolean = always): Promise<void> {
+export function syncFolderNow(profileId: string, key: string, allowed: Guard = always): Promise<void> {
   const ref = folderRef(profileId, key);
   const busy = running.get(ref);
   if (busy && allowed !== always) return busy.then(() => (allowed() ? syncFolderNow(profileId, key, allowed) : undefined));
   if (busy) {
-    queued.add(ref);
+    queue(ref, always);
     return busy;
   }
   const bound = sharedFolderOf(profileId, key);
   const run = round(profileId, key, allowed)
     .catch((error: unknown) => {
-      if (sharedFolderOf(profileId, key) !== bound) return void queued.add(ref);
-      setFolderSync(profileId, key, { state: "error", error: error instanceof Error ? error.message : String(error) });
+      if (sharedFolderOf(profileId, key) !== bound) return queue(ref, allowed);
+      if (allowed()) setFolderSync(profileId, key, { state: "error", error: error instanceof Error ? error.message : String(error) });
     })
     .finally(() => {
       running.delete(ref);
-      if (queued.delete(ref)) schedule(profileId, key, REMOTE_SETTLE_MS);
+      const next = queued.get(ref);
+      if (!next) return;
+      queued.delete(ref);
+      schedule(profileId, key, REMOTE_SETTLE_MS, next);
     });
   running.set(ref, run);
   return run;
 }
 
-async function round(profileId: string, key: string, allowed: () => boolean) {
+async function round(profileId: string, key: string, allowed: Guard) {
   const ref = folderRef(profileId, key);
   const folder = sharedFolderOf(profileId, key);
   if (!folder) return;
@@ -96,7 +107,7 @@ async function round(profileId: string, key: string, allowed: () => boolean) {
   const listing = await readSharedFolder(folder.path, folder.identity ?? null);
   const stale = () => sharedFolderOf(profileId, key) !== folder;
   if (!allowed()) return;
-  if (stale()) return void queued.add(ref);
+  if (stale()) return queue(ref, allowed);
   if (!listing.exists) {
     if (listing.error) return setFolderSync(profileId, key, { state: "error", error: listing.error });
     signatures.set(ref, signatureOf(localFolder(store(), place.groupId, knownNames(folder.base))));
@@ -105,7 +116,7 @@ async function round(profileId: string, key: string, allowed: () => boolean) {
   const remote = remoteLevel(listing.root);
   const s = store();
   const here = folderPlace(s, profileId, key);
-  if (here.kind !== "shown") return void queued.add(ref);
+  if (here.kind !== "shown") return queue(ref, allowed);
   if (!allowed()) return;
   const local = localFolder(s, here.groupId, knownNames(folder.base));
   if (!local) return;
@@ -114,16 +125,18 @@ async function round(profileId: string, key: string, allowed: () => boolean) {
   if (next !== s) fromSync(() => useBrowser.setState(Object.fromEntries(APPLIED_FIELDS.map((f) => [f, next[f]]))));
   const { ops, base } = planFiles(level, folder.base);
   const settled = signatureOf(localFolder(store(), here.groupId, knownNames(base)));
-  if (!(await sessionSaved())) {
-    schedule(profileId, key, CONFLICT_RETRY_MS);
+  const saved = await sessionSaved();
+  if (!allowed()) return;
+  if (!saved) {
+    schedule(profileId, key, CONFLICT_RETRY_MS, allowed);
     return setFolderSync(profileId, key, { state: "syncing", error: null });
   }
-  if (!allowed()) return;
-  if (stale()) return void queued.add(ref);
+  if (stale()) return queue(ref, allowed);
   const { conflicts } = ops.length ? await writeSharedFolder(folder.path, ops, folder.identity ?? null) : { conflicts: [] };
-  if (stale()) return void queued.add(ref);
+  if (stale()) return queue(ref, allowed);
+  if (!allowed()) return;
   if (conflicts.length) {
-    schedule(profileId, key, CONFLICT_RETRY_MS);
+    schedule(profileId, key, CONFLICT_RETRY_MS, allowed);
     return setFolderSync(profileId, key, { state: "syncing", error: null });
   }
   setFolderBase(profileId, key, base);
