@@ -53,8 +53,8 @@ export type MenuBookmarkKey = "bookmarkFolders" | "recentBookmarks" | "bookmarks
 export type SurfaceItem = {
   path: number[];
   title: string;
-  enabled: boolean;
-  checked: boolean;
+  enabled?: boolean;
+  checked?: boolean;
   mixed?: boolean;
   separator: boolean;
   hidden?: boolean;
@@ -83,7 +83,7 @@ export type OpenSurface = {
 
 export type SurfaceEvent =
   | (OpenSurface & { type: "menuOpened" })
-  | { type: "menuClosed"; id: string; kind: OpenSurface["kind"] };
+  | { type: "menuClosed" | "menuDropped"; id: string; kind: OpenSurface["kind"] };
 
 export type MenusNative = {
   addListener(name: "onCommand", listener: (e: CommandEvent | MenuPickEvent) => void): EventSubscription;
