@@ -72,6 +72,7 @@ export type OpenSurface = {
   kind: "select" | "page" | "app" | "menuBar" | "other";
   tab?: string;
   window?: string;
+  keyless?: boolean;
   captured?: boolean;
   openedAt?: number;
   link?: string;

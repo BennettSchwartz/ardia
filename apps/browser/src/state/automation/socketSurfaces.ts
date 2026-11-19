@@ -11,7 +11,7 @@ import { runMethod } from "./controlSocket";
 const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page"]);
 
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
-  const window = surface.window;
+  const window = surface.window ?? (surface.kind === "menuBar" && surface.keyless ? lastFocusedEligibleWindow(s) : null);
   if (!window || !eligibleKind(s, window)) return null;
   if (surface.tab) {
     if (!isEligibleTab(s, surface.tab) || s.tabs[surface.tab]?.windowId !== window) return null;

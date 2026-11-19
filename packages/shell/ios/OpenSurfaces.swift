@@ -24,14 +24,16 @@ final class OpenSurfaces: NSObject {
     let captured: Captured?
     let tab: String?
     let window: String?
+    let keyless: Bool
     let openedAt = Date()
-    init(id: String, kind: String, menu: NSMenu?, captured: Captured?, tab: String?, window: String?) {
+    init(id: String, kind: String, menu: NSMenu?, captured: Captured?, tab: String?, window: String?, keyless: Bool = false) {
       self.id = id
       self.kind = kind
       self.menu = menu
       self.captured = captured
       self.tab = tab
       self.window = window
+      self.keyless = keyless
     }
     var expired: Bool { captured != nil && Date().timeIntervalSince(openedAt) > OpenSurfaces.capturedLifetime }
   }
@@ -120,7 +122,7 @@ final class OpenSurfaces: NSObject {
     case "page": Self.focusedPage().map { ($0.tab, $0.window) } ?? (nil, nil)
     default: (nil, WindowManager.shared.id(of: NSApp.keyWindow))
     }
-    let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window)
+    let tracked = Tracked(id: newId("m"), kind: kind, menu: menu, captured: nil, tab: owner.tab, window: owner.window, keyless: NSApp.keyWindow == nil)
     open.append(tracked)
     send?("menuOpened", describe(tracked))
   }
@@ -206,6 +208,7 @@ final class OpenSurfaces: NSObject {
     var out: [String: Any] = ["id": tracked.id, "kind": tracked.kind, "openedAt": tracked.openedAt.timeIntervalSince1970 * 1000]
     if let tab = tracked.tab { out["tab"] = tab }
     if let window = tracked.window { out["window"] = window }
+    if tracked.keyless { out["keyless"] = true }
     if let menu = tracked.menu {
       out["items"] = Self.rows(menu, path: [], validate: false)
     } else if let captured = tracked.captured {
