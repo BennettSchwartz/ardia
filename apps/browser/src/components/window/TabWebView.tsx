@@ -304,7 +304,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onProtectedMedia={(request) => offerWebKit(tabId, request)}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onVerificationCodeSetup={(setup) => showVerificationCodePrompt(tabId, setup)}
-      onApplePasswordsShown={(shown) => noteApplePasswordsPanel("key", shown)}
+      onApplePasswordsShown={(shown, via) => noteApplePasswordsPanel(via, shown)}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {
         releaseTranslation(tabId);

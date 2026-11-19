@@ -1,4 +1,6 @@
 import type { PasswordManager } from "../settings/settings";
+import type { ConsentToken } from "./choice";
+import { countFor } from "./countFor";
 
 export type ApplePasswordsOpener = "key" | "menu";
 export type VerificationCodeStep = "offered" | "setUp" | "failed";
@@ -23,11 +25,11 @@ const CHOICE_FIELDS: Record<PasswordManager, string> = {
 const FIELDS = [...Object.values(PANEL_FIELDS).flat(), ...Object.values(CODE_FIELDS), ...Object.values(CHOICE_FIELDS)];
 
 let counts: Record<string, number> = {};
-const bump = (field: string) => void (counts[field] = (counts[field] ?? 0) + 1);
+const bump = (field: string, consent?: ConsentToken | null) => countFor(consent, () => void (counts[field] = (counts[field] ?? 0) + 1), { [field]: 1 });
 
 export const noteApplePasswordsPanel = (opener: ApplePasswordsOpener, shown: boolean) => bump(PANEL_FIELDS[opener][shown ? 0 : 1]);
 
-export const noteVerificationCodeSetup = (step: VerificationCodeStep) => bump(CODE_FIELDS[step]);
+export const noteVerificationCodeSetup = (step: VerificationCodeStep, consent?: ConsentToken | null) => bump(CODE_FIELDS[step], consent);
 
 export const notePasswordManagerChosen = (manager: PasswordManager) => bump(CHOICE_FIELDS[manager]);
 

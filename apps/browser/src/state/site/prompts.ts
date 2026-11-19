@@ -11,6 +11,7 @@ import { showToast } from "../app/toasts";
 import { effectivePasswordManager } from "./passwordManager";
 import { parseVerificationCodeSetup } from "./verificationCodes";
 import { noteVerificationCodeSetup } from "../telemetry/passwordManagerCounts";
+import { consentToken } from "../telemetry/client";
 
 async function shouldPromptForPopups(profile: string, origin: string): Promise<boolean> {
   try {
@@ -56,11 +57,12 @@ export function showVerificationCodePrompt(tabId: string, data: VerificationCode
 
 export function acceptVerificationCodePrompt(tabId: string, url: string) {
   patchPage(tabId, { verificationCode: null });
-  noteVerificationCodeSetup("setUp");
+  const consent = consentToken();
+  noteVerificationCodeSetup("setUp", consent);
   void setUpVerificationCode(url)
     .catch(() => false)
     .then((opened) => {
-      if (!opened) noteVerificationCodeSetup("failed");
+      if (!opened) noteVerificationCodeSetup("failed", consent);
       const windowId = currentTab(tabId)?.windowId;
       if (!opened && windowId) showToast(windowId, "Couldn't open Passwords.", undefined, { icon: "key.fill" });
     });

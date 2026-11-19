@@ -74,7 +74,7 @@ type NativeEvents = {
   onSelection: { selection: PageSelection | null };
   onScroll: { state: ScrollState };
   onVerificationCodeSetup: VerificationCodeSetup;
-  onApplePasswordsShown: { shown: boolean };
+  onApplePasswordsShown: { shown: boolean; via: string };
   onProtectedMedia: ProtectedMediaRequest;
   onAutoplayBlocked: { count?: number };
   onReady: object;
@@ -184,7 +184,7 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onSelection: (e) => [e.selection],
   onScroll: (e) => [e.state],
   onVerificationCodeSetup: (e) => [e],
-  onApplePasswordsShown: (e) => [!!e.shown],
+  onApplePasswordsShown: (e) => [!!e.shown, e.via === "menu" ? "menu" : "key"],
   onProtectedMedia: (e) => [e],
   onAutoplayBlocked: (e) => [Number.isInteger(e.count) ? Math.min(Math.max(e.count!, 1), 20) : 1],
   onReady: () => [],

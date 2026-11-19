@@ -132,6 +132,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (void)setApplePasswordsEnabled:(BOOL)enabled extensionProfiles:(NSArray<NSString *> *)profiles
     NS_SWIFT_NAME(setApplePasswordsEnabled(_:extensionProfiles:));
 - (BOOL)showAppleAutoFill:(NSString *)kind;
+- (BOOL)showAppleAutoFillFromMenu:(NSString *)kind;
 - (void)resolveDisplayMedia:(NSString *)requestId sourceId:(nullable NSString *)sourceId audio:(BOOL)audio
     NS_SWIFT_NAME(resolveDisplayMedia(_:sourceId:audio:));
 @end

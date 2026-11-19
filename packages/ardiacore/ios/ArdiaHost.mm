@@ -201,7 +201,7 @@ static void (^gQuitCancelledHandler)(void);
 
 + (BOOL)showAppleAutoFill:(NSString *)tabId kind:(NSString *)kind {
   ArdiaCoreTab *tab = ardia_host::TabWithAppTabId(tabId);
-  return tab && [[ArdiaTabRegistry viewForTab:tab] showAppleAutoFill:kind];
+  return tab && [[ArdiaTabRegistry viewForTab:tab] showAppleAutoFillFromMenu:kind];
 }
 
 + (void)deviceChooser:(int)chooserId select:(int)index {

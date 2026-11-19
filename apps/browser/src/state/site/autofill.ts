@@ -4,7 +4,6 @@ import { activeTabId } from "../browser/model";
 import { isTabReady } from "../tabs/pageState";
 import { openSettings, SETTINGS_DETAIL } from "../settings/settingsWindows";
 import { effectivePasswordManager } from "./passwordManager";
-import { noteApplePasswordsPanel } from "../telemetry/passwordManagerCounts";
 
 export { deleteAddress, deleteCard, revealCardNumber, saveAddress, saveCard, setAutofillSettings, type SavedAddress, type SavedCard } from "../../platform/autofill";
 
@@ -29,11 +28,7 @@ export async function requestAutofill(windowId: string, arg: string | null, tabI
   const passwords = arg === "passwords";
   const appleKind = APPLE_AUTOFILL[arg ?? ""];
   const apple = !!appleKind && effectivePasswordManager(useBrowser.getState().settings) === "apple";
-  if (isTabReady(tabId)) {
-    const shown = await (apple ? showAppleAutoFill(tabId, appleKind) : showAutofillSuggestions(tabId, passwords ? "passwords" : "field"));
-    if (apple) noteApplePasswordsPanel("menu", shown);
-    if (shown) return;
-  }
+  if (isTabReady(tabId) && (await (apple ? showAppleAutoFill(tabId, appleKind) : showAutofillSuggestions(tabId, passwords ? "passwords" : "field")))) return;
   const s = useBrowser.getState();
   const w = s.windows[windowId];
   const profileId = w && w.kind !== "private" && s.profiles[w.profileId] ? w.profileId : null;

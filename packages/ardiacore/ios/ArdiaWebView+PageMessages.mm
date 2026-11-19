@@ -57,7 +57,7 @@ static char kSameSiteFramesKey;
 
 static NSDictionary *DisplayMediaAudioOffer(NSDictionary *message) {
   if (!Flag(message, @"audio")) return nil;
-  NSDictionary *support = [ArdiaCoreEngine respondsToSelector:@selector(desktopCaptureAudio)] ? ArdiaCoreEngine.desktopCaptureAudio : nil;
+  NSDictionary *support = ArdiaCoreEngine.desktopCaptureAudio;
   const bool system = Flag(support, @"system"), application = Flag(support, @"application");
   NSString *preference = Text(message, @"windowAudio", 16);
   NSString *window = nil;
@@ -122,8 +122,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
 
 + (void)setDisplayMediaPicker:(BOOL)enabled {
   gDisplayMediaPicker = enabled;
-  if ([ArdiaCoreEngine respondsToSelector:@selector(setPagesPickDisplayMedia:)])
-    ArdiaCoreEngine.pagesPickDisplayMedia = enabled;
+  ArdiaCoreEngine.pagesPickDisplayMedia = enabled;
 }
 
 + (void)setBlockAutoplayEverywhere:(BOOL)enabled {
@@ -237,7 +236,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   } else if ([kind isEqualToString:@"applePasswords"]) {
     if (ApplePasswordsKey(_profile) && [self sameSiteFrame:main origin:sender]) {
       const BOOL shown = _visible && _tab.view.window.isKeyWindow && [self showAppleAutoFill:@"passwords"];
-      [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown)}];
+      [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown), @"via" : @"key"}];
     }
   } else if ([kind isEqualToString:@"verificationCodeSetup"] && dict) {
     NSString *url = Field<NSString>(dict, @"url");
@@ -389,6 +388,12 @@ static BOOL EditsWebText(NSResponder *responder, NSView *page) {
   return NO;
 }
 
+- (BOOL)showAppleAutoFillFromMenu:(NSString *)kind {
+  const BOOL shown = [self showAppleAutoFill:kind];
+  if ([kind isEqualToString:@"passwords"]) [self emit:@"applePasswordsShown" payload:@{@"shown" : @(shown), @"via" : @"menu"}];
+  return shown;
+}
+
 - (BOOL)showAppleAutoFill:(NSString *)kind {
   NSString *actionName = AppleAutoFillActions()[kind ?: @""];
   if (!actionName) return NO;
@@ -399,14 +404,17 @@ static BOOL EditsWebText(NSResponder *responder, NSView *page) {
   const CFTimeInterval now = CACurrentMediaTime();
   if (now - lastAt < kApplePasswordsInterval) return NO;
   lastAt = now;
-  if ([ArdiaLaunchConfig.shared background]) {
+  ArdiaLaunchConfig *config = ArdiaLaunchConfig.shared;
+  if (config.background && ![config testFlag:@"applePasswordsPanel"]) {
     NSLog(@"[ardiacore] apple autofill %@ (background mode, not shown)", kind);
     return YES;
   }
   SEL action = NSSelectorFromString(actionName);
   NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"AutoFill" action:action keyEquivalent:@""];
   id target = [NSApp targetForAction:action to:nil from:item];
-  return target && [NSApp sendAction:action to:target from:item];
+  const BOOL sent = target && [NSApp sendAction:action to:target from:item];
+  NSLog(@"[ardiacore] apple autofill %@ responder=%@ target=%@ sent=%d", kind, NSStringFromClass([window.firstResponder class]), NSStringFromClass([target class]), sent);
+  return sent;
 }
 
 - (void)callFrame:(NSString *)frameId kind:(NSString *)kind json:(NSString *)json {
@@ -425,7 +433,7 @@ static BOOL EditsWebText(NSResponder *responder, NSView *page) {
   [_reports.displayRequests removeObjectForKey:requestId];
   if (sourceId.length && ![ArdiaHost mayCaptureDesktopSource:sourceId]) sourceId = nil;
   NSString *audio = shareAudio && sourceId.length ? DisplayMediaAudioFor(Field<NSDictionary>(request, @"audio"), sourceId) : nil;
-  if (sourceId.length && _tab && [ArdiaCoreEngine respondsToSelector:@selector(allowDesktopCapture:tab:frame:origin:audio:)])
+  if (sourceId.length && _tab)
     [ArdiaCoreEngine allowDesktopCapture:sourceId
                                   tab:_tab
                                 frame:[request[@"frame"] length] ? request[@"frame"] : nil

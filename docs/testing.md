@@ -167,10 +167,11 @@ Launch with `scripts/agent/ac launch <app> --data <dir> [--instance K=V] [--test
   `[ardiacore] apple autofill passwords (background mode, not shown)` for the key button and Edit › AutoFill ›
   Passwords…; with this key it sends AppKit's `_handleInsertFromPasswordsCommand:` for real and logs the first
   responder, the target and whether AppKit took it (`log show --predicate 'eventMessage CONTAINS "apple autofill"'`).
-  Apple's panel belongs to another process and can show on screen, so use it only with the screen locked or the
-  owner's OK. Check: serve a login page, focus its Email field (CDP `el.focus()` after a `windows.dev` click on the page),
-  `ac.runCommand({ command: "autofill", arg: "passwords", windowId })`, then look for a new window owned by
-  another process in `CGWindowListCopyWindowInfo`; `devSnapshotWindow` shows the key badge at the field's trailing
+  Apple's panel belongs to another process (`AutoFillPanelService`, with `AutoFill` and
+  `LocalAuthenticationRemoteService` for Touch ID); it shows on screen and that process becomes the frontmost app, so
+  it takes focus from the owner: use it only with the screen locked or the owner's OK, and quit the instance at once. Check: serve a login page, focus its Email field (CDP `el.focus()` after a `windows.dev` click on the page),
+  `ac.runCommand({ command: "autofill", arg: "passwords", windowId })`, then look for a new on-screen window owned by
+  `AutoFillPanelService` in `CGWindowListCopyWindowInfo` (2026-11-19, macOS 27.0.1: 346 × 376 at layer 101, `sent=1`); `devSnapshotWindow` shows the key badge at the field's trailing
   edge. Picking a login needs Touch ID and a person.
 - **`allowOcclusion`**: macOS posts no occlusion change for a window a band below normal, so minimizing and
   deminiaturizing post one for it (the page goes hidden as in a user's minimized window).
