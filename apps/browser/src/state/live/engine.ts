@@ -63,17 +63,20 @@ export function refreshFolderWhile(folderId: string, interactive: boolean, allow
   const running = inflight.get(folderId);
   if (running) {
     if (fetchingWith.has(folderId) && settingsOf(live().folders[folderId]) !== fetchingWith.get(folderId)) queueFollowUp(folderId, allowed);
-    return running.then(() => inflight.get(folderId));
+    return running;
   }
-  const task = during("liveFolders", () => run(folderId, interactive, allowed)).finally(() => {
-    inflight.delete(folderId);
-    fetchingWith.delete(folderId);
-    const next = followUps.get(folderId);
-    followUps.delete(folderId);
-    if (next && live().folders[folderId]) void refreshFolderWhile(folderId, interactive, next);
-  });
+  const task = during("liveFolders", () => runUntilCurrent(folderId, interactive, allowed)).finally(() => [inflight, fetchingWith, followUps].forEach((m) => m.delete(folderId)));
   inflight.set(folderId, task);
   return task;
+}
+
+async function runUntilCurrent(folderId: string, interactive: boolean, allowed: () => boolean) {
+  for (let guard: (() => boolean) | undefined = allowed; guard && live().folders[folderId]; ) {
+    await run(folderId, interactive, guard);
+    fetchingWith.delete(folderId);
+    guard = followUps.get(folderId);
+    followUps.delete(folderId);
+  }
 }
 
 export function manualRefresh(folderId: string, allowed: () => boolean = always): Promise<void> {
