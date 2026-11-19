@@ -353,7 +353,8 @@ Some of what a person answers in Ardia isn't a page and isn't in a store: a perm
 with its schema, refuses plugin sessions at the dispatcher check point, stops writing when control is turned off, and
 counts in `cli_socket_calls_permissions`, `cli_socket_calls_menus` or `cli_socket_calls_secrets`.
 They need native API 84 on macOS (`NATIVE_API_VERSION` and `AppModule`'s `apiVersion`): the static menu catalog,
-`performMenuBarItem(ref, windowId)`, the captured page menus and the autofill answer the native layer confirms.
+`performMenuBarItem(ref, windowId)`, the captured page menus and the autofill answer the native layer confirms. #2816
+also takes 84 and merges first, so this becomes 85 then (merge order #2811, #2816, #2827; the higher version wins).
 
 Until the engine items listed under "Needs engine code" land, the socket **lists** prompts and captured page menus but
 **doesn't answer** permission or password prompts or **pick** from a captured menu: those methods answer `refused`
