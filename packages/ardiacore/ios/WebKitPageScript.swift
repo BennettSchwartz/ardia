@@ -10,7 +10,7 @@ enum WebKitPageScript {
       let to = script.range(of: end, range: from.upperBound..<script.endIndex)
     else {
       NSLog("[webkit] field provider kit not found in page_script.js")
-      return "  const fieldProviderKit = () => ({ configure() {} });\n"
+      return "  const fieldProviderKit = () => ({ configure() {}, focusQuery() {} });\n  const fieldProviderIntrinsics = () => ({});\n"
     }
     return String(script[from.lowerBound..<to.lowerBound])
   }()

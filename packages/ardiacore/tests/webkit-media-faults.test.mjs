@@ -113,7 +113,13 @@ globalThis.originalAccess = Navigator.prototype.requestMediaKeySystemAccess;
 globalThis.originalPlay = HTMLMediaElement.prototype.play;
 `;
 
-function page({ protocol = "https:", hostname = sites[0] } = {}) {
+const fallbackKit = (() => {
+  const found = pageScript.match(/return "(  const fieldProviderKit = [^"]*)"/);
+  assert.ok(found, "the fallback kit isn't in WebKitPageScript.swift");
+  return JSON.parse(`"${found[1]}"`);
+})();
+
+function page({ protocol = "https:", hostname = sites[0], kit = fieldProviderKit } = {}) {
   const posted = [];
   const window = {
     location: { protocol, hostname },
@@ -128,7 +134,7 @@ function page({ protocol = "https:", hostname = sites[0] } = {}) {
   createContext(window);
   const run = (code) => runInContext(code, window);
   run(prelude);
-  run(source);
+  run(kit === fieldProviderKit ? source : source.replace(fieldProviderKit, () => kit));
   run(bridge);
   const json = (code) => JSON.parse(runInContext(`JSON.stringify(${code})`, window));
   const faults = () => posted.filter((m) => m.kind === "mediaFault");
@@ -136,6 +142,12 @@ function page({ protocol = "https:", hostname = sites[0] } = {}) {
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("when page_script.js can't be sliced, the fallback kit still sets up the page script with every method", () => {
+  const p = page({ kit: fallbackKit });
+  assert.deepEqual(p.json("['fieldProvider', 'fieldFocusQuery', 'mute', 'media'].map((name) => typeof window.__ardia[name])"), ["function", "function", "function", "function"]);
+  p.run("window.__ardia.fieldProvider({ login: true, generation: 1 }); window.__ardia.fieldFocusQuery({ id: 1 })");
+});
 
 test("a key system the page asks for and gets is reported by name as granted, and the page gets its own result", async () => {
   const p = page();

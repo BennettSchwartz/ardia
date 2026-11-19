@@ -769,6 +769,7 @@
       if (el.localName === "img" && !el.complete) return "later";
       if (el.localName === "img" ? el.naturalWidth < QR_MIN : el.localName !== "canvas") return "never";
       const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) return "later";
       if (r.width < QR_MIN || r.height < QR_MIN || r.width > QR_MAX || r.height > QR_MAX) return "never";
       const ratio = r.width / r.height;
       if (ratio < 0.8 || ratio > 1.25) return "never";

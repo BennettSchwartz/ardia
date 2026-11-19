@@ -449,6 +449,22 @@ test("without BarcodeDetector, as in WebKit, otpauth links are still found", asy
   assert.equal(page.detectors, 0);
 });
 
+test("a QR image inside a hidden container is scanned once it is shown", async () => {
+  const page = frame();
+  const totp = "otpauth://totp/Site:me?secret=JBSWY3DPEHPK3PXP";
+  const hidden = image({ qr: totp });
+  hidden.getBoundingClientRect = () => ({ width: 0, height: 0 });
+  page.document.images = [hidden];
+  page.configure(LOGIN);
+  await page.settle();
+  assert.deepEqual(page.codes(), []);
+  assert.equal(page.detected.length, 0);
+  hidden.getBoundingClientRect = () => ({ width: 180, height: 180 });
+  page.observers[0].callback();
+  await page.settle();
+  assert.deepEqual(page.codes(), [{ kind: "verificationCode", data: { url: totp, generation: 1 } }]);
+});
+
 test("a QR code drawn into a canvas after its first scan is found later, with a bounded number of tries", async () => {
   const timers = [];
   const page = frame({ timers });
