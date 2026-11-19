@@ -40,8 +40,8 @@ function plannedChanges(ext: InstalledExtension, params: Record<string, unknown>
   if (!ext.mayModify) throw new OpError("refused", `${ext.name} is installed by policy, so it can't be changed.`);
   if (params.siteAccess !== undefined && !ext.siteAccess) throw new OpError("refused", `${ext.name} asks for no site access, so there's nothing to choose.`);
   if (params.userScripts !== undefined && !ext.userScriptsAvailable) throw new OpError("refused", `${ext.name} doesn't use user scripts.`);
-  if (params.incognito !== undefined && ext.path) throw new OpError("refused", `Allow in Incognito for ${ext.name}, an unpacked extension, needs engine support: Chromium doesn't report whether the loaded copy may run there.`);
   if (params.incognito !== undefined && typeof ext.incognitoAllowed !== "boolean") throw new OpError("refused", `Ardia can't confirm incognito eligibility for ${ext.name}, so Allow in Incognito stays as it is.`);
+  if (params.incognito !== undefined && ext.path) throw new OpError("refused", `Allow in Incognito for ${ext.name}, an unpacked extension, needs engine support: Chromium doesn't report whether the loaded copy may run there.`);
   if (params.incognito === true && ext.incognitoAllowed === false) throw new OpError("refused", `${ext.name} says it can't run in Incognito, so Allow in Incognito can't turn on.`);
   const siteAccess = params.siteAccess as SiteAccess | undefined;
   const rest: Parameters<typeof configure>[2] = {};
