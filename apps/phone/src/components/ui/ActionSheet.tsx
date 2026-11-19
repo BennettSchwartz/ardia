@@ -4,11 +4,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
 import { focusForScreenReader, takeHandedFocus } from "./coverFocus";
+import { useFocusReturn } from "./focusReturn";
 import { screenReaderActions } from "./screenReaderActions";
 import type { Confirmation } from "./Dialog";
 import { countDrawnMenuOpened, MenuMaterial } from "./Menu";
 import { menuMotion } from "./motion";
-import { Portal, useOverlayAfterClear, useOverlayCovered, useOverlayGeneration, usePortalLeaving, usePortalLeft } from "./Overlay";
+import { Portal, usePortalLeaving, usePortalLeft } from "./Overlay";
 import { actionSheetInk, actionSheetLook, ink } from "./tokens";
 import { useTheme } from "./theme";
 
@@ -21,16 +22,11 @@ export function ActionSheet({ onCancel, opener, ...props }: Props) {
     const handed = takeHandedFocus();
     return { target: opener ? () => opener as Parameters<typeof findNodeHandle>[0] : handed };
   });
-  const afterClear = useOverlayAfterClear();
-  const generation = useOverlayGeneration();
-  const covered = useOverlayCovered();
+  const returnFocus = useFocusReturn();
   const cancelled = useCallback(() => {
     onCancel();
-    const target = returnTo.target;
-    if (!target) return;
-    const openedBefore = generation();
-    afterClear(() => focusForScreenReader(target, () => generation() === openedBefore && !covered()));
-  }, [onCancel, returnTo, afterClear, generation, covered]);
+    if (returnTo.target) returnFocus(returnTo.target);
+  }, [onCancel, returnTo, returnFocus]);
   return (
     <Portal exitMs={menuMotion.sheetOut}>
       <SheetCard {...props} onCancel={cancelled} />

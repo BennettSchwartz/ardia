@@ -1107,3 +1107,46 @@ test("the dark confirmation keeps the iPhone's text colours on a darker card and
   expect(contrast("#C5C5C5", "#797979")).toBeLessThan(3);
   expect(contrast("#FF9B9C", "#959595")).toBeLessThan(2);
 });
+
+test("on Android a cancelled confirmation's restore already handed to the native side is revoked the moment a newer overlay opens; with no newer overlay it still lands", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
+  const { ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
+  const revoked = jest.fn();
+  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => revoked);
+  let show: (which: "asking" | "other" | null) => void = () => undefined;
+  function Harness() {
+    const [which, setWhich] = useState<"asking" | "other" | null>("asking");
+    show = setWhich;
+    if (which === "asking") return <ConfirmSheet confirmation={{ title: "Clear Data?", message: "", action: "Clear Data", run: () => undefined, opener: 77 }} onClose={() => setWhich(null)} />;
+    if (which === "other") return <ConfirmSheet confirmation={{ title: "Question", message: "", action: "Confirm", run: () => undefined }} onClose={() => setWhich(null)} />;
+    return null;
+  }
+  const back = pressBack();
+  const root = renderSurface(<Harness />);
+  const toOpener = () => sent.mock.calls.filter(([tag]) => tag === 77).length;
+  const cancelAndLand = async () => {
+    back();
+    throughClose();
+    await act(async () => undefined);
+    act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
+  };
+  await cancelAndLand();
+  expect(toOpener()).toBe(1);
+  expect(revoked).not.toHaveBeenCalled();
+  act(() => show("other"));
+  expect(revoked).toHaveBeenCalledTimes(1);
+  act(() => show(null));
+  throughClose();
+  act(() => show("asking"));
+  revoked.mockClear();
+  await cancelAndLand();
+  expect(toOpener()).toBe(2);
+  act(() => jest.advanceTimersByTime(3000));
+  expect(revoked).not.toHaveBeenCalled();
+  unmount(root);
+});

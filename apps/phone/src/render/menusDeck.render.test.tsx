@@ -512,29 +512,40 @@ drawnTest("after a stack card's Tab Options menu closes without a choice, TalkBa
   unmount(root);
 });
 
-drawnTest("two Tab Options asked one after the other: only the later one opens its menu, whichever measurement comes back first", async () => {
-  withSpaces([WORK]);
-  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
-  const pending: ((rect: { x: number; y: number; width: number; height: number }) => void)[] = [];
-  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => void pending.push(resolve)));
-  const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
-  const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
-  const root = deck();
-  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
-  const [first, second] = [withMenu()[0]!, withMenu()[1]!];
-  const tabOf = (node: ReactTestInstance) => tabStore.currentTabs().open.find((tab) => tab.title === node.props.accessibilityLabel)!;
-  const [firstTab, secondTab] = [tabOf(first), tabOf(second)];
-  act(() => first.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
-  act(() => second.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
-  expect(pending).toHaveLength(2);
-  await act(async () => pending[1]!({ x: 60, y: 200, width: 280, height: 520 }));
-  await act(async () => pending[0]!({ x: 60, y: 200, width: 280, height: 520 }));
-  pick(root, "Copy Link");
-  expect(copied).toHaveBeenCalledTimes(1);
-  expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: secondTab.id }));
-  expect(copied).not.toHaveBeenCalledWith(expect.objectContaining({ id: firstTab.id }));
-  unmount(root);
-});
+for (const order of ["later first", "earlier first"] as const) {
+  drawnTest(`two Tab Options asked one after the other: only the later one opens its menu, with the ${order === "later first" ? "later" : "earlier"} measurement back first`, async () => {
+    withSpaces([WORK]);
+    const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+    const pending: ((rect: { x: number; y: number; width: number; height: number }) => void)[] = [];
+    jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => void pending.push(resolve)));
+    const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
+    const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
+    const root = deck();
+    const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+    const [first, second] = [withMenu()[0]!, withMenu()[1]!];
+    const tabOf = (node: ReactTestInstance) => tabStore.currentTabs().open.find((tab) => tab.title === node.props.accessibilityLabel)!;
+    const [firstTab, secondTab] = [tabOf(first), tabOf(second)];
+    act(() => first.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+    act(() => second.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+    expect(pending).toHaveLength(2);
+    const rect = { x: 60, y: 200, width: 280, height: 520 };
+    if (order === "later first") {
+      await act(async () => pending[1]!(rect));
+      expect(menuitems(root).length).toBeGreaterThan(0);
+      await act(async () => pending[0]!(rect));
+    } else {
+      await act(async () => pending[0]!(rect));
+      expect(menuitems(root)).toEqual([]);
+      await act(async () => pending[1]!(rect));
+      expect(menuitems(root).length).toBeGreaterThan(0);
+    }
+    pick(root, "Copy Link");
+    expect(copied).toHaveBeenCalledTimes(1);
+    expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: secondTab.id }));
+    expect(copied).not.toHaveBeenCalledWith(expect.objectContaining({ id: firstTab.id }));
+    unmount(root);
+  });
+}
 
 drawnTest("a Tab Options measurement asked before the deck went away opens nothing when it comes back after the deck has returned, and a later one still works", async () => {
   withSpaces([WORK]);
