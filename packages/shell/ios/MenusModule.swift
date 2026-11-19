@@ -64,21 +64,12 @@ public class MenusModule: Module {
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
     AsyncFunction("menuBar") { () throws -> [[String: Any]] in
       guard !WindowManager.shared.anyIncognitoWindow else {
-        throw Exception(name: "refused", description: OpenSurfaces.reflectsPrivate, code: "refused")
+        throw Exception(name: "refused", description: OpenSurfaces.privateWindowOpen, code: "refused")
       }
-      return NSApp.mainMenu.map { OpenSurfaces.rows($0, path: []) } ?? []
+      return MenuCatalog.rows
     }.runOnQueue(.main)
-    AsyncFunction("performMenuBarItem") { (menu: String?, path: [Int], ref: String, windowId: String) throws -> String in
-      try MenusModule.surfaceCall { try MenuBarAction.perform(menu: menu, path: path, ref: ref, windowId: windowId) }
-    }.runOnQueue(.main)
-    AsyncFunction("devTrackMenuBar") { (index: Int, tracking: Bool) -> Bool in
-      guard LaunchConfig.shared.testFlag("menuBarTracking"), index >= 0, index < NSApp.mainMenu?.numberOfItems ?? 0,
-            let menu = NSApp.mainMenu?.item(at: index)?.submenu else { return false }
-      NotificationCenter.default.post(name: tracking ? NSMenu.didBeginTrackingNotification : NSMenu.didEndTrackingNotification, object: menu)
-      return true
-    }.runOnQueue(.main)
-    AsyncFunction("checkMenuBarItem") { (menu: String?, path: [Int], ref: String) throws in
-      try MenusModule.surfaceCall { _ = try OpenSurfaces.shared.trackedBarItem(menu, path: path, ref: ref) }
+    AsyncFunction("performMenuBarItem") { (ref: String, windowId: String) throws -> String in
+      try MenusModule.surfaceCall { try MenuBarAction.perform(ref: ref, windowId: windowId) }
     }.runOnQueue(.main)
 
     AsyncFunction("menuShortcuts") { () -> [[String: Any]] in MainMenu.shortcutList() }.runOnQueue(.main)
