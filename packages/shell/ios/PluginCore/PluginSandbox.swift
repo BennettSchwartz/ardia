@@ -11,21 +11,35 @@ struct PluginSandbox {
 
   static let searchPath = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"]
 
+  static let machAllowed = [
+    "com.apple.system.notification_center", "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
+    "com.apple.logd", "com.apple.diagnosticd", "com.apple.bsd.dirhelper", "com.apple.SystemConfiguration.DNSConfiguration",
+    "com.apple.SystemConfiguration.configd", "com.apple.trustd", "com.apple.trustd.agent", "com.apple.TrustEvaluationAgent",
+    "com.apple.SecurityServer", "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
+  ]
+
+  static let unixSocketsAllowed = ["/private/var/run/mDNSResponder"]
+
   static let profile = """
     (version 1)
     (allow default)
     (deny appleevent-send)
     (deny lsopen)
+    (deny job-creation)
+    (deny distributed-notification-post)
+    (deny user-preference-write)
     (deny process-info* signal)
     (allow process-info* signal (target same-sandbox))
     (allow process-info-listpids)
-    (deny user-preference-write)
-    (deny mach-lookup (global-name "com.apple.lsd.modifydb") (global-name "com.apple.coreservices.sharedfilelistd.xpc") (global-name "com.apple.xpc.smd") (global-name "com.apple.xpc.loginitemregisterd") (global-name-prefix "com.apple.backgroundtaskmanagement") (global-name "com.apple.siriactionsd.xpc") (global-name "com.apple.siri.VoiceShortcuts.xpc") (global-name "com.apple.shortcuts.systemshortcutservice.runner"))
+    (deny ipc-posix-shm*)
+    (allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center") (ipc-posix-name-prefix "apple.cfprefs."))
+    (deny mach-lookup)
+    (allow mach-lookup \(machAllowed.map { "(global-name \"\($0)\")" }.joined(separator: " ")))
     (deny file-read* file-write* (subpath (param "HOME")) (subpath (param "APP_DATA")) (subpath (param "CONFIG")))
     (deny file-write* (subpath "/"))
     (allow file-write* (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper") (subpath "/dev/fd"))
-    (deny network-outbound (remote unix-socket (subpath (param "HOME"))) (remote unix-socket (subpath (param "APP_DATA"))))
-    (deny network-outbound (remote unix-socket (regex #"^/private/var/run/com\\.apple\\.launchd\\.[^/]+/") (regex #"^/private/tmp/com\\.apple\\.launchd\\.[^/]+/")))
+    (deny network-outbound (remote unix-socket))
+    (allow network-outbound \(unixSocketsAllowed.map { "(remote unix-socket (literal \"\($0)\"))" }.joined(separator: " ")) (remote unix-socket (subpath (param "DATA"))))
     (allow file-read* (subpath (param "PLUGIN")) (literal (param "PROGRAM")) (subpath (param "INSTALL")))
     (allow file-read* file-write* (subpath (param "DATA")))
     (allow file-read-metadata (literal (param "HOME")))
