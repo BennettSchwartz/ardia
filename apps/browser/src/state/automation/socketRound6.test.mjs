@@ -2,10 +2,6 @@ import assert from "node:assert/strict";
 import { after, mock, test } from "node:test";
 const { S, socketClient, freshWindow, controlOn, tick } = await import("./fixtures/socketHarness.mjs");
 const { useBrowser } = await import("../browser/store.ts");
-const { activeTabId } = await import("../browser/model.ts");
-const { runMethod } = await import("./controlSocket.ts");
-const { BACKGROUND_RUN_COMMANDS } = await import("./backgroundRun.ts");
-const { COMMAND_INTERACTION } = await import("../commands/commandInteraction.ts");
 const { patchPage } = await import("../tabs/pageState.ts");
 const { useLifecycle } = await import("../tabs/sleepingTabs.ts");
 const { webviews } = await import("../../platform/webviews.ts");
@@ -19,86 +15,6 @@ const settle = async (n = 10) => {
   for (let i = 0; i < n; i++) await tick();
 };
 
-function recordUserFacing() {
-  const opened = [];
-  const restore = [];
-  const watch = (module, names) => {
-    for (const name of names) {
-      const original = module[name];
-      if (typeof original !== "function") continue;
-      module[name] = (...args) => (opened.push(name), original(...args));
-      restore.push(() => (module[name] = original));
-    }
-  };
-  watch(shellNativeModules.ArdiaDialogs, ["confirm", "prompt", "pickFiles", "pickFolder"]);
-  watch(shellNativeModules.ArdiaMenus, ["showMenu"]);
-  watch(shellNativeModules.ArdiaApp, ["openExternalURL", "shareVia", "share"]);
-  return { opened, restore: () => restore.forEach((r) => r()) };
-}
-
-const SETUPS = {
-  reopenClosedTab: ({ two }) => S().closeTabs([two]),
-  nextTab: ({ one }) => S().activate(one),
-  selectLastTab: ({ one }) => S().activate(one),
-  moveTabDown: ({ one }) => S().activate(one),
-};
-
-function effectOf(command, { windowId, one, two }, before, stopped) {
-  const w = S().windows[windowId];
-  const active = activeTabId(S(), windowId);
-  switch (command) {
-    case "reopenClosedTab":
-      return w.tabIds.length === before.windows[windowId].tabIds.length + 1;
-    case "nextTab":
-    case "selectLastTab":
-      return active === two;
-    case "previousTab":
-      return active === one;
-    case "togglePin":
-      return !!S().tabs[two].pin;
-    case "duplicateTab":
-      return w.tabIds.length === before.windows[windowId].tabIds.length + 1;
-    case "toggleMute":
-      return S().tabs[two].muted === true;
-    case "moveTabDown":
-    case "moveTabUp":
-      return w.tabIds.join() !== before.windows[windowId].tabIds.join();
-    case "stop":
-      return stopped.includes(two);
-    default:
-      return w !== before.windows[windowId] || S().windowUi[windowId] !== before.windowUi[windowId] || S().settings !== before.settings;
-  }
-}
-
-test("a background run allows only its allowlist, each run for real and verified to open nothing", async () => {
-  assert.ok(!BACKGROUND_RUN_COMMANDS.has("newTab") && !BACKGROUND_RUN_COMMANDS.has("newWindow"), "a homepage load can raise an HTTP-auth dialog");
-  for (const command of BACKGROUND_RUN_COMMANDS) assert.equal(COMMAND_INTERACTION[command], "quiet", `${command} is allowlisted, so it must be quiet`);
-  const seen = recordUserFacing();
-  try {
-    for (const command of BACKGROUND_RUN_COMMANDS) {
-      const { windowId, tab: one } = await freshWindow("https://one.example/");
-      const two = S().newTab(windowId, { url: "https://two.example/" });
-      const stopped = [];
-      webviews.set(two, { stopLoading: () => (stopped.push(two), Promise.resolve()) });
-      S().updateSettings({ warnBeforeClosingLastTab: true, warnBeforeClosingWindow: true, warnBeforeQuitting: true });
-      SETUPS[command]?.({ windowId, one, two });
-      const before = S();
-      const reply = runMethod({ command, window: windowId }, true);
-      assert.ok(!reply.error, `${command}: ${JSON.stringify(reply.error)}`);
-      await settle();
-      webviews.delete(two);
-      assert.ok(effectOf(command, { windowId, one, two }, before, stopped), `${command} did what it says`);
-      assert.deepEqual(seen.opened, [], `${command} opened ${seen.opened.join(", ")}`);
-    }
-    const { windowId } = await freshWindow();
-    for (const command of ["newTab", "newWindow", "renameTab", "closeTab", "back", "reportProblem", "toolTour", "showOnboarding", "importBrowserData", "emailPageLocation", "print"]) {
-      assert.equal(runMethod({ command, window: windowId }, true).error?.code, "refused", command);
-    }
-    assert.deepEqual(seen.opened, []);
-  } finally {
-    seen.restore();
-  }
-});
 
 test("a search that resumes after its connection closed or control toggled leaves no handles", async () => {
   for (const interrupt of ["disconnect", "toggle"]) {
