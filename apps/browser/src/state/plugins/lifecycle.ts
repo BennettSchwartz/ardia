@@ -136,7 +136,10 @@ export function enablePlugin(name: string, hash: string): boolean {
   const records = kept || !before.enabled ? currentPlugins().records : spliceApplied(currentPlugins().records, name);
   const plan = kept ? { patch: {}, applied: before.applied } : planEnable(manifest, records, name, before.applied);
   const builtIn = isAlwaysOn(listing) ? { installed: true, ...(before.controlGranted ? { controlGranted: true } : {}) } : {};
-  if (!saveRecords({ ...records, [name]: { enabled: true, approved: hash, values, applied: plan.applied, ...builtIn } }, consent)) return false;
+  if (!saveRecords({ ...records, [name]: { enabled: true, approved: hash, values, applied: plan.applied, ...builtIn } }, consent)) {
+    settleInstall(name, { ok: false, reason: "plugins.json couldn't be saved." });
+    return false;
+  }
   const asksControl = manifest.permissions.includes("control");
   applySettingsPatch(kept || !asksControl || useBrowser.getState().settings.cliControl ? plan.patch : { ...plan.patch, cliControl: true });
   usePlugins.setState({ consent: null });
