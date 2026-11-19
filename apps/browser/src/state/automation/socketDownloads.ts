@@ -10,6 +10,7 @@ import { bool, id, obj, oneOf, PAGE, PROFILE, text } from "./socketSchema";
 import { expect, now, page, profileArg } from "./socketTargets";
 import { useDownloadProgress, withProgress } from "../downloads/progress";
 import { OpError } from "./workspaceTargets";
+import { backgroundInstance } from "../app/appSettings";
 
 const STATES = ["downloading", "finished", "failed", "cancelled"] as const;
 
@@ -61,6 +62,7 @@ const inProgress = (d: Download) => (d.state === "downloading" ? null : `Downloa
 async function openOrReveal(params: Record<string, unknown>, reveal: boolean, call: SocketCall) {
   const d = downloadOf(params.id);
   if (d.state !== "finished") throw new OpError("refused", `Download ${d.id} is ${d.state}, so there's no file yet.`);
+  if (!reveal && backgroundInstance) throw new OpError("refused", `Download ${d.id} wasn't opened: opening a download needs the person, and this Ardia runs in the background.`);
   const done = await (reveal ? revealFile(d.path) : openDownload(d.path, undefined, call.serving));
   expect(done, `${reveal ? "revealing" : "opening"} ${d.filename} failed (the file may be gone).`);
   return { ok: true };
