@@ -3,7 +3,7 @@ import ArdiaCore
 import ExpoModulesCore
 
 public class DialogsModule: Module {
-  private static var shownOnly: [(window: NSWindow, alert: NSAlert)] = []
+  private static var shownOnly: [(window: NSWindow, alert: NSAlert, key: String?)] = []
 
   public func definition() -> ModuleDefinition {
     Name("ArdiaDialogs")
@@ -35,14 +35,14 @@ public class DialogsModule: Module {
         ])
       }
       if options.onlyIfShown, let window = DialogsModule.visibleWindow(options.windowId) {
-        DialogsModule.shownOnly.append((window, alert))
+        DialogsModule.shownOnly.append((window, alert, options.dismissKey))
         alert.beginSheetModal(for: window, completionHandler: answer)
         return
       }
       DialogsModule.present(alert, windowId: options.windowId, completion: answer)
     }.runOnQueue(.main)
-    AsyncFunction("dismissShownOnly") { () in
-      for (window, alert) in DialogsModule.shownOnly {
+    AsyncFunction("dismissShownOnly") { (key: String?) in
+      for (window, alert, shownKey) in DialogsModule.shownOnly where key == nil || shownKey == key {
         window.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
       }
     }.runOnQueue(.main)

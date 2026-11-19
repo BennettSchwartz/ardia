@@ -110,7 +110,7 @@ async function uninstall(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
   modifiable(ext);
   call.stillServing();
-  await removeExtension(engine, ext, shownWindowId(), call.serving, askWhereSeen(`${ext.name} wasn't removed`, call.serving));
+  await removeExtension(engine, ext, shownWindowId(), call.serving, askWhereSeen(`${ext.name} wasn't removed`, call));
   const removed = !(await refreshExtensions(engine)).some((x) => x.id === ext.id);
   if (!removed) call.stillServing();
   return { removed };

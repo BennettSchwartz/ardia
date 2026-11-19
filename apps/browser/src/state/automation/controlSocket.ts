@@ -252,6 +252,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
 
 function handleClose({ connection }: { connection: number }) {
   openConnections.delete(connection);
+  dismissSocketAsks(connection);
   launchSent.delete(connection);
   callers.delete(connection);
   dropResponder(connection);
