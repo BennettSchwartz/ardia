@@ -441,3 +441,51 @@ drawnTest("a card's menu whose tab goes while it is open lets the deck go: the m
   expect(shaded()).toBe(false);
   unmount(root);
 });
+
+drawnTest("after a stack card's Tab Options menu closes without a choice, TalkBack goes back to that card once the menu has gone; not after a choice, a newer overlay or the card's tab leaving", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  jest.spyOn(overlay, "measureAnchor").mockResolvedValue({ x: 60, y: 200, width: 280, height: 520 });
+  const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => () => undefined);
+  const { Menu } = require("../components/ui") as typeof import("../components/ui");
+  const root = deck();
+  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+  const label = withMenu()[1]!.props.accessibilityLabel;
+  const cardTab = tabStore.currentTabs().open.find((tab) => tab.title === label)!;
+  const open = async () => {
+    act(() => withMenu().find((node) => node.props.accessibilityLabel === label)!.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+    await act(async () => undefined);
+    expect(menuitems(root).length).toBeGreaterThan(0);
+    asked.mockClear();
+  };
+  const dismiss = (chosen?: boolean) => act(() => root.root.findAll((node) => node.type === Menu)[0]!.props.onDismiss(chosen));
+  const through = () => {
+    act(() => jest.advanceTimersByTime(1000));
+    act(() => jest.advanceTimersByTime(32));
+  };
+  const landedOn = () =>
+    asked.mock.calls
+      .map(([target]) => target())
+      .filter(Boolean)
+      .map((view) => root.root.findAll((node) => node.instance === view)[0]?.props.accessibilityLabel);
+  await open();
+  dismiss();
+  through();
+  expect(landedOn()).toEqual([label]);
+  await open();
+  dismiss(true);
+  through();
+  expect(landedOn()).toEqual([]);
+  await open();
+  dismiss();
+  await open();
+  through();
+  expect(landedOn()).toEqual([]);
+  dismiss();
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== cardTab.id) })));
+  await act(async () => undefined);
+  through();
+  expect(landedOn()).toEqual([]);
+  unmount(root);
+});

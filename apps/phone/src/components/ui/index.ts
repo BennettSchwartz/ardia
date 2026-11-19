@@ -27,6 +27,7 @@ export { isSymbolName, type SymbolName } from "./symbolPaths";
 export { DEFAULT_PROFILE_COLOR, PROFILE_PRESETS, ProfileLookContext, rolesFor, useProfileLook, useTheme, type StartBackdrop, type Theme } from "./theme";
 export { appIconLayout, browseLayout, capsule, font, ink, radius, space, dialogLayout, actionSheetLook, menuLayout, menuLook, pageInk, pageMenuInk, pageMenuLayout, readerInk, readerLayout, settingsLayout, settingsTint, PROFILE_COLORS, scanInk, scanLayout, shadowRadius, spacesLayout, expoSpacesLayout, syncInk, tabsInk, voiceInk, voiceLayout, failureLayout, archiveCardLayout, onboardingArt, syncSketch, chromeInk, chromeLayout, floatingBarLayout, floatingPanelLayout, deckChromeInk, deckChromeLayout, startInk, startLayout, tabsLayout, toastLayout, trayShadow, type ColorRoles, type ProfileColor } from "./tokens";
 export { focusForScreenReader, useCoverFocus } from "./coverFocus";
+export { useFocusReturn } from "./focusReturn";
 export { FullSheet, SheetBackground, useSheetFrame } from "./FullSheet";
 export { SwipeToDelete } from "./SwipeToDelete";
 export { useIncreasedContrast, useReduceMotion, useReduceTransparency } from "./contrast";

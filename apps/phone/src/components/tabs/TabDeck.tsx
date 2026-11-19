@@ -72,7 +72,7 @@ import {
 } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useHasArchivedTabs, useIncognito, usePrivateCount, useShownSpace } from "../../state/tabs/hooks";
-import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, measureAnchor, Menu, menuExitMs, MenuFloorProvider, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
+import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, measureAnchor, Menu, menuExitMs, MenuFloorProvider, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useFocusReturn, useReduceMotion, usesGlass } from "../ui";
 import { openSettings } from "../../state/settings/hooks";
 import { confirmInSheet, nativeMenus } from "../ui/MenuTrigger";
 import { useSyncEnabled } from "../../state/sync/hooks";
@@ -198,7 +198,10 @@ export const TabDeck = memo(function TabDeck() {
   const [phase, setPhase] = useState<Phase>(first.phase);
   const [menu, setMenu] = useState<"plus" | "chip" | null>(null);
   const [chromeMenu, setChromeMenu] = useState(false);
-  const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; control?: Rect } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; control?: Rect; opener?: RefObject<ViewInstance | null> } | null>(null);
+  const returnFocus = useFocusReturn();
+  const cancelCardFocus = useRef<() => void>(() => undefined);
+  useEffect(() => () => cancelCardFocus.current(), []);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   if (cardMenu && !order.includes(cardMenu.id)) setCardMenu(null);
   const [leavingCards, setLeavingCards] = useState<LeavingCard[]>(NO_LEAVING_CARDS);
@@ -959,12 +962,23 @@ export const TabDeck = memo(function TabDeck() {
         ? withTiming(target, { duration: tabsMotion.fade, easing: tabsCurve.easeOut }, settled)
         : withSpring(target, { ...tabsMotion.settle, velocity: deckSettleVelocity(g, scroll.value, target, e.velocityX) }, settled);
     });
-  const showCardMenu = (index: number, x: number, y: number, control?: Rect) => {
+  const showCardMenu = (index: number, x: number, y: number, control?: Rect, opener?: RefObject<ViewInstance | null>) => {
     if (phase.kind !== "settled" || !order[index]) return;
+    cancelCardFocus.current();
     menuOpenedHaptic();
     hideArchiveCard();
     setMenu(null);
-    setCardMenu({ id: order[index]!, x, y, control });
+    setCardMenu({ id: order[index]!, x, y, control, opener });
+  };
+  const dismissCardMenu = (chosen?: boolean) => {
+    const closing = cardMenu;
+    setCardMenu(null);
+    if (chosen || !closing?.opener) return;
+    const { id, opener } = closing;
+    cancelCardFocus.current = returnFocus(
+      () => opener.current,
+      () => latestActions.current.order.includes(id),
+    );
   };
   const longPress = Gesture.LongPress()
     .withTestId("deckLongPress")
@@ -1038,7 +1052,7 @@ export const TabDeck = memo(function TabDeck() {
         if (!id) return;
         void measureAnchor(card).then((rect) => {
           const now = latestActions.current.order.indexOf(id);
-          if (now >= 0 && rect.height > 0) latestActions.current.showCardMenu(now, rect.x, rect.y + rect.height, rect);
+          if (now >= 0 && rect.height > 0) latestActions.current.showCardMenu(now, rect.x, rect.y + rect.height, rect, card);
         });
       },
       openTab: (id: string) => {
@@ -1266,7 +1280,7 @@ export const TabDeck = memo(function TabDeck() {
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-      {cardMenu && order.includes(cardMenu.id) ? <CardMenuAt items={cardMenuItems(order.indexOf(cardMenu.id))} privately={tabs.get(cardMenu.id)?.isPrivate === true} at={cardMenu} control={cardMenu.control} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
+      {cardMenu && order.includes(cardMenu.id) ? <CardMenuAt items={cardMenuItems(order.indexOf(cardMenu.id))} privately={tabs.get(cardMenu.id)?.isPrivate === true} at={cardMenu} control={cardMenu.control} floor={deckBarTop} screen={{ width, height }} onDismiss={dismissCardMenu} /> : null}
       {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
     </MenuFloorProvider>
@@ -1354,7 +1368,7 @@ const styles = StyleSheet.create({
   parked: { transform: [{ translateX: HANDED_OVER_AWAY }] },
 });
 
-function CardMenuAt({ items, privately, at, control, floor, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; control?: Rect; floor: number; screen: { width: number; height: number }; onDismiss: () => void }) {
+function CardMenuAt({ items, privately, at, control, floor, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; control?: Rect; floor: number; screen: { width: number; height: number }; onDismiss: (chosen?: boolean) => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Portal exitMs={menuExitMs(true)}>

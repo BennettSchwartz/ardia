@@ -58,7 +58,7 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
   };
 }
 
-type FocusTarget = () => Focusable | null | undefined;
+export type FocusTarget = () => Focusable | null | undefined;
 
 let handedOver: FocusTarget | null = null;
 
