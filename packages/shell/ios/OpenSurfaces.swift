@@ -222,11 +222,16 @@ final class OpenSurfaces: NSObject {
     if let held = tracked.held { held["done"] = true } else { tracked.menu?.cancelTracking() }
   }
 
+  private static var chromiumListener: AnyObject? {
+    guard let listener = NSClassFromString("ColorPanelListener") as? NSObject.Type else { return nil }
+    let instance = Selector(("instance"))
+    guard listener.responds(to: instance) else { return nil }
+    return listener.perform(instance)?.takeUnretainedValue()
+  }
+
   private static var chromiumPanel: NSColorPanel? {
-    guard NSColorPanel.sharedColorPanelExists else { return nil }
-    let panel = NSColorPanel.shared
-    guard let target = panel.target, NSStringFromClass(type(of: target)).contains("ColorPanelListener") else { return nil }
-    return panel
+    guard NSColorPanel.sharedColorPanelExists, NSClassFromString("ColorPanelListener") != nil else { return nil }
+    return NSColorPanel.shared
   }
 
   private func colorPanelShown(_ window: NSWindow?) {
@@ -259,8 +264,9 @@ final class OpenSurfaces: NSObject {
   func chooseColor(_ id: String, hex: String, close: Bool) throws -> String {
     guard id == colorPanelId, let panel = Self.chromiumPanel else { throw Problem.missing("There's no open color panel \(id); menus.open lists it.") }
     guard let rgb = Self.components(hex) else { throw Problem.refused("color is # and six hex digits.") }
-    panel.color = NSColor(genericRed: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1)
-    if let action = panel.action { NSApp.sendAction(action, to: panel.target, from: panel) }
+    guard let listener = Self.chromiumListener else { throw Problem.missing("The page's color chooser closed.") }
+    panel.color = NSColor(calibratedRed: rgb[0], green: rgb[1], blue: rgb[2], alpha: 1)
+    NSApp.sendAction(Selector(("didChooseColor:")), to: listener, from: panel)
     if close { panel.close() }
     return hex.lowercased()
   }
