@@ -1,4 +1,4 @@
-import { uiWriteHooks } from "./uiWriteHooks";
+import { foreignWriteHooks } from "./foreignWriteHooks";
 import { listExtensions } from "../../platform/extensions";
 import { stepPager } from "../../platform/pager";
 import { confirm } from "../../platform/dialogs";
@@ -50,7 +50,7 @@ export function switchToTab(tabId: string) {
   if (tab.windowId !== focusedWindowOf(store())) focus(tab.windowId);
 }
 
-export const writesFor = (mayWrite?: () => boolean) => (mayWrite ? (write: () => void) => write() : uiWriteHooks.around);
+export const writesFor = (mayWrite?: () => boolean) => (mayWrite ? (write: () => void) => write() : foreignWriteHooks.around);
 
 export async function closeTab(tabId: string, mayWrite?: () => boolean) {
   const commit = writesFor(mayWrite);
@@ -161,7 +161,7 @@ async function profileMoveTarget(move: ProfileMove, target: string | null): Prom
     suppression: "Don't warn me again",
     windowId: move.windowId,
   });
-  if (suppressed) uiWriteHooks.around(() => store().updateSettings({ warnBeforeMovingTabsToProfile: false }));
+  if (suppressed) foreignWriteHooks.around(() => store().updateSettings({ warnBeforeMovingTabsToProfile: false }));
   return confirmed ? profileId : null;
 }
 
@@ -278,10 +278,10 @@ export async function openProfileMenu(windowId: string) {
   const choice = await chooseFromMenu(items);
   if (!choice) return;
   if (typeof choice !== "string") {
-    if (choice.open === "switch") uiWriteHooks.around(() => switchProfile(windowId, choice.profileId, true));
-    else uiWriteHooks.around(() => void openWindow({ profileId: choice.profileId }));
+    if (choice.open === "switch") foreignWriteHooks.around(() => switchProfile(windowId, choice.profileId, true));
+    else foreignWriteHooks.around(() => void openWindow({ profileId: choice.profileId }));
   } else if (choice === "new") {
     const id = await requestCreateProfile(windowId);
-    if (id) uiWriteHooks.around(() => switchProfile(windowId, id));
+    if (id) foreignWriteHooks.around(() => switchProfile(windowId, id));
   } else if (choice === "edit") openSettings("profiles", current);
 }

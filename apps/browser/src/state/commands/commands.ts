@@ -1,4 +1,4 @@
-import { uiWriteHooks } from "../browser/uiWriteHooks";
+import { foreignWriteHooks } from "../browser/foreignWriteHooks";
 import { copyText } from "../../platform/clipboard";
 import { openExternalURL } from "../../platform/app";
 import { pickFiles, prompt } from "../../platform/dialogs";
@@ -70,7 +70,7 @@ const newOrId = (arg: string) => (arg === "new" ? null : arg);
 
 export class NoCommandWindowError extends Error {}
 
-export function runCommand({ command, arg, windowId: given }: CommandEvent, { strictWindow = false, tabId: targetTab = null, mayWrite = () => true }: { strictWindow?: boolean; tabId?: string | null; mayWrite?: () => boolean } = {}) {
+export function runCommand({ command, arg, windowId: given }: CommandEvent, { strictWindow = false, tabId: targetTab = null, mayWrite }: { strictWindow?: boolean; tabId?: string | null; mayWrite?: () => boolean } = {}) {
   if (isAppCommand(command)) return APP_COMMAND_HANDLERS[command](given);
   const s = useBrowser.getState();
   const target = commandTarget(s, command, given, targetTab);
@@ -338,7 +338,7 @@ export function runCommand({ command, arg, windowId: given }: CommandEvent, { st
     case "autofill":
       return void requestAutofill(windowId, arg, tabId);
     case "newProfile":
-      return void requestCreateProfile(windowId).then((id) => id && uiWriteHooks.around(() => switchProfile(windowId, id)));
+      return void requestCreateProfile(windowId).then((id) => id && foreignWriteHooks.around(() => switchProfile(windowId, id)));
   }
 }
 
@@ -351,9 +351,9 @@ async function addBookmarkToFolder(windowId: string, tabId: string, folder: stri
   if (folder === "new") {
     const title = await prompt({ title: "New Folder", placeholder: "Folder name", confirmTitle: "Create", windowId });
     if (!title) return;
-    uiWriteHooks.around(() => void (parentId = useBrowser.getState().addBookmarkFolder({ profileId, title })));
+    foreignWriteHooks.around(() => void (parentId = useBrowser.getState().addBookmarkFolder({ profileId, title })));
   }
-  uiWriteHooks.around(() => useBrowser.getState().addBookmark({ profileId, url: tab.url, title: tab.title, favicon: tab.favicon, parentId }));
+  foreignWriteHooks.around(() => useBrowser.getState().addBookmark({ profileId, url: tab.url, title: tab.title, favicon: tab.favicon, parentId }));
 }
 
 async function openFiles(windowId: string | null) {
@@ -361,8 +361,8 @@ async function openFiles(windowId: string | null) {
   if (!urls.length) return;
   const s = useBrowser.getState();
   const target = resolveWindowId(s, windowId);
-  if (!target) return uiWriteHooks.around(() => void openWindow({ url: urls[0] }));
-  uiWriteHooks.around(() => {
+  if (!target) return foreignWriteHooks.around(() => void openWindow({ url: urls[0] }));
+  foreignWriteHooks.around(() => {
     let last: string | undefined;
     for (const url of urls) last = useBrowser.getState().newTab(target, { url });
     if (last) useBrowser.getState().activate(last);

@@ -338,17 +338,23 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   first (refusing the request if the socket had already changed the projection), makes the write, then opens the
   check again on the result: the shared-folder engine's merge (`syncWriteHooks`), and the sidebar's and other UI writes
   that follow an await, such as a close confirmed in a sheet, a rename typed into a prompt, or a profile picked from a
-  menu (`uiWriteHooks`). So neither is undone or blamed on the socket, and neither absorbs the socket's own change. A stretch of another request starting while a check is open ends that check first, so each check covers one
+  menu, and a finished download's move (`foreignWriteHooks`). So neither is undone or blamed on the socket, and neither
+  absorbs the socket's own change. Commands a person runs (the menu bar, shortcuts, the app menu, the command bar and
+  launch actions) pass no guard to `runCommand`, so their writes after an await go through `foreignWriteHooks` too;
+  only the socket's `run` passes its guard. A stretch of another request starting while a check is open ends that check first, so each check covers one
   request. A guard called after its request has answered (a live refresh that goes on, the guards handed to
   `goBackAsking` and `closeWindowAsked`) only checks control and opens no check. Read-only requests open none either.
   Muting, sleeping, activating, colour, icon and collapsing don't touch the projection, so they still work, and so do
   closing or parking a window that shows the folder. A socket-reachable action that awaits before it writes the store
   takes the request's guard and calls it after each await, or, when the write is a person's answer to a sheet, menu,
-  prompt or picker, makes it through `uiWriteHooks`. `scripts/socketGuardLint.mjs` checks this with the TypeScript
+  prompt or picker, makes it through `foreignWriteHooks`. `scripts/socketGuardLint.mjs` checks this with the TypeScript
   compiler. It starts from every function in `state/automation` and `run`'s command table and follows calls, plain
-  wrappers of async helpers, store actions reached through helpers or destructuring, and `.then`/`.catch`/`.finally`
-  callbacks, up to five calls deep. It fails on any store write after an await that isn't preceded by a guard call
-  (`socketGuardLint.test.mjs`). `run` answers synchronously, so a guard called after an await inside one of its
+  wrappers of async helpers, store actions reached through helpers, destructuring or an alias of the store hook, and
+  every nested function: `.then`/`.catch`/`.finally` and timer, microtask and listener callbacks as running later,
+  array callbacks and hook wrappers in place, up to five calls deep. It fails on any store write after an await that
+  isn't preceded by a guard call, and on `foreignWriteHooks.around` or `syncWriteHooks.around` reached in the socket's
+  own stretch, which would close its open check before the socket's write (`socketGuardLint.test.mjs`, which names the
+  one known-safe site and why). `run` answers synchronously, so a guard called after an await inside one of its
   commands opens no check: `run` `closeTab` and `closeTabGroup` on a shared folder's tree are protected by the
   up-front refusal below, not by the check. Earlier, more specific refusals remain where they read better or where a rollback
   can't reach, because the action reaches a page or the engine before any check runs:

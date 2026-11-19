@@ -3,7 +3,7 @@ import { folderPlace } from "../sharedFolders/engine";
 import { knownNames, localFolder, signatureOf } from "../sharedFolders/local";
 import { boundFolders, folderRef } from "../sharedFolders/store";
 import { syncWriteHooks } from "../sharedFolders/syncWriteHooks";
-import { uiWriteHooks } from "../browser/uiWriteHooks";
+import { foreignWriteHooks } from "../browser/foreignWriteHooks";
 import { withTreesFrom } from "./sharedTrees";
 import { SHARED_GROUPS_SIDEBAR_ONLY } from "./workspaceSharedGuard";
 
@@ -62,7 +62,7 @@ function aroundForeignWrite(write: () => void) {
 }
 
 syncWriteHooks.around = aroundForeignWrite;
-uiWriteHooks.around = aroundForeignWrite;
+foreignWriteHooks.around = aroundForeignWrite;
 
 export class SocketOrigin {
   vetoed = false;

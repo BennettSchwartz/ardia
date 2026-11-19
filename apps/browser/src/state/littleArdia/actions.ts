@@ -1,4 +1,4 @@
-import { uiWriteHooks } from "../browser/uiWriteHooks";
+import { foreignWriteHooks } from "../browser/foreignWriteHooks";
 import { type LinkRoute, routeLinkTabs } from "../../platform/tabs";
 import { showMenu } from "../../platform/menus";
 import { focus, openWindow } from "../browser/actions";
@@ -182,7 +182,7 @@ export async function openLittleArdiaProfileMenu(windowId: string) {
       ...menuShortcut(`switchProfile:${id}`, s),
     })),
   );
-  if (choice) uiWriteHooks.around(() => moveLittleArdiaToProfile(windowId, choice));
+  if (choice) foreignWriteHooks.around(() => moveLittleArdiaToProfile(windowId, choice));
 }
 
 export async function closeLittleArdia(windowId: string, { mayClose = () => true, ask }: CloseGuard = {}): Promise<GuardedClose> {

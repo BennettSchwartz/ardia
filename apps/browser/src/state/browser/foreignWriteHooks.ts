@@ -1,1 +1,1 @@
-export const uiWriteHooks: { around: (write: () => void) => void } = { around: (write) => write() };
+export const foreignWriteHooks: { around: (write: () => void) => void } = { around: (write) => write() };
