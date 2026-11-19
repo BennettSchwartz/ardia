@@ -277,7 +277,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
 | search | `search.engines` (`default` is the engine searches use, an extension's when one controls it, with `controlledBy`) | `search.setDefault {id}` (`refused` while an extension controls it, as Settings disables the picker; so is `settings.set {searchEngine}`), `search.add`, `search.update`, `search.remove` |
 | sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {site}` |
-| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore}` (the user adds it on the store page; `folder` is refused), `extensions.configure {id, siteAccess?, incognito?, userScripts?}`, `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
+| extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore}` (the user adds it on the store page; `folder` is refused), `extensions.configure {id, siteAccess? | incognito? | userScripts?}` (one per call), `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status`, `sync.devices {profile?}` | `sync.now`, `sync.setType {type, on}`, `sync.setProfile {profile, on}`, `sync.setOpenTabs {profile, on}`, `sync.sendTab {tab, device}` |
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
@@ -359,25 +359,28 @@ since Chromium rereads an unpacked extension's folder by path, so only an engine
 
 The install sheet that Settings and Web Store prompts show keys each request, so its Add button and Return confirm
 that request only. Once Add is pressed the sheet shows Adding… with Cancel greyed out, and nothing else replaces it:
-a Web Store prompt that arrives meanwhile waits and shows after. If the window under a sheet closes before Chromium
+a Web Store prompt that arrives meanwhile waits and shows after, in its own window if that can still show a sheet,
+otherwise in another open browser window that isn't closing (mid-animation or marked for close), or it is declined. If the window under a sheet closes before Chromium
 answers a failed add, no error sheet is left behind for it.
 
-`extensions.configure` sets what an extension's page in Settings offers: site access (only for an extension that
-asks for sites), Allow in Incognito (not for one whose manifest says `"incognito": "not_allowed"`), and Allow User
-Scripts (only when the extension uses them); a policy-installed one is `refused`. The whole call is checked before
-anything changes, against a list read from Chromium for the call, never the cached row. Allow in Incognito is
-`refused` ("needs engine support") for an unpacked extension: its manifest on disk can differ from the one Chromium
+`extensions.configure` changes one setting per call, as an extension's page in Settings does: site access (only for
+an extension that asks for sites), Allow in Incognito, or Allow User Scripts (only when the extension uses them). A
+request naming site access and incognito together is `bad_request` ("change site access and incognito in separate
+calls"), as is any other pair, before anything is read or written; a policy-installed extension is `refused`. Each
+call is checked against a list read from Chromium for the call, never the cached row, makes its one write, and reads
+the list again with a request started after the write (never one already running): if that read fails, or the
+setting didn't take, the call answers `failed` and nothing else was touched. There is no rollback, so a refused or
+silently declined change can't take a user's site grants or later changes with it.
+
+Allow in Incognito is checked first for eligibility: when `incognitoAllowed` is missing (Linux and Windows rows don't
+carry it) or `null` (macOS couldn't read the manifest), any Incognito change is `refused` ("can't confirm incognito
+eligibility"), and that includes an unpacked extension whose eligibility is unknown. An unpacked extension with a
+readable manifest is then `refused` ("needs engine support"): its manifest on disk can differ from the one Chromium
 loaded, and Chromium's own eligibility flag (`incognito_access.is_enabled`) isn't exported by `ac_extensions_list`.
-For a packed or Web Store extension it is checked against `incognitoAllowed`, read from the installed manifest; when
-that field is missing (Linux and Windows rows don't carry it) or `null` (macOS couldn't read the manifest), any
-Incognito change is `refused` ("can't confirm incognito eligibility") before anything is written. If Chromium still
-declines Allow in Incognito or Allow User Scripts after site access was written, the previous site access is written
-back and the call answers `failed`. Then site access, the one change Chromium can
-still refuse, goes first on its own: if it's refused, nothing else changes. `specificSites` turns withholding on
-and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply shows (with
-`sites`) as success. The reply reads the list again with a request started after the write, never one that was
-already running; if that read fails the call answers `failed`, never the cached row. Changing several fields in one engine call atomically would need `ac_extensions.cc`
-(`engine/`) to validate before it applies anything.
+A packed or Web Store extension whose manifest says `"incognito": "not_allowed"` can't turn it on. Otherwise the
+Incognito write is read back, so a change Chromium declines without an error answers `failed`. `specificSites` turns
+withholding on and keeps the sites the user granted; with none granted, Chromium reports `ON_CLICK`, which the reply
+shows (with `sites`) as success.
 
 ### Window geometry
 
@@ -394,10 +397,11 @@ by the native call itself, and the socket also bounds every coordinate to ±100,
 green button with Option, or double-clicking the title bar). `setWindowFullScreen` answers once the transition has
 finished, not when it starts. `FullScreenLifecycle.swift` tracks every window's transitions, whoever starts them (a
 call, the green button, the menu or a keyboard shortcut): `willEnter`/`willExit` opens one and gives it a generation
-number, and the window closing ends it. `didEnter` or `didExit` ends it only when the window's real full-screen state
-(`ArdiaChromeWindowHost.windowIsFullScreen`, the style mask, plus the stand-in a background test instance acts out)
-matches that transition's direction; otherwise the notification is stale (a late end of an earlier transition) and is
-ignored and logged. Chromium's failure callbacks don't end one (its exit-failure callback arrives before `didExit`). A
+number, and the window closing ends it. `didEnter` or `didExit` ends it only when the notification's own direction
+matches the open transition's and the window's real full-screen state (`ArdiaChromeWindowHost.windowIsFullScreen`, the
+style mask, plus the stand-in a background test instance acts out) matches it too; otherwise the notification is stale
+(a late end of an earlier transition) and is ignored and logged. WindowManager's cached full-screen flag takes the same
+decision (`acceptsEnd`), so a stale notification can't set it either. Chromium's failure callbacks don't end one (its exit-failure callback arrives before `didExit`). A
 transition with no ending notification is checked against the same real state from 6 s on, once a second: it ends
 when two checks agree, whichever side that is, and after 30 s it ends regardless and is logged. Either way the
 window's cached full-screen flag is set to that real state (and the store told), so geometry and later calls see
