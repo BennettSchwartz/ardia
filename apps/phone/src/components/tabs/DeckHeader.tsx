@@ -17,6 +17,7 @@ import { FadingGlyphs, GlassCircleButton, type ChromeFade } from "./ChromeButton
 type Props = {
   safeTop: number;
   safeSide: number;
+  sideInset: number;
   privateCount: number;
   hasTabs: boolean;
   onCloseIncognito: () => void;
@@ -43,7 +44,7 @@ export function deckMoreMenuItems({ syncEnabled, canReopen, hasTabs, onCloseAll 
   ];
 }
 
-export function DeckHeader({ safeTop, safeSide, privateCount, hasTabs, onCloseIncognito, onCloseAll, menusShown = true, showsMore = true, onMenu, glassShown, glassShownMs, glyphFade }: Props) {
+export function DeckHeader({ safeTop, safeSide, sideInset, privateCount, hasTabs, onCloseIncognito, onCloseAll, menusShown = true, showsMore = true, onMenu, glassShown, glassShownMs, glyphFade }: Props) {
   const theme = useTheme();
   const status = useSyncStatus();
   const view = useSyncView();
@@ -52,7 +53,7 @@ export function DeckHeader({ safeTop, safeSide, privateCount, hasTabs, onCloseIn
   const incognito = useIncognito();
   const spaces = status.isEnabled ? view.profiles : [];
   const current = shown ?? spaces[0] ?? null;
-  const side = safeSide + deckChromeLayout.headerSide;
+  const side = safeSide + sideInset;
   const below = safeTop + deckHeaderBottom() + deckChromeLayout.menuGap;
   const opened = () => onMenu?.(true);
   const closed = () => onMenu?.(false);

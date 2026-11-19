@@ -119,8 +119,7 @@ export const menuLayout = {
   iconSlot: 26,
   zoomButton: { width: 40, height: 34 },
   zoomReset: 48,
-  sheetTopGap: Platform.OS === "ios" ? 0 : 24,
-  sheetMaxShare: Platform.OS === "ios" ? 0.9 : 1,
+  sheetTopGap: Platform.OS === "ios" ? 10 : 24,
   sheetGrabber: Platform.OS === "ios" ? { width: 36, height: 5, top: 6 } : null,
 } as const;
 
@@ -313,8 +312,7 @@ export const deckChromeLayout = {
   searchTrailFilled: 8,
   searchSpacing: 8,
   searchGlyph: 16.8,
-  incognitoSpecs: 28,
-  incognitoOn: 38,
+  incognitoEyes: 30,
   clearGlyph: 22.8,
   clearHit: 32,
   archiveCenter: 78.5,

@@ -124,7 +124,7 @@ export function ExpoSettingsRoot() {
             <ExpoRowLabel title="Export Open Tabs" systemImage="square.and.arrow.up.fill" tint="export" />
           </Button>
         </Section>
-        <Section title="Privacy" footer={<Text>{PHONE_SHARING_COPY.summary}</Text>}>
+        <Section title="Privacy">
           <NavigationLink value={link({ page: "clearData" })}>
             <ExpoRowLabel title="Clear Browsing Data" systemImage="eraser.fill" tint="clearData" />
           </NavigationLink>

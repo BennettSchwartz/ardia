@@ -59,14 +59,15 @@ test("an iPhone 17 Pro on its side gets main's landscape deck: a 520.3 by 240 ca
   expect(g.safeSide).toBe(59);
 });
 
-test("in landscape the deck's header pads by the wider side inset plus 12 and its bottom bar by it plus the bars' 24 on both sides, and on iPhone the grid by it plus 16", () => {
+test("in landscape the deck's header and its bottom bar pad by the wider side inset plus the bars' 24 on both sides, and on iPhone the grid by it plus 16", () => {
   act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
   const root = redesigned(<TabDeck />);
   expect(flat(hosts(root, "deckBottomBar")[0]!).paddingHorizontal).toBe(59 + 24);
   const header = root.root.findAll((node) => typeof node.type === "string" && typeof node.props.testID === "string" && node.props.testID.startsWith("deckHeader"));
   expect(header.length).toBeGreaterThan(0);
   const sides = header.map(flat).flatMap((style) => [style.paddingHorizontal, style.left, style.right, style.paddingLeft, style.paddingRight]).filter((value) => typeof value === "number");
-  expect(sides).toContain(59 + 12);
+  expect(sides).toContain(59 + 24);
+  expect(sides).not.toContain(59 + 12);
   if (Platform.OS !== "ios") return unmount(root);
   act(() => deckGrid.setDeckGrid(true));
   act(() => jest.advanceTimersByTime(1000));
@@ -147,7 +148,7 @@ test("in landscape a sheet stops at the side insets and fits the shorter window,
   act(() => Dimensions.set({ window: { ...PORTRAIT, ...LANDSCAPE }, screen: { ...PORTRAIT, ...LANDSCAPE } }));
   const after = flat(panel(root));
   expect(after).toMatchObject({ left: 59, right: 59, paddingBottom: 21 });
-  expect(after.maxHeight).toBe(Math.min(LANDSCAPE.height - INSETS.top - (Platform.OS === "ios" ? 0 : 24), LANDSCAPE.height * (Platform.OS === "ios" ? 0.9 : 1)));
+  expect(after.maxHeight).toBe(LANDSCAPE.height - INSETS.top - (Platform.OS === "ios" ? 10 : 24));
   expect(after.maxHeight as number).toBeLessThan(before.maxHeight as number);
   unmount(root);
 });
