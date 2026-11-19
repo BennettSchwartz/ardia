@@ -1,8 +1,9 @@
 import { useEffect, type RefObject } from "react";
 import { AccessibilityInfo, findNodeHandle, type View, type ViewInstance } from "react-native";
 
-export function useCoverFocus(target: RefObject<ViewInstance | null>) {
+export function useCoverFocus(target: RefObject<ViewInstance | null>, enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     let live = true;
     void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
       if (!on || !live) return;
@@ -14,7 +15,7 @@ export function useCoverFocus(target: RefObject<ViewInstance | null>) {
     return () => {
       live = false;
     };
-  }, [target]);
+  }, [target, enabled]);
 }
 
 type Focusable = Parameters<typeof findNodeHandle>[0];

@@ -70,8 +70,16 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     countDrawnMenuOpened(privately);
   }, []);
   useEffect(() => {
-    if (revealed && !leaving) focusForScreenReader(() => firstRow.current);
-  }, [revealed, page]);
+    if (!revealed || leaving) return;
+    let live = true;
+    focusForScreenReader(
+      () => firstRow.current,
+      () => live,
+    );
+    return () => {
+      live = false;
+    };
+  }, [revealed, page, leaving]);
   useEffect(() => {
     if (leaving) return;
     const back = BackHandler.addEventListener("hardwareBackPress", () => {

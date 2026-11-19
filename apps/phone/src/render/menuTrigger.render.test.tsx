@@ -395,6 +395,22 @@ test("TalkBack moves to the first enabled row once the menu is shown, and back t
   expect(restored()).toBe(2);
 });
 
+test("a TalkBack focus asked for as the menu opens is dropped once the menu starts closing, so it never lands on a closing row", () => {
+  const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => undefined);
+  const back = pressBack();
+  const root = trigger("longPress");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onLongPress === "function")[0]!.props.onLongPress({ nativeEvent: { pageX: 120, pageY: 300 } }));
+  act(() => rowsOf(root).props.onContentSizeChange(250, 200));
+  expect(asked).toHaveBeenCalledTimes(1);
+  const still = asked.mock.calls[0]![1]!;
+  expect(still()).toBe(true);
+  back();
+  expect(still()).toBe(false);
+  act(() => jest.advanceTimersByTime(1000));
+  unmount(root);
+});
+
 test("an Incognito card's native menu on iPhone is not counted either", () => {
   if (Platform.OS !== "ios") return;
   mockNative.contextMenu = true;

@@ -38,7 +38,7 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
     if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut });
   }, [leaving]);
   const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
-  useCoverFocus(card);
+  useCoverFocus(card, !leaving);
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
