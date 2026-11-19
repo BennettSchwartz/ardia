@@ -63,7 +63,8 @@ export const tabsMotion = {
 export const menuMotion = {
   open: spring(0.3, 0.76),
   fromScale: 0.18,
-  contentFade: 90,
+  contentFade: 67,
+  glassFade: 50,
   close: 200,
   heldOpen: 280,
   heldClose: 270,

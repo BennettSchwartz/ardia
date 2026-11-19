@@ -40,6 +40,23 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
   };
 }
 
+type FocusTarget = () => Focusable | null | undefined;
+
+let handedOver: FocusTarget | null = null;
+
+export function handFocusOver(target: FocusTarget) {
+  handedOver = target;
+  setTimeout(() => {
+    if (handedOver === target) handedOver = null;
+  }, 0);
+}
+
+export function takeHandedFocus(): FocusTarget | null {
+  const target = handedOver;
+  handedOver = null;
+  return target;
+}
+
 export function announceForScreenReader(text: string, still: () => boolean = () => true) {
   void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
     if (!on || !still() || !text) return;

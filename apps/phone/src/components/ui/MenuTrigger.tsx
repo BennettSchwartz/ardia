@@ -3,14 +3,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { findNodeHandle, Platform, View, type GestureResponderEvent, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
 import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
-import { focusForScreenReader } from "./coverFocus";
-import { menuMotion } from "./motion";
-import { useOverlayCovered, useOverlayGeneration, useOverlayOpened } from "./Overlay";
+import { focusForScreenReader, handFocusOver } from "./coverFocus";
+import { useOverlayAfterClear, useOverlayCovered, useOverlayGeneration, useOverlayOpened } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
 
-export type MenuHandlers = { onPress?: (event?: GestureResponderEvent) => void; onLongPress?: (event?: GestureResponderEvent) => void };
+export type MenuHandlers = { onPress?: (event?: GestureResponderEvent) => void; onLongPress?: (event?: GestureResponderEvent) => void; openFor?: (opener: unknown) => void };
 
 type Props = {
   items: MenuItem[];
@@ -109,6 +108,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
   const covered = useOverlayCovered();
   const generation = useOverlayGeneration();
   const onOverlayOpened = useOverlayOpened();
+  const afterClear = useOverlayAfterClear();
   useEffect(() => () => cancelRestore.current(), []);
   const frostAround = useMenuFrost();
   const frost = frostHere === undefined ? frostAround : frostHere;
@@ -122,11 +122,11 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
     onClose?.();
   }, [disabled]);
   const open = useCallback(
-    (event?: GestureResponderEvent) => {
+    (event?: GestureResponderEvent, explicitOpener?: unknown) => {
       if (disabled) return;
       cancelRestore.current();
       haptic?.();
-      opener.current = event?.currentTarget ?? null;
+      opener.current = explicitOpener ?? event?.currentTarget ?? null;
       setOpened({ at: trigger === "longPress" ? pressPoint(event) : null });
       onOpen?.();
     },
@@ -137,29 +137,30 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
       setOpened(null);
       onClose?.();
       cancelRestore.current();
-      if (chosen && !restoresAfterChoice) return;
+      const target = () => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0];
+      if (chosen && !restoresAfterChoice) {
+        handFocusOver(target);
+        return;
+      }
       let cancelFocus: () => void = () => undefined;
       const openedBefore = generation();
-      const wait = setTimeout(() => {
-        cancelFocus = focusForScreenReader(
-          () => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0],
-          () => generation() === openedBefore && !covered(),
-        );
-      }, menuMotion.heldClose);
+      const stopWaiting = afterClear(() => {
+        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered());
+      });
       const stopWatching = onOverlayOpened(() => cancelRestore.current());
       cancelRestore.current = () => {
-        clearTimeout(wait);
+        stopWaiting();
         cancelFocus();
         stopWatching();
         cancelRestore.current = () => undefined;
       };
     },
-    [onClose, restoresAfterChoice],
+    [onClose, restoresAfterChoice, afterClear],
   );
   const held = trigger === "longPress";
   return (
     <View ref={anchor} testID={testID} style={style} collapsable={false}>
-      {children(held ? { onLongPress: open } : { onPress: open })}
+      {children(held ? { onLongPress: open, openFor: (target) => open(undefined, target) } : { onPress: open, openFor: (target) => open(undefined, target) })}
       {opened && !disabled ? <FloatingMenu items={items} anchor={anchor} at={opened.at} floor={floor} align={align} place={place ?? {}} dimmed={held} privately={privately} frost={frost} onDismiss={dismiss} /> : null}
     </View>
   );

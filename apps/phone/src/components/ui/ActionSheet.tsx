@@ -1,14 +1,14 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
-import { announceForScreenReader, useCoverFocus } from "./coverFocus";
+import { focusForScreenReader, takeHandedFocus } from "./coverFocus";
 import { screenReaderActions } from "./screenReaderActions";
 import type { Confirmation } from "./Dialog";
 import { countDrawnMenuOpened, MenuMaterial } from "./Menu";
 import { menuMotion } from "./motion";
-import { Portal, usePortalLeaving } from "./Overlay";
+import { Portal, useOverlayAfterClear, useOverlayCovered, useOverlayGeneration, usePortalLeaving, usePortalLeft } from "./Overlay";
 import { actionSheetInk, actionSheetLook, ink } from "./tokens";
 import { useTheme } from "./theme";
 
@@ -16,10 +16,21 @@ export type SheetAction = { title: string; destructive?: boolean; onPress: () =>
 
 type Props = { title?: string | null; message?: string | null; actions: SheetAction[]; cancel?: string; onCancel: () => void };
 
-export function ActionSheet(props: Props) {
+export function ActionSheet({ onCancel, ...props }: Props) {
+  const [returnTo] = useState(() => ({ target: takeHandedFocus() }));
+  const afterClear = useOverlayAfterClear();
+  const generation = useOverlayGeneration();
+  const covered = useOverlayCovered();
+  const cancelled = useCallback(() => {
+    onCancel();
+    const target = returnTo.target;
+    if (!target) return;
+    const openedBefore = generation();
+    afterClear(() => focusForScreenReader(target, () => generation() === openedBefore && !covered()));
+  }, [onCancel, returnTo, afterClear, generation, covered]);
   return (
     <Portal exitMs={menuMotion.sheetOut}>
-      <SheetCard {...props} />
+      <SheetCard {...props} onCancel={cancelled} />
     </Portal>
   );
 }
@@ -38,20 +49,17 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
   const announces = Platform.OS === "android";
   const heading = title && message ? `${title}${/[.?!]$/.test(title) ? "" : "."} ${message}` : title || message || "";
   const leaving = usePortalLeaving();
+  const left = usePortalLeft();
   const shown = useSharedValue(1);
   useEffect(() => {
-    if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut });
+    if (leaving) shown.value = withTiming(0, { duration: reduceMotion ? menuMotion.contentFade : menuMotion.sheetOut }, (finished) => finished && runOnJS(left)());
   }, [leaving]);
   const fade = useAnimatedStyle(() => ({ opacity: shown.value }));
-  useCoverFocus(announces || !heading ? firstAction : spoken, !leaving);
   useEffect(() => {
-    if (!announces || leaving || !heading) return;
-    let live = true;
-    announceForScreenReader(heading, () => live);
-    return () => {
-      live = false;
-    };
+    if (leaving) return;
+    return focusForScreenReader(() => (heading ? spoken : firstAction).current);
   }, [leaving]);
+  const cancelAction = announces ? screenReaderActions([{ name: "cancel", label: cancel, run: onCancel }]) : {};
   useEffect(() => {
     countDrawnMenuOpened();
   }, []);
@@ -71,7 +79,7 @@ function SheetCard({ title, message, actions, cancel = "Cancel", onCancel }: Pro
           <MenuMaterial source={null} fill={paint.fill} solid={paint.solid} radius={actionSheetLook.radius} style={[styles.material, { maxHeight: maxHeight - 2 * actionSheetLook.rim }]}>
             <ScrollView testID="drawnConfirmationScroll" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.content} bounces={false} overScrollMode="never">
             {heading ? (
-              <View ref={spoken} testID="drawnConfirmationHeading" accessible accessibilityRole="header" accessibilityLabel={heading}>
+              <View ref={spoken} testID="drawnConfirmationHeading" accessible accessibilityRole="header" accessibilityLabel={heading} {...cancelAction}>
                 {title ? <Text style={[actionSheetLook.title, { color: paint.title }]}>{title}</Text> : null}
                 {message ? (
                   <Text textBreakStrategy="balanced" style={[actionSheetLook.message, styles.message, { color: paint.message }]}>

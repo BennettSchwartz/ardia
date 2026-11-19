@@ -341,6 +341,27 @@ onAndroid("a grid card's Tab Options action gives TalkBack the same drawn CardMe
   unmount(root);
 });
 
+onAndroid("after a grid card's Tab Options menu is dismissed, TalkBack goes back to the card itself, not to the menu's wrapper", () => {
+  const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => () => undefined);
+  const root = deck();
+  toggle();
+  const card = cards(root)[1]!;
+  const cardView = byTestId(root, "tabGridCard").map((node) => node.instance).filter(Boolean)[1];
+  const wrapper = byTestId(root, "tabGridCardMenu").map((node) => node.instance).filter(Boolean)[1];
+  act(() => card.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  asked.mockClear();
+  act(() => root.root.findAll((node) => node.type === FloatingMenu)[0]!.props.onDismiss());
+  act(() => jest.advanceTimersByTime(1000));
+  act(() => jest.advanceTimersByTime(32));
+  expect(cardView).toBeTruthy();
+  const targets = asked.mock.calls.map(([target]) => target());
+  expect(targets.length).toBe(1);
+  expect(targets[0] === cardView).toBe(true);
+  expect(targets[0] === wrapper).toBe(false);
+  unmount(root);
+});
+
 onAndroid("a grid card's Tab Options stays with its own tab when an earlier tab closes while the card is measured", async () => {
   const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
   let measured!: (rect: { x: number; y: number; width: number; height: number }) => void;

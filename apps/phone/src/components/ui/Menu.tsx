@@ -1,14 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
 import { lookIsNative } from "@ardia/phone-native";
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from "react-native-reanimated";
+import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { insetRect, MENU_DIVIDER, MENU_HEADING, MENU_MARGIN, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, type MenuAlign, type MenuLimits, type Point, type Rect } from "../../lib/menuPlace";
 import { useReduceMotion } from "./contrast";
 import { focusForScreenReader } from "./coverFocus";
 import { LookFrost, SURFACES_FROST } from "./LookViews";
 import { menuMotion } from "./motion";
-import { measureAnchor, Portal, useOverlayFrame, usePortalLeaving } from "./Overlay";
+import { measureAnchor, Portal, useOverlayFrame, usePortalLeaving, usePortalLeft } from "./Overlay";
 import { Symbol } from "./Symbol";
 import type { SymbolName } from "./symbolPaths";
 import { useTheme } from "./theme";
@@ -61,6 +61,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const source = frost === undefined ? frostAround : frost;
   const [page, setPage] = useState<MenuSubmenu | null>(null);
   const leaving = usePortalLeaving();
+  const left = usePortalLeft();
   const rows = page ? page.children : items;
   const [content, setContent] = useState<number | null>(null);
   const revealed = shown && (placer === undefined || content !== null);
@@ -106,13 +107,13 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
     if (!leaving) return;
     const closing = dimmed ? menuMotion.heldClose : menuMotion.close;
     if (reduceMotion) {
-      glass.value = withTiming(0, { duration: menuMotion.contentFade });
+      glass.value = withTiming(0, { duration: menuMotion.contentFade }, (finished) => finished && runOnJS(left)());
       shownContent.value = withTiming(0, { duration: menuMotion.contentFade });
       dim.value = withTiming(0, { duration: menuMotion.contentFade });
       return;
     }
     closed.value = withTiming(1, { duration: closing, easing: Easing.linear });
-    glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }) : withDelay(closing - menuMotion.contentFade, withTiming(0, { duration: menuMotion.contentFade }));
+    glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }, (finished) => finished && runOnJS(left)()) : withDelay(closing - menuMotion.glassFade, withTiming(0, { duration: menuMotion.glassFade }, (finished) => finished && runOnJS(left)()));
     shownContent.value = withTiming(0, { duration: dimmed ? closing : menuMotion.contentFade });
     dim.value = withTiming(0, { duration: menuMotion.heldClose });
   }, [leaving]);
