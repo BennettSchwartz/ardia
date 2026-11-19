@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/callback_list.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
@@ -77,7 +78,11 @@ struct PluginCommandContext {
   bool on_root_session = false;
   base::RepeatingCallback<bool(int)> context_allowed;
   base::RepeatingCallback<bool(const std::string&)> session_known;
+  std::string isolated_world_name;
+  base::RepeatingCallback<std::optional<std::pair<double, double>>()> viewport;
 };
+
+void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info);
 
 std::string PluginRefusal(const PluginScope& scope,
                           const std::string& method,
@@ -139,13 +144,21 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                    const std::string& session,
                    const base::DictValue* params);
   bool FilterResponse(const std::string& method, std::string& message);
-  bool FilterTargetEvent(std::string_view method, const std::string& message);
+  bool FilterTargetEvent(std::string_view method, std::string& message);
   bool FilterPluginEvent(std::string_view method,
                          std::string_view session,
                          std::string& message);
   bool FilterPluginRuntimeEvent(std::string_view method,
                                 const std::string& message);
+  bool FilterPluginReply(int id,
+                         const std::string& session,
+                         std::string& message);
   bool SessionInScope(const std::string& session);
+  bool RootInScope();
+  void WatchTab(const std::string& session);
+  void TabLeftWindow(const std::string& session);
+  std::optional<std::pair<double, double>> ViewportOf(
+      const std::string& session);
   void DetachOutOfScope(const std::string& session);
   void CloseOutOfScope();
   void CheckScope();
@@ -165,6 +178,11 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::map<std::string, std::string> parents_;
   std::set<std::string> detaching_;
   std::set<std::string> told_targets_;
+  std::set<std::string> left_;
+  bool root_left_ = false;
+  std::map<std::string, base::CallbackListSubscription> tab_watches_;
+  base::CallbackListSubscription root_tab_watch_;
+  std::string isolated_world_name_;
   std::map<std::string, Contexts> contexts_;
   std::map<std::pair<std::string, int>, std::string> outstanding_;
   base::OnceClosure closer_;

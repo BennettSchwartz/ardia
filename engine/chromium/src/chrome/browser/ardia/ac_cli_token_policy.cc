@@ -17,6 +17,8 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/no_destructor.h"
+#include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -143,9 +145,12 @@ TokenClient::TokenClient(content::DevToolsAgentHostClient* client,
   CHECK_EQ(kind_ == TokenKind::kPlugin, scope_.has_value());
   Registry()[client_] = this;
   if (kind_ == TokenKind::kPlugin) {
+    isolated_world_name_ = base::StrCat(
+        {"ardia-plugin-", base::HexEncode(base::RandBytesAsVector(16))});
     scope_timer_.Start(FROM_HERE, kScopeCheckInterval,
                        base::BindRepeating(&TokenClient::CheckScope,
                                            base::Unretained(this)));
+    WatchTab(std::string());
   }
 }
 
@@ -343,6 +348,7 @@ bool TokenClient::FilterResponse(const std::string& method,
     for (base::Value& info : *infos) {
       MarkOffscreen(info.GetIfDict());
       if (kind_ == TokenKind::kPlugin) {
+        ScrubPluginTargetInfo(*scope_, info.GetIfDict());
         if (const std::string* target_id = info.GetDict().FindString("targetId")) {
           told_targets_.insert(*target_id);
         }
@@ -360,6 +366,7 @@ bool TokenClient::FilterResponse(const std::string& method,
         return true;
       }
       told_targets_.insert(*target_id);
+      ScrubPluginTargetInfo(*scope_, info);
     }
   }
   std::optional<std::string> annotated = base::WriteJson(*parsed);
@@ -407,6 +414,21 @@ bool TokenClientMayAttach(content::DevToolsAgentHostClient* root_client,
   return host == it->second->root_host() ||
          cli_token_policy_internal::PluginTargetInScope(*it->second->scope(),
                                                         host);
+}
+
+bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
+                         content::RenderFrameHost* frame) {
+  auto it = cli_token_policy_internal::Registry().find(root_client);
+  if (it == cli_token_policy_internal::Registry().end() ||
+      it->second->kind() == TokenKind::kCli) {
+    return true;
+  }
+  return frame && cli_token_policy_internal::PluginMayAttachToFrame(
+                      *it->second->scope(), frame);
+}
+
+bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client) {
+  return TokenClientKind(root_client) == TokenKind::kPlugin;
 }
 
 void CloseTokenClientsOf(const std::string& credential_id) {

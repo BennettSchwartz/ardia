@@ -15,7 +15,10 @@ DOM.setFileInputFiles, cookies, Target.createTarget and window 2's page, isn't w
 read /ardia/active; revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its
 allowlist (one allowed and one refused method per domain), Runtime only in its own isolated world (main world refused,
 no universal access), no Network method and no Network, console or main-world context event; when its tab moves to
-another window, a command in flight answers tab_out_of_scope and the session is detached. The CLI answers a page's
+another window (or out and straight back), a command in flight answers tab_out_of_scope, a late reply never arrives,
+and the session is detached. Backend node ids from another tab in the same renderer, another client's world name, paste
+and native key codes, window screenshots and clips outside the viewport are refused or confined, and a target whose
+opener left the window shows no opener. The CLI answers a page's
 showOpenFilePicker, showSaveFilePicker and showDirectoryPicker with Ardia.answerFilePicker (no dialog opens), and a
 plugin is refused that command. The app's file eval runs
 through its perf probe, so a release build works.`;
@@ -38,7 +41,7 @@ const PICKERS = `<button id=open style="position:fixed;left:0;top:40px;width:200
 const report = (p) => p.then((v) => (window.picked = v), (e) => (window.picked = "error:" + e.name));
 open.onclick = () => report(showOpenFilePicker().then(async ([h]) => "open:" + h.name + ":" + (await (await h.getFile()).text())));
 save.onclick = () => report(showSaveFilePicker().then(async (h) => { const w = await h.createWritable(); await w.write("saved by the page"); await w.close(); return "save:" + h.name; }));
-dir.onclick = () => report(showDirectoryPicker().then(async (d) => { const names = []; for await (const [n] of d.entries()) names.push(n); return "dir:" + names.sort().join(","); }));
+dir.onclick = () => report(showDirectoryPicker().then(async (d) => { window.dirHandle = d; const names = []; for await (const [n] of d.entries()) names.push(n); return "dir:" + names.sort().join(","); }));
 </script>`;
 const server = createServer((req, res) => {
   res.setHeader("content-type", "text/html");
@@ -86,16 +89,17 @@ function connect(url) {
     let next = 1;
     const waiting = new Map();
     const events = [];
+    const replies = [];
     ws.onopen = () => resolve({
-      ws, events,
+      ws, events, replies,
       closed: new Promise((r) => ws.addEventListener("close", r)),
-      raw: (id, method, params = {}, sessionId) => new Promise((done) => {
-        waiting.set(id, done);
-        ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-        setTimeout(() => waiting.delete(id) && done({ error: { message: "timed out" } }), 15000);
-      }),
+      raw: (id, method, params = {}, sessionId) => ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })),
+      repliesTo: async (id, since, ms) => {
+        await sleep(ms);
+        return replies.slice(since).filter((m) => m.id === id);
+      },
       send: (method, params = {}, sessionId) => new Promise((done) => {
-        const id = next++;
+        const id = 1000000 + next++;
         waiting.set(id, done);
         ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
         setTimeout(() => waiting.delete(id) && done({ error: { message: "timed out" } }), 15000);
@@ -104,7 +108,8 @@ function connect(url) {
     ws.onerror = () => reject(new Error("websocket refused"));
     ws.onmessage = (e) => {
       const m = JSON.parse(e.data);
-      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); } else events.push(m);
+      if (m.id !== undefined) replies.push(m);
+      if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); } else if (m.id === undefined) events.push(m);
     };
   });
 }
@@ -224,6 +229,41 @@ try {
   const mainContexts = plugin.events.filter((e) => e.method === "Runtime.executionContextCreated" && e.params?.context?.id !== isolated);
   check("plugin: no main-world execution context is announced to it", mainContexts.length === 0, mainContexts.map((e) => e.params?.context?.name).join(" "));
 
+  const cliFrame = (await cli.send("Page.getFrameTree", {}, csOne)).result?.frameTree?.frame?.id;
+  const shared = await cli.send("Page.createIsolatedWorld", { frameId: cliFrame, worldName: "shared-world" }, csOne);
+  await cli.send("Runtime.evaluate", { expression: "window.secret = 42", contextId: shared.result?.executionContextId }, csOne);
+  const claimed = await plugin.send("Page.createIsolatedWorld", { frameId, worldName: "shared-world" }, ps);
+  const peek = await plugin.send("Runtime.evaluate", { expression: "typeof window.secret", contextId: claimed.result?.executionContextId, returnByValue: true }, ps);
+  check("plugin: asking for another client's world name gets a world of its own", peek.result?.result?.value === "undefined", text(peek));
+
+  const key = (extra) => plugin.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 4, ...extra }, ps);
+  const selectAll = await key({ commands: ["selectAll"] });
+  check("plugin: Input.dispatchKeyEvent with selectAll answers", !refused(selectAll), text(selectAll));
+  const paste = await key({ commands: ["paste"] });
+  check("plugin: Input.dispatchKeyEvent with paste is refused", refused(paste) && /plugin/.test(paste.error?.message ?? ""), text(paste));
+  const nativeKey = await key({ nativeVirtualKeyCode: 0 });
+  check("plugin: Input.dispatchKeyEvent with nativeVirtualKeyCode is refused", refused(nativeKey) && /plugin/.test(nativeKey.error?.message ?? ""), text(nativeKey));
+  const shot = await plugin.send("Page.captureScreenshot", { fromSurface: false }, ps);
+  check("plugin: Page.captureScreenshot answers from the page surface even when asked for the window", !refused(shot) && !!shot.result?.data, text(shot));
+  const clipped = await plugin.send("Page.captureScreenshot", { clip: { x: 0, y: 0, width: 100000, height: 100, scale: 1 } }, ps);
+  check("plugin: Page.captureScreenshot with a clip outside the viewport is refused", refused(clipped) && /plugin/.test(clipped.error?.message ?? ""), text(clipped));
+
+  const tree = await plugin.send("Accessibility.getFullAXTree", {}, ps);
+  const button = tree.result?.nodes?.find((n) => n.role?.value === "button" && n.backendDOMNodeId);
+  const described = await plugin.send("DOM.describeNode", { backendNodeId: button?.backendDOMNodeId }, ps);
+  const resolved = await plugin.send("DOM.resolveNode", { backendNodeId: button?.backendDOMNodeId, executionContextId: isolated }, ps);
+  check("plugin: a backendNodeId from its own tab's accessibility tree describes and resolves", !!button && !refused(described) && !refused(resolved), `${text(described)} ${text(resolved)}`);
+  await cli.send("Runtime.evaluate", { expression: `window.open(${JSON.stringify(`${origin}/four`)})`, userGesture: true }, csOne);
+  const popup = await until("the popup", async () => (await urlsOf(cli)).find((t) => t.url === `${origin}/four`) ?? null, 15000).catch(() => null);
+  const movedPopup = await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
+  await sleep(1000);
+  const popupSession = popup && (await cli.send("Target.attachToTarget", { targetId: popup.targetId, flatten: true })).result?.sessionId;
+  const popupDocument = popupSession && (await cli.send("DOM.getDocument", { depth: 2 }, popupSession));
+  const html = popupDocument?.result?.root?.children?.find((c) => c.nodeName === "HTML");
+  const foreign = html?.children?.find((c) => c.nodeName === "BODY")?.backendNodeId ?? html?.backendNodeId;
+  const crossTab = await plugin.send("DOM.describeNode", { backendNodeId: foreign }, ps);
+  check("plugin: a backendNodeId from another tab in the same renderer is refused", !!popup && movedPopup === true && !!foreign && refused(crossTab) && /isn't in this page/.test(crossTab.error?.message ?? ""), text(crossTab));
+
   const folder = join(work, "picked");
   mkdirSync(folder);
   writeFileSync(join(folder, "a.txt"), "from the ardia command");
@@ -245,6 +285,8 @@ try {
   await arm("directory", [folder]);
   const listed = await click("dir");
   check("cli: showDirectoryPicker takes the answered folder without a permission prompt", listed === "dir:a.txt,b.txt,out.txt", listed);
+  const readwrite = await cli.send("Runtime.evaluate", { expression: "Promise.race([window.dirHandle.requestPermission({ mode: 'readwrite' }), new Promise((r) => setTimeout(() => r('no answer'), 3000))])", awaitPromise: true, returnByValue: true, userGesture: true }, cs);
+  check("cli: a read-only directory answer doesn't grant the page's later readwrite request", readwrite.result?.result?.value !== "granted", text(readwrite));
   await arm("open", []);
   check("cli: an empty answer cancels the picker", (await click("open")) === "error:AbortError");
   const wrongKind = await arm("save", [join(folder, "x.txt")]);
@@ -256,17 +298,33 @@ try {
   await until("page one reloaded", async () => (await cli.send("Runtime.evaluate", { expression: "document.readyState === 'complete' && !!document.getElementById('open')", returnByValue: true }, cs)).result?.result?.value);
   const afterNavigation = await click("open").then((v) => v, () => null);
   check("cli: an answer armed before a navigation isn't used by the new document", afterNavigation !== "open:a.txt:from the ardia command", String(afterNavigation));
-  const slow = cli.raw(424242, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(1), 1500))", awaitPromise: true }, cs);
-  const duplicate = await cli.raw(424242, "Ardia.answerFilePicker", { kind: "open", paths: [join(folder, "a.txt")] }, cs);
-  check("cli: Ardia.answerFilePicker with a pending command's id is refused", /still waiting/.test(duplicate.error?.message ?? ""), text(duplicate));
-  await slow;
+  const duplicateMark = cli.replies.length;
+  cli.raw(424242, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(1), 1500))", awaitPromise: true }, cs);
+  cli.raw(424242, "Ardia.answerFilePicker", { kind: "open", paths: [join(folder, "a.txt")] }, cs);
+  const duplicates = await cli.repliesTo(424242, duplicateMark, 3000);
+  check("cli: Ardia.answerFilePicker with a pending command's id is refused and the first command still answers",
+    duplicates.length === 2 && duplicates.some((m) => /still waiting/.test(m.error?.message ?? "")) && duplicates.some((m) => m.result?.result?.value === 1),
+    JSON.stringify(duplicates).slice(0, 300));
 
   const frameAgain = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.frame?.id;
   const worldAgain = (await plugin.send("Page.createIsolatedWorld", { frameId: frameAgain, worldName: "ardia-plugin" }, ps)).result?.executionContextId;
-  const inFlight = plugin.send("Runtime.evaluate", { expression: "new Promise(() => {})", contextId: worldAgain, awaitPromise: true }, ps);
+  const threeTarget = (await urlsOf(plugin)).find((t) => t.url === `${origin}/three`);
+  const s3 = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
+  await appEval(`ac.actions.moveTabToWindow("t3", "w2"); ac.actions.moveTabToWindow("t3", "w1"); return true`);
+  await sleep(2500);
+  const outAndBack = await plugin.send("DOM.getDocument", {}, s3);
+  check("plugin: a tab moved out of the window and straight back stays detached", !!s3 && refused(outAndBack) && plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3), text(outAndBack));
+
+  const lateMark = plugin.replies.length;
+  plugin.raw(777001, "Runtime.evaluate", { expression: "new Promise((r) => setTimeout(() => r(document.title), 1500))", contextId: worldAgain, awaitPromise: true, returnByValue: true }, ps);
   await appEval(`ac.actions.moveTabToWindow("t1", "w2"); return true`);
-  const cut = await Promise.race([inFlight, sleep(8000).then(() => ({ error: { message: "no answer" } }))]);
-  check("plugin: a command in flight when its tab leaves the window answers tab_out_of_scope", (cut.error?.message ?? "").startsWith("ardia: tab_out_of_scope"), text(cut));
+  const late = await plugin.repliesTo(777001, lateMark, 4000);
+  const returned = await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w1"); return !!t`);
+  await sleep(1500);
+  const orphan = (await plugin.send("Target.getTargets")).result?.targetInfos?.find((t) => t.url === `${origin}/four`);
+  check("plugin: a target whose opener left its window shows no opener", returned === true && !!orphan && !orphan.openerId && !orphan.openerFrameId && orphan.canAccessOpener !== true, JSON.stringify(orphan ?? null).slice(0, 300));
+  check("plugin: a reply that finishes after its tab moved never reaches it; it gets exactly one tab_out_of_scope error",
+    late.length === 1 && (late[0].error?.message ?? "").startsWith("ardia: tab_out_of_scope") && !late.some((m) => m.result), JSON.stringify(late).slice(0, 300));
   const detached = await until("the detach event", async () => plugin.events.find((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === ps) ?? null, 8000).catch(() => null);
   check("plugin: its session on the moved tab is detached with Target.detachedFromTarget", !!detached);
   const afterMove = await plugin.send("DOM.getDocument", {}, ps);

@@ -1,0 +1,103 @@
+diff --git a/content/browser/devtools/devtools_session.cc b/content/browser/devtools/devtools_session.cc
+--- a/content/browser/devtools/devtools_session.cc
++++ b/content/browser/devtools/devtools_session.cc
+@@ -24,6 +24,11 @@
+ #include "third_party/inspector_protocol/crdtp/json.h"
+ #include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
+ 
++#include "ardia/core/ac_content_hooks.h"  // nogncheck
++
++bool (*g_ardia_devtools_renderer_untrusted)(
++    content::DevToolsAgentHostClient* root_client) = nullptr;
++
+ namespace content {
+ namespace {
+ // Keep in sync with WebDevToolsAgent::ShouldInterruptForMethod.
+@@ -226,7 +231,12 @@ void DevToolsSession::AttachToAgent(blink::mojom::DevToolsAgent* agent,
+       receiver_.BindNewEndpointAndPassRemote(),
+       session_.BindNewEndpointAndPassReceiver(),
+       io_session_.BindNewPipeAndPassReceiver(), session_state_cookie_.Clone(),
+-      client_->UsesBinaryProtocol(), client_->IsTrusted(), session_id_,
++      client_->UsesBinaryProtocol(),
++      client_->IsTrusted() &&
++          !(g_ardia_devtools_renderer_untrusted &&
++            g_ardia_devtools_renderer_untrusted(
++                GetRootSession()->GetClient())),
++      session_id_,
+       IsWaitingForDebuggerOnStart());
+   session_.set_disconnect_handler(base::BindOnce(
+       &DevToolsSession::MojoConnectionDestroyed, base::Unretained(this)));
+diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc b/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
+--- a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
++++ b/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.cc
+@@ -337,6 +337,9 @@ void WebDevToolsAgentImpl::AttachSession(DevToolsSession* session,
+ 
+   InspectorDOMAgent* dom_agent =
+       session->CreateAndAppend<InspectorDOMAgent>(isolate, inspected_frames);
++  if (dom_agent && !session->client_is_trusted()) {
++    dom_agent->ArdiaOwnedBackendNodesOnly();
++  }
+ 
+   session->CreateAndAppend<InspectorLayerTreeAgent>(inspected_frames, this);
+ 
+diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
+--- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
++++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
+@@ -626,6 +626,14 @@ void InspectorDOMAgent::Unbind(Node* node) {
+   cached_child_count_.erase(id);
+ }
+ 
++bool InspectorDOMAgent::ArdiaOwnsBackendNode(Node* node) const {
++  if (!ardia_owned_backend_nodes_only_) {
++    return true;
++  }
++  LocalFrame* frame = node->GetDocument().GetFrame();
++  return frame && inspected_frames_->Contains(frame);
++}
++
+ protocol::Response InspectorDOMAgent::AssertNode(int node_id, Node*& node) {
+   node = NodeForId(node_id);
+   if (!node)
+@@ -644,6 +652,11 @@ protocol::Response InspectorDOMAgent::AssertNode(
+ 
+   if (backend_node_id.has_value()) {
+     node = DOMNodeIds::NodeForId(backend_node_id.value());
++    if (node && !ArdiaOwnsBackendNode(node)) {
++      node = nullptr;
++      return protocol::Response::ServerError(
++          "ardia: that backendNodeId isn't in this page");
++    }
+     return !node ? protocol::Response::ServerError(
+                        "No node found for given backend id")
+                  : protocol::Response::Success();
+@@ -1933,6 +1946,10 @@ protocol::Response InspectorDOMAgent::resolveNode(
+     node = NodeForId(node_id.value());
+   } else {
+     node = DOMNodeIds::NodeForId(backend_node_id.value());
++    if (node && !ArdiaOwnsBackendNode(node)) {
++      return protocol::Response::ServerError(
++          "ardia: that backendNodeId isn't in this page");
++    }
+   }
+ 
+   if (!node)
+diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.h b/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
+--- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
++++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.h
+@@ -102,6 +102,7 @@ class CORE_EXPORT InspectorDOMAgent final
+   void Trace(Visitor*) const override;
+   void Dispose() override;
+   void Restore() override;
++  void ArdiaOwnedBackendNodesOnly() { ardia_owned_backend_nodes_only_ = true; }
+ 
+   HeapVector<Member<Document>> Documents();
+   void Reset();
+@@ -448,6 +449,8 @@ class CORE_EXPORT InspectorDOMAgent final
+   raw_ptr<v8::Isolate, UnprotectedInRelease | DanglingUntriaged>
+       isolate_;  // null after Dispose().
+   Member<InspectedFrames> inspected_frames_;
++  bool ardia_owned_backend_nodes_only_ = false;
++  bool ArdiaOwnsBackendNode(Node* node) const;
+   HeapHashSet<Member<DOMListener>> dom_listeners_;
+   Member<NodeToIdMap> document_node_to_id_map_;
+   // Owns node mappings for dangling nodes.

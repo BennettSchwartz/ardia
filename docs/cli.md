@@ -83,6 +83,19 @@ client). A plugin's browse gets a credential of its own (kind `plugin`: web page
 else), minted per plugin activity. A plugin process never reads `ArdiaControl.json`, and a credential never travels in
 argv (any process can read another's argv through `sysctl KERN_PROCARGS2`), in the environment, in a file or in a log.
 
+**What #2808 ships and what it doesn't.** #2808 ships the engine side only: the `ac_cli_plugin_credential` call and its
+app routes (`engine.cliPluginCredential` on the Mac and Linux; Windows reports it missing), the `plugin` kind and its
+policy. Nothing in the app calls them yet. `packages/shell/ios/PluginProcess.swift` still passes only its channel fd
+(`ARDIA_PLUGIN_FD=3`), and no plugin activity mints or revokes a credential, so until the app side lands a plugin
+browse can't connect as `plugin` at all. The app side belongs to the AI plugin work (`PluginBrowse.swift` and the
+TypeScript browse client), not to #2808. It must:
+- mint with `mintCliPluginCredential(tabId)` (`apps/browser/src/platform/cli.ts`, which calls `engine.cliPluginCredential
+  {tabId}`) when a plugin activity starts, with a tab in the activity's window;
+- hand the `credential` to each CLI child it spawns for that activity on an inherited pipe fd, and `endpoint` in
+  `ARDIA_PLUGIN_ENDPOINT`, as described below;
+- revoke with `revokeCliPluginCredential(id)` (same file, `engine.cliPluginCredential {revoke}`) when the activity ends,
+  is cancelled or its plugin is turned off, and mint again after control is turned back on (a restart clears them).
+
 - **Mint.** The app calls `engine.cliPluginCredential {tabId}` (engine call `ac_cli_plugin_credential`, args
   `{"tab": <Chrome tab id>}`; the Mac's `EngineModule.swift` and Linux's `ac_linux_host.cc` turn the app's tab id into
   Chrome's). The scope is the window that tab is in (its `SessionID`) and that window's profile (path and whether it

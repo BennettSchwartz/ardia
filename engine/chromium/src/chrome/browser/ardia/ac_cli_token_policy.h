@@ -14,6 +14,7 @@
 namespace content {
 class DevToolsAgentHost;
 class DevToolsAgentHostClient;
+class RenderFrameHost;
 }
 
 namespace ardia {
@@ -40,6 +41,11 @@ bool IsTokenClient(content::DevToolsAgentHostClient* root_client);
 
 bool TokenClientMayAttach(content::DevToolsAgentHostClient* root_client,
                           content::DevToolsAgentHost* host);
+
+bool TokenClientMayInput(content::DevToolsAgentHostClient* root_client,
+                         content::RenderFrameHost* frame);
+
+bool TokenClientRendererUntrusted(content::DevToolsAgentHostClient* root_client);
 
 bool PluginMayConnectTo(const PluginScope& scope,
                         content::DevToolsAgentHost* host);

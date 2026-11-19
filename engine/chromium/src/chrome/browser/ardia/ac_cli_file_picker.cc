@@ -3,6 +3,7 @@
 #include "chrome/browser/ardia/ac_cli_file_picker.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -85,6 +86,7 @@ class ArmedAnswer : public content::WebContentsObserver {
 
 struct GrantCandidate {
   content::GlobalRenderFrameHostId frame;
+  content::WeakDocumentPtr document;
   url::Origin origin;
   base::FilePath path;
   bool write = false;
@@ -92,13 +94,14 @@ struct GrantCandidate {
   base::TimeTicks expires;
 };
 
-struct PromptGrant {
-  base::WeakPtr<content::WebContents> contents;
+struct GrantTicket {
+  uint64_t serial = 0;
+  content::GlobalRenderFrameHostId frame;
+  content::WeakDocumentPtr document;
   url::Origin origin;
   base::FilePath path;
-  bool write = false;
-  const void* owner = nullptr;
-  base::TimeTicks expires;
+  bool read_left = false;
+  bool write_left = false;
 };
 
 std::map<const content::WebContents*, std::unique_ptr<ArmedAnswer>>& Answers() {
@@ -113,9 +116,20 @@ std::vector<GrantCandidate>& Candidates() {
   return *candidates;
 }
 
-std::vector<PromptGrant>& Grants() {
-  static base::NoDestructor<std::vector<PromptGrant>> grants;
-  return *grants;
+std::optional<GrantTicket>& Ticket() {
+  static base::NoDestructor<std::optional<GrantTicket>> ticket;
+  return *ticket;
+}
+
+uint64_t NextTicketSerial() {
+  static uint64_t serial = 0;
+  return ++serial;
+}
+
+void EndTicket(uint64_t serial) {
+  if (Ticket() && Ticket()->serial == serial) {
+    Ticket().reset();
+  }
 }
 
 void DropAnswer(const content::WebContents* contents) {
@@ -141,9 +155,6 @@ void SweepExpired() {
   const base::TimeTicks now = base::TimeTicks::Now();
   std::erase_if(Candidates(),
                 [&](const GrantCandidate& c) { return now > c.expires; });
-  std::erase_if(Grants(), [&](const PromptGrant& g) {
-    return !g.contents || now > g.expires;
-  });
 }
 
 void SweepLater(base::TimeDelta delay) {
@@ -216,7 +227,7 @@ bool AnswerPicker(content::RenderFrameHost* frame,
     return true;
   }
   if (kind == FilePickerKind::kDirectory && !answer.empty()) {
-    Candidates().push_back({frame->GetGlobalId(),
+    Candidates().push_back({frame->GetGlobalId(), frame->GetWeakDocumentPtr(),
                             frame->GetLastCommittedOrigin(), answer.front(),
                             write, owner,
                             base::TimeTicks::Now() + kGrantLifetime});
@@ -230,6 +241,7 @@ void GrantExpected(content::RenderFrameHost* frame,
                    const base::FilePath& path,
                    bool write) {
   SweepExpired();
+  Ticket().reset();
   if (!frame) {
     return;
   }
@@ -242,37 +254,39 @@ void GrantExpected(content::RenderFrameHost* frame,
   }
   GrantCandidate candidate = std::move(*it);
   Candidates().erase(it);
-  if (write && !candidate.write) {
+  if ((write && !candidate.write) ||
+      candidate.document.AsRenderFrameHostIfValid() != frame ||
+      frame->GetLastCommittedOrigin() != candidate.origin) {
     return;
   }
-  content::WebContents* contents =
-      content::WebContents::FromRenderFrameHost(frame);
-  if (!contents || frame->GetLastCommittedOrigin() != candidate.origin) {
-    return;
-  }
-  Grants().push_back({contents->GetWeakPtr(), candidate.origin, path, write,
-                      candidate.owner,
-                      base::TimeTicks::Now() + kGrantLifetime});
-  SweepLater(kGrantLifetime);
+  const uint64_t serial = NextTicketSerial();
+  Ticket() = GrantTicket{serial,      candidate.frame, candidate.document,
+                         candidate.origin, path,      true,
+                         write};
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&EndTicket, serial));
 }
 
-bool AnswerAccessPrompt(content::WebContents* contents,
-                        const url::Origin& origin,
-                        const base::FilePath& path,
-                        bool is_directory,
-                        bool wants_write) {
-  SweepExpired();
-  auto it = std::find_if(Grants().begin(), Grants().end(),
-                         [&](const PromptGrant& grant) {
-                           return grant.contents.get() == contents &&
-                                  grant.origin == origin &&
-                                  grant.path == path && is_directory &&
-                                  (!wants_write || grant.write);
-                         });
-  if (it == Grants().end()) {
+bool ClaimGrant(content::RenderFrameHost* frame,
+                const base::FilePath& path,
+                bool is_directory,
+                bool write) {
+  std::optional<GrantTicket>& ticket = Ticket();
+  if (!ticket || !frame || !is_directory ||
+      frame->GetGlobalId() != ticket->frame ||
+      ticket->document.AsRenderFrameHostIfValid() != frame ||
+      frame->GetLastCommittedOrigin() != ticket->origin ||
+      path != ticket->path) {
     return false;
   }
-  Grants().erase(it);
+  bool& left = write ? ticket->write_left : ticket->read_left;
+  if (!left) {
+    return false;
+  }
+  left = false;
+  if (!ticket->read_left && !ticket->write_left) {
+    ticket.reset();
+  }
   return true;
 }
 
@@ -327,14 +341,13 @@ void ForgetFilePickerAnswers(const void* owner) {
   }
   std::erase_if(Candidates(),
                 [&](const GrantCandidate& c) { return c.owner == owner; });
-  std::erase_if(Grants(),
-                [&](const PromptGrant& g) { return g.owner == owner; });
+  Ticket().reset();
 }
 
 void InstallFilePickerAnswers() {
   g_ardia_file_picker_answer = &AnswerPicker;
   g_ardia_file_picker_grant_expected = &GrantExpected;
-  g_ardia_file_access_prompt_answer = &AnswerAccessPrompt;
+  g_ardia_file_picker_grant_claim = &ClaimGrant;
 }
 
 base::DictValue FilePickerAnswerTotals() {

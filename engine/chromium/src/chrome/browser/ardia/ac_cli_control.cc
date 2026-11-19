@@ -180,6 +180,8 @@ class ControlServer {
     g_ardia_devtools_active_target = &ActiveTarget;
     g_ardia_devtools_token_client = &TokenClientFor;
     g_ardia_devtools_may_attach = &TokenClientMayAttach;
+    g_ardia_devtools_may_input = &TokenClientMayInput;
+    g_ardia_devtools_renderer_untrusted = &TokenClientRendererUntrusted;
     InstallFilePickerAnswers();
     terminating_ = browser_shutdown::AddAppTerminatingCallback(
         base::BindOnce(&ControlServer::Quit, base::Unretained(this)));

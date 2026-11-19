@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
@@ -124,6 +125,9 @@ bool TokenClient::FilterEvent(std::string& message) {
   if (method == kInternalCommand) {
     return false;
   }
+  if (kind_ == TokenKind::kPlugin && !FilterPluginReply(*id, session, message)) {
+    return true;
+  }
   if (method.empty()) {
     return true;
   }
@@ -161,6 +165,8 @@ std::vector<std::string> TokenClient::Subtree(
 
 void TokenClient::DropSubtree(const std::string& session) {
   for (const std::string& gone : Subtree(session)) {
+    tab_watches_.erase(gone);
+    left_.erase(gone);
     targets_.erase(gone);
     parents_.erase(gone);
     contexts_.erase(gone);
@@ -169,7 +175,7 @@ void TokenClient::DropSubtree(const std::string& session) {
 }
 
 bool TokenClient::FilterTargetEvent(std::string_view method,
-                                    const std::string& message) {
+                                    std::string& message) {
   std::optional<base::Value> parsed =
       base::JSONReader::Read(message, base::JSON_PARSE_RFC);
   const base::DictValue* event = parsed && parsed->is_dict()
@@ -202,12 +208,18 @@ bool TokenClient::FilterTargetEvent(std::string_view method,
                  base::DictValue().Set("sessionId", *child));
     return false;
   }
-  targets_[*child] = *target_id;
-  parents_[*child] = parent ? *parent : std::string();
-  if (kind_ == TokenKind::kPlugin) {
-    told_targets_.insert(*target_id);
+  const std::string child_session = *child;
+  targets_[child_session] = *target_id;
+  parents_[child_session] = parent ? *parent : std::string();
+  if (kind_ != TokenKind::kPlugin) {
+    return true;
   }
-  return true;
+  told_targets_.insert(*target_id);
+  WatchTab(child_session);
+  ScrubPluginTargetInfo(*scope_, parsed->GetDict().FindDict("params")
+                                     ->FindDict("targetInfo"));
+  message = base::WriteJson(*parsed).value_or(std::string());
+  return !message.empty();
 }
 
 }

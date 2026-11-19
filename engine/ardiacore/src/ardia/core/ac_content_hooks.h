@@ -17,10 +17,6 @@ namespace base {
 class FilePath;
 }
 
-namespace url {
-class Origin;
-}
-
 namespace content {
 class BrowserContext;
 class DevToolsAgentHost;
@@ -193,10 +189,12 @@ extern void (*g_ardia_file_picker_grant_expected)(
     const base::FilePath& path,
     bool write);
 
-extern bool (*g_ardia_file_access_prompt_answer)(content::WebContents* contents,
-                                                 const url::Origin& origin,
-                                                 const base::FilePath& path,
-                                                 bool is_directory,
-                                                 bool wants_write);
+extern bool (*g_ardia_file_picker_grant_claim)(content::RenderFrameHost* frame,
+                                               const base::FilePath& path,
+                                               bool is_directory,
+                                               bool write);
+
+extern bool (*g_ardia_devtools_renderer_untrusted)(
+    content::DevToolsAgentHostClient* root_client);
 
 #endif

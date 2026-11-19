@@ -1,52 +1,37 @@
-diff --git a/chrome/browser/file_system_access/file_system_access_permission_request_manager.cc b/chrome/browser/file_system_access/file_system_access_permission_request_manager.cc
---- a/chrome/browser/file_system_access/file_system_access_permission_request_manager.cc
-+++ b/chrome/browser/file_system_access/file_system_access_permission_request_manager.cc
-@@ -4,6 +4,8 @@
+diff --git a/chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc b/chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc
+--- a/chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc
++++ b/chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc
+@@ -125,6 +125,11 @@
+ #include "extensions/browser/guest_view/web_view/web_view_guest.h"
+ #endif  // BUILDFLAG(ENABLE_EXTENSIONS_CORE) && BUILDFLAG(ENABLE_GUEST_VIEW)
  
- #include "chrome/browser/file_system_access/file_system_access_permission_request_manager.h"
- 
-+#include "ardia/core/ac_content_hooks.h"  // nogncheck
++bool (*g_ardia_file_picker_grant_claim)(content::RenderFrameHost* frame,
++                                        const base::FilePath& path,
++                                        bool is_directory,
++                                        bool write) = nullptr;
 +
- #include "base/command_line.h"
- #include "base/functional/bind.h"
- #include "chrome/browser/ui/file_system_access/file_system_access_dialogs.h"
-@@ -183,6 +185,12 @@ void FileSystemAccessPermissionRequestManager::ScheduleShowRequest() {
-           weak_factory_.GetWeakPtr()));
- }
+ namespace {
  
-+bool (*g_ardia_file_access_prompt_answer)(content::WebContents* contents,
-+                                         const url::Origin& origin,
-+                                         const base::FilePath& path,
-+                                         bool is_directory,
-+                                         bool wants_write) = nullptr;
-+
- void FileSystemAccessPermissionRequestManager::DequeueAndShowRequest() {
-   if (!CanShowRequest())
-     return;
-@@ -195,6 +203,23 @@ void FileSystemAccessPermissionRequestManager::DequeueAndShowRequest() {
-     return;
-   }
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -1229,6 +1234,18 @@ class ChromeFileSystemAccessPermissionContext::PermissionGrantImpl
+       return;
+     }
  
-+  if (g_ardia_file_access_prompt_answer &&
-+      current_request_->data.request_type == RequestType::kNewPermission &&
-+      current_request_->data.file_request_data.size() == 1) {
-+    const FileRequestData& ardia_file =
-+        current_request_->data.file_request_data.front();
-+    if (g_ardia_file_access_prompt_answer(
-+            web_contents(), current_request_->data.origin,
-+            ardia_file.path_info.path,
-+            ardia_file.handle_type ==
-+                content::FileSystemAccessPermissionContext::HandleType::
-+                    kDirectory,
-+            ardia_file.access != Access::kRead)) {
-+      OnPermissionDialogResult(permissions::PermissionAction::GRANTED);
++    if (g_ardia_file_picker_grant_claim &&
++        g_ardia_file_picker_grant_claim(
++            rfh, path_info_.path, handle_type_ == HandleType::kDirectory,
++            type_ == GrantType::kWrite)) {
++      PermissionRequestOutcome outcome = PermissionRequestOutcome::kUserGranted;
++      RecordPermissionRequestOutcome(outcome);
++      SetStatus(PermissionStatus::GRANTED,
++                PersistedPermissionOptions::kDoNotUpdatePersistedPermission);
++      std::move(callback).Run(outcome);
 +      return;
 +    }
-+  }
 +
-   switch (current_request_->data.request_type) {
-     case RequestType::kNewPermission:
-       ShowFileSystemAccessPermissionDialog(
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE) && BUILDFLAG(ENABLE_GUEST_VIEW)
+     // A permission request from a webview is normally delegated to its embedder
+     // without showing a prompt. However, filesystem permissions are known to be
 diff --git a/content/browser/file_system_access/file_system_access_manager_impl.cc b/content/browser/file_system_access/file_system_access_manager_impl.cc
 --- a/content/browser/file_system_access/file_system_access_manager_impl.cc
 +++ b/content/browser/file_system_access/file_system_access_manager_impl.cc

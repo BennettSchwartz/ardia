@@ -5,6 +5,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "ardia/core/ac_content_hooks.h"
@@ -12,6 +13,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
+#include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
@@ -70,6 +72,82 @@ const std::set<std::string_view>& PluginMethods() {
       "Target.setAutoAttach",
   });
   return *methods;
+}
+
+const std::set<std::string_view>& PluginKeyCommands() {
+  static const base::NoDestructor<std::set<std::string_view>> commands({
+      "deletebackward",
+      "deleteforward",
+      "deletewordbackward",
+      "deletewordforward",
+      "insertnewline",
+      "inserttab",
+      "movedown",
+      "movedownandmodifyselection",
+      "moveleft",
+      "moveleftandmodifyselection",
+      "moveright",
+      "moverightandmodifyselection",
+      "movetobeginningofdocument",
+      "movetobeginningofdocumentandmodifyselection",
+      "movetobeginningofline",
+      "movetobeginningoflineandmodifyselection",
+      "movetoendofdocument",
+      "movetoendofdocumentandmodifyselection",
+      "movetoendofline",
+      "movetoendoflineandmodifyselection",
+      "moveup",
+      "moveupandmodifyselection",
+      "movewordleft",
+      "movewordleftandmodifyselection",
+      "movewordright",
+      "movewordrightandmodifyselection",
+      "selectall",
+  });
+  return *commands;
+}
+
+std::string KeyEventRefusal(const base::DictValue& params) {
+  if (params.Find("nativeVirtualKeyCode") || params.Find("isSystemKey")) {
+    return "with a native key code or a system key";
+  }
+  const base::Value* commands = params.Find("commands");
+  if (!commands) {
+    return std::string();
+  }
+  if (!commands->is_list()) {
+    return "with those editing commands";
+  }
+  for (const base::Value& command : commands->GetList()) {
+    if (!command.is_string() || !PluginKeyCommands().contains(
+                                    base::ToLowerASCII(command.GetString()))) {
+      return "with that editing command";
+    }
+  }
+  return std::string();
+}
+
+std::string ScreenshotRefusal(base::DictValue& params,
+                              const PluginCommandContext& context) {
+  params.Set("fromSurface", true);
+  params.Set("captureBeyondViewport", false);
+  const base::DictValue* clip = params.FindDict("clip");
+  if (!clip) {
+    return std::string();
+  }
+  const std::optional<double> x = clip->FindDouble("x");
+  const std::optional<double> y = clip->FindDouble("y");
+  const std::optional<double> width = clip->FindDouble("width");
+  const std::optional<double> height = clip->FindDouble("height");
+  const std::optional<double> scale = clip->FindDouble("scale");
+  const std::optional<std::pair<double, double>> viewport =
+      context.viewport ? context.viewport.Run() : std::nullopt;
+  if (!x || !y || !width || !height || !viewport || *x < 0 || *y < 0 ||
+      *width <= 0 || *height <= 0 || *x + *width > viewport->first ||
+      *y + *height > viewport->second || (scale && (*scale <= 0 || *scale > 1))) {
+    return "with a clip outside the viewport";
+  }
+  return std::string();
 }
 
 const std::set<std::string_view>& PluginPageEvents() {
@@ -282,6 +360,23 @@ std::optional<int> ContextOfObjectId(std::string_view object_id) {
   return context;
 }
 
+void ScrubPluginTargetInfo(const PluginScope& scope, base::DictValue* info) {
+  if (!info) {
+    return;
+  }
+  info->Remove("browserContextId");
+  const std::string* opener = info->FindString("openerId");
+  if (opener && !PluginMayAttachToTargetId(scope, opener)) {
+    info->Remove("openerId");
+    info->Remove("openerFrameId");
+    info->Set("canAccessOpener", false);
+  }
+  const std::string* parent = info->FindString("parentId");
+  if (parent && !PluginMayAttachToTargetId(scope, parent)) {
+    info->Remove("parentId");
+  }
+}
+
 bool PluginForwardsEvent(std::string_view method) {
   return PluginPageEvents().contains(method) || method.starts_with("DOM.") ||
          method.starts_with("Accessibility.");
@@ -319,7 +414,17 @@ std::string PluginRefusal(const PluginScope& scope,
     return "in the page's main world";
   }
   if (method == "Page.createIsolatedWorld") {
+    if (context.isolated_world_name.empty()) {
+      return "without a world name for this connection";
+    }
     params.Set("grantUniveralAccess", false);
+    params.Set("worldName", context.isolated_world_name);
+  }
+  if (method == "Input.dispatchKeyEvent") {
+    return KeyEventRefusal(params);
+  }
+  if (method == "Page.captureScreenshot") {
+    return ScreenshotRefusal(params, context);
   }
   if (method == "Page.navigate") {
     const std::string* url = params.FindString("url");

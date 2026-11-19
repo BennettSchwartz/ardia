@@ -18,7 +18,11 @@
 #include "chrome/browser/ardia/ac_cli_plugin_credentials.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/web_contents.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace ardia {
 namespace cli_token_policy_internal {
@@ -71,8 +75,97 @@ bool TokenClient::ContextAllowed(const std::string& session,
 }
 
 bool TokenClient::SessionInScope(const std::string& session) {
+  if (left_.contains(session)) {
+    return false;
+  }
   auto it = targets_.find(session);
   return it != targets_.end() && PluginMayAttachToTargetId(*scope_, &it->second);
+}
+
+bool TokenClient::RootInScope() {
+  return IsBrowserHost(root_host_.get()) ||
+         (!root_left_ && PluginTargetInScope(*scope_, root_host_.get()));
+}
+
+void TokenClient::WatchTab(const std::string& session) {
+  content::DevToolsAgentHost* host = HostOf(session);
+  content::WebContents* contents = host ? host->GetWebContents() : nullptr;
+  tabs::TabInterface* tab =
+      contents ? tabs::TabInterface::MaybeGetFromContents(contents) : nullptr;
+  if (!tab) {
+    return;
+  }
+  auto subscription = tab->RegisterWillDetach(base::BindRepeating(
+      [](base::WeakPtr<TokenClient> self, std::string watched,
+         tabs::TabInterface* tab, tabs::TabInterface::DetachReason reason) {
+        if (self && reason ==
+                        tabs::TabInterface::DetachReason::kInsertIntoOtherWindow) {
+          self->TabLeftWindow(watched);
+        }
+      },
+      weak_factory_.GetWeakPtr(), session));
+  if (session.empty()) {
+    root_tab_watch_ = std::move(subscription);
+  } else {
+    tab_watches_[session] = std::move(subscription);
+  }
+}
+
+void TokenClient::TabLeftWindow(const std::string& session) {
+  if (session.empty()) {
+    root_left_ = true;
+  } else {
+    left_.insert(session);
+  }
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(
+                     [](base::WeakPtr<TokenClient> self, std::string gone) {
+                       if (!self) {
+                         return;
+                       }
+                       if (gone.empty()) {
+                         self->CloseOutOfScope();
+                       } else {
+                         self->DetachOutOfScope(gone);
+                       }
+                     },
+                     weak_factory_.GetWeakPtr(), session));
+}
+
+std::optional<std::pair<double, double>> TokenClient::ViewportOf(
+    const std::string& session) {
+  content::DevToolsAgentHost* host = HostOf(session);
+  content::WebContents* contents = host ? host->GetWebContents() : nullptr;
+  content::RenderWidgetHostView* view =
+      contents ? contents->GetRenderWidgetHostView() : nullptr;
+  if (!view) {
+    return std::nullopt;
+  }
+  const gfx::Size size = view->GetVisibleViewportSize();
+  return std::make_pair(static_cast<double>(size.width()),
+                        static_cast<double>(size.height()));
+}
+
+bool TokenClient::FilterPluginReply(int id,
+                                    const std::string& session,
+                                    std::string& message) {
+  if (session.empty() ? RootInScope() : SessionInScope(session)) {
+    return true;
+  }
+  message = OutOfScopeReply(id, session);
+  if (!session.empty()) {
+    DetachOutOfScope(session);
+  } else {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](base::WeakPtr<TokenClient> self) {
+                         if (self) {
+                           self->CloseOutOfScope();
+                         }
+                       },
+                       weak_factory_.GetWeakPtr()));
+  }
+  return false;
 }
 
 bool TokenClient::PluginCommandAllowed(int id,
@@ -85,8 +178,7 @@ bool TokenClient::PluginCommandAllowed(int id,
     DetachOutOfScope(session);
     return false;
   }
-  if (session.empty() && !IsBrowserHost(root_host_.get()) &&
-      !PluginTargetInScope(*scope_, root_host_.get())) {
+  if (session.empty() && !RootInScope()) {
     *reply = OutOfScopeReply(id, session);
     CloseOutOfScope();
     return false;
@@ -103,6 +195,10 @@ bool TokenClient::PluginCommandAllowed(int id,
         return self->targets_.contains(value);
       },
       base::Unretained(this));
+  context.isolated_world_name = isolated_world_name_;
+  context.viewport =
+      base::BindRepeating(&TokenClient::ViewportOf, base::Unretained(this),
+                          session);
   const std::string refusal = PluginRefusal(*scope_, method, params, context);
   if (refusal.empty()) {
     return true;
@@ -186,8 +282,7 @@ void TokenClient::CheckScope() {
     Revoke();
     return;
   }
-  if (!IsBrowserHost(root_host_.get()) &&
-      !PluginTargetInScope(*scope_, root_host_.get())) {
+  if (!RootInScope()) {
     CloseOutOfScope();
     return;
   }
@@ -215,8 +310,7 @@ bool TokenClient::FilterPluginEvent(std::string_view method,
       DetachOutOfScope(session);
       return false;
     }
-  } else if (!IsBrowserHost(root_host_.get()) &&
-             !PluginTargetInScope(*scope_, root_host_.get())) {
+  } else if (!RootInScope()) {
     CloseOutOfScope();
     return false;
   }
@@ -243,7 +337,13 @@ bool TokenClient::FilterPluginEvent(std::string_view method,
       told_targets_.erase(*target_id);
       return true;
     }
-    return PluginMayAttachToTargetId(*scope_, target_id);
+    if (!PluginMayAttachToTargetId(*scope_, target_id)) {
+      return false;
+    }
+    ScrubPluginTargetInfo(*scope_, parsed->GetDict().FindDict("params")
+                                       ->FindDict("targetInfo"));
+    message = base::WriteJson(*parsed).value_or(std::string());
+    return !message.empty();
   }
   if (method == "Inspector.detached" || method == "Inspector.targetCrashed") {
     ForgetSessionOf(message);
