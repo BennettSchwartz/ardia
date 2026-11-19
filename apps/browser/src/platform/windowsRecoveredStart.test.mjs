@@ -16,7 +16,7 @@ test("launchConfig() carries recoveredStart as a real boolean from the launch gu
 test("the app reads the file and field the engine writes, from the same data folder", () => {
   assert.ok(guard.length > 0, "namespace LaunchGuard not found in AppModule.h");
   assert.match(engine, /data_dir \+ L"\\\\launch-guard\.json"/);
-  assert.match(engine, /",\\"restoreStateSetAside\\":" \+\s*\(facts\.recovered_to\.empty\(\) \? "false" : "true"\)/);
+  assert.match(engine, /saved\.Set\("restoreStateSetAside", !facts\.recovered_to\.empty\(\)\);/);
   assert.match(guard, /constexpr wchar_t FactsFile\[\] = L"launch-guard\.json";/);
   assert.match(guard, /Paths::DataDirectory\(\) \/ FactsFile/);
   assert.match(guard, /TryLookup\(L"restoreStateSetAside"\)/);
