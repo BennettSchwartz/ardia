@@ -843,16 +843,30 @@ int main(int argc, char **argv) {
     let secret = "fse-secret-\(Self.short())"
     func run(inside: Bool, network: Bool) throws -> String {
       let realHome = PluginSandbox.resolved(NSHomeDirectory())!
-      let writer = DispatchWorkItem {
-        Thread.sleep(forTimeInterval: 1.0)
-        try? "x".write(toFile: "\(realHome)/\(secret)", atomically: false, encoding: .utf8)
-        try? FileManager.default.removeItem(atPath: "\(realHome)/\(secret)")
+      let written = NSLock()
+      var writes = 0
+      let writer = Thread {
+        for _ in 0..<8 {
+          Thread.sleep(forTimeInterval: 0.25)
+          if (try? "x".write(toFile: "\(realHome)/\(secret)", atomically: false, encoding: .utf8)) != nil {
+            written.lock()
+            writes += 1
+            written.unlock()
+          }
+          try? FileManager.default.removeItem(atPath: "\(realHome)/\(secret)")
+        }
       }
-      DispatchQueue.global().async(execute: writer)
-      let arguments = [inside ? "/" : realHome, "none", secret, "now", "2.5"]
-      return (inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)).output
+      writer.start()
+      let arguments = [inside ? "/" : realHome, "none", secret, "now", "4"]
+      let output = (inside ? try sandboxed(watcher, arguments, network: network) : try Self.run(watcher, arguments, in: plugin)).output
+      written.lock()
+      defer { written.unlock() }
+      return output + "writes \(writes) to \(realHome)\n"
     }
-    let outside = try run(inside: false, network: true)
+    var outside = try run(inside: false, network: true)
+    for _ in 0..<2 where !outside.contains("leak ") {
+      outside = try run(inside: false, network: true)
+    }
     XCTAssertTrue(outside.contains("started"), "control: a stream on the home folder must start outside, or this test proves nothing: \(outside)")
     XCTAssertTrue(outside.contains("leak "), "control: outside, the stream shows the write in the home folder: \(outside)")
     for network in [true, false] {
