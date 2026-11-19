@@ -317,6 +317,7 @@ The only variables the app and engine read, through `ArdiaLaunchConfig` (`packag
 | | `screenRecording=allowed\|denied` | What the share sheet is told about macOS Screen Recording permission (Chrome still checks the real one); background mode never asks macOS for it |
 | | `contextMenu` | Context menus dump to `<data dir>/context-menu.json` and take their pick from `….pick` |
 | | `systemLocationPermission=ask\|denied\|granted` | The app's macOS location access (`ArdiaLocation`): `ask` is not determined and a request answers Allow. A background instance never asks macOS and reads as not determined without it |
+| | `applePasswordsPanel` | Background mode sends AppKit's AutoFill action (Apple's Passwords panel) for the key button and Edit › AutoFill instead of only logging it, with the outcome in the system log (`[ardiacore] apple autofill`); the panel can show on screen, so only with the owner's OK or the screen locked |
 | | `appMenu` · `appDialog` | The app's own menus (`showMenu`) dump to `<data dir>/menu.json` and take their pick from `….pick` · `confirm` and `prompt` dump to `dialog.json` and take their answer from `….pick` |
 | | `pipSelfTest=close\|backToTab\|hover\|style` · `pipHover=close\|back` | PiP self-tests on the first PiP window (background mode), results in the data dir |
 | | `fakeFullScreenMs=<ms>` | Length of the acted-out full-screen transition |
