@@ -4,6 +4,8 @@ import { failure, type MethodError } from "./automationMethods";
 import { obj, ownField, schemaProblem } from "./socketSchema";
 import { OpError } from "./workspaceTargets";
 
+export const STOPPED = "Control was turned off before Ardia made the change, so nothing changed.";
+
 export type SocketBody = { result: unknown } | { error: MethodError };
 
 export type SocketCall = { serving: () => boolean; stillServing: () => void };
@@ -128,14 +130,14 @@ const isClosedObject = (schema: JsonSchema | undefined): schema is JsonSchema =>
 function guarded(method: string, schema: JsonSchema, value: Record<string, unknown>, path: string): Record<string, unknown> {
   const listed = schema.properties ?? {};
   const check = (key: string | symbol) => {
-    if (typeof key === "string" && !Object.hasOwn(listed, key) && !PROTOTYPE_KEYS.has(key)) throw new UnlistedParamError(`${method} read ${path}${key}, which its params schema doesn't list.`);
+    if (typeof key === "string" && !Object.hasOwn(listed, key) && !PROTOTYPE_KEYS.has(key)) throw new UnlistedParamError(`${method} read ${path}${String(key)}, which its params schema doesn't list.`);
   };
   return new Proxy(value, {
     get(target, key, receiver) {
       check(key);
       const found = Reflect.get(target, key, receiver);
       const nested = typeof key === "string" ? ownField(listed, key) : undefined;
-      if (isClosedObject(nested) && typeof found === "object" && found !== null && !Array.isArray(found)) return guarded(method, nested, found as Record<string, unknown>, `${path}${key}.`);
+      if (isClosedObject(nested) && typeof found === "object" && found !== null && !Array.isArray(found)) return guarded(method, nested, found as Record<string, unknown>, `${path}${String(key)}.`);
       return found;
     },
     has(target, key) {
@@ -174,7 +176,7 @@ export function servingWhile(stillOn: () => boolean): SocketCall {
   return {
     serving: stillOn,
     stillServing: () => {
-      if (!stillOn()) throw new OpError("failed", "Control was turned off before Ardia made the change, so nothing changed.");
+      if (!stillOn()) throw new OpError("failed", STOPPED);
     },
   };
 }

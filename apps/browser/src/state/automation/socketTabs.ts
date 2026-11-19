@@ -119,9 +119,9 @@ export const TAB_METHODS: MethodSpec[] = [
   { name: "tabs.list", mutates: false, description: "Every tab the command may use, with its pin, group, split, page state and times", params: obj({ window: WINDOW, profile: PROFILE }), result: "[tab]", run: listTabs },
   { name: "tabs.get", mutates: false, description: "One tab", params: obj({ tab: TAB }, ["tab"]), result: "tab", run: (p) => tabRow(now(), tabOf(p.tab).id) },
   { name: "tabs.navigate", mutates: true, description: "Load a URL in a tab, as typing it in the address bar does", params: obj({ tab: TAB, url: text("http, https or file URL, about:blank or ardia://history, bookmarks, downloads, newtab") }, ["tab", "url"]), result: "tab", run: navigate },
-  { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: (p) => livePage(p, (t) => withLivePage(t, (page) => (p.bypassCache ? page.forceReload() : page.reload()))) },
-  { name: "tabs.back", mutates: true, description: "Go back in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p) => livePage(p, goBack) },
-  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p) => livePage(p, goForward) },
+  { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => withLivePage(t, (page) => (p.bypassCache ? page.forceReload() : page.reload()), call.serving)) },
+  { name: "tabs.back", mutates: true, description: "Go back in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => goBack(t, call.serving)) },
+  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => goForward(t, call.serving)) },
   {
     name: "tabs.duplicate",
     mutates: true,

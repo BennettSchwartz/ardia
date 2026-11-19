@@ -38,7 +38,7 @@ function callPluginTool(params: Record<string, unknown>): Body | Promise<Body> {
   return callTool(plugin, tool, input, { kind: "cli" }).then((o) => (o.ok ? { result: o.result } : failure(o.code, o.message)));
 }
 
-export function pluginSocketMethod(method: string, params: Record<string, unknown>): Body | Promise<Body> | null {
+export function pluginSocketMethod(method: string, params: Record<string, unknown>, serving: () => boolean = () => true): Body | Promise<Body> | null {
   if (method === "plugins") return { result: pluginList() };
   if (method === "plugins.official") return { result: officialPlugins(currentPlugins()) };
   if (!method.startsWith("plugins.")) return null;
@@ -66,7 +66,7 @@ export function pluginSocketMethod(method: string, params: Record<string, unknow
     }
     case "plugins.remove":
       if (!known && !recorded) return failure("bad_request", `There's no plugin ${String(name)}.`);
-      return removePlugin(name).then((r) => (r.ok ? { result: { ok: true } } : failure("failed", r.reason ?? "Couldn't remove it.")));
+      return removePlugin(name, serving).then((r) => (r.ok ? { result: { ok: true } } : failure("failed", r.reason ?? "Couldn't remove it.")));
   }
   return failure("unknown_method", `There's no method ${method}.`);
 }

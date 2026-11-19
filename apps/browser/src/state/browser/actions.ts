@@ -112,7 +112,7 @@ export function toggleSiteMute(tabId: string) {
   if (tab) s.setSiteMuted(tabId, !isSiteMuted(s, tab));
 }
 
-export async function deleteProfile(profileId: string, windowId?: string) {
+export async function deleteProfile(profileId: string, windowId?: string, mayDelete: () => boolean = () => true) {
   const s = store();
   const profile = s.profiles[profileId];
   if (!profile || s.profileOrder.length <= 1) return;
@@ -126,7 +126,7 @@ export async function deleteProfile(profileId: string, windowId?: string) {
     destructive: true,
     windowId,
   });
-  if (!confirmed) return;
+  if (!confirmed || !mayDelete()) return;
   store().deleteProfile(profileId);
 }
 

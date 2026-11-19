@@ -46,11 +46,11 @@ export function useHistoryAvailability(tabId: string) {
   return { back: !shown && (back || backToNewTab || closes), forward: shown || forward, backCloses: !shown && !back && !backToNewTab && closes };
 }
 
-export function goBack(tabId: string): void {
-  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goBack(id));
+export function goBack(tabId: string, mayAct: () => boolean = () => true): void {
+  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goBack(id, mayAct), mayAct);
   if (pageOf(tabId).newTabShown) return;
   if (liveOf(tabId).canGoBack) return void webviews.get(tabId)?.goBack();
-  if (pageOf(tabId).engineBack) return void goBackAcrossEngines(tabId);
+  if (pageOf(tabId).engineBack) return void goBackAcrossEngines(tabId, mayAct);
   if (pageOf(tabId).backToNewTab) return showNewTab(tabId);
   if (backClosesTab(store(), tabId)) {
     noteBackCloseToOpener();
@@ -65,8 +65,8 @@ export function goBack(tabId: string): void {
   }
 }
 
-export function goForward(tabId: string): void {
-  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goForward(id));
+export function goForward(tabId: string, mayAct: () => boolean = () => true): void {
+  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goForward(id, mayAct), mayAct);
   if (pageOf(tabId).newTabShown) return hideNewTab(tabId);
   void webviews.get(tabId)?.goForward();
 }
