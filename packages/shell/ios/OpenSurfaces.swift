@@ -208,8 +208,6 @@ final class OpenSurfaces: NSObject {
     let tracked = try find(id)
     if let held = tracked.held { held["done"] = true } else { tracked.menu?.cancelTracking() }
   }
-
-  }
 }
 
 enum MenuBarAction {
