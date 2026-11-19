@@ -1,6 +1,6 @@
 import { sendTab, sendTargets, setOpenTabsSynced, setProfileSynced, setTypeSynced, syncNow, syncWritesOpen, useSync } from "../sync/engine";
 import { DATA_TYPES, type DataType } from "../sync/syncDoc";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, obj, oneOf, PROFILE, TAB } from "./socketSchema";
 import { expect, now, profileArg, tabOf } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -26,9 +26,9 @@ const summary = () => {
   return { status: s.status, lastSyncedAt: s.lastSyncedAt, pending: s.pending, error: s.error, types: s.types, profiles: s.profiles };
 };
 
-async function runNow() {
+async function runNow(_params: Record<string, unknown>, call: SocketCall) {
   writable("syncing now");
-  await syncNow();
+  if (!(await syncNow(() => call.stillServing()))) throw new OpError("refused", "Sync turned off while the last cycle finished, so no new one started.");
   return summary();
 }
 

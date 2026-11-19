@@ -91,9 +91,12 @@ let stopping = false;
 
 export const syncWritesOpen = () => doc.enabled && !stopping && !["starting", "locked", "off", "unavailable"].includes(useSync.getState().status);
 
-export async function syncNow() {
+export async function syncNow(stillWanted: () => void = () => {}): Promise<boolean> {
   while (cycle) await cycle.catch(() => {});
+  if (stopping || !doc.enabled) return false;
+  stillWanted();
   await runCycle({ forcePasswords: true });
+  return true;
 }
 
 type CycleOptions = { retiring?: boolean; forcePasswords?: boolean };
@@ -281,11 +284,7 @@ export async function stopSync({ deleteData = false } = {}) {
   const native = SyncNative;
   if (!native || !doc.enabled || stopping) return;
   stopping = true;
-  try {
-    await retire(native, deleteData);
-  } finally {
-    stopping = false;
-  }
+  await retire(native, deleteData).finally(() => (stopping = false));
 }
 
 async function retire(native: NonNullable<typeof SyncNative>, deleteData: boolean) {
