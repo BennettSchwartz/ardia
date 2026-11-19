@@ -60,8 +60,12 @@ final class PluginProcess: PluginRun {
 
   static func errnoText(_ code: Int32 = errno) -> String { String(cString: strerror(code)) }
 
-  static func environment(name: String, data: String) -> [String] {
-    [
+  static func environment(name: String, data: String, network: Bool = false) -> [String] {
+    let carried = PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment, network: network, dataFolder: data)
+    if !carried.droppedProxies.isEmpty {
+      NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, carried.droppedProxies.joined(separator: ", "))
+    }
+    return [
       "PATH=" + PluginSandbox.searchPath.joined(separator: ":"),
       "HOME=" + (data as NSString).appendingPathComponent("home"),
       "TMPDIR=" + (data as NSString).appendingPathComponent("tmp") + "/",
@@ -69,7 +73,7 @@ final class PluginProcess: PluginRun {
       "ARDIA_PLUGIN_NAME=" + name,
       "ARDIA_PLUGIN_FD=\(channelFd)",
       "ARDIA_PLUGIN_PROTOCOL=1",
-    ] + PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment)
+    ] + carried.variables
   }
 
   static func spawn(
@@ -151,7 +155,7 @@ final class PluginProcess: PluginRun {
       NSLog("[plugins] %@: macOS's responsibility calls aren't available, so its processes are tracked by group and descendants only", spec.name)
     }
     let argv = ["/usr/bin/sandbox-exec"] + sandboxArguments + [launched] + spec.run.dropFirst()
-    let env = environment(name: spec.name, data: data)
+    let env = environment(name: spec.name, data: data, network: spec.network)
     var pid: pid_t = 0
     let result = withCStrings(argv) { cArgv in withCStrings(env) { cEnv in posix_spawn(&pid, "/usr/bin/sandbox-exec", &actions, &attributes, cArgv, cEnv) } }
     guard result == 0 else {

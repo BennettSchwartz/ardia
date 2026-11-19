@@ -361,7 +361,7 @@ Needs a `process`.
 | `tabs` | The helper may call `windows` and subscribe to tab, window and page events. URLs come without their query and fragment |
 | `fullUrls` | Those URLs in full (needs `tabs`) |
 | `commands` | The helper may run Ardia's commands, the same ones and with the same refusals as the `ardia` command (`docs/automation.md` › Which commands) |
-| `network` | The helper may resolve names and connect to the internet and to servers on this Mac. Without it, it can't connect anywhere, not even to this Mac's own addresses |
+| `network` | The helper may resolve names, connect to the internet and to servers on this Mac, and accept connections, from other devices on your network too. Without it, it can't connect, listen or accept connections at all, not even on this Mac |
 | `control` | Install or Turn On turns on `cliControl`, the ardia command's control of Ardia; the sheet says "Lets any program you run drive your tabs and pages, with your logins" (for an always-on plugin, "… while it's installed. There's no off switch"). On macOS there's no switch afterwards: while an always-on plugin that asks for it is installed, each launch turns it back on, and the control pill's Stop holds only until the next launch. For an `autoInstall` built-in plugin, its first link turns it on once unless you'd turned it off. `config.json` can't set it. |
 
 Contributions grant their own reach and are shown too: running a program, adding a page, adding commands, changing
@@ -433,10 +433,15 @@ settings only once it is saved, so a failed save changes nothing.
   log, `PluginData/<name>/plugin.log`, 0600, a regular file or the helper doesn't start, moved to `plugin.log.1` at start past 1 MB and emptied while it runs past
   2 MB) and the channel on descriptor 3; both ends of the channel are close-on-exec from the moment they exist. Its
   environment is only `PATH` (above), `HOME` (`PluginData/<name>/home`), `TMPDIR` (`PluginData/<name>/tmp`), `LANG`,
-  `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`, plus the proxy and certificate settings Ardia
-  itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case, `SSL_CERT_FILE`,
-  `SSL_CERT_DIR`, `NODE_EXTRA_CA_CERTS`), and `SSL_CERT_FILE=/etc/ssl/cert.pem` when none is set, since the Keychain's
-  trust settings are out of the helper's reach (a root kept only in the Keychain isn't trusted). Never a token. A sandbox Ardia can't set up means the helper
+  `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`. A helper with `network` also gets the proxy
+  settings Ardia itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case), except a
+  proxy whose address carries a user name or password, which is dropped with one line in Ardia's log (an authenticated
+  proxy is a follow-up the person would choose per plugin), and `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS` and
+  `GIT_SSL_CAINFO` pointing at `PluginData/<name>/certificates.pem`, staged at each start from `/etc/ssl/cert.pem` plus
+  the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name (copied, since a path under your home is unreadable
+  inside). The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain isn't
+  trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the
+  default because it is the one system-wide root list every runtime can read. Never a token. A sandbox Ardia can't set up means the helper
   doesn't start; it never runs unsandboxed.
 - **Data folder.** `PluginData/<name>` is opened once per start and must be a real folder Ardia's user owns, with
   `home` and `tmp` real folders in it; the log is created inside that opened folder, never through a link. The
@@ -445,11 +450,15 @@ settings only once it is saved, so a failed save changes nothing.
   program's install folder (the folder above the `bin` it is in, so `/opt/homebrew/opt/node/bin/node` reads its own
   libraries; `/bin/sh` or `~/bin/x` read only themselves, since that folder would be `/` or your home). Your home
   folder, Ardia's data folder and its config folder are unreadable and unwritable, wherever they are (a scratch data
-  folder outside your home included): your files, every browser profile, cookies, passwords and Ardia's own state. It
+  folder outside your home included): your files, every browser profile, cookies, passwords and Ardia's own state. So
+  are `/Users` (every account's home, `/Users/Shared` included) and `/Volumes` (mounted disks and disk images). The
+  rest of the disk (system folders, `/tmp`, `/opt`) stays readable; a read allowlist is a follow-up. It
   can't connect to a Unix socket in your home or Ardia's data folder, so Ardia's control socket is out of reach. It
   can't write anywhere else on disk, nor connect to any Unix socket but the system resolver's: its channel to Ardia is
   the inherited descriptor 3. Without `network` it can't connect anywhere, this Mac's own addresses included, and
-  can't resolve names; with it, it reaches the internet and servers on this Mac. A plugin whose
+  can't resolve names, listen or accept connections; with it, it reaches the internet and servers on this Mac, and a
+  server it starts can be reached from other devices on your network (the sandbox can't hold a listener to loopback:
+  its `localhost` filter matches every address of this Mac). A plugin whose
   folder (after links) would take in your home, Ardia's data or its settings, or whose program lives in Ardia's data or
   config folder, isn't started. The profile's grants are paths, the only kind `sandbox-exec` has: they name the
   approved folder's path at start. A folder put in its place afterwards can be read by the running helper instead
@@ -458,13 +467,17 @@ settings only once it is saved, so a failed save changes nothing.
   distributed or Darwin notifications, writing any preferences or reading any but the global domain, opening IOKit
   user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments, and looking up any
   system service off a short list: user and group lookups, logging, per-user temp folders, network settings, the
-  resolver (with `network` only), TLS trust and preference reads (`PluginSandbox.machAllowed`). It can't inspect or
+  resolver, network settings and TLS trust (with `network` only, since trustd fetches issuers over the network on a
+  helper's behalf), and preference reads (`PluginSandbox.machAllowed`, `machAllowedOnline`). Nothing it runs follows
+  live changes to your locale or other global preferences: notification posts and lookups are refused, and nothing
+  measured needed them. It can't inspect or
   signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal against a probe that
   succeeds outside the sandbox.
 - **What the sandbox doesn't do.** It runs as you, so it is a containment layer around a program you chose to run, not
-  a defense against one built to escape. Known gaps: any process's command line is readable (`KERN_PROCARGS2` can't be
-  sandboxed), so nothing secret ever goes in a helper's arguments; files your config folder links to outside your home
-  are readable; a local server it starts may listen on any address; it isn't limited in CPU. Out of Ardia's reach: a
+  a defense against one built to escape. Known gaps: any same-user process's command line, and for a process without
+  the hardened runtime its environment too, is readable (`KERN_PROCARGS2` can't be sandboxed), so nothing secret ever
+  goes in a helper's arguments or environment, and Ardia's own launch never puts one there; files your config folder
+  links to outside your home are readable; with `network`, a local server it starts may listen on any address; it isn't limited in CPU. Out of Ardia's reach: a
   process started within
   the moment between a helper's fork and its own exit. Checking a process id's start time and signalling it are two
   calls, so an id reused within microseconds in between could be hit. The responsibility calls

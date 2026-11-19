@@ -12,6 +12,7 @@ final class PluginSandboxEscapeTests: XCTestCase {
     #include <netinet/in.h>
     #include <notify.h>
     #include <sys/mman.h>
+    #include <sys/sysctl.h>
     #include <libproc.h>
     #include <servers/bootstrap.h>
     #include <signal.h>
@@ -100,6 +101,32 @@ final class PluginSandboxEscapeTests: XCTestCase {
         address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
         if (connect(fd, (struct sockaddr *)&address, sizeof address) != 0) return failed();
         printf("connected\\n");
+        return 0;
+      }
+      if (!strcmp(mode, "bind")) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in address = {0};
+        address.sin_family = AF_INET;
+        address.sin_port = 0;
+        address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (bind(fd, (struct sockaddr *)&address, sizeof address) != 0) return failed();
+        if (listen(fd, 1) != 0) return failed();
+        printf("listening\\n");
+        return 0;
+      }
+      if (!strcmp(mode, "sysctlread")) {
+        int value = 0;
+        size_t size = sizeof value;
+        if (sysctlbyname(argv[2], &value, &size, NULL, 0) != 0) return failed();
+        printf("read %d\\n", value);
+        return 0;
+      }
+      if (!strcmp(mode, "sysctlwrite")) {
+        int value = 0;
+        size_t size = sizeof value;
+        if (sysctlbyname(argv[2], &value, &size, NULL, 0) != 0) return failed();
+        if (sysctlbyname(argv[2], NULL, NULL, &value, sizeof value) != 0) return failed();
+        printf("wrote\\n");
         return 0;
       }
       if (!strcmp(mode, "connect")) {
@@ -353,18 +380,25 @@ final class PluginSandboxEscapeTests: XCTestCase {
     preferenceDomains += [controlDomain, domain]
     XCTAssertEqual(try Self.run("/usr/bin/defaults", ["write", controlDomain, "key", "value"]).status, 0)
     XCTAssertEqual(try Self.run("/usr/bin/defaults", ["read", controlDomain, "key"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "value", "control")
-    XCTAssertNotEqual(try sandboxed("/usr/bin/defaults", ["write", domain, "key", "value"]).status, 0)
+    _ = try sandboxed("/usr/bin/defaults", ["write", domain, "key", "value"], realHome: true)
+    Thread.sleep(forTimeInterval: 0.5)
     XCTAssertNotEqual(try Self.run("/usr/bin/defaults", ["read", domain, "key"]).status, 0, "the write landed")
   }
 
-  func testItCannotReadOtherAppsPreferencesButReadsTheGlobalDomain() throws {
-    let controlDomain = "dev.ardia.plugin-escape.secret.\(Self.short())"
-    preferenceDomains.append(controlDomain)
-    XCTAssertEqual(try Self.run("/usr/bin/defaults", ["write", controlDomain, "token", "secret-value"]).status, 0)
-    XCTAssertEqual(try Self.run("/usr/bin/defaults", ["read", controlDomain, "token"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "secret-value", "control")
-    let inside = try sandboxed("/usr/bin/defaults", ["read", controlDomain, "token"], realHome: true)
-    XCTAssertNotEqual(inside.status, 0)
-    XCTAssertFalse(inside.output.contains("secret-value"), "another app's preferences are readable: \(inside.output)")
+  func testItCannotReadOtherAppsPreferencesInEitherHostScope() throws {
+    for scope in [[], ["-currentHost"]] {
+      let controlDomain = "dev.ardia.plugin-escape.secret.\(Self.short())"
+      preferenceDomains.append(controlDomain)
+      XCTAssertEqual(try Self.run("/usr/bin/defaults", scope + ["write", controlDomain, "token", "secret-value"]).status, 0)
+      XCTAssertEqual(try Self.run("/usr/bin/defaults", scope + ["read", controlDomain, "token"]).output.trimmingCharacters(in: .whitespacesAndNewlines), "secret-value", "control \(scope)")
+      let inside = try sandboxed("/usr/bin/defaults", scope + ["read", controlDomain, "token"], realHome: true)
+      XCTAssertNotEqual(inside.status, 0, "\(scope)")
+      XCTAssertFalse(inside.output.contains("secret-value"), "another app's preferences are readable \(scope): \(inside.output)")
+      _ = try? Self.run("/usr/bin/defaults", scope + ["delete", controlDomain])
+    }
+  }
+
+  func testItReadsTheGlobalDomainLikeOutside() throws {
     let locale = try Self.run("/usr/bin/defaults", ["read", "-g", "AppleLocale"])
     try XCTSkipUnless(locale.status == 0, "no AppleLocale to compare")
     XCTAssertEqual(try sandboxed("/usr/bin/defaults", ["read", "-g", "AppleLocale"], realHome: true).output, locale.output, "the global domain stays readable")
@@ -378,15 +412,27 @@ final class PluginSandboxEscapeTests: XCTestCase {
     watcher.standardOutput = pipe
     try watcher.run()
     started.append(watcher)
+    let lock = NSLock()
     var heard = ""
-    let deadline = Date().addingTimeInterval(5)
-    while !heard.contains("ready") && Date() < deadline {
-      heard += String(decoding: pipe.fileHandleForReading.availableData, as: UTF8.self)
+    let ready = DispatchSemaphore(value: 0)
+    let finished = DispatchSemaphore(value: 0)
+    pipe.fileHandleForReading.readabilityHandler = { handle in
+      let data = handle.availableData
+      lock.lock()
+      heard += String(decoding: data, as: UTF8.self)
+      let text = heard
+      lock.unlock()
+      if text.contains("ready") { ready.signal() }
+      if data.isEmpty {
+        handle.readabilityHandler = nil
+        finished.signal()
+      }
     }
-    XCTAssertTrue(heard.contains("ready"), "the watcher never registered")
+    XCTAssertEqual(ready.wait(timeout: .now() + 5), .success, "the watcher never registered")
     try posting()
-    watcher.waitUntilExit()
-    heard += String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    XCTAssertEqual(finished.wait(timeout: .now() + 10), .success, "the watcher never finished")
+    lock.lock()
+    defer { lock.unlock() }
     return heard.contains("arrived")
   }
 
@@ -435,11 +481,68 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: false).status, EPERM, "without network loopback is reachable")
   }
 
-  func testHelpersGetProxyAndCertificateSettingsButNoSecrets() {
-    let carried = PluginSandbox.networkEnvironment(from: [
-      "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret", "NODE_EXTRA_CA_CERTS": "/etc/corp.pem",
+  func testHelpersGetProxySettingsAndAStagedCertificateBundleButNoSecrets() throws {
+    let system = "\(root)/system.pem"
+    let corporate = "\(home)/corp.pem"
+    try "SYSTEM ROOTS\n".write(toFile: system, atomically: true, encoding: .utf8)
+    try "CORPORATE ROOT".write(toFile: corporate, atomically: true, encoding: .utf8)
+    let given = [
+      "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "HTTP_PROXY": "http://user:pass@proxy.example:3128",
+      "all_proxy": "socks5://alice@proxy.example:1080", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret", "NODE_EXTRA_CA_CERTS": corporate,
+    ]
+    XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false, dataFolder: pluginData, system: system), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
+    let carried = PluginSandbox.networkEnvironment(from: given, network: true, dataFolder: pluginData, system: system)
+    let bundle = "\(pluginData)/certificates.pem"
+    XCTAssertEqual(Set(carried.variables), [
+      "HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost", "SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)",
     ])
-    XCTAssertEqual(Set(carried), ["HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost", "NODE_EXTRA_CA_CERTS=/etc/corp.pem", "SSL_CERT_FILE=/etc/ssl/cert.pem"])
-    XCTAssertEqual(PluginSandbox.networkEnvironment(from: ["SSL_CERT_FILE": "/corp/roots.pem"]), ["SSL_CERT_FILE=/corp/roots.pem"])
+    XCTAssertEqual(Set(carried.droppedProxies), ["HTTP_PROXY", "all_proxy"], "proxies with a user name or password are dropped")
+    XCTAssertFalse(carried.variables.joined().contains("secret") || carried.variables.joined().contains("pass"))
+    XCTAssertEqual(try String(contentsOfFile: bundle, encoding: .utf8), "SYSTEM ROOTS\nCORPORATE ROOT\n", "a root from under the home folder reaches the helper as a copy, never as a path")
+  }
+
+  func testWithoutNetworkItCannotListenWithItCanOnLoopback() throws {
+    XCTAssertEqual(try Self.run(probe, ["bind", "0"]).status, 0, "control: binding loopback works outside")
+    XCTAssertEqual(try sandboxed(probe, ["bind", "0"], network: true).status, 0, "with network a local server can listen")
+    XCTAssertEqual(try sandboxed(probe, ["bind", "0"], network: false).status, EPERM, "without network it can't listen")
+  }
+
+  func testTrustServicesAreReachableOnlyWithNetwork() throws {
+    for name in PluginSandbox.machAllowedOnline {
+      XCTAssertEqual(try Self.run(probe, ["lookup", name]).status, 0, "control: \(name) outside")
+      XCTAssertEqual(try sandboxed(probe, ["lookup", name], network: true).status, 0, "\(name) with network")
+      XCTAssertEqual(try sandboxed(probe, ["lookup", name], network: false).status, 97, "\(name) without network")
+    }
+  }
+
+  func testOtherUsersFilesAndMountedDisksAreUnreadable() throws {
+    let shared = "/Users/Shared/ardia-plugin-escape-\(Self.short())"
+    scratch.append(shared)
+    try "shared-secret".write(toFile: shared, atomically: true, encoding: .utf8)
+    XCTAssertEqual(try Self.run("/bin/cat", [shared]).output, "shared-secret", "control")
+    let inside = try sandboxed("/bin/cat", [shared])
+    XCTAssertNotEqual(inside.status, 0)
+    XCTAssertFalse(inside.output.contains("shared-secret"))
+    let image = "\(root)/disk.dmg"
+    let volume = "ArdiaEscape\(Self.short())"
+    let made = try Self.run("/usr/bin/hdiutil", ["create", "-size", "1m", "-fs", "HFS+", "-volname", volume, "-ov", image])
+    try XCTSkipUnless(made.status == 0, "hdiutil can't make an image here: \(made.output)")
+    let attached = try Self.run("/usr/bin/hdiutil", ["attach", "-nobrowse", "-noverify", image])
+    try XCTSkipUnless(attached.status == 0, "hdiutil can't attach here: \(attached.output)")
+    let mount = "/Volumes/\(volume)"
+    defer { _ = try? Self.run("/usr/bin/hdiutil", ["detach", mount, "-force"]) }
+    try "disk-secret".write(toFile: "\(mount)/secret.txt", atomically: true, encoding: .utf8)
+    XCTAssertEqual(try Self.run("/bin/cat", ["\(mount)/secret.txt"]).output, "disk-secret", "control")
+    let onDisk = try sandboxed("/bin/cat", ["\(mount)/secret.txt"])
+    XCTAssertNotEqual(onDisk.status, 0)
+    XCTAssertFalse(onDisk.output.contains("disk-secret"))
+  }
+
+  func testSysctlReadsWorkAndWritesAreRefused() throws {
+    let control = try Self.run(probe, ["sysctlread", "hw.pagesize"])
+    XCTAssertEqual(control.status, 0, control.output)
+    XCTAssertEqual(try sandboxed(probe, ["sysctlread", "hw.pagesize"]).output, control.output, "a required read works inside")
+    let inside = try sandboxed(probe, ["sysctlwrite", "kern.maxfilesperproc"])
+    XCTAssertEqual(inside.status, EPERM, "a write is refused: \(inside.output)")
   }
 }

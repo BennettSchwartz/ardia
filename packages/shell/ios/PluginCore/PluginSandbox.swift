@@ -12,12 +12,14 @@ struct PluginSandbox {
   static let searchPath = ["/usr/bin", "/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/usr/local/bin"]
 
   static let machAllowed = [
-    "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership",
-    "com.apple.logd", "com.apple.bsd.dirhelper", "com.apple.SystemConfiguration.configd",
-    "com.apple.trustd", "com.apple.trustd.agent", "com.apple.TrustEvaluationAgent", "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
+    "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership", "com.apple.logd", "com.apple.bsd.dirhelper",
+    "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
   ]
 
-  static let machAllowedOnline = ["com.apple.SystemConfiguration.DNSConfiguration"]
+  static let machAllowedOnline = [
+    "com.apple.SystemConfiguration.DNSConfiguration", "com.apple.SystemConfiguration.configd", "com.apple.trustd", "com.apple.trustd.agent",
+    "com.apple.TrustEvaluationAgent",
+  ]
 
   static let unixSocketsAllowedOnline = ["/private/var/run/mDNSResponder"]
 
@@ -25,17 +27,51 @@ struct PluginSandbox {
 
   static let devicesWritable = ["/dev/null", "/dev/zero"]
 
-  static let carriedEnvironment = [
-    "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy",
-    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
-  ]
+  static let unreadableTrees = ["/Users", "/Volumes"]
+
+  static let proxyEnvironment = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"]
+
+  static let certificateEnvironment = ["SSL_CERT_FILE", "NODE_EXTRA_CA_CERTS"]
 
   static let systemCertificates = "/etc/ssl/cert.pem"
 
-  static func networkEnvironment(from given: [String: String]) -> [String] {
-    var carried = carriedEnvironment.compactMap { name in given[name].flatMap { $0.isEmpty || $0.contains("\0") ? nil : "\(name)=\($0)" } }
-    if given["SSL_CERT_FILE"]?.isEmpty ?? true { carried.append("SSL_CERT_FILE=\(systemCertificates)") }
-    return carried
+  static let certificateBundleName = "certificates.pem"
+
+  struct NetworkEnvironment: Equatable {
+    var variables: [String] = []
+    var droppedProxies: [String] = []
+  }
+
+  static func carriesCredentials(_ value: String) -> Bool {
+    guard let url = URL(string: value.contains("://") ? value : "http://\(value)") else { return value.contains("@") }
+    return url.user != nil || url.password != nil || (url.host == nil && value.contains("@"))
+  }
+
+  static func certificateBundle(from given: [String: String], system: String = systemCertificates) -> String {
+    var sources = [system]
+    for name in certificateEnvironment {
+      if let path = given[name], !path.isEmpty, !sources.contains(path) { sources.append(path) }
+    }
+    return sources.compactMap { try? String(contentsOfFile: $0, encoding: .utf8) }.map { $0.hasSuffix("\n") ? $0 : $0 + "\n" }.joined()
+  }
+
+  static func networkEnvironment(from given: [String: String], network: Bool, dataFolder: String, system: String = systemCertificates) -> NetworkEnvironment {
+    guard network else { return NetworkEnvironment() }
+    var result = NetworkEnvironment()
+    for name in proxyEnvironment {
+      guard let value = given[name], !value.isEmpty, !value.contains("\0") else { continue }
+      if carriesCredentials(value) {
+        result.droppedProxies.append(name)
+        continue
+      }
+      result.variables.append("\(name)=\(value)")
+    }
+    let bundle = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
+    let staged = certificateBundle(from: given, system: system)
+    if !staged.isEmpty, (try? staged.write(toFile: bundle, atomically: true, encoding: .utf8)) != nil {
+      result.variables += ["SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)"]
+    }
+    return result
   }
 
   static func profile(network: Bool) -> String {
@@ -44,7 +80,14 @@ struct PluginSandbox {
       ? "" : "\n(allow user-preference-read \(preferenceDomainsAllowed.map { "(preference-domain \"\($0)\")" }.joined(separator: " ")))"
     let sockets = network
       ? "\n(allow network-outbound \(unixSocketsAllowedOnline.map { "(remote unix-socket (literal \"\($0)\"))" }.joined(separator: " ")))" : ""
-    let addresses = network ? "" : "\n(deny network-outbound (remote ip))"
+    let addresses = network
+      ? ""
+      : """
+
+        (deny network-outbound (remote ip))
+        (deny network-bind (local ip))
+        (deny network-inbound (local ip))
+        """
     return """
       (version 1)
       (allow default)
@@ -66,6 +109,8 @@ struct PluginSandbox {
       (deny mach-lookup)
       (allow mach-lookup \(mach.map { "(global-name \"\($0)\")" }.joined(separator: " ")))
       (deny file-read* file-write* (subpath (param "HOME")) (subpath (param "APP_DATA")) (subpath (param "CONFIG")))
+      (deny file-read* file-write* \(unreadableTrees.map { "(subpath \"\($0)\")" }.joined(separator: " ")))
+      (allow file-read-metadata \(unreadableTrees.map { "(literal \"\($0)\")" }.joined(separator: " ")))
       (deny file-write* (subpath "/"))
       (allow file-write* \(devicesWritable.map { "(literal \"\($0)\")" }.joined(separator: " ")) (subpath "/dev/fd"))
       (deny network-outbound (remote unix-socket))\(sockets)\(addresses)
