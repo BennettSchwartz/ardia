@@ -265,6 +265,7 @@ function answerAs(origin: Pick<SocketOrigin, "segment">, connection: number, met
 
 function handleClose({ connection }: { connection: number }) {
   openConnections.delete(connection);
+  dismissSocketAsks(connection);
   launchSent.delete(connection);
   callers.delete(connection);
   dropResponder(connection);

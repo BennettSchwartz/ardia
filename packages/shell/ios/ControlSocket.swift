@@ -19,6 +19,7 @@ final class ControlSocket {
   private var acceptSource: DispatchSourceRead?
   private var bound: (path: String, device: dev_t, inode: ino_t)?
   private var connections: [Int: ControlConnection] = [:]
+  private var peerFinished = Set<Int>()
   private var nextConnection = 0
   private var generation = 0
   private var quitObserver: NSObjectProtocol?
@@ -163,6 +164,7 @@ final class ControlSocket {
     self.bound = nil
     for connection in Array(connections.values) { connection.retire() }
     connections.removeAll()
+    peerFinished.removeAll()
     acceptSource?.cancel()
     acceptSource = nil
     listenFd = -1
@@ -194,9 +196,14 @@ final class ControlSocket {
         },
         onClose: { [weak self] connection in
           guard let self, self.connections.removeValue(forKey: connection.id) != nil else { return }
+          guard self.peerFinished.remove(connection.id) == nil else { return }
           self.sink?.send("onClose", ["connection": connection.id])
         },
-        onWritten: { [weak self] tickets in self?.sink?.send("onWritten", ["tickets": tickets]) })
+        onWritten: { [weak self] tickets in self?.sink?.send("onWritten", ["tickets": tickets]) },
+        onPeerFinished: { [weak self] connection in
+          guard let self, self.connections[connection.id] != nil, self.peerFinished.insert(connection.id).inserted else { return }
+          self.sink?.send("onClose", ["connection": connection.id])
+        })
       connections[connection.id] = connection
       connection.open()
     }
