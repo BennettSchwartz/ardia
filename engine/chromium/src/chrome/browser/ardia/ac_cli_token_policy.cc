@@ -260,9 +260,10 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
   if (*method == kAnswerFilePicker) {
     return AnswerFilePickerCommand(*id, session, &params, reply);
   }
-  if (*method == kDispatchClick) {
-    outstanding_[key] = kDispatchClick;
-    return DispatchClickCommand(*id, session, params, reply);
+  if (*method == kDispatchClick ||
+      (kind_ == TokenKind::kPlugin && *method == "Input.dispatchMouseEvent")) {
+    outstanding_[key] = *method;
+    return DispatchPointerCommand(*id, session, *method, params, reply);
   }
   if (*method == "IO.read") {
     const std::optional<int> size = params.FindInt("size");
@@ -273,20 +274,6 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
   NoteCommand(*method, session, &params);
   outstanding_[key] = NeedsResponse(*method) ? *method : std::string();
   message = base::WriteJson(command).value_or(std::string());
-  if (kind_ == TokenKind::kPlugin && *method == "Input.dispatchMouseEvent" &&
-      CliPluginInputHold() && to_browser_ && !message.empty()) {
-    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-        FROM_HERE,
-        base::BindOnce(
-            [](base::WeakPtr<TokenClient> self, std::string held) {
-              if (self && self->to_browser_ && !self->revoked_) {
-                self->to_browser_.Run(std::move(held));
-              }
-            },
-            weak_factory_.GetWeakPtr(), std::move(message)),
-        kHeldPluginInput);
-    return false;
-  }
   return !message.empty();
 }
 
@@ -319,46 +306,60 @@ bool TokenClient::AnswerFilePickerCommand(int id,
   return false;
 }
 
-bool TokenClient::DispatchClickCommand(int id,
-                                       const std::string& session,
-                                       const base::DictValue& params,
-                                       std::string* reply) {
+bool TokenClient::DispatchPointerCommand(int id,
+                                         const std::string& session,
+                                         const std::string& method,
+                                         const base::DictValue& params,
+                                         std::string* reply) {
   CountCommand(CommandDomain::kInput);
   content::DevToolsAgentHost* host = HostOf(session);
-  PluginClickParams validated;
-  const std::string refusal =
-      PluginClickRefusal(ToPluginParams(params), &validated);
+  content::ArdiaPointer pointer;
+  std::string refusal;
+  if (method == kDispatchClick) {
+    PluginClickParams click;
+    refusal = PluginClickRefusal(ToPluginParams(params), &click);
+    pointer.kind = content::ArdiaPointer::Kind::kClick;
+    pointer.x = click.x;
+    pointer.y = click.y;
+    pointer.button = click.button;
+    pointer.click_count = click.click_count;
+    pointer.modifiers = click.modifiers;
+  } else {
+    PluginMouseParams mouse;
+    refusal = PluginMouseRefusal(ToPluginParams(params), &mouse);
+    pointer.kind = mouse.type == "mouseWheel"
+                       ? content::ArdiaPointer::Kind::kWheel
+                       : content::ArdiaPointer::Kind::kMove;
+    pointer.x = mouse.x;
+    pointer.y = mouse.y;
+    pointer.modifiers = mouse.modifiers;
+    pointer.delta_x = mouse.delta_x.value_or(0);
+    pointer.delta_y = mouse.delta_y.value_or(0);
+  }
   if (!host || !refusal.empty()) {
     outstanding_.erase({session, id});
     *reply = ErrorReply(
         id, session, kInvalidRequest,
-        base::StrCat({"ardia: ", kDispatchClick, " ",
+        base::StrCat({"ardia: ", method, " ",
                       refusal.empty() ? std::string("without a page")
                                       : refusal,
                       " can't be sent"}));
     return false;
   }
-  content::ArdiaClick click;
-  click.x = validated.x;
-  click.y = validated.y;
-  click.button = validated.button;
-  click.click_count = validated.click_count;
-  click.modifiers = validated.modifiers;
-  click.document = content::ArdiaClickDocument(host, client_, session);
+  pointer.epoch = content::ArdiaPageEpoch(host);
   auto dispatch = base::BindOnce(
       [](base::WeakPtr<TokenClient> self,
          scoped_refptr<content::DevToolsAgentHost> host, std::string session,
-         int id, content::ArdiaClick click) {
+         int id, content::ArdiaPointer pointer) {
         if (!self || self->revoked_) {
           return;
         }
-        content::ArdiaDispatchClick(
-            host.get(), self->client_, session, click,
-            base::BindOnce(&TokenClient::FinishDispatchClick, self, id,
-                           session));
+        content::ArdiaDispatchPointer(
+            host.get(), self->client_, session, pointer,
+            base::BindOnce(&TokenClient::FinishPointer, self, id, session));
       },
       weak_factory_.GetWeakPtr(), base::WrapRefCounted(host), session, id,
-      click);
+      pointer);
   if (kind_ == TokenKind::kPlugin && CliPluginInputHold()) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, std::move(dispatch), kHeldPluginInput);
@@ -368,7 +369,7 @@ bool TokenClient::DispatchClickCommand(int id,
   return false;
 }
 
-void TokenClient::FinishDispatchClick(int id,
+void TokenClient::FinishPointer(int id,
                                       const std::string& session,
                                       std::string error) {
   if (!outstanding_.erase({session, id}) || !to_client_) {
@@ -523,15 +524,6 @@ bool TokenClientSessionMayInput(content::DevToolsAgentHostClient* root_client,
     return true;
   }
   return it->second->MaySessionInput(session);
-}
-
-int EndPluginFocusEmulation(const std::string& credential_id) {
-  int ended = 0;
-  for (cli_token_policy_internal::TokenClient* client :
-       cli_token_policy_internal::ClientsOf(credential_id)) {
-    ended += client->EndFocusEmulation();
-  }
-  return ended;
 }
 
 void InstallTokenClientInputHooks() {

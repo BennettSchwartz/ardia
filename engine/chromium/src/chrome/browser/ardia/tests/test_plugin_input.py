@@ -6,6 +6,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+CORE_ROOT = os.path.abspath(os.path.join(SRC_ROOT, "..", "..", "ardiacore", "src"))
 
 
 def compiler():
@@ -24,7 +25,7 @@ class PluginInputTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             binary = os.path.join(work, "plugin_input_test")
             build = subprocess.run(
-                [cxx, "-std=c++20", "-I", SRC_ROOT, "-o", binary,
+                [cxx, "-std=c++20", "-I", SRC_ROOT, "-I", CORE_ROOT, "-o", binary,
                  os.path.join(HERE, "plugin_input_test.cc"),
                  os.path.join(HERE, "..", "ac_cli_plugin_input.cc")],
                 capture_output=True, text=True)

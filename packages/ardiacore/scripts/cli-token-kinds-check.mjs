@@ -21,9 +21,9 @@ page and the browser target. A plugin credential minted for window 1 (engine.cli
 attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
 cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.json and can't read /ardia/active;
 revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its allowlist: the
-plain-data DOM and accessibility reads work, DOM.scrollIntoViewIfNeeded works on its own nodes, DOM.focus and
-Page.captureScreenshot are refused (Ardia.dispatchClick focuses a field), ending its focus emulation through
-engine.cliPluginCredential {endFocusEmulation} turns it off, and every
+plain-data DOM and accessibility reads work; DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and
+Emulation.setFocusEmulationEnabled are refused (Ardia.dispatchClick focuses a field, a wheel scrolls); its moves and
+wheels never focus the page; input held past an in-scope navigation is refused; and every
 Runtime method, DOM.resolveNode, DOM search, Page.createIsolatedWorld and any Runtime object or context id are refused,
 as are Page.navigate's referrer, referrerPolicy, transitionType and frameId, every scheme but http, https and
 about:blank, and a script on reload; no Network, console or Runtime event reaches it; a frame of another tab is out of
@@ -253,7 +253,8 @@ try {
   const focused = await plugin.send("DOM.focus", { nodeId: areaNode }, ps);
   const shot = await plugin.send("Page.captureScreenshot", {}, ps);
   const scrolled = await plugin.send("DOM.scrollIntoViewIfNeeded", { nodeId: openNode }, ps);
-  check("plugin: DOM.focus and Page.captureScreenshot are refused, and DOM.scrollIntoViewIfNeeded works on its own node", refused(focused) && /plugin/.test(focused.error?.message ?? "") && refused(shot) && /plugin/.test(shot.error?.message ?? "") && !refused(scrolled), `${text(focused)} ${text(shot)} ${text(scrolled)}`);
+  const emulatedFocus = await plugin.send("Emulation.setFocusEmulationEnabled", { enabled: true }, ps);
+  check("plugin: DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and Emulation.setFocusEmulationEnabled are refused", [focused, scrolled, shot, emulatedFocus].every((r) => refused(r) && /plugin/.test(r.error?.message ?? "")), [focused, scrolled, shot, emulatedFocus].map(text).join(" | "));
   const wheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 60, deltaX: 0, deltaY: 50 }, ps);
   check("plugin: a mouseWheel event answers", !refused(wheel), text(wheel));
 
@@ -262,7 +263,6 @@ try {
     ["Accessibility.getFullAXTree", {}],
     ["Page.getLayoutMetrics", {}],
     ["Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 }],
-    ["Emulation.setFocusEmulationEnabled", { enabled: true }],
     ["Target.getTargetInfo", { targetId: pages.one.targetId }],
   ];
   for (const [method, params] of allowed) {
@@ -504,9 +504,9 @@ try {
   const tree = await plugin.send("Accessibility.getFullAXTree", {}, ps);
   const button = tree.result?.nodes?.find((n) => n.role?.value === "button" && n.backendDOMNodeId);
   const described = await plugin.send("DOM.describeNode", { backendNodeId: button?.backendDOMNodeId }, ps);
-  const focusedByBackend = await plugin.send("DOM.scrollIntoViewIfNeeded", { backendNodeId: button?.backendDOMNodeId }, ps);
+  const focusedByBackend = await plugin.send("DOM.getBoxModel", { backendNodeId: button?.backendDOMNodeId }, ps);
   const resolved = await plugin.send("DOM.resolveNode", { backendNodeId: button?.backendDOMNodeId }, ps);
-  check("plugin: a backendNodeId from its own tab's accessibility tree describes and scrolls into view, and DOM.resolveNode is refused", !!button && !refused(described) && !refused(focusedByBackend) && refused(resolved), `${text(described)} ${text(focusedByBackend)} ${text(resolved)}`);
+  check("plugin: a backendNodeId from its own tab's accessibility tree describes and boxes, and DOM.resolveNode is refused", !!button && !refused(described) && !refused(focusedByBackend) && refused(resolved), `${text(described)} ${text(focusedByBackend)} ${text(resolved)}`);
   await cli.send("Runtime.evaluate", { expression: `window.popupRef = window.open(${JSON.stringify(`${origin}/four`)}), true`, userGesture: true }, csOne);
   const popup = await until("the popup", async () => (await urlsOf(cli)).find((t) => t.url === `${origin}/four`) ?? null, 15000).catch(() => null);
   const movedPopup = await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
@@ -517,7 +517,7 @@ try {
   const foreign = html?.children?.find((c) => c.nodeName === "BODY")?.backendNodeId ?? html?.backendNodeId;
   const crossTab = await plugin.send("DOM.describeNode", { backendNodeId: foreign }, ps);
   check("plugin: a backendNodeId from another tab in the same renderer is refused", !!popup && movedPopup === true && !!foreign && refused(crossTab) && /isn't in this page/.test(crossTab.error?.message ?? ""), text(crossTab));
-  for (const method of ["DOM.scrollIntoViewIfNeeded"]) {
+  for (const method of ["DOM.getBoxModel"]) {
     const crossTabAct = await plugin.send(method, { backendNodeId: foreign }, ps);
     check(`plugin: ${method} on another tab's node is refused`, !!foreign && refused(crossTabAct) && /isn't in this page/.test(crossTabAct.error?.message ?? ""), text(crossTabAct));
   }
@@ -533,7 +533,7 @@ try {
   const beforeAdoption = await plugin.send("DOM.getOuterHTML", { nodeId: tplNode }, ps);
   const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const t = window.opener?.document.getElementById('tpl'); if (!t) return false; document.body.append(document.adoptNode(t)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
   const adoptedReads = [];
-  for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
+  for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
     adoptedReads.push([method, await plugin.send(method, params, ps)]);
   }
   check("plugin: a template node it mapped stays mapped when the page adopts the template into a window-2 document, and every read, focus and scroll by that nodeId is refused as not in this page", !!tplNode && /tplp/.test(beforeAdoption.result?.outerHTML ?? "") && adopted === true && adoptedReads.every(([, r]) => /that nodeId isn't in this page/.test(r.error?.message ?? "")), `before: ${text(beforeAdoption)}; ` + adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
@@ -649,6 +649,9 @@ try {
   const fresh = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
   const freshMove = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 30 }, fresh);
   const freshWheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 30, y: 30, deltaX: 0, deltaY: 20 }, fresh);
+  const hasFocus = () => csValue(cs3, "document.hasFocus()");
+  const focusAfterPointer = await hasFocus();
+  check("plugin: its buttonless moves and wheels on a background page don't focus it", focusAfterPointer === false && !refused(freshMove) && !refused(freshWheel), `hasFocus ${focusAfterPointer}`);
   const freshClicksBefore = await csValue(cs3, "window.clicks");
   const freshClick = await plugin.send("Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, fresh);
   await sleep(300);
@@ -656,20 +659,16 @@ try {
   const freshMoves = await moves();
   const freshWheels = await wheels();
   check("plugin: the departed session's input is refused, and a fresh attach to the returned tab delivers a mouse move, a wheel event and a click", refused(old) && !!fresh && !refused(freshMove) && !refused(freshWheel) && !refused(freshClick) && freshClicked && freshMoves > movesAfterReturn && freshWheels > wheelsAfterReturn, `${text(old)} ${text(freshMove)} ${text(freshWheel)} moves ${freshMoves} wheels ${freshWheels}`);
-  const hasFocus = () => csValue(cs3, "document.hasFocus()");
-  const focusBefore = await hasFocus();
-  const emulated = await plugin.send("Emulation.setFocusEmulationEnabled", { enabled: true }, fresh);
-  const focusEmulated = await hasFocus();
-  const endedFocus = await appEval(`return ac.engine.call("engine.cliPluginCredential", { endFocusEmulation: ${JSON.stringify(minted.id)} })`);
-  const focusAfterEnd = await until("focus emulation to end", async () => (await hasFocus()) === false || null, 5000).then(() => false, () => true);
-  check("plugin: ending its focus emulation (engine.cliPluginCredential endFocusEmulation, the lease's hook) turns it off for its sessions", focusBefore === false && !refused(emulated) && focusEmulated === true && endedFocus?.ended >= 1 && focusAfterEnd === false, `before ${focusBefore}, emulated ${focusEmulated}, ended ${JSON.stringify(endedFocus)}, after ${focusAfterEnd}`);
   const heldMark = plugin.replies.length;
   plugin.raw(663000, "Ardia.dispatchClick", { x: threeClickX, y: threeClickY }, fresh);
+  plugin.raw(663001, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 30, y: 30, deltaX: 0, deltaY: 20 }, fresh);
   await cli.send("Page.navigate", { url: `${origin}/three` }, cs3);
   await until("page three reloaded", async () => (await csValue(cs3, "document.readyState === 'complete' && window.clicks === 0")) || null, 8000).catch(() => null);
   const heldReply = (await plugin.repliesTo(663000, heldMark, 3500))[0];
+  const heldWheel = (await plugin.repliesTo(663001, heldMark, 100))[0];
   const clicksAfterNavigation = await csValue(cs3, "window.clicks");
   check("plugin: a click held past an in-scope navigation is refused at delivery and never lands in the new document", !!heldReply && refused(heldReply) && /page changed/.test(heldReply.error?.message ?? "") && clicksAfterNavigation === 0, `${heldReply ? text(heldReply) : "no reply"} clicks ${clicksAfterNavigation}`);
+  check("plugin: a wheel held past an in-scope navigation is refused at delivery", !!heldWheel && refused(heldWheel) && /page changed/.test(heldWheel.error?.message ?? ""), heldWheel ? text(heldWheel) : "no reply");
 
   const t3Target = (await urlsOf(cli)).find((t) => t.url === `${origin}/three`);
   const direct = await connect(`ws://127.0.0.1:${control.port}/devtools/page/${t3Target?.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null);

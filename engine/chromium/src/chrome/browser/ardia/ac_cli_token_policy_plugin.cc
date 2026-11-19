@@ -57,8 +57,6 @@ const std::set<std::string_view>& PluginMethods() {
       "DOM.getOuterHTML",
       "DOM.querySelector",
       "DOM.querySelectorAll",
-      "DOM.scrollIntoViewIfNeeded",
-      "Emulation.setFocusEmulationEnabled",
       "Input.dispatchKeyEvent",
       "Input.dispatchMouseEvent",
       "Input.insertText",

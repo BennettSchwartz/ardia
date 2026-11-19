@@ -2004,8 +2004,6 @@ class HostMessageHandler : public content::WebUIMessageHandler,
       engine_call = "ac_cli_plugin_credential";
       if (const std::string* revoke = input.FindString("revoke")) {
         request.Set("revoke", *revoke);
-      } else if (const std::string* lease_ended = input.FindString("endFocusEmulation")) {
-        request.Set("endFocusEmulation", *lease_ended);
       } else {
         const std::string* tab = input.FindString("tabId");
         TabBinding* binding = tab ? host_->BindingForKey(*tab) : nullptr;

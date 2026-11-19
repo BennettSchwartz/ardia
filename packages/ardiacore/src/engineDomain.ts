@@ -112,7 +112,7 @@ export type CliDragsEnded = { ownerGone: number; debuggerUnowned: number; native
 
 export type CliWindowlessPages = { given: number; missed: number };
 
-export type CliPluginCredential = { id: string; credential: string; window: number; endpoint: string } | { revoked: boolean } | { ended: number };
+export type CliPluginCredential = { id: string; credential: string; window: number; endpoint: string } | { revoked: boolean };
 
 export type CliPluginTotals = { minted: number; revoked: number; refused: number };
 

@@ -107,18 +107,17 @@ TypeScript browse client), not to #2808. It must:
     on, then mint again; a credential minted while it's off still works once it's on, but the reply can't say where).
 
   An unknown or closed tab answers the error `no such tab`.
-- **End focus emulation.** `engine.cliPluginCredential {endFocusEmulation: <id>}` (engine args `{"endFocusEmulation": "<id>"}`)
-  turns focus emulation off on every session of that credential that turned it on, and answers `{"ended": <n>}`. An act
-  lease calls it (or `EndPluginFocusEmulation` in the engine) when the lease ends.
 - **Revoke.** `engine.cliPluginCredential {revoke: <id>}` (engine args `{"revoke": "<id>"}`) answers
   `{"revoked": true}`, or `false` for an unknown id. It forgets the credential and closes every connection made with
   it. The app revokes when the activity ends. A credential also dies with the window it was minted for, when the
   control server stops or restarts (mint again after turning control back on) and when the browser quits. A profile
   holds at most 16 live credentials; past that, minting answers `too many plugin credentials for this profile`.
 - **What a plugin connection may do** is an exact allowlist (`docs/engine-build.md` › `chromium-devtools-control-token.patch`):
-  plain-data DOM and accessibility reads, scrolling its own nodes into view, page navigation, focus emulation, and
+  plain-data DOM and accessibility reads, page navigation, and
   input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
-  and releases in place, so a plugin can never drag). It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
+  and releases in place, so a plugin can never drag). It can't focus, scroll a node into view, or emulate focus: it
+  focuses by clicking and scrolls with the wheel.
+  It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
   response to its input (a link that opens in another window) counts as the person acting, but the plugin still can't
   reach that window. When its tab leaves the window, its session is detached, commands in flight answer
   `ardia: tab_out_of_scope`, and input it queued before the move never lands.
@@ -138,6 +137,8 @@ TypeScript browse client), not to #2808. It must:
   The credential stays in the query (`?token=`), and the engine never records it:
   - **Not recorded:** nothing on the engine side records the request path or query: not `net/server`, the DevTools
     handler, NetLog (the server socket has no NetLog source), crash keys, tracing, internals pages or our own logging.
+    One exception, which never includes the credential: a plain HTTP request to a `/devtools/` path with an unknown
+    file suffix can log that path in `GetMimeType`, but Chromium strips the query before it gets there.
   - **Crash dumps:** a dump holds process memory, so it can hold the credential, as it would any secret, whichever way
     the credential arrived.
   - **Client side:** the remaining risk is there. The TS client never puts the raw endpoint in an error.

@@ -135,7 +135,6 @@ bool TokenClient::FilterEvent(std::string& message) {
 }
 
 void TokenClient::ForgetSession(const std::string& session) {
-  focus_emulated_.erase(session);
   std::erase_if(outstanding_, [&](const auto& entry) {
     return entry.first.first == session;
   });

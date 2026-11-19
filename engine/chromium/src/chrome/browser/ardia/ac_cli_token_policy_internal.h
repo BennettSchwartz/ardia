@@ -111,7 +111,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   void Revoke();
   bool MayInputTo(content::RenderFrameHost* frame);
   bool MaySessionInput(const std::string& session);
-  int EndFocusEmulation();
 
   bool FilterCommand(std::string& message, std::string* reply) override;
   bool FilterEvent(std::string& message) override;
@@ -130,11 +129,12 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                                const std::string& session,
                                const base::DictValue* params,
                                std::string* reply);
-  bool DispatchClickCommand(int id,
-                            const std::string& session,
-                            const base::DictValue& params,
-                            std::string* reply);
-  void FinishDispatchClick(int id, const std::string& session, std::string error);
+  bool DispatchPointerCommand(int id,
+                              const std::string& session,
+                              const std::string& method,
+                              const base::DictValue& params,
+                              std::string* reply);
+  void FinishPointer(int id, const std::string& session, std::string error);
   bool PluginCommandAllowed(int id,
                             const std::string& session,
                             const std::string& method,
@@ -176,7 +176,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::map<std::string, std::string> detaching_;
   std::set<std::string> told_targets_;
   std::set<std::string> left_;
-  std::set<std::string> focus_emulated_;
   bool root_left_ = false;
   struct TabWatch {
     base::CallbackListSubscription will_detach;

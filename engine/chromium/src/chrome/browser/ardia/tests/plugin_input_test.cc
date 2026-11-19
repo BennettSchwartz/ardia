@@ -8,6 +8,8 @@
 #include "chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h"
 #include "chrome/browser/ardia/ac_cli_plugin_input.h"
 
+#include "ardia/core/ac_pointer_outcome.h"
+
 namespace {
 
 int failures = 0;
@@ -288,6 +290,68 @@ int main() {
     Expect(out.click_count == 3 && out.button == "left" && out.x == 30,
            "parsed: the validated click", "");
   }
+
+  const ardia::PluginParams wheel = {{"type", text("mouseWheel")},
+                                     {"x", integer(5)},
+                                     {"y", integer(5)},
+                                     {"deltaX", integer(0)},
+                                     {"deltaY", real(-120.5)}};
+  Expect(mouse(wheel).empty(), "allowed: a wheel with finite deltas",
+         mouse(wheel));
+  Expect(!mouse(with(wheel, "deltaY", text("10"))).empty(),
+         "refused: a wheel delta as a string", "");
+  Expect(!mouse(with(wheel, "deltaY", real(1e400))).empty(),
+         "refused: an infinite wheel delta", "");
+  Expect(!mouse(with(wheel, "y", real(-0.5))).empty(),
+         "refused: a wheel at a negative y", "");
+  Expect(!mouse(with(wheel, "buttons", integer(1))).empty(),
+         "refused: a wheel with a button held", "");
+  Expect(!mouse(with(move, "x", real(1e400))).empty(),
+         "refused: a move at an infinite x", "");
+  Expect(!mouse(with(move, "y", integer(-3))).empty(),
+         "refused: a move at a negative y", "");
+  {
+    ardia::PluginMouseParams out;
+    ardia::PluginMouseRefusal(wheel, &out);
+    Expect(out.type == "mouseWheel" && out.delta_y && *out.delta_y == -120.5,
+           "parsed: the validated wheel", "");
+  }
+
+  {
+    ardia::PageEpoch epoch;
+    const uint64_t admitted = epoch.value();
+    Expect(epoch.Unchanged(admitted), "epoch: unchanged right after admission",
+           "");
+    epoch.Committed();
+    Expect(!epoch.Unchanged(admitted),
+           "epoch: any committed navigation changes it", "");
+    Expect(!epoch.Unchanged(0), "epoch: 0 (no page) never matches", "");
+  }
+  using R = ardia::PointerEventResult;
+  using O = ardia::PointerOutcome;
+  const auto outcome = [](std::vector<R> events, bool epoch, bool widget) {
+    return ardia::PointerOutcomeOf(events, epoch, widget);
+  };
+  Expect(outcome({R::kDelivered, R::kDelivered}, true, true) == O::kDone,
+         "outcome: both events acked by the renderer is done", "");
+  Expect(outcome({R::kDelivered, R::kPending}, true, true) == O::kPending,
+         "outcome: waits while the release is pending", "");
+  Expect(outcome({R::kDropped, R::kDelivered}, true, true) == O::kNotDelivered,
+         "outcome: a dropped press is not delivered", "");
+  Expect(outcome({R::kDelivered, R::kDropped}, true, true) == O::kUnknown,
+         "outcome: a dropped release after a delivered press is unknown", "");
+  Expect(outcome({R::kDelivered, R::kDelivered}, false, true) == O::kUnknown,
+         "outcome: an epoch change by the last ack is unknown", "");
+  Expect(outcome({R::kDelivered, R::kDelivered}, true, false) == O::kUnknown,
+         "outcome: a torn-down widget is unknown", "");
+  Expect(outcome({}, true, true) == O::kNotDelivered,
+         "outcome: no events is not delivered", "");
+  Expect(ardia::NeedsRecoveryRelease(true, O::kUnknown),
+         "outcome: an unknown click sends a recovery release", "");
+  Expect(!ardia::NeedsRecoveryRelease(true, O::kNotDelivered) &&
+             !ardia::NeedsRecoveryRelease(true, O::kDone) &&
+             !ardia::NeedsRecoveryRelease(false, O::kUnknown),
+         "outcome: no recovery release otherwise", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

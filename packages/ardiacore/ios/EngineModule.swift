@@ -59,10 +59,6 @@ public class EngineModule: Module {
         EngineCall.passing("ac_cli_plugin_credential", profile: args.profile, args: ["revoke": revoke], reply: reply)
         return
       }
-      if let leaseEnded = try args.optionalText("endFocusEmulation") {
-        EngineCall.passing("ac_cli_plugin_credential", profile: args.profile, args: ["endFocusEmulation": leaseEnded], reply: reply)
-        return
-      }
       let tab = ArdiaHost.chromeTabId(ofTab: try args.text("tabId"))
       EngineCall.passing("ac_cli_plugin_credential", profile: args.profile, args: ["tab": tab], reply: reply)
     },

@@ -80,18 +80,6 @@ bool TokenClient::MaySessionInput(const std::string& session) {
   return targets_.contains(session) && SessionInScope(session);
 }
 
-int TokenClient::EndFocusEmulation() {
-  int ended = 0;
-  for (const std::string& session : std::exchange(focus_emulated_, {})) {
-    if (session.empty() || targets_.contains(session)) {
-      SendInternal(session, "Emulation.setFocusEmulationEnabled",
-                   base::DictValue().Set("enabled", false));
-      ++ended;
-    }
-  }
-  return ended;
-}
-
 bool TokenClient::RootInScope() {
   return IsBrowserHost(root_host_.get()) ||
          (!root_left_ && PluginTargetInScope(*scope_, root_host_.get()));
@@ -197,13 +185,6 @@ bool TokenClient::PluginCommandAllowed(int id,
       base::Unretained(this));
   const std::string refusal = PluginRefusal(*scope_, method, params, context);
   if (refusal.empty()) {
-    if (method == "Emulation.setFocusEmulationEnabled") {
-      if (params.FindBool("enabled").value_or(false)) {
-        focus_emulated_.insert(session);
-      } else {
-        focus_emulated_.erase(session);
-      }
-    }
     return true;
   }
   ++PluginTotalsSoFar().refused;

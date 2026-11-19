@@ -2,6 +2,7 @@
 #define ARDIA_CORE_AC_CONTENT_HOOKS_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <memory>
 #include <string>
@@ -34,24 +35,26 @@ bool ArdiaMainFrameHandlesEnterPictureInPicture(WebContents* contents);
 
 DevToolsAgentHost* ArdiaDevToolsAgentHostForId(const std::string& id);
 
-struct ArdiaClick {
+struct ArdiaPointer {
+  enum class Kind { kClick, kMove, kWheel };
+  Kind kind = Kind::kClick;
   double x = 0;
   double y = 0;
   std::string button = "left";
   int click_count = 1;
   int modifiers = 0;
-  std::string document;
+  double delta_x = 0;
+  double delta_y = 0;
+  uint64_t epoch = 0;
 };
 
-std::string ArdiaClickDocument(DevToolsAgentHost* host,
-                               DevToolsAgentHostClient* root_client,
-                               const std::string& session_id);
+uint64_t ArdiaPageEpoch(DevToolsAgentHost* host);
 
-void ArdiaDispatchClick(DevToolsAgentHost* host,
-                        DevToolsAgentHostClient* root_client,
-                        const std::string& session_id,
-                        const ArdiaClick& click,
-                        base::OnceCallback<void(std::string error)> done);
+void ArdiaDispatchPointer(DevToolsAgentHost* host,
+                          DevToolsAgentHostClient* root_client,
+                          const std::string& session_id,
+                          const ArdiaPointer& pointer,
+                          base::OnceCallback<void(std::string error)> done);
 }
 
 namespace gfx {

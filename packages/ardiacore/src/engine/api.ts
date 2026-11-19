@@ -45,7 +45,7 @@ export type EngineCalls = {
   "engine.cliOwnsTab": [{ tabId: string }, { owned: boolean; shown: boolean }];
   "engine.cliMoveOffscreen": [{ tabId: string }, { ok: boolean; reason?: string }];
   "engine.cliCloseOffscreenTabs": [{}, Done];
-  "engine.cliPluginCredential": [{ tabId: string } | { revoke: string } | { endFocusEmulation: string }, CliPluginCredential];
+  "engine.cliPluginCredential": [{ tabId: string } | { revoke: string }, CliPluginCredential];
 
   "tabs.routeLinkTabs": [{ urls: string[] }, LinkRoute];
   "tabs.stripCommand": [{ id: number; command: TabStripCommand }, null];
