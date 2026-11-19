@@ -13,7 +13,7 @@ struct PluginSandbox {
 
   static let machAllowed = [
     "com.apple.system.opendirectoryd.libinfo", "com.apple.system.opendirectoryd.membership", "com.apple.logd", "com.apple.bsd.dirhelper",
-    "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon",
+    "com.apple.cfprefsd.agent", "com.apple.cfprefsd.daemon", "com.apple.FSEvents",
   ]
 
   static let machAllowedOnline = [
@@ -37,9 +37,12 @@ struct PluginSandbox {
 
   static let certificateBundleName = "certificates.pem"
 
+  static let certificateSourceLimit = 4 << 20
+
   struct NetworkEnvironment: Equatable {
     var variables: [String] = []
     var droppedProxies: [String] = []
+    var certificates: String?
   }
 
   static func carriesCredentials(_ value: String) -> Bool {
@@ -47,15 +50,42 @@ struct PluginSandbox {
     return url.user != nil || url.password != nil || (url.host == nil && value.contains("@"))
   }
 
+  static func certificateBlocks(in text: String) -> [String] {
+    let begin = "-----BEGIN CERTIFICATE-----"
+    let end = "-----END CERTIFICATE-----"
+    var blocks: [String] = []
+    var rest = Substring(text)
+    while let start = rest.range(of: begin), let stop = rest[start.upperBound...].range(of: end) {
+      let body = rest[start.upperBound..<stop.lowerBound].filter { !$0.isWhitespace }
+      rest = rest[stop.upperBound...]
+      guard let der = Data(base64Encoded: String(body)), !der.isEmpty, der.first == 0x30 else { continue }
+      blocks.append("\(begin)\n\(der.base64EncodedString(options: [.lineLength64Characters, .endLineWithLineFeed]))\n\(end)\n")
+    }
+    return blocks
+  }
+
   static func certificateBundle(from given: [String: String], system: String = systemCertificates) -> String {
     var sources = [system]
     for name in certificateEnvironment {
       if let path = given[name], !path.isEmpty, !sources.contains(path) { sources.append(path) }
     }
-    return sources.compactMap { try? String(contentsOfFile: $0, encoding: .utf8) }.map { $0.hasSuffix("\n") ? $0 : $0 + "\n" }.joined()
+    var seen = Set<String>()
+    var bundle = ""
+    for source in sources {
+      guard let handle = FileHandle(forReadingAtPath: source) else { continue }
+      defer { try? handle.close() }
+      guard let data = try? handle.read(upToCount: certificateSourceLimit + 1), data.count <= certificateSourceLimit else { continue }
+      for block in certificateBlocks(in: String(decoding: data, as: UTF8.self)) where seen.insert(block).inserted { bundle += block }
+    }
+    return bundle
   }
 
-  static func networkEnvironment(from given: [String: String], network: Bool, dataFolder: String, system: String = systemCertificates) -> NetworkEnvironment {
+  static func certificateVariables(dataFolder: String) -> [String] {
+    let bundle = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
+    return ["SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)"]
+  }
+
+  static func networkEnvironment(from given: [String: String], network: Bool, system: String = systemCertificates) -> NetworkEnvironment {
     guard network else { return NetworkEnvironment() }
     var result = NetworkEnvironment()
     for name in proxyEnvironment {
@@ -66,12 +96,29 @@ struct PluginSandbox {
       }
       result.variables.append("\(name)=\(value)")
     }
-    let bundle = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
-    let staged = certificateBundle(from: given, system: system)
-    if !staged.isEmpty, (try? staged.write(toFile: bundle, atomically: true, encoding: .utf8)) != nil {
-      result.variables += ["SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)"]
-    }
+    let bundle = certificateBundle(from: given, system: system)
+    result.certificates = bundle.isEmpty ? nil : bundle
     return result
+  }
+
+  static func writeAtomically(in directory: Int32, name: String, contents: String) -> Bool {
+    let temporary = ".\(name).\(UUID().uuidString)"
+    let fd = openat(directory, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o644)
+    guard fd >= 0 else { return false }
+    let bytes = Array(contents.utf8)
+    var written = 0
+    while written < bytes.count {
+      let step = bytes[written...].withUnsafeBufferPointer { Darwin.write(fd, $0.baseAddress, $0.count) }
+      if step <= 0 { break }
+      written += step
+    }
+    let complete = written == bytes.count && fchmod(fd, 0o644) == 0
+    Darwin.close(fd)
+    guard complete, renameat(directory, temporary, directory, name) == 0 else {
+      unlinkat(directory, temporary, 0)
+      return false
+    }
+    return true
   }
 
   static func profile(network: Bool) -> String {
@@ -114,6 +161,7 @@ struct PluginSandbox {
       (deny file-write* (subpath "/"))
       (allow file-write* \(devicesWritable.map { "(literal \"\($0)\")" }.joined(separator: " ")) (subpath "/dev/fd"))
       (deny network-outbound (remote unix-socket))\(sockets)\(addresses)
+      (deny network-bind (local unix-socket))
       (allow file-read* (subpath (param "PLUGIN")) (literal (param "PROGRAM")) (subpath (param "INSTALL")))
       (allow file-read* file-write* (subpath (param "DATA")))
       (allow file-read-metadata (literal (param "HOME")))
@@ -155,7 +203,35 @@ struct PluginSandbox {
     let parent = (program as NSString).deletingLastPathComponent
     let folder = (parent as NSString).lastPathComponent == "bin" ? (parent as NSString).deletingLastPathComponent : parent
     if folder == "/" || folder.split(separator: "/").count < 2 || protected.contains(where: { Self.overlaps($0, folder) }) { return program }
+    if Self.unreadableTrees.contains(where: { Self.overlaps($0, folder) }) && !readable(folder) { return program }
     return folder
+  }
+
+  func readable(_ folder: String) -> Bool {
+    Self.isInside(folder, pluginFolder)
+  }
+
+  static func ancestors(of path: String, below home: String) -> [String] {
+    var chain: [String] = []
+    var current = (path as NSString).deletingLastPathComponent
+    while isInside(current, home) && current != home {
+      chain.append(current)
+      current = (current as NSString).deletingLastPathComponent
+    }
+    return chain
+  }
+
+  func pathRules() -> (text: String, parameters: [String: String]) {
+    var text = ""
+    var parameters: [String: String] = [:]
+    let roots = [home, appData, configFolder]
+    let chain = Set([pluginFolder, program, pluginData].flatMap { path in roots.filter { Self.isInside(path, $0) }.flatMap { Self.ancestors(of: path, below: $0) + [$0] } })
+    for (step, folder) in chain.sorted().enumerated() {
+      let name = "PATH_UP_\(step)"
+      parameters[name] = folder
+      text += "\n(allow file-read-metadata (literal (param \"\(name)\")))"
+    }
+    return (text, parameters)
   }
 
   func checked() throws {
@@ -178,10 +254,11 @@ struct PluginSandbox {
 
   func arguments() throws -> [String] {
     try checked()
+    let paths = pathRules()
     let parameters = [
       "HOME": home, "APP_DATA": appData, "CONFIG": configFolder, "PLUGIN": pluginFolder, "DATA": pluginData, "PROGRAM": program,
       "INSTALL": installFolder(),
-    ]
-    return ["-p", Self.profile(network: network)] + parameters.sorted { $0.key < $1.key }.flatMap { ["-D", "\($0.key)=\($0.value)"] }
+    ].merging(paths.parameters) { first, _ in first }
+    return ["-p", Self.profile(network: network) + paths.text] + parameters.sorted { $0.key < $1.key }.flatMap { ["-D", "\($0.key)=\($0.value)"] }
   }
 }

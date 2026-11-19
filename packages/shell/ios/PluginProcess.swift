@@ -60,20 +60,23 @@ final class PluginProcess: PluginRun {
 
   static func errnoText(_ code: Int32 = errno) -> String { String(cString: strerror(code)) }
 
-  static func environment(name: String, data: String, network: Bool = false) -> [String] {
-    let carried = PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment, network: network, dataFolder: data)
+  static func environment(name: String, data: OpenedFolder, network: Bool = false) -> [String] {
+    let carried = PluginSandbox.networkEnvironment(from: ProcessInfo.processInfo.environment, network: network)
     if !carried.droppedProxies.isEmpty {
       NSLog("[plugins] %@: %@ carries a user name or password, so its helper doesn't get it", name, carried.droppedProxies.joined(separator: ", "))
     }
+    let staged = carried.certificates.map { PluginSandbox.writeAtomically(in: data.fd, name: PluginSandbox.certificateBundleName, contents: $0) } ?? false
+    let certificates = staged ? PluginSandbox.certificateVariables(dataFolder: data.path) : []
+    let folder = data.path as NSString
     return [
       "PATH=" + PluginSandbox.searchPath.joined(separator: ":"),
-      "HOME=" + (data as NSString).appendingPathComponent("home"),
-      "TMPDIR=" + (data as NSString).appendingPathComponent("tmp") + "/",
+      "HOME=" + folder.appendingPathComponent("home"),
+      "TMPDIR=" + folder.appendingPathComponent("tmp") + "/",
       "LANG=en_US.UTF-8",
       "ARDIA_PLUGIN_NAME=" + name,
       "ARDIA_PLUGIN_FD=\(channelFd)",
       "ARDIA_PLUGIN_PROTOCOL=1",
-    ] + carried.variables
+    ] + carried.variables + certificates
   }
 
   static func spawn(
@@ -155,7 +158,7 @@ final class PluginProcess: PluginRun {
       NSLog("[plugins] %@: macOS's responsibility calls aren't available, so its processes are tracked by group and descendants only", spec.name)
     }
     let argv = ["/usr/bin/sandbox-exec"] + sandboxArguments + [launched] + spec.run.dropFirst()
-    let env = environment(name: spec.name, data: data, network: spec.network)
+    let env = environment(name: spec.name, data: dataFolder, network: spec.network)
     var pid: pid_t = 0
     let result = withCStrings(argv) { cArgv in withCStrings(env) { cEnv in posix_spawn(&pid, "/usr/bin/sandbox-exec", &actions, &attributes, cArgv, cEnv) } }
     guard result == 0 else {

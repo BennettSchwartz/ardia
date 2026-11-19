@@ -14,7 +14,7 @@ export function consentLines(m: PluginManifest): ConsentLine[] {
   const control = m.permissions.includes("control");
   if (control) lines.push({ icon: "hand.raised", text: m.alwaysOn ? "Lets any program you run drive your tabs and pages, with your logins, while it's installed. There's no off switch" : "Lets any program you run drive your tabs and pages, with your logins" });
   else if (m.alwaysOn) lines.push({ icon: "lock", text: "Once installed, there's no off switch" });
-  if (m.permissions.includes("network")) lines.push({ icon: "network", text: `That program may connect to the internet and to servers on this ${PLATFORM_TERMS.computer}, and accept connections from other devices on your network` });
+  if (m.permissions.includes("network")) lines.push({ icon: "network", text: `That program may connect to the internet and to servers on this ${PLATFORM_TERMS.computer}, and a server it starts may listen on your network address` });
   else if (m.process) lines.push({ icon: "antenna.radiowaves.left.and.right.slash", text: `That program can't connect to anything or accept connections, not even from this ${PLATFORM_TERMS.computer}` });
   if (m.permissions.includes("tabs")) lines.push({ icon: "square.on.square", text: m.permissions.includes("fullUrls") ? "Sees the full address and title of your tabs" : "Sees the address (without what follows ? or #) and title of your tabs" });
   if (m.hooks.length) lines.push({ icon: "bell", text: `Hears these events: ${m.hooks.join(", ")}` });

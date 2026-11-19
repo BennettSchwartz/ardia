@@ -22,6 +22,7 @@ final class PluginSandboxEscapeTests: XCTestCase {
     #include <sys/socket.h>
     #include <sys/un.h>
     #include <unistd.h>
+    extern int sandbox_check(pid_t pid, const char *operation, int type, ...);
     static int failed(void) { int code = errno; printf("errno %d\\n", code); return code ? code : 99; }
     int main(int argc, char **argv) {
       if (argc < 3) return 98;
@@ -119,6 +120,26 @@ final class PluginSandboxEscapeTests: XCTestCase {
         size_t size = sizeof value;
         if (sysctlbyname(argv[2], &value, &size, NULL, 0) != 0) return failed();
         printf("read %d\\n", value);
+        return 0;
+      }
+      if (!strcmp(mode, "decision")) {
+        int denied = sandbox_check(getpid(), argv[2], 0);
+        printf("%s\\n", denied ? "denied" : "allowed");
+        return denied ? 91 : 0;
+      }
+      if (!strcmp(mode, "ubind")) {
+        int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        struct sockaddr_un address = {0};
+        address.sun_family = AF_UNIX;
+        strlcpy(address.sun_path, argv[2], sizeof address.sun_path);
+        if (bind(fd, (struct sockaddr *)&address, sizeof address) != 0) return failed();
+        printf("bound\\n");
+        unlink(argv[2]);
+        return 0;
+      }
+      if (!strcmp(mode, "fd3")) {
+        if (write(3, "hello\\n", 6) != 6) return failed();
+        printf("wrote\\n");
         return 0;
       }
       if (!strcmp(mode, "sysctlwrite")) {
@@ -481,24 +502,88 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: false).status, EPERM, "without network loopback is reachable")
   }
 
-  func testHelpersGetProxySettingsAndAStagedCertificateBundleButNoSecrets() throws {
+  static let sampleCertificate = """
+    -----BEGIN CERTIFICATE-----
+    MIICFDCCAboCCQCGzc4KH/YOFDAKBggqhkjOPQQDAjAYMRYwFAYDVQQDDA1BcmRp
+    YSBUZXN0IENBMB4XDTI2MTExOTIxMTQwMVoXDTM2MTExNjIxMTQwMVowGDEWMBQG
+    A1UEAwwNQXJkaWEgVGVzdCBDQTCCAUswggEDBgcqhkjOPQIBMIH3AgEBMCwGByqG
+    SM49AQECIQD/////AAAAAQAAAAAAAAAAAAAAAP///////////////zBbBCD/////
+    AAAAAQAAAAAAAAAAAAAAAP///////////////AQgWsY12Ko6k+ez671VdpiGvGUd
+    BrDMU7D2O848PifSYEsDFQDEnTYIhucEk2pmeOETnSa3gZ9+kARBBGsX0fLhLEJH
+    +Lzm5WOkQPJ3A32BLeszoPShOUXYmMKWT+NC4v4af5uO5+tKfA+eFivOM1drMV7O
+    y7ZAaDe/UfUCIQD/////AAAAAP//////////vOb6racXnoTzucrC/GMlUQIBAQNC
+    AAQCdPnUV0joYs5KtwyoUoI3FEjwSVJLfuiYWvZ6gCoqvSsBpKL0tzcrBKV2wI3A
+    FoEmSE3kOgehsuGLLxDvb9npMAoGCCqGSM49BAMCA0gAMEUCIFUmsE9O5AIUpNi0
+    u1HfwwIuvvExdEDiU2oA1IrAx2AUAiEA0Z4Gj3ZZHgOAReutq88nidJ4BZjoFNfN
+    tKQASN2/l4c=
+    -----END CERTIFICATE-----
+    """
+
+  func testHelpersGetProxySettingsAndOnlyCertificatesFromTheFilesTheyName() throws {
     let system = "\(root)/system.pem"
     let corporate = "\(home)/corp.pem"
-    try "SYSTEM ROOTS\n".write(toFile: system, atomically: true, encoding: .utf8)
-    try "CORPORATE ROOT".write(toFile: corporate, atomically: true, encoding: .utf8)
+    try (Self.sampleCertificate + "\n").write(toFile: system, atomically: true, encoding: .utf8)
+    let mixed = "comment line\n" + Self.sampleCertificate + "\n-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7\n-----END PRIVATE KEY-----\n-----BEGIN CERTIFICATE-----\nnot base64 !!\n-----END CERTIFICATE-----\n"
+    try mixed.write(toFile: corporate, atomically: true, encoding: .utf8)
     let given = [
       "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "HTTP_PROXY": "http://user:pass@proxy.example:3128",
       "all_proxy": "socks5://alice@proxy.example:1080", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret", "NODE_EXTRA_CA_CERTS": corporate,
     ]
-    XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false, dataFolder: pluginData, system: system), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
-    let carried = PluginSandbox.networkEnvironment(from: given, network: true, dataFolder: pluginData, system: system)
-    let bundle = "\(pluginData)/certificates.pem"
-    XCTAssertEqual(Set(carried.variables), [
-      "HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost", "SSL_CERT_FILE=\(bundle)", "NODE_EXTRA_CA_CERTS=\(bundle)", "GIT_SSL_CAINFO=\(bundle)",
-    ])
+    XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false, system: system), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
+    let carried = PluginSandbox.networkEnvironment(from: given, network: true, system: system)
+    XCTAssertEqual(Set(carried.variables), ["HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost"])
     XCTAssertEqual(Set(carried.droppedProxies), ["HTTP_PROXY", "all_proxy"], "proxies with a user name or password are dropped")
-    XCTAssertFalse(carried.variables.joined().contains("secret") || carried.variables.joined().contains("pass"))
-    XCTAssertEqual(try String(contentsOfFile: bundle, encoding: .utf8), "SYSTEM ROOTS\nCORPORATE ROOT\n", "a root from under the home folder reaches the helper as a copy, never as a path")
+    let bundle = try XCTUnwrap(carried.certificates)
+    XCTAssertFalse(bundle.contains("PRIVATE KEY") || bundle.contains("MIIEvQIBADAN") || bundle.contains("comment") || bundle.contains("not base64"), "only certificate blocks are kept")
+    XCTAssertEqual(bundle.components(separatedBy: "-----BEGIN CERTIFICATE-----").count - 1, 1, "the same certificate twice is kept once")
+    XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData), [
+      "SSL_CERT_FILE=\(pluginData)/certificates.pem", "NODE_EXTRA_CA_CERTS=\(pluginData)/certificates.pem", "GIT_SSL_CAINFO=\(pluginData)/certificates.pem",
+    ])
+    let huge = "\(root)/huge.pem"
+    try String(repeating: Self.sampleCertificate + "\n", count: (PluginSandbox.certificateSourceLimit / 600) + 2).write(toFile: huge, atomically: true, encoding: .utf8)
+    XCTAssertNil(PluginSandbox.networkEnvironment(from: ["SSL_CERT_FILE": huge], network: true, system: "\(root)/none.pem").certificates, "a file past the size limit isn't read")
+  }
+
+  func testTheCertificateBundleIsWrittenAtomicallyInsideTheDataFolder() throws {
+    let outsideFile = "\(outside)/target.pem"
+    try "outside".write(toFile: outsideFile, atomically: true, encoding: .utf8)
+    try FileManager.default.createSymbolicLink(atPath: "\(pluginData)/certificates.pem", withDestinationPath: outsideFile)
+    let fd = open(pluginData, O_RDONLY | O_DIRECTORY)
+    XCTAssertGreaterThanOrEqual(fd, 0)
+    defer { close(fd) }
+    XCTAssertTrue(PluginSandbox.writeAtomically(in: fd, name: "certificates.pem", contents: Self.sampleCertificate))
+    XCTAssertEqual(try String(contentsOfFile: outsideFile, encoding: .utf8), "outside", "a link left in its place isn't followed")
+    XCTAssertEqual(try String(contentsOfFile: "\(pluginData)/certificates.pem", encoding: .utf8), Self.sampleCertificate)
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: pluginData).filter { $0.hasPrefix(".certificates.pem.") }, [], "no temporary file is left")
+  }
+
+  func testAProgramOnAnotherDiskOrInAnotherHomeReadsOnlyItself() {
+    for program in ["/Volumes/Work/bin/tool", "/Users/Shared/tools/bin/tool", "/Users/someone/bin/tool"] {
+      let box = PluginSandbox(home: home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: program, network: true)
+      XCTAssertEqual(box.installFolder(), program, program)
+    }
+    XCTAssertEqual(PluginSandbox(home: home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: "/opt/homebrew/opt/node/bin/node", network: true).installFolder(), "/opt/homebrew/opt/node")
+  }
+
+  func testPathnameSocketsCannotBeBoundButTheChannelOnDescriptorThreeWorks() throws {
+    let path = "\(pluginData)/own.sock"
+    XCTAssertEqual(try Self.run(probe, ["ubind", path]).status, 0, "control: binding works outside")
+    for network in [true, false] {
+      XCTAssertEqual(try sandboxed(probe, ["ubind", path], network: network).status, EPERM, "a pathname socket can't be bound (network \(network))")
+    }
+    let box = PluginSandbox(home: home, appData: data, configFolder: config, pluginFolder: plugin, pluginData: pluginData, program: probe, network: false)
+    let launcher = """
+      import os, socket, subprocess, sys
+      reserved = os.open("/dev/null", os.O_RDONLY)
+      ours, theirs = socket.socketpair()
+      os.dup2(theirs.fileno(), 3)
+      os.set_inheritable(3, True)
+      done = subprocess.run(["/usr/bin/sandbox-exec"] + sys.argv[1:], pass_fds=(3,), capture_output=True, timeout=20)
+      ours.settimeout(5)
+      print(done.returncode, ours.recv(64).decode().strip())
+      """
+    let through = try Self.run("/usr/bin/python3", ["-I", "-c", launcher] + (try box.arguments()) + [probe, "fd3", "x"], in: plugin)
+    XCTAssertEqual(through.output.trimmingCharacters(in: .whitespacesAndNewlines), "0 hello", "the inherited channel still works: \(through.output)")
   }
 
   func testWithoutNetworkItCannotListenWithItCanOnLoopback() throws {
@@ -542,7 +627,62 @@ final class PluginSandboxEscapeTests: XCTestCase {
     let control = try Self.run(probe, ["sysctlread", "hw.pagesize"])
     XCTAssertEqual(control.status, 0, control.output)
     XCTAssertEqual(try sandboxed(probe, ["sysctlread", "hw.pagesize"]).output, control.output, "a required read works inside")
-    let inside = try sandboxed(probe, ["sysctlwrite", "kern.maxfilesperproc"])
-    XCTAssertEqual(inside.status, EPERM, "a write is refused: \(inside.output)")
+    XCTAssertEqual(try Self.run(probe, ["decision", "sysctl-write"]).output, "allowed\n", "control: outside a sandbox the write isn't refused by policy")
+    XCTAssertEqual(try sandboxed(probe, ["decision", "sysctl-write"]).output, "denied\n", "the sandbox's own decision refuses sysctl writes")
+  }
+
+  func testDataUnderTheRealLibraryWorksAndItsSiblingsStayDenied() throws {
+    let realHome = PluginSandbox.resolved(NSHomeDirectory())!
+    let base = "\(realHome)/Library/Caches/ardia-plugin-escape-\(Self.short())"
+    scratch.append(base)
+    let libraryData = "\(base)/data"
+    let libraryConfig = "\(libraryData)/config"
+    let libraryPlugin = "\(libraryConfig)/plugins/example"
+    let libraryPluginData = "\(libraryData)/PluginData/example"
+    let sibling = "\(base)/sibling"
+    for folder in [libraryPlugin, libraryPluginData, sibling] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
+    try "plugin file".write(toFile: "\(libraryPlugin)/readme", atomically: true, encoding: .utf8)
+    try "sibling-secret".write(toFile: "\(sibling)/secret", atomically: true, encoding: .utf8)
+    try FileManager.default.createSymbolicLink(atPath: "\(libraryPluginData)/link", withDestinationPath: "\(sibling)/secret")
+    let box = PluginSandbox(home: realHome, appData: libraryData, configFolder: libraryConfig, pluginFolder: libraryPlugin, pluginData: libraryPluginData, program: "/bin/sh", network: false)
+    func inside(_ script: String) throws -> Outcome { try Self.run("/usr/bin/sandbox-exec", try box.arguments() + ["/bin/sh", "-c", script], in: libraryPlugin) }
+    let worked = try inside("echo written > '\(libraryPluginData)/note' && cat '\(libraryPluginData)/note' '\(libraryPlugin)/readme'")
+    XCTAssertEqual(worked.output, "written\nplugin file", "its own data and folder work under the real Library: \(worked.output)")
+    let stats = try inside(PluginSandbox.ancestors(of: libraryPluginData, below: realHome).map { "/usr/bin/stat -f %N '\($0)' >/dev/null || echo 'no stat: \($0)'" }.joined(separator: "; "))
+    XCTAssertFalse(stats.output.contains("no stat"), "every folder between home and its data can be stat'd: \(stats.output)")
+    XCTAssertEqual(try Self.run("/bin/cat", ["\(sibling)/secret"]).output, "sibling-secret", "control")
+    for path in ["\(sibling)/secret", "\(libraryPluginData)/link", "/System/Volumes/Data\(sibling)/secret"] {
+      let read = try inside("cat '\(path)'")
+      XCTAssertFalse(read.output.contains("sibling-secret"), "\(path) is readable inside")
+    }
+  }
+
+  func testFileWatchingWorksForItsOwnFolderAndShowsNothingItCantRead() throws {
+    let node = ["/opt/homebrew/bin/node", "/usr/local/bin/node"].first { FileManager.default.isExecutableFile(atPath: $0) }
+    try XCTSkipUnless(node != nil, "no node to run fs.watch with")
+    let secret = "watch-secret-\(Self.short())"
+    let watched = "\(pluginData)/watched"
+    try FileManager.default.createDirectory(atPath: watched, withIntermediateDirectories: true)
+    let script = """
+      const fs = require("fs");
+      const seen = { own: false, leaked: false };
+      try { fs.watch(process.argv[1], () => (seen.own = true)).on("error", () => {}); } catch {}
+      try { fs.watch("/", { recursive: true }, (_, name) => { if (name && String(name).includes(process.argv[2])) seen.leaked = true; }).on("error", () => {}); } catch {}
+      setTimeout(() => fs.writeFileSync(process.argv[1] + "/touched", "x"), 400);
+      setTimeout(() => { console.log(JSON.stringify(seen)); process.exit(0); }, 2500);
+      """
+    func run(_ inside: Bool) throws -> String {
+      let writer = DispatchWorkItem { [home] in
+        Thread.sleep(forTimeInterval: 1.0)
+        try? "x".write(toFile: "\(home)/\(secret)", atomically: false, encoding: .utf8)
+      }
+      DispatchQueue.global().async(execute: writer)
+      let arguments = ["-e", script, watched, secret]
+      let outcome = inside ? try sandboxed(node!, arguments) : try Self.run(node!, arguments, in: plugin)
+      try? FileManager.default.removeItem(atPath: "\(home)/\(secret)")
+      return outcome.output.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    XCTAssertEqual(try run(false), #"{"own":true,"leaked":true}"#, "control: outside, watching / shows a write in the home folder")
+    XCTAssertEqual(try run(true), #"{"own":true,"leaked":false}"#, "inside, its own folder is watched and nothing from the home folder shows")
   }
 }

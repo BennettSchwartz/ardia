@@ -361,7 +361,7 @@ Needs a `process`.
 | `tabs` | The helper may call `windows` and subscribe to tab, window and page events. URLs come without their query and fragment |
 | `fullUrls` | Those URLs in full (needs `tabs`) |
 | `commands` | The helper may run Ardia's commands, the same ones and with the same refusals as the `ardia` command (`docs/automation.md` › Which commands) |
-| `network` | The helper may resolve names, connect to the internet and to servers on this Mac, and accept connections, from other devices on your network too. Without it, it can't connect, listen or accept connections at all, not even on this Mac |
+| `network` | The helper may resolve names, connect to the internet and to servers on this Mac, and listen on any of this Mac's addresses. Without it, it can't connect, listen or accept connections at all, not even on this Mac |
 | `control` | Install or Turn On turns on `cliControl`, the ardia command's control of Ardia; the sheet says "Lets any program you run drive your tabs and pages, with your logins" (for an always-on plugin, "… while it's installed. There's no off switch"). On macOS there's no switch afterwards: while an always-on plugin that asks for it is installed, each launch turns it back on, and the control pill's Stop holds only until the next launch. For an `autoInstall` built-in plugin, its first link turns it on once unless you'd turned it off. `config.json` can't set it. |
 
 Contributions grant their own reach and are shown too: running a program, adding a page, adding commands, changing
@@ -437,9 +437,10 @@ settings only once it is saved, so a failed save changes nothing.
   settings Ardia itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case), except a
   proxy whose address carries a user name or password, which is dropped with one line in Ardia's log (an authenticated
   proxy is a follow-up the person would choose per plugin), and `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS` and
-  `GIT_SSL_CAINFO` pointing at `PluginData/<name>/certificates.pem`, staged at each start from `/etc/ssl/cert.pem` plus
-  the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name (copied, since a path under your home is unreadable
-  inside). The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain isn't
+  `GIT_SSL_CAINFO` pointing at `PluginData/<name>/certificates.pem`, staged at each start from the certificates in
+  `/etc/ssl/cert.pem` and in the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name: only `CERTIFICATE`
+  blocks, decoded and encoded again, from files of at most 4 MB, so a key or anything else in those files never reaches
+  the helper. The bundle is written through the already-open data folder, to a private file renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain isn't
   trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the
   default because it is the one system-wide root list every runtime can read. Never a token. A sandbox Ardia can't set up means the helper
   doesn't start; it never runs unsandboxed.
@@ -448,17 +449,20 @@ settings only once it is saved, so a failed save changes nothing.
   helper can write in it, so Ardia never follows anything the helper leaves there.
 - **Sandbox.** It may read and write its `PluginData` folder and read the plugin's folder, the program it runs and that
   program's install folder (the folder above the `bin` it is in, so `/opt/homebrew/opt/node/bin/node` reads its own
-  libraries; `/bin/sh` or `~/bin/x` read only themselves, since that folder would be `/` or your home). Your home
+  libraries; `/bin/sh` or `~/bin/x` read only themselves, since that folder would be `/` or your home, and so does a
+  program on another disk or in another account's home, under `/Volumes` or `/Users`). Each folder between a protected
+  root and the plugin's folder, its program or its data can be stat'd (`PATH_UP_<n>`), nothing more. Your home
   folder, Ardia's data folder and its config folder are unreadable and unwritable, wherever they are (a scratch data
   folder outside your home included): your files, every browser profile, cookies, passwords and Ardia's own state. So
   are `/Users` (every account's home, `/Users/Shared` included) and `/Volumes` (mounted disks and disk images). The
   rest of the disk (system folders, `/tmp`, `/opt`) stays readable; a read allowlist is a follow-up. It
   can't connect to a Unix socket in your home or Ardia's data folder, so Ardia's control socket is out of reach. It
-  can't write anywhere else on disk, nor connect to any Unix socket but the system resolver's: its channel to Ardia is
-  the inherited descriptor 3. Without `network` it can't connect anywhere, this Mac's own addresses included, and
-  can't resolve names, listen or accept connections; with it, it reaches the internet and servers on this Mac, and a
-  server it starts can be reached from other devices on your network (the sandbox can't hold a listener to loopback:
-  its `localhost` filter matches every address of this Mac). A plugin whose
+  can't write anywhere else on disk, nor create a Unix socket anywhere, nor connect to any but the system resolver's:
+  its channel to Ardia is the inherited descriptor 3. Without `network` it can't connect anywhere, this Mac's own
+  addresses included, and can't resolve names, listen or accept connections; with it, it reaches the internet and
+  servers on this Mac, and a server it starts may listen on any of this Mac's addresses (the sandbox can't hold a
+  listener to loopback: a listener under `(allow network-bind (local ip "localhost:*"))` still accepted a connection
+  made from this Mac to its network address; connections from other devices weren't tested). A plugin whose
   folder (after links) would take in your home, Ardia's data or its settings, or whose program lives in Ardia's data or
   config folder, isn't started. The profile's grants are paths, the only kind `sandbox-exec` has: they name the
   approved folder's path at start. A folder put in its place afterwards can be read by the running helper instead
@@ -466,13 +470,16 @@ settings only once it is saved, so a failed save changes nothing.
 - **What else it refuses.** Launching apps or opening URLs (`lsopen`), Apple Events, creating launchd jobs, posting
   distributed or Darwin notifications, writing any preferences or reading any but the global domain, opening IOKit
   user clients, writing sysctls, POSIX shared memory beyond reading the preferences segments, and looking up any
-  system service off a short list: user and group lookups, logging, per-user temp folders, network settings, the
-  resolver, network settings and TLS trust (with `network` only, since trustd fetches issuers over the network on a
-  helper's behalf), and preference reads (`PluginSandbox.machAllowed`, `machAllowedOnline`). Nothing it runs follows
+  system service off a short list: user and group lookups, logging, per-user temp folders, preference reads, file
+  events (FSEvents, so `fs.watch` works; fseventsd reports only paths the helper can read: watching `/` from inside
+  shows nothing from your home), and, with `network` only, the resolver, network settings and TLS trust (trustd fetches
+  issuers over the network on a helper's behalf) (`PluginSandbox.machAllowed`, `machAllowedOnline`). Nothing it runs follows
   live changes to your locale or other global preferences: notification posts and lookups are refused, and nothing
   measured needed them. It can't inspect or
-  signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal against a probe that
-  succeeds outside the sandbox.
+  signal processes outside its own sandbox. `PluginSandboxEscapeTests.swift` proves each refusal next to a control
+  outside the sandbox. Two controls are weaker: Apple Events only check that Finder runs (a real send would raise a
+  privacy prompt), and sysctl writes are checked through the sandbox's own decision (`sandbox_check`), since the
+  writable ones need root anyway.
 - **What the sandbox doesn't do.** It runs as you, so it is a containment layer around a program you chose to run, not
   a defense against one built to escape. Known gaps: any same-user process's command line, and for a process without
   the hardened runtime its environment too, is readable (`KERN_PROCARGS2` can't be sandboxed), so nothing secret ever
