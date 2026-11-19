@@ -7,7 +7,7 @@ import { TabDeck } from "../components/tabs/TabDeck";
 import { deckArchiveBottom, deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { DesignProvider } from "../components/ui";
 import { deckGeometry } from "../lib/deckGeometry";
-import { forgetLandscapeCount, noteScreenLayoutName, noteWindowShape } from "../state/app/landscapeCount";
+import { forgetLandscapeCount, noteScreenLayout, noteWindowShape } from "../state/app/landscapeCount";
 import { useArchiveCard } from "../state/browse/archiveCard";
 import * as deckGrid from "../state/browse/deckGrid";
 import { writePreference } from "../state/store/browserDatabase";
@@ -125,14 +125,21 @@ test("in landscape the archive capsule shrinks the deck's cards to main's 407.6 
   act(() => useArchiveCard.setState({ showing: false }));
 });
 
-test("a Duo layout is counted once a launch, and the phone layout never counts", () => {
+test("a launch on a Duo in any pose, or in the wide or split layout, is counted once, and a plain iPhone never counts", () => {
   const counted = jest.spyOn(telemetry, "countUsage").mockImplementation(() => undefined);
   forgetLandscapeCount();
-  noteScreenLayoutName("phone");
-  noteScreenLayoutName("column");
-  noteScreenLayoutName("wide");
-  noteScreenLayoutName("split");
+  noteScreenLayout("phone", "none");
+  expect(counted.mock.calls).toEqual([]);
+  noteScreenLayout("phone", "closed");
+  noteScreenLayout("phone", "fullyOpen");
+  noteScreenLayout("split", "partiallyOpen");
   expect(counted.mock.calls).toEqual([["duo_layout_shown"]]);
+  for (const [name, hinge] of [["phone", "fullyOpen"], ["wide", "none"], ["split", "partiallyOpen"]] as const) {
+    counted.mockClear();
+    forgetLandscapeCount();
+    noteScreenLayout(name, hinge);
+    expect(counted.mock.calls).toEqual([["duo_layout_shown"]]);
+  }
   forgetLandscapeCount();
 });
 

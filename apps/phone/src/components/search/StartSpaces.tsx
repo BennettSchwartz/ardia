@@ -37,7 +37,7 @@ import {
 import { MenuTrigger, type MenuHandlers } from "../ui/MenuTrigger";
 import { syncOffered } from "../../state/sync/offer";
 
-export type StartGeometry = { width: number; height: number; safeSide: number; barCenterY: number; dotsOnBar?: boolean };
+export type StartGeometry = { width: number; height: number; safeSide: number; barCenterY: number };
 
 export const startBarCenterY = (height: number, safeBottom: number, os: string = Platform.OS) => height - redesignedBarCenterFromBottom(safeBottom, os);
 
@@ -121,7 +121,7 @@ export function StartSpaces({ geometry, dark, incognito }: { geometry: StartGeom
               if (next) choose(next.syncId);
             }}
             dark={dark}
-            y={geometry.dotsOnBar ? geometry.barCenterY : geometry.barCenterY - startLayout.pageDotsAboveBar}
+            y={geometry.barCenterY - startLayout.pageDotsAboveBar}
           />
         </>
       ) : spaces.length === 1 ? (

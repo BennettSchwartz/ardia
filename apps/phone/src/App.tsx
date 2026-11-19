@@ -34,11 +34,10 @@ import { useBaseSystemBars, useSystemBars } from "./state/app/systemBars";
 import { useSearchOpen } from "./state/search/hooks";
 import { useLeavingTab, useOpeningTab, useSheet, useSurface } from "./state/browse/hooks";
 import { appBecameActive, appWillResignActive, closeArchive, deckPullInFlight, goBackToStartIfEmpty, startBrowser, type Surface } from "./state/browse/store";
-import { useColumn } from "./components/column/SideColumn";
 import { refreshHiddenDeck } from "./state/browse/deckHold";
 import { useDeckStandbyWanted } from "./state/browse/deckStandby";
 import { deckPullGrowing } from "./state/browse/deckPull";
-import { noteScreenLayoutName, noteWindowShape } from "./state/app/landscapeCount";
+import { noteScreenLayout, noteWindowShape } from "./state/app/landscapeCount";
 import { DUO_CANVAS, reportScreenLayout, useScreenLayout } from "./state/app/screenLayout";
 import { DuoBrowsing } from "./components/duo/DuoBrowsing";
 import { ScreenLayoutProbe } from "@ardia/phone-native";
@@ -124,8 +123,7 @@ export function Surfaces() {
   const opening = useOpeningTab();
   const leaving = useLeavingTab();
   const design = useDesign();
-  const column = useColumn();
-  const pageOverDeck = design === "redesigned" && !column;
+  const pageOverDeck = design === "redesigned";
   const pageUnderDeck = surface === "deck" && tab !== null && (tab.id === opening || tab.id === leaving);
   const settingsOpen = useSettingsNav((s) => s.open);
   const onboarding = useOnboarding((s) => s.showing);
@@ -214,8 +212,9 @@ function DuoCanvasFrame({ children }: { children: ReactNode }) {
 function LandscapeCount() {
   const { width, height } = useWindowDimensions();
   const layout = useScreenLayout((s) => s.layout.name);
+  const hinge = useScreenLayout((s) => s.hinge);
   useEffect(() => noteWindowShape(width, height), [width, height]);
-  useEffect(() => noteScreenLayoutName(layout), [layout]);
+  useEffect(() => noteScreenLayout(layout, hinge), [layout, hinge]);
   return null;
 }
 
