@@ -97,6 +97,38 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun anAttemptPastTheDeadlineGivesUpWithoutLookingForOrFocusingTheView() {
+        val asked = mutableListOf<Int>()
+        val target = recording(asked)
+        activity.setContentView(FrameLayout(activity).apply { addView(target, 200, 100) })
+        layOut()
+        var now = 0L
+        var ready = false
+        var looked = 0
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), { now })
+        requests.start {
+            looked += 1
+            if (ready) target else null
+        }
+        assertEquals(1, looked)
+        now = FocusRequests.GIVE_UP_AFTER_MS + 12
+        ready = true
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        assertEquals(1, looked)
+        assertTrue("past its deadline a request focuses nothing", asked.isEmpty())
+        assertEquals(0, requests.waiting)
+        now = 0L
+        val inTime = FocusRequests(Handler(Looper.getMainLooper()), { now })
+        ready = false
+        inTime.start { if (ready) target else null }
+        now = FocusRequests.GIVE_UP_AFTER_MS - 4
+        ready = true
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(100))
+        assertEquals(listOf(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS), asked)
+        assertEquals(0, inTime.waiting)
+    }
+
+    @Test
     fun aCancelledRequestNeverLooksAgain() {
         val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
         var looked = 0

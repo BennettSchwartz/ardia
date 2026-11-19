@@ -67,7 +67,7 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
         val attempt = object : Runnable {
             override fun run() {
                 if (destroyed || pending[id] !== this) return
-                if (ScreenReaderFocus.focus(resolve()) || clock() >= deadline) {
+                if (clock() >= deadline || ScreenReaderFocus.focus(resolve())) {
                     pending.remove(id)
                     return
                 }

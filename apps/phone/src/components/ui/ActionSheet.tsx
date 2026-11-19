@@ -29,7 +29,7 @@ export function ActionSheet({ onCancel, opener, ...props }: Props) {
     const target = returnTo.target;
     if (!target) return;
     const openedBefore = generation();
-    afterClear(() => focusForScreenReader(target, () => generation() === openedBefore && !covered(), { refocus: true }));
+    afterClear(() => focusForScreenReader(target, () => generation() === openedBefore && !covered()));
   }, [onCancel, returnTo, afterClear, generation, covered]);
   return (
     <Portal exitMs={menuMotion.sheetOut}>

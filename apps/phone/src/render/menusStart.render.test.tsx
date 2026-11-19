@@ -158,9 +158,11 @@ drawnTest("on Android a pinned link tile's long press opens Copy Link and Share 
   expect(held.props.dimmed).toBe(true);
   const heldItems = held.props.items as { label: string; onPress: () => void }[];
   expect(heldItems.map((item) => item.label)).toEqual(["Copy Link", "Share"]);
-  act(() => heldItems[0]!.onPress());
+  const copyRow = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === "Copy Link" && typeof node.props.onPress === "function")[0]!;
+  act(() => copyRow.props.onPress());
+  expect(copied).toHaveBeenCalledTimes(1);
   expect(copied).toHaveBeenCalledWith("https://pin0.example/");
-  act(() => held.props.onDismiss());
+  expect(floating()).toHaveLength(0);
   const folder = root.root.findAll((node) => node.props.accessibilityLabel === "Pin 1" && typeof node.props.onPress === "function")[0]!;
   act(() => folder.props.onPress());
   const tapped = floating()[0]!;

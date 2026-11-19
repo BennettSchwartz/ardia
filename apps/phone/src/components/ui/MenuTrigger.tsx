@@ -145,7 +145,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
       let cancelFocus: () => void = () => undefined;
       const openedBefore = generation();
       const stopWaiting = afterClear(() => {
-        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered(), { refocus: true });
+        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered());
       });
       const stopWatching = onOverlayOpened(() => cancelRestore.current());
       cancelRestore.current = () => {

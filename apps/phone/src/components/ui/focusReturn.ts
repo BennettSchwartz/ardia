@@ -13,7 +13,7 @@ export function useFocusReturn() {
       let stopWatching: () => void = () => undefined;
       const openedBefore = generation();
       const stopWaiting = afterClear(() => {
-        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered() && still(), { refocus: true });
+        cancelFocus = focusForScreenReader(target, () => generation() === openedBefore && !covered() && still());
       });
       const cancel = () => {
         stopWaiting();

@@ -299,13 +299,23 @@ drawnTest("on Android the ··· menu is drawn with main's items, and Close All 
   unmount(root);
 });
 
-drawnTest("on Android Settings chosen from the drawn ··· menu opens Settings, with no native menu view mounted to lose the choice", () => {
+drawnTest("on Android Settings chosen from the drawn ··· menu opens Settings, with no native menu view mounted to lose the choice", async () => {
   withSpaces([WORK]);
   const settings = jest.spyOn(settingsNav, "openSettings").mockImplementation(() => undefined);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  jest.spyOn(overlay, "measureAnchor").mockResolvedValue({ x: 337, y: 52, width: 44, height: 44 });
+  jest.spyOn(overlay, "useOverlayFrame").mockReturnValue(() => Promise.resolve({ x: 0, y: 0, width: 393, height: 873 }));
   const root = deck();
   expect(contextMenus(root)).toHaveLength(0);
   press(root, "More");
   expect(contextMenus(root)).toHaveLength(0);
+  for (let step = 0; step < 3; step++) await act(async () => undefined);
+  act(() => root.root.findAll((node) => node.props.testID === "drawnMenuRows" && typeof node.props.onContentSizeChange === "function")[0]!.props.onContentSizeChange(250, 320));
+  const row = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && node.props.accessibilityLabel === "Settings" && typeof node.type === "string")[0]!;
+  expect(row.props.accessibilityState?.disabled).toBeFalsy();
+  const blockers: string[] = [];
+  for (let at = row.parent; at; at = at.parent) if (typeof at.type === "string" && (at.props.pointerEvents === "none" || at.props.pointerEvents === "box-only")) blockers.push(`${at.props.testID ?? at.type}:${at.props.pointerEvents}`);
+  expect(blockers).toEqual([]);
   pick(root, "Settings");
   expect(settings).toHaveBeenCalledTimes(1);
   unmount(root);
@@ -415,7 +425,7 @@ drawnTest("Tab Options is dropped if its tab has gone by the time the card is me
   unmount(root);
 });
 
-drawnTest("a card's menu whose tab goes while it is open lets the deck go: the menu closes and the deck is no longer shaded or hidden; a reorder keeps it", async () => {
+drawnTest("a card's menu whose tab goes while it is open lets the deck go: the menu closes and the deck is no longer shaded or hidden; a move of its card keeps it on the same tab", async () => {
   withSpaces([WORK]);
   const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
   jest.spyOn(overlay, "measureAnchor").mockResolvedValue({ x: 60, y: 200, width: 280, height: 520 });
@@ -429,10 +439,23 @@ drawnTest("a card's menu whose tab goes while it is open lets the deck go: the m
   await act(async () => undefined);
   expect(menuitems(root).length).toBeGreaterThan(0);
   expect(shaded()).toBe(true);
-  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: [...state.open].reverse() })));
+  const placeOf = () => withMenu().findIndex((node) => node.props.accessibilityLabel === askedTab.title);
+  const placeBefore = placeOf();
+  const earlier = tabStore.currentTabs().open.find((tab) => tab.title === withMenu()[0]!.props.accessibilityLabel)!;
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== earlier.id) })));
   await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(1000));
+  expect(placeOf()).toBe(placeBefore - 1);
   expect(menuitems(root).length).toBeGreaterThan(0);
   expect(shaded()).toBe(true);
+  const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
+  const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
+  pick(root, "Copy Link");
+  expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: askedTab.id }));
+  act(() => jest.advanceTimersByTime(1000));
+  act(() => asked.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  await act(async () => undefined);
+  expect(menuitems(root).length).toBeGreaterThan(0);
   act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== askedTab.id) })));
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(1000));
@@ -486,5 +509,53 @@ drawnTest("after a stack card's Tab Options menu closes without a choice, TalkBa
   await act(async () => undefined);
   through();
   expect(landedOn()).toEqual([]);
+  unmount(root);
+});
+
+drawnTest("two Tab Options asked one after the other: only the later one opens its menu, whichever measurement comes back first", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  const pending: ((rect: { x: number; y: number; width: number; height: number }) => void)[] = [];
+  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => void pending.push(resolve)));
+  const tabMenus = require("../state/browse/tabMenus") as typeof import("../state/browse/tabMenus");
+  const copied = jest.spyOn(tabMenus, "copyTabLink").mockImplementation(() => undefined);
+  const root = deck();
+  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+  const [first, second] = [withMenu()[0]!, withMenu()[1]!];
+  const tabOf = (node: ReactTestInstance) => tabStore.currentTabs().open.find((tab) => tab.title === node.props.accessibilityLabel)!;
+  const [firstTab, secondTab] = [tabOf(first), tabOf(second)];
+  act(() => first.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  act(() => second.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  expect(pending).toHaveLength(2);
+  await act(async () => pending[1]!({ x: 60, y: 200, width: 280, height: 520 }));
+  await act(async () => pending[0]!({ x: 60, y: 200, width: 280, height: 520 }));
+  pick(root, "Copy Link");
+  expect(copied).toHaveBeenCalledTimes(1);
+  expect(copied).toHaveBeenCalledWith(expect.objectContaining({ id: secondTab.id }));
+  expect(copied).not.toHaveBeenCalledWith(expect.objectContaining({ id: firstTab.id }));
+  unmount(root);
+});
+
+drawnTest("a Tab Options measurement asked before the deck went away opens nothing when it comes back after the deck has returned, and a later one still works", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  const pending: ((rect: { x: number; y: number; width: number; height: number }) => void)[] = [];
+  jest.spyOn(overlay, "measureAnchor").mockImplementation(() => new Promise((resolve) => void pending.push(resolve)));
+  const hideDeck = () => act(() => browse.useBrowse.setState({ surface: "browsing" }));
+  const showDeck = () => act(() => browse.useBrowse.setState({ surface: "deck" }));
+  const root = deck();
+  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+  act(() => withMenu()[1]!.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  const shownCards = withMenu().length;
+  hideDeck();
+  act(() => jest.advanceTimersByTime(1000));
+  showDeck();
+  act(() => jest.advanceTimersByTime(1000));
+  expect(withMenu().length).toBe(shownCards);
+  await act(async () => pending[0]!({ x: 60, y: 200, width: 280, height: 520 }));
+  expect(menuitems(root)).toEqual([]);
+  act(() => withMenu()[1]!.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  await act(async () => pending[pending.length - 1]!({ x: 60, y: 200, width: 280, height: 520 }));
+  expect(menuitems(root).length).toBeGreaterThan(0);
   unmount(root);
 });

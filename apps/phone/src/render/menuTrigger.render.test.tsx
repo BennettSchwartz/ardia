@@ -1063,58 +1063,47 @@ test("the app is readable again the moment a menu or a confirmation starts closi
   unmount(root);
 });
 
-test("on Android a restore is asked for once more 300 ms after it lands, in case TalkBack moved focus on its own, and that second ask is dropped like the first when a newer overlay opens", async () => {
+test("on Android a restore is asked for once: after it lands nothing asks again, so a swipe the user makes right after is never undone", async () => {
   if (Platform.OS !== "android") return;
   const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
   const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
-  const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
-  const { updateSurface } = require("../../test/render/harness") as typeof import("../../test/render/harness");
-  const { ANDROID_FOCUS_DELAY_MS, ANDROID_REFOCUS_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const { ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
   jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
   jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
-  const revoked = jest.fn();
-  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => revoked);
-  function Harness({ asking = false }: { asking?: boolean }) {
-    return (
-      <>
-        <MenuTrigger items={ITEMS} trigger="tap">
-          {({ onPress }) => (
-            <Pressable accessibilityLabel="Trigger" onPress={onPress}>
-              <Text>Trigger</Text>
-            </Pressable>
-          )}
-        </MenuTrigger>
-        {asking ? <ConfirmSheet confirmation={{ title: "Question", message: "", action: "Confirm", run: () => undefined }} onClose={() => undefined} /> : null}
-      </>
-    );
-  }
+  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => () => undefined);
   const back = pressBack();
-  const root = renderSurface(<Harness />);
-  const open = () => act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: 77, nativeEvent: {} }));
-  const toTrigger = () => sent.mock.calls.filter(([tag]) => tag === 77).length;
-  open();
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: 77, nativeEvent: {} }));
   back();
   throughClose();
   await act(async () => undefined);
   act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
-  expect(toTrigger()).toBe(1);
-  act(() => jest.advanceTimersByTime(ANDROID_REFOCUS_MS - 30));
-  expect(toTrigger()).toBe(1);
-  act(() => jest.advanceTimersByTime(40));
-  expect(toTrigger()).toBe(2);
-  act(() => jest.advanceTimersByTime(2000));
-  expect(toTrigger()).toBe(2);
-  open();
-  back();
-  throughClose();
-  await act(async () => undefined);
-  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
-  expect(toTrigger()).toBe(3);
-  revoked.mockClear();
-  updateSurface(root, <Harness asking />);
-  expect(revoked).toHaveBeenCalledTimes(1);
-  act(() => jest.advanceTimersByTime(ANDROID_REFOCUS_MS + 50));
-  expect(toTrigger()).toBe(3);
-  updateSurface(root, <Harness />);
+  expect(sent.mock.calls.filter(([tag]) => tag === 77)).toHaveLength(1);
+  act(() => jest.advanceTimersByTime(3000));
+  expect(sent.mock.calls.filter(([tag]) => tag === 77)).toHaveLength(1);
   unmount(root);
+});
+
+test("the dark confirmation keeps the iPhone's text colours on a darker card and pill, so its message reads at 4.5:1 and its button label at 3:1, where the iPhone's own are 2.5:1 and 1.5:1", () => {
+  const { actionSheetInk } = require("../components/ui/tokens") as typeof import("../components/ui/tokens");
+  const channel = (value: number) => {
+    const c = value / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((at) => channel(parseInt(hex.slice(at, at + 2), 16)));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string) => {
+    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (high! + 0.05) / (low! + 0.05);
+  };
+  const dark = actionSheetInk.dark;
+  expect(contrast(dark.message, dark.solid)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(dark.title, dark.solid)).toBeGreaterThanOrEqual(4.5);
+  expect(contrast(dark.destructive, dark.button)).toBeGreaterThanOrEqual(3);
+  expect(contrast(dark.title, dark.button)).toBeGreaterThanOrEqual(3);
+  expect(luminance(dark.button)).toBeGreaterThan(luminance(dark.solid));
+  expect(contrast("#C5C5C5", "#797979")).toBeLessThan(3);
+  expect(contrast("#FF9B9C", "#959595")).toBeLessThan(2);
 });

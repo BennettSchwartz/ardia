@@ -202,7 +202,17 @@ export const TabDeck = memo(function TabDeck() {
   const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; control?: Rect; opener?: RefObject<ViewInstance | null> } | null>(null);
   const returnFocus = useFocusReturn();
   const cancelCardFocus = useRef<() => void>(() => undefined);
-  useEffect(() => () => cancelCardFocus.current(), []);
+  const cardMenuAsked = useRef(0);
+  useEffect(
+    () => () => {
+      cancelCardFocus.current();
+      cardMenuAsked.current += 1;
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!shown) cardMenuAsked.current += 1;
+  }, [shown]);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   if (cardMenu && !order.includes(cardMenu.id)) setCardMenu(null);
   const [leavingCards, setLeavingCards] = useState<LeavingCard[]>(NO_LEAVING_CARDS);
@@ -971,6 +981,10 @@ export const TabDeck = memo(function TabDeck() {
     setMenu(null);
     setCardMenu({ id: order[index]!, x, y, control, opener });
   };
+  const showHeldCardMenu = (index: number, x: number, y: number) => {
+    cardMenuAsked.current += 1;
+    showCardMenu(index, x, y);
+  };
   const dismissCardMenu = (chosen?: boolean) => {
     const closing = cardMenu;
     setCardMenu(null);
@@ -988,7 +1002,7 @@ export const TabDeck = memo(function TabDeck() {
     .minDuration(tabsMotion.longPress)
     .onStart((e) => {
       const card = deckCardAt(g, count, scroll.value, e.x, e.y);
-      if (card >= 0) runOnJS(showCardMenu)(card, e.absoluteX, e.absoluteY);
+      if (card >= 0) runOnJS(showHeldCardMenu)(card, e.absoluteX, e.absoluteY);
     });
   const tapFrom = useSharedValue({ x: 0, y: 0 });
   const tap = Gesture.Manual()
@@ -1042,7 +1056,9 @@ export const TabDeck = memo(function TabDeck() {
     if (closing) remove(closing);
   };
   const latestActions = useRef({ open, close, closeNow, order, showCardMenu });
-  latestActions.current = { open, close, closeNow, order, showCardMenu };
+  useLayoutEffect(() => {
+    latestActions.current = { open, close, closeNow, order, showCardMenu };
+  });
   const cardActions = useMemo(
     () => ({
       open: (at: number) => latestActions.current.open(at),
@@ -1051,7 +1067,9 @@ export const TabDeck = memo(function TabDeck() {
       menu: (at: number, card: RefObject<ViewInstance | null>) => {
         const id = latestActions.current.order[at];
         if (!id) return;
+        const asked = ++cardMenuAsked.current;
         void measureAnchor(card).then((rect) => {
+          if (asked !== cardMenuAsked.current) return;
           const now = latestActions.current.order.indexOf(id);
           if (now >= 0 && rect.height > 0) latestActions.current.showCardMenu(now, rect.x, rect.y + rect.height, rect, card);
         });
