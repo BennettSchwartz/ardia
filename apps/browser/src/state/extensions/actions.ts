@@ -26,7 +26,7 @@ import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, nex
 import { consentToken, type ConsentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
-import { refreshExtensions, refreshExtensionsAfterChange } from "./lists";
+import { freshExtensions, refreshExtensions, refreshExtensionsAfterChange } from "./lists";
 import { cancelInstall, confirmInstall, showInstallSheet } from "./installSheet";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
@@ -112,6 +112,12 @@ export async function moveToolbarExtension(windowId: string, id: string, to: num
 
 export async function configure(profile: string, id: string, options: Parameters<typeof configureExtension>[2]): Promise<boolean> {
   return changeThenRefresh(profile, "configure", () => configureExtension(id, profile, options));
+}
+
+export async function configureThenRead(profile: string, id: string, options: Parameters<typeof configureExtension>[2]): Promise<InstalledExtension[] | null> {
+  const consent = consentToken();
+  if (!(await changed("configure", () => configureExtension(id, profile, options), consent))) return null;
+  return freshExtensions(profile);
 }
 
 export async function reload(profile: string, id: string) {

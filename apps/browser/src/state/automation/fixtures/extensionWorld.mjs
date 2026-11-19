@@ -7,10 +7,12 @@ export function extensionWorld() {
   const gates = { inspect: null, install: null, list: null, reject: null, listFails: false, breakListsOnWrite: false };
   const reloads = [];
   const writes = [];
+  const listCalls = { count: 0 };
   const uninstalls = [];
   const pkg = { version: "1.0", description: "", manifestVersion: 3, icon: null, permissions: [], optionalPermissions: [], hostPermissions: [], hasAction: false, popup: null, optionsPage: null, sidePanel: null };
   const engine = {
     list: async () => {
+      listCalls.count++;
       const snapshot = list.map((x) => ({ ...x }));
       if (gates.list) await gates.list;
       if (gates.listFails) throw new Error("Chromium didn't answer");
@@ -39,8 +41,11 @@ export function extensionWorld() {
       writes.push({ id, ...options });
       if (options.incognito !== undefined && !x.ignoreIncognito) x.incognito = options.incognito;
       if (options.userScripts !== undefined) x.userScripts = options.userScripts;
+      writes.at(-1).listCallsBefore = listCalls.count;
       if (options.siteAccess) {
         if (x.lockedSites) throw new Error("Can't change this extension's site access");
+        if (options.siteAccess === "onClick") x.sites = [];
+        if (options.siteAccess === "specificSites") x.sites = x.sites.filter((host) => !/^(<all_urls>|[^:]+:\/\/\*\/)/.test(host) && !x.revokeAllOnWithhold);
         x.siteAccess = options.siteAccess === "allSites" ? "ON_ALL_SITES" : x.sites.length && options.siteAccess === "specificSites" ? "ON_SPECIFIC_SITES" : "ON_CLICK";
       }
     },
@@ -52,7 +57,7 @@ export function extensionWorld() {
     },
   };
   globalThis.acTestUserScripts = { ...(globalThis.acTestUserScripts ?? {}), engine };
-  return { list, folders, installs, gates, reloads, uninstalls, writes };
+  return { list, folders, installs, gates, reloads, uninstalls, writes, listCalls };
 }
 
 export function gate() {
