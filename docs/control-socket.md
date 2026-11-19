@@ -145,7 +145,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Autofill | addresses, cards | Chrome's Web Data | 🔍 `autofill.list` (no card numbers); ⛔ card numbers |
 | Cookies and site data | cookies, storage per origin | Chrome's Cookies and storage | ✅ `sites.clearData`; ⛔ cookie values |
 | Favicons | icon per page | Chrome's Favicons database, app cache | 🔍 `favicons.get` |
-| Shared folders | groups backed by a folder, their identities | `shared-folders.json`, `.ardia-folder.json` | ✅ `sharedFolders.*` |
+| Shared folders | groups backed by a folder, their identities | `shared-folders.json`, `.ardia-folder.json` | 🔍 `sharedFolders.list`; 🗺️ share, add, sync, stop |
 | Live folders | pull request and document folders, their items, hidden and read state, connected accounts | `live.json` | ✅ `live.*`; ⛔ account tokens |
 | Sidebar layout | width, side, pinned collapsed, auto-hide | `settings` (`sidebarWidth`, `sidebarSide`, `autoHideTabs`), profiles (`pinnedCollapsed`) | ✅ through `settings.set`, `profiles.update`, `windows.setLayout` |
 | Presets and themes | setup codes, profile looks, theme files | `settings`, `themes/*.json`, profiles (`theme`) | ✅ `profiles.setLook`, `presets.apply`, `presets.describe` |
@@ -200,7 +200,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
 | pins (tile folders) | `pins.folders {window?}` | `pins.createFolder {tabs, name?}`, `pins.renameFolder {folder, name}`, `pins.removeFolder {folder}`, `pins.addToFolder {folder, tabs}`, `pins.removeFromFolder {tabs}` |
 | favicons | `favicons.get {url, profile?}` | none |
-| sharedFolders | `sharedFolders.list` | `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`, `sharedFolders.sync {group}`, `sharedFolders.stop {group}` |
+| sharedFolders | `sharedFolders.list` | none yet; `share`, `add`, `sync` and `stop` are designed under Next |
 | live | `live.list {profile?}`, `live.items {folder, limit?, offset?}` | `live.create {kind, profile?, sources?, name?}`, `live.update`, `live.remove`, `live.refresh`, `live.hide {folder, items}`, `live.unhide`, `live.markRead {folder, items?}`, `live.setRepoHidden {folder, repo, hidden}`, `live.open {folder, item, window?}` |
 | presets | `presets.describe {code}` | `presets.apply {code, window?}` |
 | airTraffic | `airTraffic.rules`, `airTraffic.test {url, from?}` | `airTraffic.addRule`, `airTraffic.updateRule {id, …}`, `airTraffic.removeRule {id}`, `airTraffic.moveRule {id, index}`, `airTraffic.setFallback {open, profile?, group?}` |
@@ -230,28 +230,13 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
 - **Favicons.** `favicons.get` answers from the app's icon cache (`resolveFavicon`) and otherwise from the profile's
   icon database (`faviconsFor`), with `{found, mime, data}` (base64). It never fetches from the network, so reading
   icons can't tell a site the page is open.
-- **Shared folders** (`state/sharedFolders`). `share` makes the folder in iCloud Drive's Ardia folder (or `parent`
-  when iCloud Drive is off) and syncs it once; instead of the macOS share sheet, the reply carries the folder's path and
-  file URL for the command to share. `add` binds a folder someone shared as a new pinned folder, as Add Shared Folder
-  does without its folder picker. `stop` is Stop Syncing: the group and the files stay.
-  Paths are resolved once to the real folder (`resolve` in `SharedFoldersModule.swift`): the binding stores that path and
-  the folder's device and inode. The native layer (`SharedFolderDirectory.swift`) opens the root once with `O_NOFOLLOW`,
-  checks its device and inode, and does every scan, read, write, rename, mkdir and unlink relative to folder descriptors
-  it holds while descending (`openat`, `fstatat`, `renameatx_np`, `unlinkat`), so a root or subfolder swapped after the
-  check is never followed, and two spellings of one folder are one binding. `/`, system folders and home folders are
-  refused (`resolve` rejects with `ERR_SHARED_FOLDER_REFUSED`, answered as `refused`); `parent` must already exist and is
-  held by descriptor and checked against its identity through creation, never recreated. `create` returns the new
-  folder's identity in the same call, and a folder `share` made but couldn't use is removed only while it is still that
-  empty folder. A binding made before identities existed (from the sidebar, or an older Ardia) is upgraded to its real
-  path and identity the first time it syncs or `add` looks for it. Binding is compare-and-set for the sidebar and the
-  socket alike: whichever finishes making a folder second keeps the first one's binding and removes its own. `add` reads
-  the folder before saving anything, so a missing, unreadable or too big folder (over 20,000 items or 32 MB of links and
-  order files, counted while listing) answers an error and adds nothing. Requests for one group run one at a time;
-  `share` re-checks the group after making the folder and removes the folder it made when the group changed or control
-  went off. A sync started by the socket stops before writing once control is off, its retries keep that check, and a
-  write already under way when control goes off commits nothing. When the first sync fails, `share` answers `failed`
-  with the reason instead of the URL, as the sidebar shows a toast instead of the share sheet; the binding stays, as it
-  does there.
+- **Shared folders** (`state/sharedFolders`). `sharedFolders.list` reads the sidebar's folders backed by a folder on
+  disk, with each one's path, file URL, groups, link count and sync state; nothing over the socket writes to a shared
+  folder yet (see Next). The sidebar's own sync goes through the native layer (`SharedFolderDirectory.swift`), which
+  opens the root once with `O_NOFOLLOW`, checks its device and inode, and does every scan, read, write, rename, mkdir
+  and unlink relative to folder descriptors it holds while descending (`openat`, `fstatat`, `renameatx_np`,
+  `unlinkat`), so a root or subfolder swapped after the check is never followed. Binding is compare-and-set: whichever
+  finishes making a folder second keeps the first one's binding and removes its own.
 - **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
   browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
   menu does. Account tokens are never read. `create` checks the name and sources before saving anything, and with no
@@ -259,9 +244,11 @@ Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFo
   sources or filters fetches again after it, and a pass whose sources or filters changed under it drops its results.
   A socket refresh joins only a pass started by the same request; otherwise it waits for the running pass and then
   fetches for itself, so a refresh after control went off and on never returns a revoked pass's old state. A pass checks
-  control before it fetches. `live.items` lists the folder's listed, then hidden, then recently completed items as
+  control before it fetches and before it commits, and the follow-up a settings change queues keeps the guard of the
+  pass that queued it, so its results never land once control is off. `live.items` lists the folder's listed, then hidden, then recently completed items as
   `{item, shown, unread, completed}`, each item once (an item still animating out counts as completed), a page at a
-  time, building rows only for the page.
+  time, building rows only for the page. An item over 256 KiB of JSON is sent as `{id, source, oversized: true}`, so
+  one huge item never turns its page into an error; open it with `live.open`.
 - **Presets.** `presets.apply` is Settings › Apply a setup code (`applySetupCode`): the code's settings, and its colour
   and pinned apps on the given or focused main window's profile. `presets.describe` decodes a code without applying it.
 - **Air Traffic Control** (`state/airTraffic/store.ts`). Rules are `{from, when, profile, open, group}`: `from` an app
@@ -322,6 +309,12 @@ the user's live sessions on every site. Both are a different consent than "contr
 
 Designed, not built in this round, each in its own file under `state/automation/socket<Area>.ts`:
 
+- **Shared folder writes:** `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`,
+  `sharedFolders.sync {group}` and `sharedFolders.stop {group}`, in the follow-up to this round
+  (`full-control/app-socket-2a-shared`). They wait for the shared-folder sync engine and its native layer to hold up
+  under a writer outside the sidebar: control checks after every await, no store-triggered round outliving its guard,
+  no sync without a folder identity, sanitized names, one Add per folder identity, refusal by device and inode, and
+  identity-checked renames, removals and creates.
 - **Window geometry:** `windows.setFrame {window, frame}`, `windows.setMaximized`, `windows.setFullScreen`. The store's
   `frame`, `maximized` and `fullScreen` follow the native window (`windows/windowSync.ts`), so these need a native
   call that moves the window (`ArdiaWindows`), which doesn't exist yet; `run` covers full screen through its command.

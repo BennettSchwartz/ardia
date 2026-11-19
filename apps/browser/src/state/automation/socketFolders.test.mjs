@@ -150,7 +150,8 @@ test("presets: describe a setup code without changing anything, then apply it", 
 test("the new areas describe themselves, take only what they list, and count in their own families", async () => {
   await setup();
   const names = (await ok("methods")).map((m) => m.name);
-  for (const name of ["pins.folders", "pins.createFolder", "favicons.get", "sharedFolders.list", "sharedFolders.share", "live.list", "live.refresh", "live.hide", "presets.apply", "airTraffic.rules", "airTraffic.addRule"]) assert.ok(names.includes(name), name);
+  for (const name of ["pins.folders", "pins.createFolder", "favicons.get", "sharedFolders.list", "live.list", "live.refresh", "live.hide", "presets.apply", "airTraffic.rules", "airTraffic.addRule"]) assert.ok(names.includes(name), name);
+  for (const name of ["sharedFolders.share", "sharedFolders.add", "sharedFolders.sync", "sharedFolders.stop"]) assert.ok(!names.includes(name), `${name} waits for the shared-folder follow-up`);
   assert.equal(await code("pins.folders", { window: 3 }), "bad_request");
   assert.equal(await code("favicons.get", { url: "https://a.example/", size: 64 }), "bad_request");
   setConsentPeriod(true, "socket-folders-test");
