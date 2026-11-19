@@ -268,19 +268,19 @@ counts in `cli_socket_calls_permissions`, `cli_socket_calls_menus` or `cli_socke
 | Method | Mutates | What it does, and the path it takes |
 | --- | --- | --- |
 | `permissions.prompts` | no | The prompt each tab shows (`{id, window, tab, origin, permissions, queued}`); `queued` counts the prompts waiting behind it |
-| `permissions.respond {id, decision}` | yes | `allow` and `block` as the Allow and Don't Allow buttons (remembered), `dismiss` as the close button, `allowOnce` for this visit only (camera, microphone and location; other kinds answer `refused`, because the engine would turn a one-time grant of them into a lasting one). Goes through `answerPermission` → `resolvePermission` → `ResolvePermission` in `ac_permissions.mm`, so the next queued prompt shows, notifications and location still ask macOS, and Chrome records the decision as a click would |
-| `passwords.prompts` | no | Save and update password prompts: origin, state, username and the usernames an update offers; never the password or its length |
-| `passwords.respond {tab, decision, username?}` | yes | `save`, `never`, `update`, `notNow`, `dismiss`, only the buttons that prompt shows; `username` picks one of an update prompt's usernames. Through `answerPasswordPrompt`, which the prompt component now calls too |
-| `autofill.prompts` | no | Save address and save card prompts: kind, origin, title, message and button labels; never the address lines or card |
-| `autofill.respond {tab, decision}` | yes | `accept`, `decline`, `dismiss`, through `answerAutofillPrompt` |
-| `menus.open` | no | Open menus with their items (`path`, `title`, `enabled`, `checked`, `separator`, `submenu`) : `kind` is `select` (a page's `<select>` popup), `page` (a page's context menu), `app` (an Ardia menu), `menuBar` |
-| `menus.choose {menu, path}` | yes | Chooses the item with the menu's own action (`-[NSMenu performActionForItemAtIndex:]`, then the menu closes), as a click does: the `<select>` gets trusted `input` and `change`, a context menu runs its command |
+| `permissions.respond {id, decision}` | yes | `allow` and `block` as the Allow and Don't Allow buttons (remembered), `dismiss` as the close button, `allowOnce` for this visit only. `allowOnce` is refused unless the prompt names its kinds and every one is camera, microphone, camera pan-tilt-zoom or location, since the engine turns a one-time grant of anything else into a lasting one. The reply waits for the app's native layer to accept the answer (`permissions.answer`, which checks the request is still pending, as tracked from the engine's request and dismiss callbacks) and is `failed` when it isn't; only then does the next queued prompt show. Notifications and location still ask macOS, and Chrome records the decision as a click would |
+| `passwords.prompts` | no | Save and update password prompts: `id` (Ardia's own, new for every prompt a tab shows), origin, state, username, at most 20 of the usernames an update offers (each cut to 256 characters) and `usernameCount`; never the password or its length |
+| `passwords.respond {tab, id, decision, username?}` | yes | `save`, `never`, `update`, `notNow`, `dismiss`, only the buttons that prompt shows. `no_window` when the tab now shows another prompt than `id`. The native layer then checks the engine's prompt still has the state, origin and username that were listed, and that the answer is one of that state's buttons, before it answers; otherwise `failed` |
+| `autofill.prompts` | no | Save address, update address and save card prompts: the engine's `id`, origin, `kind`, `fields` (for an update: which of name, address, email, phone, other change) and a `description` Ardia writes from those. Never the engine's text (an update's summary holds the name and street), the address lines or the card |
+| `autofill.respond {tab, id, decision}` | yes | `accept`, `decline`, `dismiss`. `no_window` when the tab now shows another prompt or its page is gone; `failed` when the engine's prompt id no longer matches or it stays open after the answer |
+| `menus.open` | no | Open menus with their owner (`window`, and `tab` for a page's menu) and items (`path`, `ref`, `title`, `enabled`, `checked`, `separator`, `submenu`): `kind` is `select` (a page's `<select>` popup), `page` (a page's context menu), `app` (an Ardia menu), `menuBar`. A menu whose window isn't one the ardia command may use (private, unknown, closed) isn't listed, nor a page menu without a known tab in that window |
+| `menus.choose {menu, path, ref?}` | yes | A page's `<select>` popup or context menu: the item's own action, as a click (trusted `input` and `change` for a `<select>`). The menu bar while it tracks: needs `ref` and goes through exactly the `menus.runBar` rules, then the menu closes. Ardia's own menus (`app`) and anything else are refused: their callbacks (an engine switch, copying the sync recovery code) aren't commands `run` allows |
 | `menus.dismiss {menu}` | yes | Closes a menu without choosing |
 | `menus.bar` | no | The menu bar as shown now: every item's path, title, enabled, checked, shortcut, and its `command` and `arg` when `run` takes it, or its AppKit `action` |
-| `menus.runBar {path, window?}` | yes | An Ardia command goes through `run`, so the automation policy (`automationCommands.ts`: no Quit, no engine switch, the settings `config.json` can't set) still applies; an editing or window item (Undo, Copy, Paste, Select All, Minimize, Zoom) goes through the menu itself, from an allowlist of editing, text and window actions; everything else (Quit, Hide, Close Window, Check for Updates, system input) is refused |
+| `menus.runBar {path, ref, window?}` | yes | An Ardia command goes through `run`, so the automation policy (`automationCommands.ts`: no Quit, no engine switch, no Allow JavaScript from Apple Events, the settings `config.json` can't set) still applies; an editing or window item (Undo, Copy, Paste, Select All, Minimize, Zoom) goes through the allowlist in `MenuBarAction` and is sent to the responder chain of the named eligible window, only when it is the key window, never to whatever happens to be first responder. Everything else (Quit, Hide, Close Window, Check for Updates, system input, Check Document Now, Show Substitutions…) is refused. `ref` is the item's command or selector plus its title path; the native side checks it at `path` before acting, so a menu rebuilt since `menus.bar` can't run another item |
 
-**Events:** `permission.prompted` (`{id, windowId, tabId, origin, permissions, queued}`), `password.prompted` (named only,
-not in `"*"`), `menu.opened` (`{id, kind, windowId, tabId, items}`, `items` being a count), `menu.closed`. None of
+**Events:** `permission.prompted` (`{id, windowId, tabId, origin, permissions, queued}`), `password.prompted`
+(`{id, windowId, tabId, origin, state, username, usernames, usernameCount}`, the same capped list; named only, not in `"*"`), `menu.opened` (`{id, kind, windowId, tabId, items}`, `items` being a count), `menu.closed`. None of
 them reach plugins.
 
 **What `run` already covered.** `run` and the `commands` catalogue cover every Ardia command in the menu bar; what was
@@ -290,16 +290,41 @@ and the menu items that aren't Ardia commands (Edit and Window). `menus.bar` and
 **How it works.** `OpenSurfaces.swift` (in `packages/shell`) runs in the app process, where Chromium shows these menus,
 and watches `NSMenuDidBeginTracking`/`NSMenuDidEndTracking`. A `<select>` popup is the `NSMenu` of Chromium's
 `WebMenuRunner` (`content/app_shim_remote_cocoa/web_menu_runner_mac.mm`), a page's context menu Chromium's
-`MenuControllerCocoa`. Choosing calls the item's own action and the menu ends
-tracking as after a click, so the engine sees exactly what a click gives it. The tab is the page whose view holds the
-popup's anchor or has focus (`+[ArdiaWebView appTabIdContainingView:]`); a page menu with no tab is hidden while any
-private window is open, so a private page's menu never shows.
+`MenuControllerCocoa`. Choosing calls the item's own action and the menu ends tracking as after a click. Every menu
+carries its owner: a `<select>` popup the tab and window whose view holds the popup's anchor, a visible context menu
+the tab holding the key window's first responder and that window, the menu bar and Ardia's menus the key window. The
+socket shows a menu only when that window is one the ardia command may use and, for a page's menu, the tab is in it.
 
 **Background mode.** A hidden instance (`ARDIA_BACKGROUND=1`) doesn't show a page's context menu: the engine hands it to
-the app (`-tab:runContextMenu:`). While the socket serves, the app now holds it open for the socket, as an `NSMenu` holds
-its tracking loop, until `menus.choose`, `menus.dismiss` or 60 s, and hands the choice back to the engine, which checks
-it against the menu's own model (`FindPicked`). Without a serving socket it logs the menu as before. A `<select>`
-popup is a real AppKit menu in either mode.
+the app (`-tab:runContextMenu:`), which used to hold it open in a nested run loop. That loop is gone. While the socket
+serves, the app captures the menu as data (`ArdiaPageMenuCaptured`: the tab, its window, the engine's document count and
+URL, the items) and returns at once, so the engine closes its menu as before. `menus.choose` on a captured menu runs
+the item's command for that tab: `+[ArdiaWebView runCapturedMenuCommand:tab:documents:url:]` refuses when the tab
+closed, its document count or URL changed, and otherwise sends the editing items (Undo, Redo, Cut, Copy, Paste, Paste
+and Match Style, Delete, Select All, Chromium's `IDC_CONTENT_CONTEXT_*` 50150–50157) to the page's
+`RenderWidgetHostViewCocoa`, which hands them to the focused frame, the frame the right click focused. A captured menu
+lasts 60 s, is replaced by the next one, is used once, and is dropped when control turns off or the menus module goes
+away. Other items are refused until the engine can run them (below). Without a serving socket the menu is logged as
+before. A `<select>` popup is a real AppKit menu in either mode.
+
+**Needs engine code (joins #2808's build or a later key).** These change `engine/ardiacore/src/ardia/core`, so they
+move the engine key; until then the app-side checks above stand in.
+- *Captured context-menu commands.* `ACContextMenu::ShowThroughHost` keeps, per tab, the menu's `ContextMenuParams`, the
+  `GlobalRenderFrameHostId` it was built for and that frame's document token, for 60 s. A new
+  `-[ArdiaCoreTab runContextMenuCommand:(int)command menu:(NSString *)token flags:(int)flags]` rebuilds an
+  `ACContextMenu` for that frame with those params and calls `ExecuteCommand` when `IsCommandIdEnabled`, returning NO
+  when the frame is gone, its document changed, the token was replaced or the time ran out. The app then drops its
+  editing-item mapping and runs every item (Open Link in New Tab, Copy Link, Save Image As…) for its own frame.
+- *Password prompts.* `PasswordPrompt()` in `ac_password_prompt.mm` adds an `id` that changes whenever
+  `PasswordsModelDelegate` enters a pending state, and `-resolvePasswordPrompt:id:username:password:` returns BOOL:
+  NO when the id differs or the action isn't one of the current state's (`save`/`never` for pending, `update`/`nope`
+  for pending update). The app then lists the engine's id instead of its own.
+- *Autofill prompts.* `ResolveAutofillPrompt` returns whether a prompt with that id was answered, so the app needn't
+  read `autofillPrompt` again afterwards.
+- *Permissions.* `+[ArdiaCoreEngine resolvePermission:]` returns BOOL (the prompt was found and was current), and
+  `ACPermissionPrompt::Apply` takes an explicit `acceptOnce`: it refuses (dismisses nothing, returns NO) unless every
+  request supports temporary grants, instead of falling back to a lasting `Accept`. `AskHost` lists a kind it doesn't
+  name as `other` rather than leaving it out, so a prompt's kinds are never silently shorter than its requests.
 
 **The color picker is Blink's, not AppKit's.** The issue's row 14 expected `NSColorPanel`, but in this Chromium a web
 page never reaches it on desktop: `WebContentsDelegate::OpenColorChooser` is compiled only for Android and iOS
