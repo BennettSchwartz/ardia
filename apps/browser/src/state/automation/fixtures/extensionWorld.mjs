@@ -42,6 +42,7 @@ export function extensionWorld() {
       if (options.incognito !== undefined && !x.ignoreIncognito) x.incognito = options.incognito;
       if (options.userScripts !== undefined) x.userScripts = options.userScripts;
       writes.at(-1).listCallsBefore = listCalls.count;
+      if (x.vanishOnWrite) list.splice(list.indexOf(x), 1);
       if (options.siteAccess) {
         if (x.lockedSites) throw new Error("Can't change this extension's site access");
         if (options.siteAccess === "onClick") x.sites = [];

@@ -6,7 +6,7 @@ import type { InstalledExtension } from "../extensions/store";
 import { ownEntry } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
 import type { JsonSchema } from "../../lib/jsonSchema";
-import { bool, id, ids, obj, oneOf, PROFILE, text } from "./socketSchema";
+import { bool, id, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { now, profileArg } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
 
@@ -37,27 +37,20 @@ async function install(params: Record<string, unknown>, call: SocketCall) {
   return { waiting: true, id: extensionId };
 }
 
-type Change = { siteAccess: SiteAccess; hosts?: string[] } | { incognito: boolean } | { userScripts: boolean };
+type Change = { siteAccess: SiteAccess } | { incognito: boolean } | { userScripts: boolean };
 
 function requestedChange(params: Record<string, unknown>): Change {
-  if (params.siteAccess !== undefined) return { siteAccess: params.siteAccess as SiteAccess, ...(params.hosts !== undefined ? { hosts: params.hosts as string[] } : {}) };
+  if (params.siteAccess !== undefined) return { siteAccess: params.siteAccess as SiteAccess };
   if (params.incognito !== undefined) return { incognito: params.incognito as boolean };
   return { userScripts: params.userScripts as boolean };
 }
 
-const BROAD = /^(<all_urls>|[^:]+:\/\/\*\/)/;
-
-export const sameHosts = (a: readonly string[], b: readonly string[]) => a.length === b.length && [...a].sort().every((host, i) => host === [...b].sort()[i]);
+export const SPECIFIC_SITES_REFUSED = "changing to specific sites needs engine support";
 
 function checkedChange(ext: InstalledExtension, change: Change) {
   if (!ext.mayModify) throw new OpError("refused", `${ext.name} is installed by policy, so it can't be changed.`);
   if ("siteAccess" in change && !ext.siteAccess) throw new OpError("refused", `${ext.name} asks for no site access, so there's nothing to choose.`);
-  if ("siteAccess" in change && change.hosts) {
-    const kept = (ext.sites ?? []).filter((host) => !BROAD.test(host));
-    if (!sameHosts(kept, change.hosts)) {
-      throw new OpError("refused", `Ardia can only keep the sites ${ext.name} is already granted (${kept.join(", ") || "none"}); granting other sites needs engine support, so nothing changed.`);
-    }
-  }
+  if ("siteAccess" in change && change.siteAccess === "specificSites") throw new OpError("refused", SPECIFIC_SITES_REFUSED);
   if ("userScripts" in change && !ext.userScriptsAvailable) throw new OpError("refused", `${ext.name} doesn't use user scripts.`);
   if (!("incognito" in change)) return;
   if (typeof ext.incognitoAllowed !== "boolean") throw new OpError("refused", `Ardia can't confirm incognito eligibility for ${ext.name}, so Allow in Incognito stays as it is.`);
@@ -76,10 +69,6 @@ async function loaded(engine: string): Promise<InstalledExtension[]> {
 function expectation(change: Change): (after: InstalledExtension) => boolean {
   if ("incognito" in change) return (after) => after.incognito === change.incognito;
   if ("userScripts" in change) return (after) => !!after.userScripts === change.userScripts;
-  if (change.siteAccess === "specificSites") {
-    const hosts = change.hosts!;
-    return (after) => after.siteAccess === "ON_SPECIFIC_SITES" && sameHosts(after.sites ?? [], hosts);
-  }
   const state = SITE_ACCESS_STATE[change.siteAccess];
   return (after) => after.siteAccess === state;
 }
@@ -94,28 +83,25 @@ async function configureExtension(params: Record<string, unknown>, call: SocketC
   checkedChange(ext, change);
   stillThere(call, profileId, engine);
   const what = Object.keys(change)[0];
-  const write = "siteAccess" in change ? { siteAccess: change.siteAccess } : change;
   let list: InstalledExtension[] | null;
   try {
-    list = await configureThenRead(engine, ext.id, write);
+    list = await configureThenRead(engine, ext.id, change);
   } catch (error) {
     throw new OpError("failed", `Ardia couldn't read the profile's extensions from Chromium after the change: ${errorText(error)}`);
   }
   if (!list) throw new OpError("failed", `Ardia didn't do that: Chromium refused ${ext.name}'s ${what} change, so nothing changed.`);
   const after = list.find((x) => x.id === ext.id);
-  if (!after) throw new OpError("no_window", `${ext.name} is gone from that profile.`);
+  if (!after) throw new OpError("failed", `Ardia didn't do that: ${ext.name} wasn't in the profile's extensions when Ardia read them back after the change.`);
   if (!expected(after)) throw new OpError("failed", `Ardia didn't do that: Chromium didn't leave ${ext.name}'s ${what} as asked (${after.siteAccess ?? "no site access"}, ${(after.sites ?? []).join(", ") || "no sites"}, incognito ${after.incognito}).`);
   return { id: after.id, name: after.name, incognito: after.incognito, userScripts: !!after.userScripts, siteAccess: after.siteAccess ?? null, sites: after.sites ?? [] };
 }
 
 const EXTENSION_ID = id("An extension id from extensions.list");
-const SITE_ACCESS_PARAM = oneOf(SITE_ACCESS, "Which sites it can read and change: allSites, onClick, or specificSites with hosts");
-const HOSTS = ids("For specificSites: exactly the sites it keeps, as match patterns it is already granted", 200);
+const SITE_ACCESS_PARAM = oneOf(SITE_ACCESS, "Which sites it can read and change: allSites or onClick; specificSites is refused until the engine can grant sites");
 const CONFIGURE_PARAMS: JsonSchema = {
-  ...obj({ profile: PROFILE, id: EXTENSION_ID, siteAccess: SITE_ACCESS_PARAM, hosts: HOSTS, incognito: bool("Allow in Incognito"), userScripts: bool("Allow User Scripts") }, ["id"]),
+  ...obj({ profile: PROFILE, id: EXTENSION_ID, siteAccess: SITE_ACCESS_PARAM, incognito: bool("Allow in Incognito"), userScripts: bool("Allow User Scripts") }, ["id"]),
   anyOf: [
-    obj({ profile: PROFILE, id: EXTENSION_ID, siteAccess: { ...SITE_ACCESS_PARAM, enum: ["specificSites"] }, hosts: HOSTS }, ["id", "siteAccess", "hosts"]),
-    obj({ profile: PROFILE, id: EXTENSION_ID, siteAccess: { ...SITE_ACCESS_PARAM, enum: ["allSites", "onClick"] } }, ["id", "siteAccess"]),
+    obj({ profile: PROFILE, id: EXTENSION_ID, siteAccess: SITE_ACCESS_PARAM }, ["id", "siteAccess"]),
     obj({ profile: PROFILE, id: EXTENSION_ID, incognito: bool("Allow in Incognito") }, ["id", "incognito"]),
     obj({ profile: PROFILE, id: EXTENSION_ID, userScripts: bool("Allow User Scripts") }, ["id", "userScripts"]),
   ],
@@ -135,7 +121,7 @@ export const EXTENSION_METHODS: MethodSpec[] = [
     name: "extensions.configure",
     mutates: true,
     description:
-      "Change exactly one of an extension's settings per call, as its page in Settings does: site access (specificSites needs hosts), Allow in Incognito or Allow User Scripts; a request with none or more than one fails validation",
+      "Change exactly one of an extension's settings per call, as its page in Settings does: site access (allSites or onClick; specificSites is refused), Allow in Incognito or Allow User Scripts; a request with none or more than one fails validation",
     params: CONFIGURE_PARAMS,
     result: "{id, name, incognito, userScripts, siteAccess, sites}",
     run: configureExtension,
