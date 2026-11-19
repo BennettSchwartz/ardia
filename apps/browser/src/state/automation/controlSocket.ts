@@ -33,7 +33,8 @@ import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, run
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 import { fittedEvent, fittedReply } from "./socketWire";
-import { runWouldAsk } from "./runAsks";
+import { runNeedsUser } from "./runAsks";
+import { dismissSocketAsks } from "./socketAsk";
 import { backgroundInstance } from "../app/appSettings";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
@@ -168,7 +169,9 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
 export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
-  if (background && runWouldAsk(useBrowser.getState(), plan)) return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
+  const needsUser = background ? runNeedsUser(useBrowser.getState(), plan) : null;
+  if (needsUser === "asks") return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
+  if (needsUser === "picker") return failure("refused", `${plan.command} opens a picker, and this Ardia runs in the background, where nobody can pick, so it didn't run.`);
   try {
     runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId });
   } catch (error) {
@@ -275,6 +278,7 @@ async function start(consent: ConsentToken | null) {
 
 async function stop() {
   generation = null;
+  dismissSocketAsks();
   noteSocketServing(false);
   subscriptions.clear();
   launchSent.clear();
@@ -292,6 +296,7 @@ function sync() {
   const consent = consentToken();
   if (!on) {
     generation = null;
+    dismissSocketAsks();
     noteSocketServing(false);
     stopResponders();
     runWritten([...unwrittenRuns]);

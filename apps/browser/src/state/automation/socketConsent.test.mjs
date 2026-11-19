@@ -32,7 +32,7 @@ test("profiles.delete confirmed after control went off deletes nothing", async (
   const answer = holdConfirm();
   const deleting = fire("profiles.delete", { profile: work });
   await answer({ confirmed: true, suppressed: false });
-  assert.equal((await deleting).error?.code, "failed");
+  assert.equal((await deleting).error?.code, "refused");
   assert.ok(S().profiles[work], "the profile is still there");
   dialogs.confirm = original.confirm;
 });
@@ -50,7 +50,7 @@ test("a close confirmed after control went off neither closes nor saves Don't as
   for (let i = 0; i < 50 && !waiting.length; i++) await tick();
   S().updateSettings({ cliControl: false });
   waiting[0]({ confirmed: true, suppressed: true });
-  assert.equal((await closing).error?.code, "failed");
+  assert.equal((await closing).error?.code, "refused");
   assert.ok(S().windows[windowId]);
   assert.equal(S().settings.warnBeforeClosingWindow, true, "the preference wasn't written");
   dialogs.confirm = original.confirm;

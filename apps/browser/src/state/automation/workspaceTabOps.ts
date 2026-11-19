@@ -7,6 +7,7 @@ import { sleepTab } from "../tabs/manualSleep";
 import { isSleeping } from "../tabs/sleepingTabs";
 import { webviews } from "../../platform/webviews";
 import { withDeadline } from "../../lib/deadline";
+import { awaitLate } from "./tabCalls";
 import type { IconValue, Op } from "./workspaceOps";
 import { OpError, store, tabRef, tabRefs, type OpResult } from "./workspaceTargets";
 
@@ -33,10 +34,15 @@ function stopped(message: string, done: string[]) {
   return error;
 }
 
-async function settled<T>(work: Promise<T>, id: string, doing: string, done: string[], stillOn: () => boolean): Promise<T> {
+const CHANGED = new Set(["asleep", "awake"]);
+
+async function settled(work: Promise<string>, id: string, doing: string, done: string[], stillOn: () => boolean): Promise<string> {
   const outcome = await withDeadline(work, NATIVE_DEADLINE_MS, LATE);
-  if (outcome === LATE) throw stopped(`Tab ${id} didn't finish ${doing} within ${NATIVE_DEADLINE_MS / 1000} s, so Ardia stopped waiting (it may still finish); the tabs in changed were done.`, done);
-  if (!stillOn()) throw stopped(`Control was turned off while tab ${id} was ${doing}; the tabs after it were left alone.`, [...done, id]);
+  if (outcome === LATE) {
+    awaitLate(id, work);
+    throw stopped(`Tab ${id} didn't finish ${doing} within ${NATIVE_DEADLINE_MS / 1000} s: outcome unknown. Ardia stopped waiting; the tab is busy until the engine answers, and a later batch reports what happened under late.`, done);
+  }
+  if (!stillOn()) throw stopped(`Control was turned off while tab ${id} was ${doing}; the tabs after it were left alone.`, CHANGED.has(outcome) ? [...done, id] : done);
   return outcome;
 }
 
@@ -51,7 +57,7 @@ export async function sleep(results: OpResult[], op: Op, stillOn: () => boolean 
   for (const id of ids) {
     goingOn(stillOn, done);
     outcomes[id] = await settled(sleepTab(id), id, "going to sleep", done, stillOn);
-    done.push(id);
+    if (CHANGED.has(outcomes[id]!)) done.push(id);
   }
   return { tabs: ids, outcomes };
 }
@@ -74,7 +80,7 @@ export async function wake(results: OpResult[], op: Op, stillOn: () => boolean =
       store().updateTab(id, { page: wokenPage(t) });
       outcomes[id] = "awake";
     } else outcomes[id] = "already";
-    done.push(id);
+    if (CHANGED.has(outcomes[id]!)) done.push(id);
   }
   return { tabs: ids, outcomes };
 }

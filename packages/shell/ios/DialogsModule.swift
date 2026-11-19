@@ -3,6 +3,8 @@ import ArdiaCore
 import ExpoModulesCore
 
 public class DialogsModule: Module {
+  private static var shownOnly: [(window: NSWindow, alert: NSAlert)] = []
+
   public func definition() -> ModuleDefinition {
     Name("ArdiaDialogs")
 
@@ -25,11 +27,23 @@ public class DialogsModule: Module {
         alert.showsSuppressionButton = true
         alert.suppressionButton?.title = suppression
       }
-      DialogsModule.present(alert, windowId: options.windowId) { response in
+      let answer = { (response: NSApplication.ModalResponse) in
+        DialogsModule.shownOnly.removeAll { $0.alert === alert }
         promise.resolve([
           "confirmed": response == .alertFirstButtonReturn,
           "suppressed": alert.suppressionButton?.state == .on,
         ])
+      }
+      if options.onlyIfShown, let window = DialogsModule.visibleWindow(options.windowId) {
+        DialogsModule.shownOnly.append((window, alert))
+        alert.beginSheetModal(for: window, completionHandler: answer)
+        return
+      }
+      DialogsModule.present(alert, windowId: options.windowId, completion: answer)
+    }.runOnQueue(.main)
+    AsyncFunction("dismissShownOnly") { () in
+      for (window, alert) in DialogsModule.shownOnly {
+        window.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
       }
     }.runOnQueue(.main)
     AsyncFunction("prompt") { (options: PromptOptions, promise: Promise) in

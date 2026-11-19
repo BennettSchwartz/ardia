@@ -1,27 +1,30 @@
-export const MAX_HISTORY_KEYS = 20_000;
+const PREFIX = "h1";
+const TOKEN = /^h1\.([0-9a-f]{16})\.([0-9a-z]{1,11})$/;
 
-type Page = { engine: string; url: string };
-
-const byPage = new Map<string, string>();
-const byId = new Map<string, Page>();
-let issued = 0;
-
-const pageKey = (engine: string, url: string) => `${engine}\n${url}`;
-
-export function historyRowId(engine: string, url: string): string {
-  const key = pageKey(engine, url);
-  const known = byPage.get(key);
-  const id = known ?? `h${(++issued).toString(36)}`;
-  byPage.delete(key);
-  byId.delete(id);
-  byPage.set(key, id);
-  byId.set(id, { engine, url });
-  while (byId.size > MAX_HISTORY_KEYS) {
-    const [oldest, page] = byId.entries().next().value!;
-    byId.delete(oldest);
-    byPage.delete(pageKey(page.engine, page.url));
+function hash32(text: string, seed: number): number {
+  let h = seed >>> 0;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return id;
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b) >>> 0;
+  h ^= h >>> 13;
+  return h >>> 0;
 }
 
-export const historyPageOf = (id: string): Page | undefined => byId.get(id);
+export function urlDigest(url: string): string {
+  const hex = (n: number) => n.toString(16).padStart(8, "0");
+  return hex(hash32(url, 0x811c9dc5)) + hex(hash32(url, 0x9747b28c));
+}
+
+export const historyRowId = (url: string, lastVisit: number): string => `${PREFIX}.${urlDigest(url)}.${Math.max(0, Math.floor(lastVisit)).toString(36)}`;
+
+export type HistoryKey = { digest: string; lastVisit: number };
+
+export function parseHistoryKey(id: string): HistoryKey | null {
+  const match = TOKEN.exec(id);
+  if (!match) return null;
+  const lastVisit = parseInt(match[2]!, 36);
+  return Number.isSafeInteger(lastVisit) ? { digest: match[1]!, lastVisit } : null;
+}
