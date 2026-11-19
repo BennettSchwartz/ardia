@@ -121,7 +121,6 @@ static void EndFailedPageDragsAtMouseUp() {
   if (tab && ardia_host::AskPermissionInPopupWindow(tab, request)) return;
   NSMutableDictionary *payload = [request mutableCopy];
   payload[@"tabId"] = ardia_host::AppTabIdValue(tab);
-  if (NSString *requestId = [request[@"id"] isKindOfClass:NSString.class] ? request[@"id"] : nil) [ardia_host::PendingPermissions() addObject:requestId];
   if (tab && !ardia_host::AppTabIdOf(tab)) return ardia_host::HoldUntilHosted(tab, @"permissions.requested", payload);
   [ArdiaEvents emit:@"permissions.requested" data:payload];
 }
@@ -201,7 +200,6 @@ static void EndFailedPageDragsAtMouseUp() {
 }
 
 - (void)engine:(ArdiaCoreEngine *)engine permissionRequestDismissed:(NSString *)requestId {
-  [ardia_host::PendingPermissions() removeObject:requestId ?: @""];
   ardia_host::DropPopupWindowPermission(requestId ?: @"");
   ardia_host::DropHeldEvent(@"permissions.requested", requestId ?: @"");
   [ArdiaEvents emit:@"permissions.dismissed" data:@{@"id" : requestId ?: @""}];

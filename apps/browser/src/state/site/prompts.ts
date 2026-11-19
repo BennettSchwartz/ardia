@@ -29,7 +29,7 @@ let passwordPromptSerial = 0;
 export const passwordPromptId = (prompt: PasswordPrompt) => passwordPromptIds.get(prompt) ?? null;
 
 export function showPasswordPrompt(tabId: string, prompt: PasswordPrompt) {
-  if (prompt.state !== "saved") passwordPromptIds.set(prompt, prompt.offerSerial === undefined ? `pw${++passwordPromptSerial}` : `pw-offer-${prompt.offerSerial}`);
+  if (prompt.state !== "saved") passwordPromptIds.set(prompt, `pw${++passwordPromptSerial}`);
   patchPage(tabId, { passwordPrompt: prompt.state === "saved" ? null : prompt });
 }
 
@@ -71,19 +71,6 @@ export function answerAutofillPrompt(tabId: string, action: AutofillPromptAnswer
 }
 
 export type ConfirmedAnswer = "answered" | "gone" | "noView" | "refused";
-
-export async function answerPasswordPromptConfirmed(tabId: string, id: string, action: PasswordPromptAnswer, username?: string): Promise<ConfirmedAnswer> {
-  const prompt = pageOf(tabId).passwordPrompt;
-  if (!prompt || passwordPromptId(prompt) !== id) return "gone";
-  const view = webviews.get(tabId);
-  if (!view?.answerPasswordPrompt) return "noView";
-  if (prompt.offerSerial === undefined) return "refused";
-  const keeps = action === "save" || action === "update";
-  const expected = { state: prompt.state, origin: prompt.origin, username: prompt.username, offerSerial: prompt.offerSerial };
-  if (!(await view.answerPasswordPrompt(action, expected, keeps ? (username ?? prompt.username) : null))) return "refused";
-  if (pageOf(tabId).passwordPrompt === prompt) patchPage(tabId, { passwordPrompt: null });
-  return "answered";
-}
 
 export async function answerAutofillPromptConfirmed(tabId: string, id: number, action: AutofillPromptAnswer): Promise<ConfirmedAnswer> {
   const prompt = pageOf(tabId).autofillPrompt;

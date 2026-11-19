@@ -62,24 +62,6 @@ constexpr NSSize kExtensionPopupMaximum = {800, 600};
   [_tab resolveAutofillPrompt:promptId action:action];
 }
 
-- (BOOL)answerPasswordPrompt:(NSString *)action expected:(NSDictionary<NSString *, id> *)expected username:(NSString *)username {
-  NSNumber *offer = [expected[@"offerSerial"] isKindOfClass:NSNumber.class] ? expected[@"offerSerial"] : nil;
-  if (!offer || offer.integerValue != ardia_host::PasswordOfferSerial(self)) return NO;
-  NSDictionary *shown = ardia_host::PeekPasswordPromptTab(self, _tab).passwordPrompt;
-  NSString *state = [shown[@"state"] isKindOfClass:NSString.class] ? shown[@"state"] : nil;
-  if (!state || ![state isEqualToString:expected[@"state"] ?: @""]) return NO;
-  for (NSString *key in @[ @"origin", @"username" ])
-    if (![shown[key] isEqual:expected[key] ?: @""]) return NO;
-  NSSet *fits = [state isEqualToString:@"save"]     ? [NSSet setWithArray:@[ @"save", @"never", @"dismiss" ]]
-                : [state isEqualToString:@"update"] ? [NSSet setWithArray:@[ @"update", @"nope", @"dismiss" ]]
-                                                    : NSSet.set;
-  if (![fits containsObject:action]) return NO;
-  ArdiaCoreTab *tab = ardia_host::PasswordPromptTab(self, _tab);
-  if (!tab) return NO;
-  [tab resolvePasswordPrompt:action username:username password:nil];
-  return YES;
-}
-
 - (BOOL)answerAutofillPrompt:(NSInteger)promptId action:(NSString *)action {
   if (![_tab.autofillPrompt[@"id"] isEqual:@(promptId)]) return NO;
   [_tab resolveAutofillPrompt:promptId action:action];

@@ -3,7 +3,6 @@ import Foundation
 protocol PageEngine {
   func owns(_ id: String) -> Bool
   func resolvePermission(_ id: String, result: String, remember: Bool)
-  func answerPermission(_ id: String, result: String, remember: Bool) -> Bool
   func resolveExternalApp(_ id: String, open: Bool, remember: Bool)
   func downloadCommand(_ action: String, id: String)
   func externalAppAllowances(profile: String, done: @escaping ([[String: Any]]) -> Void)
@@ -22,10 +21,6 @@ struct ChromiumPageEngine: PageEngine {
 
   func resolvePermission(_ id: String, result: String, remember: Bool) {
     ArdiaHost.resolvePermission(id, result: result, remember: remember)
-  }
-
-  func answerPermission(_ id: String, result: String, remember: Bool) -> Bool {
-    ArdiaHost.answerPermission(id, result: result, remember: remember)
   }
 
   func resolveExternalApp(_ id: String, open: Bool, remember: Bool) {
@@ -74,10 +69,6 @@ struct WebKitPageEngine: PageEngine {
   func owns(_ id: String) -> Bool { id.hasPrefix("wk-") }
 
   func resolvePermission(_ id: String, result: String, remember: Bool) {
-    hub.permissions.resolve(id, result: result, remember: remember)
-  }
-
-  func answerPermission(_ id: String, result: String, remember: Bool) -> Bool {
     hub.permissions.resolve(id, result: result, remember: remember)
   }
 

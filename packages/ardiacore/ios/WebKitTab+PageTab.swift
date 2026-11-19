@@ -93,8 +93,6 @@ extension WebKitTab: PageTab {
 
   func resolveAutofillPrompt(_ promptId: Int, action: String) {}
 
-  func answerPasswordPrompt(_ action: String, expected: [String: Any], username: String?) -> Bool { false }
-
   func answerAutofillPrompt(_ promptId: Int, action: String) -> Bool { false }
 
   func executeExtensionAction(_ extensionId: String) -> String? { nil }

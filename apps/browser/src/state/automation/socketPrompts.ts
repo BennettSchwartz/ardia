@@ -1,6 +1,6 @@
 import { usePages, pageOf, type PageState } from "../tabs/pageState";
-import { answerPermissionConfirmed, answersJustOnce, confirmableKinds, queuedPermissions } from "../site/permissions";
-import { answerAutofillPromptConfirmed, answerPasswordPromptConfirmed, passwordPromptId, type ConfirmedAnswer } from "../site/prompts";
+import { queuedPermissions } from "../site/permissions";
+import { answerAutofillPromptConfirmed, passwordPromptId, type ConfirmedAnswer } from "../site/prompts";
 import type { AutofillPrompt } from "../tabs/pageState";
 import { useBrowser, type BrowserState } from "../browser/store";
 import { isEligibleTab } from "./automationWindows";
@@ -45,55 +45,43 @@ function permissionTab(id: string) {
   return shown;
 }
 
-export const UNCONFIRMED = "Ardia can't confirm that answer until the engine reports a permission's result, so the ardia command doesn't give it; answer allow or block, or leave it to the prompt on screen.";
+export const PERMISSION_NEEDS_ENGINE =
+  "Answering a permission prompt waits for engine support: the engine doesn't report what an answer did (a resolve result and a one-time grant in ac_permissions.mm). permissions.prompts lists them; the prompt on screen answers them.";
 
-async function respondPermission(params: Record<string, unknown>, call: SocketCall) {
-  const { tab, page } = permissionTab(params.id as string);
-  const request = page.permission!;
-  const decision = params.decision as (typeof PERMISSION_DECISIONS)[number];
-  if (decision === "allowOnce" && !answersJustOnce(request.permissions)) {
-    throw new OpError("refused", "Only camera, microphone and location can be allowed just this once; answer allow or block.");
-  }
-  if (decision === "allowOnce" || decision === "dismiss") throw new OpError("refused", UNCONFIRMED);
-  if (!confirmableKinds(request.permissions)) throw new OpError("refused", `Ardia can't read back an answer for ${request.permissions.join(", ") || "this prompt"}, so the ardia command doesn't give it; leave it to the prompt on screen.`);
-  call.stillServing();
-  const outcome = await answerPermissionConfirmed(tab, request.id, decision === "allow" ? "accept" : "deny");
-  if (outcome === "gone") throw new OpError("failed", CLOSED);
-  if (outcome === "unknown") throw new OpError("failed", "The answer went to the engine but its outcome is unknown: the site's setting didn't show it within 5 s.");
-  return { ok: true, id: request.id, decision };
+function respondPermission(params: Record<string, unknown>) {
+  permissionTab(params.id as string);
+  throw new OpError("refused", PERMISSION_NEEDS_ENGINE);
 }
 
-const usernameList = (usernames: string[]) => ({
-  usernames: usernames.slice(0, LISTED_USERNAMES).map((name, index) => ({ id: `u${index}`, name: name.slice(0, USERNAME_CHARS) })),
+function usernameToken(promptId: string, username: string) {
+  let a = 0x811c9dc5;
+  let b = 0x01000193;
+  for (const ch of `${promptId}\u0000${username}`) {
+    const code = ch.codePointAt(0)!;
+    a = Math.imul(a ^ code, 0x01000193) >>> 0;
+    b = Math.imul(b ^ code, 0x5bd1e995) >>> 0;
+  }
+  return `u-${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+}
+
+const usernameList = (promptId: string | null, usernames: string[]) => ({
+  usernames: usernames.slice(0, LISTED_USERNAMES).map((name) => ({ id: usernameToken(promptId ?? "", name), name: name.slice(0, USERNAME_CHARS) })),
   usernameCount: usernames.length,
 });
 
-const usernameAt = (usernames: string[], usernameId: unknown) => {
-  const match = typeof usernameId === "string" ? /^u(\d{1,4})$/.exec(usernameId) : null;
-  return match ? usernames[Number(match[1])] : undefined;
-};
-
 const passwordRow = ({ tab, window, page }: Shown) => {
   const p = page.passwordPrompt!;
-  return clippedRow({ id: passwordPromptId(p), tab, window, origin: p.origin, state: p.state, username: p.username, ...usernameList(p.usernames), federation: p.federation || null });
+  return clippedRow({ id: passwordPromptId(p), tab, window, origin: p.origin, state: p.state, username: p.username, ...usernameList(passwordPromptId(p), p.usernames), federation: p.federation || null });
 };
 
-async function respondPassword(params: Record<string, unknown>, call: SocketCall) {
+export const PASSWORD_NEEDS_ENGINE =
+  "Answering a password prompt waits for engine support: the engine names no offer and doesn't report whether an answer took (an offer id and a resolve result in ac_password_prompt.mm). passwords.prompts lists them; the prompt on screen answers them.";
+
+function respondPassword(params: Record<string, unknown>) {
   const t = tabOf(params.tab);
   const prompt = pageOf(t.id).passwordPrompt;
   if (!prompt || passwordPromptId(prompt) !== params.id) throw new OpError("no_window", CLOSED);
-  const decision = params.decision as (typeof PASSWORD_DECISIONS)[number];
-  const update = prompt.state === "update";
-  const fits = update ? decision === "update" || decision === "notNow" || decision === "dismiss" : decision === "save" || decision === "never" || decision === "notNow" || decision === "dismiss";
-  if (!fits) throw new OpError("bad_request", `The prompt asks to ${update ? "update" : "save"} a password; ${decision} isn't one of its buttons.`);
-  const username = params.usernameId === undefined ? undefined : usernameAt(prompt.usernames, params.usernameId);
-  if (params.usernameId !== undefined && !(update && prompt.usernames.length > 1 && username !== undefined)) {
-    throw new OpError("bad_request", "usernameId picks one of the prompt's usernames by its id, and only when it offers a choice.");
-  }
-  const action = decision === "notNow" ? (update ? "nope" : "dismiss") : decision;
-  call.stillServing();
-  confirmed(await answerPasswordPromptConfirmed(t.id, params.id as string, action, username));
-  return { ok: true };
+  throw new OpError("refused", PASSWORD_NEEDS_ENGINE);
 }
 
 const AUTOFILL_DESCRIPTIONS: Record<AutofillPrompt["kind"], string> = {
@@ -131,7 +119,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
   {
     name: "permissions.respond",
     mutates: true,
-    description: "Answer a permission prompt on screen with allow or block, remembered as the buttons do; the reply waits until the site's setting shows the answer. allowOnce and dismiss are refused until the engine reports their outcome",
+    description: "Refused for now: answering a permission prompt waits for engine support that reports what the answer did. permissions.prompts lists them",
     params: obj({ id: text("A prompt id from permissions.prompts"), decision: oneOf(PERMISSION_DECISIONS, "The answer") }, ["id", "decision"]),
     result: "{ok, id, decision}",
     run: respondPermission,
@@ -139,7 +127,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
   {
     name: "passwords.prompts",
     mutates: false,
-    description: `Save and update password prompts on screen: the site and username, never the password. usernames lists at most ${LISTED_USERNAMES} as {id, name}, name cut to ${USERNAME_CHARS} characters; usernameCount says how many there are`,
+    description: `Save and update password prompts on screen: the site and username, never the password. usernames lists at most ${LISTED_USERNAMES} as {id, name}: id is a token for that prompt and username, name is cut to ${USERNAME_CHARS} characters; usernameCount says how many there are`,
     params: obj({}),
     result: "[{id, tab, window, origin, state, username, usernames, usernameCount, federation}]",
     run: () => shownPrompts((p) => p.passwordPrompt).map(passwordRow),
@@ -147,7 +135,7 @@ export const PROMPT_METHODS: MethodSpec[] = [
   {
     name: "passwords.respond",
     mutates: true,
-    description: "Answer a tab's password prompt with one of its buttons; refused when that tab now shows another prompt",
+    description: "Refused for now: answering a password prompt waits for engine support that names the offer and reports the result. passwords.prompts lists them",
     params: obj(
       {
         tab: TAB,
@@ -192,7 +180,7 @@ export function startPromptEvents(send: EventSend, wants: ReadonlySet<string>) {
       }
       if (wants.has("password.prompted") && page.passwordPrompt && page.passwordPrompt !== before?.passwordPrompt) {
         const p = page.passwordPrompt;
-        send("password.prompted", clippedRow({ windowId: window, tabId, id: passwordPromptId(p), origin: p.origin, state: p.state, username: p.username, ...usernameList(p.usernames) }));
+        send("password.prompted", clippedRow({ windowId: window, tabId, id: passwordPromptId(p), origin: p.origin, state: p.state, username: p.username, ...usernameList(passwordPromptId(p), p.usernames) }));
       }
     }
   });

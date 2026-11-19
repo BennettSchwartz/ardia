@@ -14,7 +14,6 @@ type NativeHandle = Omit<
   | "loadUrl"
   | "downloadFavicon"
   | "resolvePasswordPrompt"
-  | "answerPasswordPrompt"
   | "answerAutofillPrompt"
   | "discard"
   | "sleepIfHidden"
@@ -22,7 +21,6 @@ type NativeHandle = Omit<
   | "requestPictureInPicture"
   | "takeControlPress"
 > & {
-  answerPasswordPrompt(answer: string, expected: { state: string; origin: string; username: string; offerSerial: number }, username: string | null): Promise<boolean>;
   answerAutofillPrompt(id: number, answer: string): Promise<boolean>;
   requestPictureInPicture(clickAt: number, control: number): Promise<boolean>;
   takeControlPress(clickAt: number, control: number): Promise<boolean>;
@@ -104,7 +102,6 @@ export const WebView = forwardRef<WebViewHandle, WebViewProps>(function WebView(
       resolvePasswordPrompt: (answer, edits) =>
         call(undefined, (n) => n.resolvePasswordPrompt(answer, edits?.username ?? null, edits?.password ?? null)),
       resolveAutofillPrompt: (id, answer) => call(undefined, (n) => n.resolveAutofillPrompt(id, answer)),
-      answerPasswordPrompt: (answer, expected, username) => call(false, (n) => n.answerPasswordPrompt(answer, expected, username)),
       answerAutofillPrompt: (id, answer) => call(false, (n) => n.answerAutofillPrompt(id, answer)),
       executeExtensionAction: (extensionId) => call(null, (n) => n.executeExtensionAction(extensionId)),
       resolveDisplayMedia: (id, sourceId, audio = false) => call(undefined, (n) => n.resolveDisplayMedia(id, sourceId, audio)),

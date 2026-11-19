@@ -5,7 +5,6 @@ export type { PermissionKind, PermissionRequest, PermissionResult, DeviceChooser
 export const onPermission = (listener: (p: PermissionRequest) => void) => on("permissions.requested", listener);
 export const onPermissionDismissed = (listener: (p: { id: string }) => void) => on("permissions.dismissed", listener);
 export const resolvePermission = (id: string, result: PermissionResult, remember = false) => call("permissions.resolve", { id, result, remember });
-export const answerPermissionIfPending = (id: string, result: PermissionResult, remember: boolean) => call("permissions.answer", { id, result, remember });
 
 export const onDeviceChooser = (listener: (e: DeviceChooser) => void) => on("media.deviceChooser", listener);
 export const selectDevice = (id: number, index: number) => call("media.selectDevice", { id, index });

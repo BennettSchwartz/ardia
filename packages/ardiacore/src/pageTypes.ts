@@ -147,7 +147,6 @@ export type PasswordPrompt = {
   federation: string;
   usernames: string[];
   offer?: string;
-  offerSerial?: number;
 };
 export type PasswordPromptAnswer = "save" | "update" | "never" | "nope" | "dismiss";
 export type AutofillPrompt = {
@@ -276,7 +275,6 @@ export type WebViewHandle = {
 
   resolvePasswordPrompt(answer: PasswordPromptAnswer, edits?: { username?: string; password?: string; offer?: string }): Promise<void>;
   resolveAutofillPrompt(id: number, answer: AutofillPromptAnswer): Promise<void>;
-  answerPasswordPrompt?(answer: PasswordPromptAnswer, expected: { state: string; origin: string; username: string; offerSerial: number }, username: string | null): Promise<boolean>;
   answerAutofillPrompt?(id: number, answer: AutofillPromptAnswer): Promise<boolean>;
   executeExtensionAction(extensionId: string): Promise<ExtensionActionResult | null>;
 
