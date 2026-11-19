@@ -15,6 +15,7 @@ NS_ASSUME_NONNULL_BEGIN
                                   appWindow:(nullable NSString *)appWindow;
 
 + (void)floatForWindowManagers:(NSWindow *)window;
++ (void)floatOverActiveSpace:(NSWindow *)window;
 
 + (void)recordLaunchLayout;
 + (void)forgetLaunchPictures;
@@ -30,6 +31,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (void)setTrafficLightsCenter:(nullable NSValue *)center trailing:(BOOL)trailing inWindow:(NSWindow *)window;
 + (void)moveTrafficLightsCenter:(nullable NSValue *)center trailing:(BOOL)trailing inWindow:(NSWindow *)window;
++ (void)insetTrafficLightsOfWindow:(NSWindow *)window NS_SWIFT_NAME(insetTrafficLights(of:));
 
 + (void)closeWindow:(NSWindow *)window;
 
@@ -46,9 +48,17 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property(class, nonatomic, copy, nullable) BOOL (^shouldCloseHandler)(NSWindow *window);
 @property(class, nonatomic, copy, nullable) BOOL (^refusesUnhandledKeyHandler)(NSWindow *window, NSEvent *event);
+@property(class, nonatomic, copy, nullable) NSString *(^focusHandoffSummaryHandler)(NSWindow *window);
 + (BOOL)windowShouldClose:(NSWindow *)window;
 + (BOOL)windowFullScreenIsForPage:(NSWindow *)window;
 + (BOOL)userSeesWindow:(nullable NSWindow *)window NS_SWIFT_NAME(userSees(_:));
+
+@end
+
+@interface ArdiaChromeWindowHost (PictureInPicture)
+
++ (BOOL)isVideoPictureInPictureWindow:(NSWindow *)window;
++ (BOOL)consumePictureInPictureActivation;
 
 @end
 
@@ -58,6 +68,12 @@ NSView *_Nullable ArdiaWindowRootView(NSWindow *_Nullable window);
 NSValue *_Nullable ArdiaTrafficLightsCenter(NSWindow *_Nullable window);
 BOOL ArdiaTrafficLightsTrailing(NSWindow *_Nullable window);
 FOUNDATION_EXPORT BOOL ArdiaPerformReservedKey(NSEvent *event);
+
+@interface ArdiaChromeWindowHost (AccessibilityTitle)
+
+@property(class, nonatomic, copy, nullable) void (^accessibilityTitleReadHandler)(NSWindow *window);
+
+@end
 
 @interface ArdiaChromeWindowHost (LittleFit)
 

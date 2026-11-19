@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Animated, ScrollView, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { switchOn } from "../../state/app/switches";
 import { ContextMenuArea, space, WindowDragRegion } from "../ui";
@@ -28,6 +28,7 @@ import { DOCK_SHARE, DOCKED_ROW_PAD, GLOW_ROOM, pageLayout, tilesFitDock, type S
 import { PageRows } from "./PageRows";
 import { NewTabRow } from "./NewTabRow";
 import { SelectedRowPill, useSelectedRowAway } from "./SelectedRowPill";
+import { withOverscan, type ListViewport } from "./listViewport";
 
 const NONE: string[] = [];
 type PageGeometry = { scrollY: number; viewport: number; regions: SidebarGeometry["regions"] };
@@ -63,7 +64,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
     return () => cancelAnimationFrame(frame);
   }, [beside]);
   const offScreen = beside && !current;
-  const playerTab = useSidebarPlayerTab(windowId, profileId);
+  const playerTab = useSidebarPlayerTab(windowId, profileId, current);
   const playerHeight = playerTab ? SIDEBAR_PLAYER_HEIGHT : 0;
   const playerMotion = usePlayerMotion();
   const cells = useSidebarCells(windowId, profileId, offScreen);
@@ -116,13 +117,14 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
   windowRef.current = windowId;
   const page = useRef<PageGeometry>({ scrollY: 0, viewport: 0, regions: { pinnedGroups: 0, list: 0 } }).current;
   const scrollView = useRef<ScrollView | null>(null);
-  const setScrollView = useCallback(
-    (view: ScrollView | null) => {
-      scrollView.current = view;
-      if (current) onScrollView(view);
-    },
-    [current, onScrollView],
-  );
+  const [listViewport] = useState<ListViewport>(() => ({
+    band: () => (page.viewport ? withOverscan(page.scrollY - LIST_PAD - page.regions.list, page.viewport) : null),
+  }));
+  useLayoutEffect(() => {
+    if (!current) return;
+    onScrollView(scrollView.current);
+    return () => onScrollView(null);
+  }, [current, onScrollView]);
   const selectedRow = useSelectedRowAway(windowId, geometry, scrollView, () => page.scrollY);
   const [listFrame, setListFrame] = useState<{ top: number; height: number } | null>(null);
   useLayoutEffect(() => {
@@ -195,7 +197,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                   <Animated.View style={{ flex: 1, overflow: "hidden", transform: [{ translateY: playerMotion.listClip }] }}>
                     <Animated.View style={{ flex: 1, transform: [{ translateY: playerMotion.listUnclip }] }}>
                       <Animated.ScrollView
-                        ref={setScrollView}
+                        ref={scrollView}
                         onLayout={(e) => {
                           page.viewport = e.nativeEvent.layout.height;
                           scrollEdgeBelow.measure({ viewport: page.viewport });
@@ -228,6 +230,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                           controller={liveDrag}
                           geometry={geometry}
                           regions={page.regions}
+                          viewport={listViewport}
                           onListHeight={reportList}
                         />
                         <ContextMenuArea style={{ flexGrow: 1, minHeight: inlineNewTab ? 24 : 0 }} onContextMenu={() => void openSidebarMenu(windowId)}>

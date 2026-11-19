@@ -170,6 +170,7 @@ void AcceptDrops(NSView *root, BOOL accept) {
 - (void)dealloc {
   if (_interfaceScaleObserver) [NSNotificationCenter.defaultCenter removeObserver:_interfaceScaleObserver];
   if (_sightObserver) [NSNotificationCenter.defaultCenter removeObserver:_sightObserver];
+  [self leaveScreenAhead];
   [self closeBrowser];
 }
 
@@ -187,6 +188,8 @@ void AcceptDrops(NSView *root, BOOL accept) {
 
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow {
   if (!newWindow) [self lendPageToSuccessor];
+  if (self.window && newWindow != self.window && (_visible || _reveal.active)) [ArdiaWebView dropNativeRevealsInWindow:self.window];
+  if (newWindow != self.window) [self leaveScreenAhead];
   [super viewWillMoveToWindow:newWindow];
 }
 
@@ -207,6 +210,11 @@ void AcceptDrops(NSView *root, BOOL accept) {
   if (_tab) [self reclaimLentPage];
   if (_tab) [self adoptMovedPage];
   else [self ensureTab];
+}
+
+- (void)viewDidUnhide {
+  [super viewDidUnhide];
+  [self settleFirstShowFocus];
 }
 
 - (void)setExtensionHost:(NSString *)extensionHost {
@@ -251,8 +259,10 @@ void AcceptDrops(NSView *root, BOOL accept) {
   if (!visible) [self storePageFocus];
   _visible = visible;
   if (visible) [self exposePage];
+  if (visible) [self holdCreatedPageShown];
   if (visible) [self stopHolding];
   if (visible) [self settleRevealsInWindow];
+  if (visible) [self settleFirstShowFocus];
   if (!visible) [_tab exitExclusiveAccess];
   if (visible && !_frameHold.awaiting && self.alphaValue < 1 && _tab.view.superview == self && !_tab.view.hidden) {
     [CATransaction begin];

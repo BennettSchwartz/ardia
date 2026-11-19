@@ -5,6 +5,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { StyleSheet } from "react-native";
 import { focus, switchToTab } from "../../state/browser/actions";
 import { notePictureInPictureBackToTab, notePictureInPictureClickSkip, notePictureInPictureDragged } from "../../state/telemetry/pictureInPictureCounts";
+import { noteRendererResponsive, noteRendererUnresponsive } from "../../state/telemetry/freezes";
 import { noteFavicon } from "../../state/favicons/favicons";
 import { adoptIconPage, dropOutlivedFavicon, noteIconPage } from "../../state/favicons/iconPage";
 import { restoredThemeColor } from "../../state/windows/launchLook";
@@ -47,7 +48,6 @@ import { notePagePress, notePagePressRefused } from "../../state/telemetry/tabPr
 import { noteWebKitFocusRestore } from "../../state/telemetry/pageFocusReturns";
 import { noteAutoPictureInPictureKept, notePageOverlay, noteReopenedPage, noteSiteControls, noteWebKitPageKeptHidden } from "../../state/telemetry/usage";
 import { noteWebKitMediaFault } from "../../state/telemetry/webkitMediaFaults";
-import { noteFairPlay } from "../../state/telemetry/fairPlayCounts";
 import { isAdoptKind } from "../../state/tabs/adoptIds";
 import { firstPagePending, isBlankAddress, noteFirstPagePending, reportedAddress, reportedTitle } from "../../state/tabs/pendingAddress";
 import { STATUS_FLIP_BAND } from "./tokens";
@@ -253,8 +253,14 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
         }
         noteUnreadPageEnded(tabId);
       }}
-      onUnresponsive={() => patchPage(tabId, { unresponsive: true })}
-      onResponsive={() => patchPage(tabId, { unresponsive: false })}
+      onUnresponsive={() => {
+        noteRendererUnresponsive(tabId);
+        patchPage(tabId, { unresponsive: true });
+      }}
+      onResponsive={() => {
+        noteRendererResponsive(tabId, false);
+        patchPage(tabId, { unresponsive: false });
+      }}
       onFullscreen={(fullscreen) => patchPage(tabId, { fullscreen })}
       onMediaAccess={(mediaAccess) => patchPage(tabId, { mediaAccess: mediaAccess.camera || mediaAccess.microphone || mediaAccess.screen ? mediaAccess : null })}
       onSecurity={(security) => !prewarmOnly() && patchPage(tabId, { security })}
@@ -283,7 +289,6 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onSelection={(selection) => setPageSelection(tabId, selection)}
       onScroll={(state) => noteScroll(tabId, state)}
       onProtectedMedia={(request) => offerWebKit(tabId, request)}
-      onFairPlay={noteFairPlay}
       onAutoplayBlocked={(count) => noteSiteControls("autoplayPlaysBlocked", count)}
       onNotificationClose={closeWebNotification}
       onDiscarded={(url, reason) => {

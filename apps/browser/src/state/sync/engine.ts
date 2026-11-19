@@ -1,17 +1,8 @@
-import {
-  emptyScope,
-  EXTENSION_PREFIX,
-  folderTransport,
-  syncScope,
-  SyncNative,
-  visible,
-  type FolderInfo,
-  type PhraseResult,
-} from "../../platform/sync";
+import { emptyScope, EXTENSION_PREFIX, folderTransport, syncScope, SyncNative, visible, type FolderInfo, type PhraseResult } from "../../platform/sync";
 import { create } from "zustand";
 import { useBrowser } from "../browser/store";
 import { engineProfile } from "../browser/model";
-import { historyExpired } from "./adapters";
+import { historyExpired } from "./historyAdapter";
 import { settingsToReapply } from "./settingsAdapter";
 import { watchExtensionIntents } from "./extensions";
 import { appAdapters, extensionsOf, forgetScopeAdapters, profileAdapters, typeSynced } from "./scopeAdapters";
@@ -21,6 +12,8 @@ import { settleThemeAdoption, themeChosenHere } from "./syncThemes";
 import { editClock, startEditClock } from "./editClock";
 import { addLinkedProfile, appScopeOf, linkedProfileId, linkProfiles, readyToPair, remoteProfileRecord, sharedDataChain } from "./profileLinks";
 import { summarize } from "./syncSummary";
+import { takeCycleWork, timedCycle } from "./cycleWork";
+import { freezeRemovals, markDeviceRemoved, markRemoved, settleRemovals, takeReturnedDeviceRemovals, takeReturnedProfileRemovals, takeSyncedDeviceRemovals, takeSyncedProfileRemovals } from "./profileRemoval";
 import { profileScope } from "./records";
 import { queueSend, sendTargetsIn } from "./sentTabs";
 import { errorText } from "../../lib/errors";
@@ -28,6 +21,8 @@ import { isQuitting, saveBeforeQuit } from "../app/quit";
 import { onProfilesOpened, profileOpened } from "../profiles/profileLoading";
 import { markOpenTabsSynced, openTabsClosed, recordOpenTabCloses } from "./openTabCloses";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
+import { consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 
 export { onTabsReceived } from "./sentTabs";
 export { takeOpenTabSyncCounts } from "../telemetry/openTabSyncCounts";
@@ -61,13 +56,11 @@ let snapshotWrites = { count: 0, bytes: 0 };
 const { read, loadState, persistJournal, watchScope, save, startOver, checkpoint } = syncFiles(() => doc);
 
 function noteSnapshot({ snapshotBytes }: { snapshotBytes: number }) {
-  if (!snapshotBytes) return;
-  snapshotWrites.count++;
-  snapshotWrites.bytes += snapshotBytes;
+  if (snapshotBytes) snapshotWrites = { count: snapshotWrites.count + 1, bytes: snapshotWrites.bytes + snapshotBytes };
 }
 
 export function takeSnapshotWrites() {
-  const taken = snapshotWrites;
+  const taken = { ...snapshotWrites, ...takeCycleWork(), removedProfiles: takeSyncedProfileRemovals(), removedDevices: takeSyncedDeviceRemovals(), removalsReturned: takeReturnedProfileRemovals() + takeReturnedDeviceRemovals() };
   snapshotWrites = { count: 0, bytes: 0 };
   return taken;
 }
@@ -119,7 +112,7 @@ async function runCycle({ retiring = false, forcePasswords = false }: CycleOptio
   }
   const options = { retiring, forcePasswords: forcePasswords || forcePasswordsNext };
   forcePasswordsNext = false;
-  cycle = cycleOnce(SyncNative, doc.folder, doc.deviceId, options);
+  cycle = timedCycle(Date.now(), cycleOnce(SyncNative, doc.folder, doc.deviceId, options));
   try {
     await cycle;
   } finally {
@@ -128,6 +121,7 @@ async function runCycle({ retiring = false, forcePasswords = false }: CycleOptio
 }
 
 async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string, device: string, { retiring, forcePasswords }: Required<CycleOptions>) {
+  const consent = consentToken();
   clearTimeout(timer);
   const slow = setTimeout(() => useSync.getState().status === "updated" && publishUi({ status: "updating" }), 1000);
   try {
@@ -139,6 +133,7 @@ async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string,
     if (editClock().device !== device) startEditClock(device, doc.clock);
     const clock = editClock();
     const app = appScopeOf(doc);
+    if (freezeRemovals(doc)) save();
     const appSettled = watchScope(APP_SCOPE, app, clock);
     try {
       noteSnapshot(await syncScope({
@@ -153,6 +148,7 @@ async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string,
     } finally {
       await appSettled();
     }
+    settleRemovals(doc, app);
     if (app.joined && readyToPair(doc, app) && !isQuitting()) linkProfiles(doc, app);
     settleThemeAdoption(doc.profiles, app, true);
     let pending = app.pending;
@@ -195,19 +191,15 @@ async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string,
     if ((error as { code?: unknown } | null)?.code === "ERR_SYNC_FOLDER_UNREADABLE") {
       publishUi({ status: "offline", error: "The sync folder can’t be read. Check that it’s still there and that Ardia can open it." });
     } else if (useSync.getState().status !== "locked") {
-      console.warn("[sync] cycle failed", error);
+      warnFor(consent, "[sync] cycle failed", error);
       publishUi({ status: "stalled", error: errorText(error) });
     }
   } finally {
     clearTimeout(slow);
     save();
     if (doc.enabled) {
-      if (again) {
-        again = false;
-        scheduleSync(0);
-      } else {
-        scheduleSync(CYCLE_MS);
-      }
+      scheduleSync(again ? 0 : CYCLE_MS);
+      again = false;
     }
   }
 }
@@ -294,7 +286,8 @@ export async function stopSync({ deleteData = false } = {}) {
   const native = SyncNative;
   if (!native || !doc.enabled) return;
   clearTimeout(timer);
-  const reportFailure = (error: unknown) => console.warn("[sync] the last cycle before stopping failed", error);
+  const consent = consentToken();
+  const reportFailure = (error: unknown) => warnFor(consent, "[sync] the last cycle before stopping failed", error);
   while (cycle) await cycle.catch(reportFailure);
   if (useSync.getState().status !== "locked") await runCycle({ retiring: true }).catch(reportFailure);
   clearTimeout(timer);
@@ -303,7 +296,7 @@ export async function stopSync({ deleteData = false } = {}) {
     try {
       await native.deleteChain(folder);
     } catch (error) {
-      console.warn("[sync] deleting sync data failed", error);
+      warnFor(consent, "[sync] deleting sync data failed", error);
     }
   }
   if (doc.deviceId) await native.forget(doc.deviceId);
@@ -356,12 +349,16 @@ export function addRemoteProfile(syncId: string): string | null {
   return shareWith;
 }
 
+export const removeRemoteProfile = (syncId: string): boolean => markRemoved(doc, syncId) && (docChanged(), true);
+export const removeSyncedDevice = (id: string): boolean => markDeviceRemoved(doc, id) && (docChanged(), true);
+
 export function startSync() {
   if (!SyncNative) return;
   load();
   publishUi({ status: doc.enabled ? "starting" : "off" });
   watchExtensions();
   if (doc.enabled && doc.deviceId) {
+    const consent = consentToken();
     void SyncNative.unlock(doc.deviceId)
       .then(async (ok) => {
         if (!ok) return publishUi({ status: "locked", error: `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.` });
@@ -370,7 +367,7 @@ export function startSync() {
         scheduleSync(500);
       })
       .catch((error: unknown) => {
-        console.warn("[sync] unlocking at launch failed", error);
+        warnFor(consent, "[sync] unlocking at launch failed", error);
         publishUi({ status: "stalled", error: errorText(error) });
       });
   }
@@ -388,7 +385,7 @@ export function startSync() {
   });
   if (__DEV__) {
     (globalThis as { acSync?: object }).acSync = {
-      useSync, syncNow, turnOnSync, enterRecoveryPhrase, stopSync, setTypeSynced, setProfileSynced, setOpenTabsSynced, addRemoteProfile, setSyncFolder, folderInfo,
+      useSync, syncNow, turnOnSync, enterRecoveryPhrase, stopSync, setTypeSynced, setProfileSynced, setOpenTabsSynced, addRemoteProfile, removeRemoteProfile, removeSyncedDevice, setSyncFolder, folderInfo,
       doc: () => doc,
       native: SyncNative,
       get menu(): typeof import("./menu") {

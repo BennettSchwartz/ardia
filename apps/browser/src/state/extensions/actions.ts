@@ -26,12 +26,14 @@ import { engineProfiles } from "../profiles/engineProfiles";
 import { shownPageId } from "../peek/peek";
 import { isOpenRegularWindow, mainWindowFor, originalProfile } from "../windows/small";
 import { focusedWindowOf } from "../windows/ui";
-import { goToSettingsPane, openSettings, replaceSettingsPlace, settingsBack, useSettingsNav } from "../settings/settingsWindows";
+import { goToSettingsPane, openSettings, replaceSettingsPlace, SETTINGS_DETAIL, useSettingsNav } from "../settings/settingsWindows";
 import { closeSidePanelsOf, toggleSidePanel } from "./sidePanels";
-import { notePrivateWindowExtensionOpen, noteExtensionProfilePageOpen, noteToolbarExtensionMove } from "../telemetry/usage";
-import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, pageProfile, shownIn, useExtensions, windowExtensions, readyTabOf, type Anchor } from "./store";
+import { notePrivateWindowExtensionOpen, noteExtensionInstallPromptStale, noteExtensionProfilePageOpen, noteToolbarExtensionMove } from "../telemetry/usage";
+import { extensionPageUrl, extensionProfile, extensionsProfileId, isPrivate, pageProfile, shownIn, useExtensions, windowExtensions, readyTabOf, tabProfile, type Anchor } from "./store";
 import { errorText } from "../../lib/errors";
 import { noteUnpackedInstall } from "../telemetry/exportCounts";
+import { consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
 import { movedToolbarOrder, toolbarOrder, type ToolbarDrag } from "./toolbarOrder";
 
@@ -47,6 +49,7 @@ export function refreshExtensions(profile: string): Promise<InstalledExtension[]
   if (!engineProfiles(useBrowser.getState()).includes(profile)) return Promise.resolve(useExtensions.getState().lists[profile] ?? EMPTY);
   const running = loading.get(profile);
   if (running) return running;
+  const consent = consentToken();
   const job = listExtensions(profile)
     .then((list) => {
       list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
@@ -54,7 +57,7 @@ export function refreshExtensions(profile: string): Promise<InstalledExtension[]
       return list;
     })
     .catch((error) => {
-      console.warn("[extensions] list failed", error);
+      warnFor(consent, "[extensions] list failed", error);
       return useExtensions.getState().lists[profile] ?? EMPTY;
     })
     .finally(() => loading.delete(profile));
@@ -117,24 +120,26 @@ export async function loadUnpacked(windowId: string, profile = extensionProfile(
 
 const STALE_PROMPT = "This install request has closed. Open the extension's page in the Chrome Web Store and add it again.";
 
-const declinePrompt = (requestId: string) => void resolveExtensionInstallPrompt(requestId, false).catch(() => {});
+const declinePrompt = (prompt: ExtensionInstallPrompt) => void resolveExtensionInstallPrompt(prompt, false).catch(() => {});
 
 export function showInstallPrompt(windowId: string, prompt: ExtensionInstallPrompt) {
   const current = useExtensions.getState().install;
-  if (current?.status === "prompt") declinePrompt(current.prompt.requestId);
+  if (current?.status === "prompt") declinePrompt(current.prompt);
   else cancelInstall();
   useExtensions.setState({ install: { windowId, profile: prompt.profile, source: "webStore", status: "prompt", prompt } });
 }
 
 export async function confirmInstall() {
+  const consent = consentToken();
   const request = useExtensions.getState().install;
   if (request?.status === "prompt") {
     useExtensions.setState({ install: null });
     try {
-      await resolveExtensionInstallPrompt(request.prompt.requestId, true);
+      await resolveExtensionInstallPrompt(request.prompt, true);
     } catch (error) {
-      if (useExtensions.getState().install) return;
       const stale = (error as { code?: unknown } | null)?.code === "ERR_EXTENSION_PROMPT_STALE";
+      if (stale) noteExtensionInstallPromptStale(consent);
+      if (useExtensions.getState().install) return;
       useExtensions.setState({ install: { windowId: request.windowId, profile: request.profile, source: request.source, status: "error", error: stale ? STALE_PROMPT : errorText(error) } });
       return;
     }
@@ -145,7 +150,7 @@ export async function confirmInstall() {
   useExtensions.setState({ install: { ...request, status: "installing" } });
   try {
     await installExtension(request.pkg, request.profile);
-    if (request.source === "unpacked") noteUnpackedInstall();
+    if (request.source === "unpacked") noteUnpackedInstall(consent);
     useExtensions.setState({ install: null });
     await refreshExtensions(request.profile);
   } catch (error) {
@@ -156,7 +161,7 @@ export async function confirmInstall() {
 export function cancelInstall() {
   const request = useExtensions.getState().install;
   if (!request) return;
-  if (request.status === "prompt") declinePrompt(request.prompt.requestId);
+  if (request.status === "prompt") declinePrompt(request.prompt);
   useExtensions.setState({ install: null });
 }
 
@@ -216,11 +221,12 @@ export async function reload(profile: string, id: string) {
 }
 
 async function changed(what: string, change: () => Promise<void>): Promise<boolean> {
+  const consent = consentToken();
   try {
     await change();
     return true;
   } catch (error) {
-    console.warn(`[extensions] ${what} failed`, error);
+    warnFor(consent, `[extensions] ${what} failed`, error);
     return false;
   }
 }
@@ -249,18 +255,13 @@ export function openOptions(windowId: string, ext: InstalledExtension) {
   focus(regular);
 }
 
-export const openManageExtensions = (windowId?: string | null) => openSettings("extensions", extensionsProfileId(null, windowId));
+export const openManageExtensions = (windowId?: string | null) => openSettings("profiles", extensionsProfileId(null, windowId));
 
 export function openExtensionDetails(profileId: string, extensionId: string) {
   if (useSettingsNav.getState().profileId !== profileId) replaceSettingsPlace(profileId);
-  goToSettingsPane("extensions", profileId, extensionId);
+  goToSettingsPane("profiles", profileId, SETTINGS_DETAIL.extension(extensionId));
 }
 
-export function showExtensionsList(profileId: string) {
-  const prev = useSettingsNav.getState().back.at(-1);
-  if (prev?.pane === "extensions" && !prev.detail && extensionsProfileId(prev.profileId) === profileId) settingsBack();
-  else goToSettingsPane("extensions", profileId);
-}
 export const openPinDialog = (windowId: string) => useExtensions.setState({ pinDialog: { windowId } });
 export const openWebStore = (windowId: string) => openInExtensionProfile(WEB_STORE_HOME, extensionProfile(useBrowser.getState(), windowId), { windowId });
 
@@ -279,7 +280,7 @@ export async function activateExtension(
   const web = tabId ? webviews.get(tabId) : undefined;
   const result = web ? await web.executeExtensionAction(ext.id) : null;
   const readyTab = readyTabOf(tabId);
-  if (!state && result === "popup" && readyTab) state = (await extensionActionStates(readyTab, [ext.id]))[ext.id];
+  if (!state && result === "popup" && readyTab) state = (await extensionActionStates(readyTab, [ext.id], tabProfile(readyTab)))[ext.id];
   const url = state ? state.popup : ext.popup ? extensionPageUrl(ext.id, ext.popup) : "";
   if (result === "none") return;
   if (result === "sidePanel") return void toggleSidePanel(windowId, ext.id);
@@ -293,11 +294,12 @@ let popupRequests = 0;
 
 export async function openActionPopup(windowId: string, extensionId: string, anchor: Anchor, sourceTabId: string) {
   const request = ++popupRequests;
+  const consent = consentToken();
   const tabId = shownPageId(useBrowser.getState(), windowId);
-  const url = (await extensionActionStates(sourceTabId, [extensionId]))[extensionId]?.popup ?? "";
+  const url = (await extensionActionStates(sourceTabId, [extensionId], tabProfile(sourceTabId)))[extensionId]?.popup ?? "";
   if (request !== popupRequests || shownPageId(useBrowser.getState(), windowId) !== tabId)
-    return console.warn(`action.openPopup for ${extensionId}: the tab changed or another call came first`);
-  if (!url) return console.warn(`action.openPopup for ${extensionId}: no popup for the tab`);
+    return warnFor(consent, `action.openPopup for ${extensionId}: the tab changed or another call came first`);
+  if (!url) return warnFor(consent, `action.openPopup for ${extensionId}: no popup for the tab`);
   useExtensions.setState({ popup: { windowId, pageProfile: pageProfile(useBrowser.getState(), windowId), extensionId, url, anchor, opened: request } });
 }
 
@@ -319,7 +321,8 @@ export function extensionMenuItems(ext: Pick<InstalledExtension, "name" | "enabl
 
 export async function showExtensionMenu(windowId: string, ext: InstalledExtension) {
   const profile = extensionProfile(useBrowser.getState(), windowId);
-  const choice = await showMenu(extensionMenuItems(ext, useExtensions.getState().sidePanels[windowId]?.extensionId === ext.id));
+  const panel = useExtensions.getState().sidePanels[windowId];
+  const choice = await showMenu(extensionMenuItems(ext, panel?.extensionId === ext.id && !panel.hidden));
   if (choice === "options") openOptions(windowId, ext);
   if (choice === "pin") void setPinned(profile, ext.id, !ext.pinned);
   if (choice === "enable") void setEnabled(profile, ext.id, !ext.enabled);
