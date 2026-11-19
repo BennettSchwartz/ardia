@@ -34,6 +34,7 @@ import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 import { fittedEvent, fittedReply } from "./socketWire";
 import { runNeedsUser } from "./runAsks";
+import { dismissSocketAsks } from "./socketAsk";
 import { backgroundInstance } from "../app/appSettings";
 
 export const useControlSocket = create<{ status: ControlSocketStatus | null }>()(() => ({ status: null }));
@@ -277,6 +278,7 @@ async function start(consent: ConsentToken | null) {
 
 async function stop() {
   generation = null;
+  dismissSocketAsks();
   noteSocketServing(false);
   subscriptions.clear();
   launchSent.clear();
@@ -294,6 +296,7 @@ function sync() {
   const consent = consentToken();
   if (!on) {
     generation = null;
+    dismissSocketAsks();
     noteSocketServing(false);
     stopResponders();
     runWritten([...unwrittenRuns]);
