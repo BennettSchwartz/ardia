@@ -3,7 +3,7 @@ import { isIncognitoProfile } from "../browser/model";
 import { routeGroups } from "../airTraffic/groups";
 import { previewLink } from "../airTraffic/preview";
 import { cleanRule, cleanTarget, linkTextProblem, sameTarget, MAX_AIR_TRAFFIC_RULES, OPEN_AS, patternProblem, siteHost, sourceAppOf, type AirTrafficRule, type AirTrafficTarget, type LinkCondition, type OpenAs } from "../airTraffic/rules";
-import { currentAirTraffic, moveAirTrafficRule, removeAirTrafficRule, setAirTrafficFallback, targetUsableNow, tryAddAirTrafficRule, updateAirTrafficRule, type RuleDraft } from "../airTraffic/store";
+import { currentAirTraffic, placeAirTrafficRule, removeAirTrafficRule, setAirTrafficFallback, targetUsableNow, tryAddAirTrafficRule, updateAirTrafficRule, type RuleDraft } from "../airTraffic/store";
 import type { MethodSpec } from "./socketCatalog";
 import { bool, id, obj, oneOf, text } from "./socketSchema";
 import { expect, now } from "./socketTargets";
@@ -43,7 +43,7 @@ function conditionOf(value: Record<string, unknown>): LinkCondition {
 function profileOf(value: unknown): string | null {
   if (value === null) return null;
   const s = now();
-  if (typeof value !== "string" || !s.profiles[value] || isIncognitoProfile(value)) throw new OpError("no_window", `There's no profile ${String(value)}.`);
+  if (typeof value !== "string" || !Object.hasOwn(s.profiles, value) || isIncognitoProfile(value)) throw new OpError("no_window", `There's no profile ${String(value)}.`);
   return value;
 }
 
@@ -106,9 +106,8 @@ function removeRule(params: Record<string, unknown>) {
 function moveRule(params: Record<string, unknown>) {
   const rule = ruleOf(params.id);
   const rules = currentAirTraffic().rules;
-  const from = rules.indexOf(rule);
   const to = Math.max(0, Math.min(rules.length - 1, params.index as number));
-  for (let at = from; at !== to; at += Math.sign(to - at)) moveAirTrafficRule(rule.id, Math.sign(to - at) as -1 | 1);
+  if (rules.indexOf(rule) !== to) placeAirTrafficRule(rule.id, to);
   expect(currentAirTraffic().rules.findIndex((r) => r.id === rule.id) === to, "air-traffic.json couldn't be saved.");
   return currentAirTraffic().rules.map((r) => r.id);
 }

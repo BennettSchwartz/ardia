@@ -124,3 +124,39 @@ test("air traffic rules route into a group, and a profile change drops the group
   const other = S().createProfile({ name: "Other" });
   assert.equal((await ok("airTraffic.updateRule", { id: rule.id, profile: other })).groupKey, undefined);
 });
+
+test("air traffic: a move is one write, so a save failing after it can't leave a half-moved order", async () => {
+  await setup();
+  resetAirTrafficForTests();
+  const ids = [];
+  for (const text of ["one", "two", "three", "four"]) ids.push((await ok("airTraffic.addRule", { when: { kind: "contains", text } })).id);
+  const moved = [ids[3], ids[0], ids[1], ids[2]];
+  let writes = 0;
+  Object.defineProperty(stub.refusedWrites, "on", { get: () => ++writes > 1, configurable: true });
+  try {
+    assert.deepEqual(await ok("airTraffic.moveRule", { id: ids[3], index: 0 }), moved);
+  } finally {
+    Object.defineProperty(stub.refusedWrites, "on", { value: false, writable: true, configurable: true });
+  }
+  assert.equal(writes, 1, "one write");
+  assert.deepEqual(JSON.parse(stub.docs.get("air-traffic.json")).rules.map((r) => r.id), moved);
+  stub.refusedWrites.on = true;
+  try {
+    assert.equal(await code("airTraffic.moveRule", { id: ids[3], index: 3 }), "failed");
+  } finally {
+    stub.refusedWrites.on = false;
+  }
+  assert.deepEqual((await ok("airTraffic.rules")).rules.map((r) => r.id), moved, "a failed move changes nothing");
+  assert.deepEqual(JSON.parse(stub.docs.get("air-traffic.json")).rules.map((r) => r.id), moved);
+});
+
+test("air traffic: an inherited name isn't a profile", async () => {
+  await setup();
+  resetAirTrafficForTests();
+  for (const profile of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    assert.equal(await code("airTraffic.addRule", { when: { kind: "any" }, profile }), "no_window", profile);
+    assert.equal(await code("airTraffic.setFallback", { open: "tab", profile }), "no_window", profile);
+  }
+  assert.deepEqual((await ok("airTraffic.rules")).rules, []);
+});
+
