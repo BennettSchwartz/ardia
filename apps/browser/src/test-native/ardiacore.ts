@@ -140,7 +140,10 @@ function addVisit(profile: string, url: string, title: string, at: number) {
 }
 export const chromeVisit = (profile: string, url: string, title: string, at = Date.now()) => addVisit(profile, url, title, at);
 
+export const historyQueries: { profile: string; maxUrls: number; maxVisits: number }[] = [];
+
 function queryHistory(profile: string, { maxUrls = 5000, maxVisits = 50 }: { maxUrls?: number; maxVisits?: number }) {
+  historyQueries.push({ profile, maxUrls, maxVisits });
   const entries = [...chromeHistory(profile)]
     .map(([u, r]) => ({ u, t: r.title, n: r.visits.length, v: r.visits.slice(-maxVisits) }))
     .sort((a, b) => (b.v.at(-1) ?? 0) - (a.v.at(-1) ?? 0))
@@ -287,6 +290,8 @@ const cliStatus = (on: boolean | null): CliControlStatus =>
 const cliControl = (on: boolean | null) => testGlobals.acTestCliControl?.(on) ?? cliStatus(on);
 
 export const cancelledDownloads: string[] = [];
+export const downloadSettingsWrites: { profile: string; folder?: string; askWhereToSave?: boolean }[] = [];
+export const clearedSiteData: { profile: string; origin: string }[] = [];
 export const endedWebKitSessions: string[] = [];
 export const removedStagings: string[] = [];
 export const stagingRemovals = { ok: true };
@@ -398,7 +403,7 @@ const fakeModules = {
     resume: () => null,
     keep: () => null,
     settings: () => ({ folder: "", askWhereToSave: false, managed: false }),
-    setSettings: () => ({ folder: "", askWhereToSave: false, managed: false }),
+    setSettings: (args) => (downloadSettingsWrites.push(args), { folder: "", askWhereToSave: false, managed: false }),
   }),
   ArdiaPermissions: domain("permissions", {
     resolve: ({ id, result, remember }) => (resolvedPermissions.push({ id, result, remember }), null),
@@ -426,7 +431,7 @@ const fakeModules = {
     setSetting: ({ profile, origin, type, value }) => (siteSettingsDb.set(`${profile}\n${origin}`, { ...(siteSettingsDb.get(`${profile}\n${origin}`) ?? {}), [type]: value }), null),
     origins: ({ profile }) => [...siteSettingsDb.keys()].filter((k) => k.startsWith(`${profile}\n`)).map((k) => k.slice(profile.length + 1)),
     reset: ({ profile, origin }) => (siteSettingsDb.delete(`${profile}\n${origin}`), null),
-    clearData: () => ({ cookies: 0, storage: true }),
+    clearData: ({ profile, origin }) => (clearedSiteData.push({ profile, origin }), { cookies: 0, storage: true }),
     zoomLevels: ({ profile }) => Object.fromEntries([...siteZoomDb].filter(([k]) => k.startsWith(`${profile}\n`)).map(([k, v]) => [k.slice(profile.length + 1), v])),
     setZoom: ({ profile, host, zoom }) => (siteZoomDb.set(`${profile}\n${host}`, zoom), null),
     preloadPages: () => false,

@@ -17,8 +17,22 @@ UI update still happens.
 - **Self-describing.** `methods` returns every method: `name`, `area`, `mutates`, a one-line `description`, `params` (a
   JSON Schema subset: `type`, `properties`, `required`, `enum`, `items`, `minimum`, `maximum`, `minItems`, `maxItems`,
   `additionalProperties: false`, `description`) and `result` (a short shape). The socket checks params against that
-  schema before a handler runs (`socketSchema.ts`), so the catalogue can't drift from what it accepts. `ardia methods`
-  prints it and `ardia call <method> [params]` calls any of them.
+  schema before any handler runs, the core and plugin methods included (`socketSchema.ts`, `socketCatalog.ts`), so the
+  catalogue can't drift from what it accepts. Only own properties count (a `constructor` or `__proto__` key is an
+  unknown param, never a match from `Object.prototype`), and numbers must be finite (`1e999` parses to Infinity and is
+  refused). A handler only sees the params its schema lists: reading any other key fails the call with `failed`, and a
+  test calls every method to prove none does. `ardia methods` prints it and `ardia call <method> [params]` calls any
+  of them.
+- **Control off means no more writes.** Consent is checked when a request arrives and again before every write that
+  follows an `await` in a handler (a lookup, a confirmation, a settings read): handlers get a `SocketCall` and call
+  `stillServing()` first, as `apply` does between ops. Turning control off mid-call answers `failed` "Control was
+  turned off before Ardia made the change, so nothing changed."
+- **The UI's path, not a shortcut.** Where the UI does more than one store call, the socket does the same:
+  `windows.close` goes through the window close guard (it asks first when the user set **Ask before closing a window
+  with multiple tabs**, answers `refused` if they cancel, and keeps the last window to reopen), `profiles.update
+  {syncTabs: false}` retires the open-tab records as the Settings switch does (`setOpenTabsSynced`), `settings.set
+  {tabLayout}` moves open windows as Settings does (`chooseTabLayout`), and `settings.reset {keys: ["shortcuts"]}`
+  drops every custom shortcut (where `settings.set {shortcuts}` adds to them, as `config.json` does).
 - **Store actions only.** Writes call the domain's own actions (`storeAction(…)` on `useBrowser`, or the domain's
   exported functions for the stores outside it). Nothing calls `setState` on another domain's store.
 - **Irreversible data loss asks the user.** `profiles.delete` and `extensions.uninstall` call the same actions the UI
@@ -31,8 +45,14 @@ UI update still happens.
   `unknown_method`, `no_window` (no such window, tab, profile, group, split, bookmark or download the command may use),
   `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen). A new code needs a new
   protocol number; none was needed for this work.
-- **Big lists page.** History and bookmark searches take `limit` (default 100, at most 1000) and `offset`, and answer
-  `{ items, total, nextOffset }`.
+- **Big lists page, and the bound comes first.** `history.search`, `bookmarks.search` and `downloads.list` take `limit`
+  (default 100, at most 1000) and `offset`, and answer `{ items, total, nextOffset }`; only the page is built.
+  `history.search` without a query or time range asks the engine for just `offset + limit + 1` pages (one visit each)
+  and answers `total: null` when it didn't count the rest; with a query it searches the newest 20,000 pages and says
+  `truncated: true` when there were more. `bookmarks.tree` stops at 5,000 items or about 1 MiB, leaves the folders it
+  didn't open as a child count and says `truncated: true`; ask for a `folder` or a lower `depth` to see more.
+- **No reply is too big to send.** A reply over 3 MiB (the native queue holds 4 MiB per connection) goes out as
+  `failed` "The reply would be over 3 MiB; ask for less" instead of the connection closing with no answer.
 - **Telemetry.** Each call counts once in its method family (`cli_socket_calls_<family>`) and once in
   `cli_socket_call_failures` when it answers an error: counts only, never which method's params
   (`state/telemetry/cliCounts.ts`).
@@ -98,7 +118,8 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | `apply` | yes | A batch of ops on tabs, groups and pins (`docs/automation.md`): `open`, `tab.*`, `group.*` |
 | `run` | yes | Runs a menu command in a window or on a tab |
 | `offscreen` | yes | Moves a tab the command opened off-screen |
-| `subscribe`, `answer` | no | Events and decide hooks |
+| `subscribe` | yes | Events and decide hooks this connection serves: `{events, fullUrls?, idle?, hooks?}` |
+| `answer` | yes | Answers a decide hook: `{decide, answer?}`; Ardia acts on the answer |
 | `plugins`, `plugins.official`, `plugins.enable`, `plugins.disable`, `plugins.remove`, `plugins.call` | mixed | Plugins |
 
 ### Added here
@@ -107,17 +128,17 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | --- | --- | --- |
 | tabs | `tabs.list {window?, profile?}`, `tabs.get {tab}` | `tabs.navigate {tab, url}`, `tabs.reload`, `tabs.back`, `tabs.forward`, `tabs.duplicate`, `tabs.setPinnedUrl {tab, url?}`, `tabs.returnToPinnedUrl` |
 | windows | `windows.get {window}`, `windows.geometry {window}` | `windows.create {profile?, url?, layout?}`, `windows.close`, `windows.focus`, `windows.setLayout {window, layout?, tabsShown?}`, `windows.switchProfile`, `windows.merge`, `windows.setFrame {window, frame}`, `windows.setMaximized {window, on}`, `windows.setFullScreen {window, on}` |
-| closed | `closed.list {window?}` | `closed.restore {id, window?}`, `closed.clear {window?}` |
+| closed | `closed.list {window?}` | `closed.restore {id, window?}`, `closed.clear {window?}` → `{cleared}`; both act on the window's profile, the last focused main window when `window` is left out, and answer `no_window` when there's none |
 | profiles | `profiles.list` | `profiles.create`, `profiles.update`, `profiles.setLook`, `profiles.reorder`, `profiles.setDefault`, `profiles.delete {profile}` (Ardia asks the user first) |
 | splits | `splits.list {window?}` | `splits.create {tabs, orientation?}`, `splits.separate`, `splits.removeTab`, `splits.resize {split, sizes}`, `splits.flip`, `splits.setOrientation` |
 | peek | `peek.list` | `peek.open {tab, url}`, `peek.close {tab}`, `peek.toTab {window}` |
 | littleArdia | (in `windows`) | `littleArdia.open {url?, profile?}`, `littleArdia.close`, `littleArdia.toMain` |
 | bookmarks | `bookmarks.tree {profile?, folder?, depth?}`, `bookmarks.search {profile?, query, limit?, offset?}`, `bookmarks.get {id}` | `bookmarks.add`, `bookmarks.addFolder`, `bookmarks.update`, `bookmarks.move {ids, parent, index?}`, `bookmarks.remove {ids}` |
 | history | `history.search {profile?, query?, since?, until?, limit?, offset?}` | `history.remove {profile?, urls}`, `history.clear {profile?, since?}` |
-| downloads | `downloads.list {profile?, state?}`, `downloads.settings {profile?}` | `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.keep`, `downloads.open`, `downloads.reveal`, `downloads.remove`, `downloads.clear`, `downloads.setSettings` |
+| downloads | `downloads.list {profile?, state?, limit?, offset?}` (live progress for running downloads), `downloads.settings {profile?}` | `downloads.pause`, `downloads.resume`, `downloads.cancel`, `downloads.keep`, `downloads.open`, `downloads.reveal`, `downloads.remove`, `downloads.clear`, `downloads.setSettings` |
 | settings | `settings.get {keys?}`, `settings.schema` | `settings.set {values}`, `settings.reset {keys}` |
-| search | `search.engines` | `search.setDefault {id}`, `search.add`, `search.update`, `search.remove` |
-| sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {origin}` |
+| search | `search.engines` (`default` is the engine searches use, an extension's when one controls it, with `controlledBy`) | `search.setDefault {id}` (`refused` while an extension controls it, as Settings disables the picker; so is `settings.set {searchEngine}`), `search.add`, `search.update`, `search.remove` |
+| sites | `sites.origins {profile?}`, `sites.get {origin, profile?}`, `sites.zoomLevels {profile?}` | `sites.set {origin, type, value}`, `sites.reset {origin}`, `sites.setZoom {host, zoom}`, `sites.clearData {site}` |
 | extensions | `extensions.list {profile?}` | `extensions.install {profile?, webStore? \| folder?}` (the user confirms), `extensions.configure {id, siteAccess?, incognito?, userScripts?}`, `extensions.setEnabled {id, enabled}`, `extensions.setPinned`, `extensions.reload`, `extensions.uninstall` (Ardia asks the user first) |
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status`, `sync.devices {profile?}` | `sync.now`, `sync.setType {type, on}`, `sync.setProfile {profile, on}`, `sync.setOpenTabs {profile, on}`, `sync.sendTab {tab, device}` |
@@ -189,6 +210,32 @@ window events they already listen to. `PLATFORM_FEATURES.windowGeometry` is on f
 four calls in `engine/ardiacore-linux` (an engine change, so a new engine), and Windows in `WindowManager` of
 `apps/browser/windows` (its maximize already exists as `toggleMaximizeWindow`); until then the methods are `refused`
 there.
+
+### Clearing site data is per site
+
+`sites.clearData {site}` deletes cookies and stored data for a whole site: the registrable domain of the host given and
+every subdomain, over http and https (`mail.example.com` clears all of `example.com`). That is what the engine's
+`ac_site_data_clear` does (`ac_site_settings.cc`, `RegistrableDomainOf`) and what the page menu's Clear Site Data does.
+The method took an `origin` before and silently cleared more than that origin; it now takes `site` and refuses
+`origin`, so an older caller gets `bad_request` instead of a wider delete. Clearing a single origin needs an engine change
+(an origin filter in place of the site filter), which can't ship in this app-only change; if it's wanted, it comes as
+`sites.clearOriginData {origin}` with the next engine.
+
+## Plugin sessions
+
+Plugins must never reach these store methods: a plugin acts through the mediated browse verbs, each of which asks the
+user or stays inside what the plugin was granted. Today the socket can't tell a plugin from the owner's `ardia`
+command: both connect to the same socket as the same user, and a plugin flag a client sends is only its own claim.
+
+**Design (not built):** when Ardia starts a plugin activity, it mints a random per-activity credential and hands it to
+the plugin's CLI child on an inherited file descriptor (never an environment variable, a file, or
+`ArdiaControl.json`, which every process of the user can read). The child sends it in `hello` as `session`; the socket
+looks it up, marks the connection `plugin`, and drops the credential when the activity ends or the connection closes.
+A connection without one is the owner's. A plugin connection may call `hello`, `methods` and the mediated browse verbs
+as they land, and nothing else: no `apply`, `run`, `subscribe`, `answer`, `plugins.*`, and none of the store methods
+above. The dispatcher already has its single check point for this: `controlSocket.ts` asks `connectionAccess` for each
+request and `accessProblem` (`socketCatalog.ts`) refuses everything outside `PLUGIN_SESSION_METHODS` for a plugin
+connection, before params are even checked. Until the credential exists every connection is `owner`.
 
 ## Secrets
 

@@ -1,6 +1,7 @@
 import { sameValue, checkedSettings } from "../config/configSettings";
 import { isConfigSettingKey } from "../settings/configAllowlist";
-import { DEFAULT_SETTINGS, SETTING_KEYS, SETTING_SPECS, searchEngines, type SettingKey, type Settings } from "../settings/settings";
+import { controllingSearchExtension, DEFAULT_SETTINGS, defaultSearchEngine, SETTING_KEYS, SETTING_SPECS, searchEngines, type SettingKey, type Settings } from "../settings/settings";
+import { chooseTabLayout } from "../settings/actions";
 import type { MethodSpec } from "./socketCatalog";
 import { checkedByRules, hasSocketRule } from "./socketSettingRules";
 import { id, ids, obj, text } from "./socketSchema";
@@ -40,9 +41,15 @@ const settingsSchema = () =>
     synced: SETTING_SPECS[key].synced,
   }));
 
-function apply(values: Record<string, unknown>, label: string) {
+function refuseWhileExtensionControlsSearch() {
+  const controlling = controllingSearchExtension(now().settings);
+  if (controlling) throw new OpError("refused", `${controlling.extensionName || "An extension"} controls the default search engine; turn it off or change its settings first.`);
+}
+
+function apply(values: Record<string, unknown>, label: string, replaced: Partial<Settings> = {}) {
   const refused = Object.keys(values).map(whyNot).filter((w): w is string => !!w);
   if (refused.length) throw new OpError("refused", `${refused.join("; ")}.`);
+  if (Object.hasOwn(values, "searchEngine")) refuseWhileExtensionControlsSearch();
   const settings = now().settings;
   const ruled = Object.fromEntries(Object.entries(values).filter(([key]) => hasSocketRule(key)));
   const { values: checked, problems } = checkedSettings(label, Object.fromEntries(Object.entries(values).filter(([key]) => !hasSocketRule(key))), settings);
@@ -50,8 +57,9 @@ function apply(values: Record<string, unknown>, label: string) {
   problems.push(...fromRules.problems.map((p) => `${label}: ${p}`));
   if (problems.length) throw new OpError("bad_request", problems.join("; "));
   const patch: Partial<Record<SettingKey, unknown>> = {};
-  for (const [key, value] of Object.entries({ ...checked, ...fromRules.patch }) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
+  for (const [key, value] of Object.entries({ ...checked, ...fromRules.patch, ...replaced }) as [SettingKey, unknown][]) if (!sameValue(value, settings[key])) patch[key] = value;
   if (Object.keys(patch).length) now().updateSettings(patch as Partial<Settings>);
+  if (patch.tabLayout !== undefined) chooseTabLayout(patch.tabLayout as Settings["tabLayout"]);
   const after = now().settings;
   const changed = Object.keys(patch).filter((k) => !sameValue(after[k as SettingKey], settings[k as SettingKey]));
   return { changed, values: Object.fromEntries(Object.keys(values).map((k) => [k, after[k as SettingKey]])) };
@@ -59,13 +67,23 @@ function apply(values: Record<string, unknown>, label: string) {
 
 function reset(params: Record<string, unknown>) {
   const keys = params.keys as string[];
-  const values = Object.fromEntries(keys.map((k) => [k, (DEFAULT_SETTINGS as Record<string, unknown>)[k]]));
-  return apply(values, "settings.reset");
+  const values = Object.fromEntries(keys.map((k) => [k, Object.hasOwn(DEFAULT_SETTINGS, k) ? (DEFAULT_SETTINGS as Record<string, unknown>)[k] : undefined]));
+  return apply(values, "settings.reset", keys.includes("shortcuts") ? { shortcuts: { ...DEFAULT_SETTINGS.shortcuts } } : {});
 }
 
 const engineRows = () => {
   const s = now().settings;
-  return searchEngines(s).map((e) => ({ id: e.id, name: e.name, keyword: e.keyword, url: e.url, custom: !!e.custom, default: e.id === s.searchEngine }));
+  const effective = defaultSearchEngine(s).id;
+  const controlling = controllingSearchExtension(s);
+  return searchEngines(s).map((e) => ({
+    id: e.id,
+    name: e.name,
+    keyword: e.keyword,
+    url: e.url,
+    custom: !!e.custom,
+    default: e.id === effective,
+    ...(e.id === effective && controlling ? { controlledBy: controlling.extensionId } : {}),
+  }));
 };
 
 function engineOf(value: unknown) {
@@ -116,17 +134,18 @@ export const SETTINGS_METHODS: MethodSpec[] = [
     run: (p) => apply(p.values as Record<string, unknown>, "settings.set"),
   },
   { name: "settings.reset", mutates: true, description: "Put settings back to their defaults", params: obj({ keys: ids("Setting keys", 200) }, ["keys"]), result: "{changed, values}", run: reset },
-  { name: "search.engines", mutates: false, description: "Search engines: built in, added in Settings and from extensions, with the default", params: obj({}), result: "[{id, name, keyword, url, custom, default}]", run: engineRows },
+  { name: "search.engines", mutates: false, description: "Search engines: built in, added in Settings and from extensions; default marks the one searches use, and controlledBy names the extension that set it", params: obj({}), result: "[{id, name, keyword, url, custom, default, controlledBy?}]", run: engineRows },
   {
     name: "search.setDefault",
     mutates: true,
-    description: "Make a search engine the default",
+    description: "Make a search engine the default; refused while an extension controls it, as Settings disables the picker",
     params: obj({ id: id("An engine id from search.engines") }, ["id"]),
     result: "engine",
     run: (p) => {
       const engine = engineOf(p.id);
+      refuseWhileExtensionControlsSearch();
       now().setSearchEngine(engine.id);
-      expect(now().settings.searchEngine === engine.id, `${engine.name} isn't the default (an extension may control it).`);
+      expect(defaultSearchEngine(now().settings).id === engine.id, `${engine.name} isn't the default.`);
       return engineOf(engine.id);
     },
   },

@@ -2,12 +2,14 @@ import type { JsonSchema, JsonType } from "../../lib/jsonSchema";
 
 const isFields = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function typeOf(value: unknown): JsonType {
+function typeOf(value: unknown): JsonType | null {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
-  if (typeof value === "number") return Number.isInteger(value) ? "integer" : "number";
+  if (typeof value === "number") return Number.isFinite(value) ? (Number.isInteger(value) ? "integer" : "number") : null;
   return typeof value as JsonType;
 }
+
+export const ownField = <T>(fields: Readonly<Record<string, T>> | undefined, key: string): T | undefined => (fields && Object.hasOwn(fields, key) ? fields[key] : undefined);
 
 const fits = (value: unknown, type: JsonType) => {
   const actual = typeOf(value);
@@ -21,6 +23,7 @@ const words = (types: JsonType[]) => types.map((t) => (t === "integer" ? "a whol
 export function schemaProblem(schema: JsonSchema, value: unknown, path: string): string | null {
   if (schema.anyOf) return schema.anyOf.some((option) => schemaProblem(option, value, path) === null) ? null : `${path} doesn't match any of its forms.`;
   const types = schema.type === undefined ? [] : Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (typeof value === "number" && !Number.isFinite(value)) return `${path} must be a finite number.`;
   if (types.length && !types.some((t) => fits(value, t))) return `${path} must be ${words(types)}.`;
   if (schema.const !== undefined && value !== schema.const) return `${path} must be ${JSON.stringify(schema.const)}.`;
   if (schema.enum && !schema.enum.includes(value)) return `${path} must be one of: ${schema.enum.map(String).join(", ")}.`;
@@ -48,9 +51,9 @@ export function schemaProblem(schema: JsonSchema, value: unknown, path: string):
   }
   if (isFields(value)) {
     const properties = schema.properties ?? {};
-    for (const key of schema.required ?? []) if (value[key] === undefined) return `${path === "params" ? "" : `${path}: `}${key} is required.`.replace(/^./, (c) => c.toUpperCase());
+    for (const key of schema.required ?? []) if (ownField(value, key) === undefined) return `${path === "params" ? "" : `${path}: `}${key} is required.`.replace(/^./, (c) => c.toUpperCase());
     for (const [key, item] of Object.entries(value)) {
-      const known = properties[key];
+      const known = ownField(properties, key);
       const where = path === "params" ? key : `${path}.${key}`;
       if (known) {
         const problem = schemaProblem(known, item, where);

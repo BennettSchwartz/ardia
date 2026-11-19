@@ -3,7 +3,7 @@ import { clearSiteData, getSiteSettings, resetSiteSettings, setSiteSetting, setZ
 import { getSiteSettingsOrigins, getZoomLevels } from "../../platform/siteSettings";
 import { refreshExtensions, reload, removeExtension, setEnabled, setPinned, findExtension } from "../extensions/actions";
 import type { InstalledExtension } from "../extensions/store";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, obj, oneOf, PROFILE, text } from "./socketSchema";
 import { expect, now, profileArg } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -37,11 +37,26 @@ async function setSetting(params: Record<string, unknown>) {
   return after;
 }
 
+const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+
 async function setSiteZoom(params: Record<string, unknown>) {
   const host = params.host as string;
   if (!/^[a-z0-9.-]+(:\d+)?$/i.test(host)) throw new OpError("bad_request", "host is a host name like example.com.");
-  await setZoom(engineOf(params), host, params.zoom as number);
-  return getZoomLevels(engineOf(params));
+  const engine = engineOf(params);
+  await setZoom(engine, host, params.zoom as number);
+  return getZoomLevels(engine);
+}
+
+function siteOf(value: unknown): string {
+  const site = typeof value === "string" ? value.toLowerCase() : "";
+  if (!HOST.test(site) || (!site.includes(".") && site !== "localhost")) throw new OpError("bad_request", `${String(value)} isn't a site like example.com (a host name, no scheme, port or path).`);
+  return site;
+}
+
+async function clearData(params: Record<string, unknown>) {
+  const site = siteOf(params.site);
+  const cleared = await clearSiteData(engineOf(params), `https://${site}`);
+  return { site, ...cleared };
 }
 
 const extensionRow = (x: InstalledExtension) => ({
@@ -73,24 +88,27 @@ const modifiable = (ext: InstalledExtension) => {
   if (!ext.mayModify) throw new OpError("refused", `${ext.name} is installed by policy, so it can't be changed.`);
 };
 
-async function enable(params: Record<string, unknown>) {
+async function enable(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
   modifiable(ext);
+  call.stillServing();
   await setEnabled(engine, ext.id, params.enabled as boolean);
   const after = (await refreshExtensions(engine)).find((x) => x.id === ext.id);
   expect(after?.enabled === params.enabled, `${ext.name} isn't ${params.enabled ? "on" : "off"}.`);
   return extensionRow(after!);
 }
 
-async function pin(params: Record<string, unknown>) {
+async function pin(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
+  call.stillServing();
   await setPinned(engine, ext.id, params.pinned as boolean);
   return extensionRow((await refreshExtensions(engine)).find((x) => x.id === ext.id) ?? ext);
 }
 
-async function uninstall(params: Record<string, unknown>) {
+async function uninstall(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
   modifiable(ext);
+  call.stillServing();
   await removeExtension(engine, ext);
   return { removed: !(await refreshExtensions(engine)).some((x) => x.id === ext.id) };
 }
@@ -120,7 +138,14 @@ export const SITE_METHODS: MethodSpec[] = [
       return { ok: true };
     },
   },
-  { name: "sites.clearData", mutates: true, description: "Delete an origin's cookies and stored data", params: obj(SITE, ["origin"]), result: "{cookies, storage}", run: (p) => clearSiteData(engineOf(p), originOf(p.origin)) },
+  {
+    name: "sites.clearData",
+    mutates: true,
+    description: "Delete a whole site's cookies and stored data: its registrable domain and every subdomain, over http and https (mail.example.com clears all of example.com)",
+    params: obj({ profile: PROFILE, site: text("A host like example.com; the whole site it belongs to is cleared") }, ["site"]),
+    result: "{site, cookies, storage}",
+    run: clearData,
+  },
   { name: "sites.zoomLevels", mutates: false, description: "Zoom per host", params: obj({ profile: PROFILE }), result: "{host: zoom}", run: (p) => getZoomLevels(engineOf(p)) },
   { name: "sites.setZoom", mutates: true, description: "Set a host's zoom (1 is 100%)", params: obj({ profile: PROFILE, host: text("A host like example.com"), zoom: { type: "number", minimum: 0.25, maximum: 5, description: "1 is 100%" } }, ["host", "zoom"]), result: "{host: zoom}", run: setSiteZoom },
   { name: "extensions.list", mutates: false, description: "A profile's extensions", params: obj({ profile: PROFILE }), result: "[extension]", run: async (p) => (await refreshExtensions(engineOf(p))).map(extensionRow) },
@@ -132,8 +157,9 @@ export const SITE_METHODS: MethodSpec[] = [
     description: "Reload an extension",
     params: obj(EXTENSION, ["id"]),
     result: "{ok}",
-    run: async (p) => {
+    run: async (p, call) => {
       const { engine, ext } = await extensionOf(p);
+      call.stillServing();
       await reload(engine, ext.id);
       return { ok: true };
     },

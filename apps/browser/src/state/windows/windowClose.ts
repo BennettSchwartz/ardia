@@ -50,10 +50,18 @@ async function requestClose(windowId: string, onceAgreed?: () => void) {
   const w = s.windows[windowId];
   if (!w) return closeWindowWithoutTabs(windowId, onceAgreed);
   if (isSmall(s, windowId)) return closeLittleArdia(windowId);
+  await closeAfterAsking(windowId);
+}
+
+export type GuardedClose = "closing" | "cancelled" | "stopped";
+
+export async function closeAfterAsking(windowId: string, mayClose: () => boolean = () => true): Promise<GuardedClose> {
   const { decision, suppressWarning, keepsLastWindow } = await decideWindowClose(windowId);
   if (suppressWarning) useBrowser.getState().updateSettings({ warnBeforeClosingWindow: false });
-  if (decision === "cancel") return;
+  if (decision === "cancel") return "cancelled";
+  if (!mayClose()) return "stopped";
   closeWindowAnimated(windowId, { keepsLastWindow });
+  return "closing";
 }
 
 export type CloseAsk = typeof confirm;

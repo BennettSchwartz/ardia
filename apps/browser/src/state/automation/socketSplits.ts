@@ -49,7 +49,9 @@ function resize(params: Record<string, unknown>) {
   const sizes = params.sizes as number[];
   if (sizes.length !== v.slots.length) throw new OpError("bad_request", `Split ${v.id} has ${v.slots.length} panes.`);
   const total = sizes.reduce((a, b) => a + b, 0);
-  now().updateSplit(v.id, { sizes: sizes.map((n) => n / total) });
+  const shares = sizes.map((n) => n / total);
+  if (!shares.every((n) => Number.isFinite(n) && n > 0)) throw new OpError("bad_request", "sizes must be positive numbers whose shares are all above zero.");
+  now().updateSplit(v.id, { sizes: shares });
   return splitRow(now(), now().splits[v.id]!);
 }
 
@@ -107,7 +109,7 @@ export const SPLIT_METHODS: MethodSpec[] = [
       return { ok: true };
     },
   },
-  { name: "splits.resize", mutates: true, description: "Set the panes' sizes (any positive numbers; they're made proportional)", params: obj({ split: id("A split id"), sizes: { type: "array", items: { type: "number", exclusiveMinimum: 0 }, minItems: 2, maxItems: 4, description: "One size per pane" } }, ["split", "sizes"]), result: "split", run: resize },
+  { name: "splits.resize", mutates: true, description: "Set the panes' sizes (any positive numbers; they're made proportional)", params: obj({ split: id("A split id"), sizes: { type: "array", items: { type: "number", exclusiveMinimum: 0, maximum: 1_000_000 }, minItems: 2, maxItems: 4, description: "One size per pane" } }, ["split", "sizes"]), result: "split", run: resize },
   {
     name: "splits.flip",
     mutates: true,

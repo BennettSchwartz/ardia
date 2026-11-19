@@ -4,7 +4,7 @@ import { useSync } from "../sync/engine";
 import { deletePassword, listPasswords } from "../site/passwords";
 import { listAddresses, listCards } from "../../platform/autofill";
 import { isEligibleTab } from "./automationWindows";
-import type { MethodSpec } from "./socketCatalog";
+import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { obj, oneOf, PROFILE, TAB, text } from "./socketSchema";
 import { expect, now, profileArg, tabOf } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
@@ -35,6 +35,7 @@ function control(params: Record<string, unknown>) {
   const t = tabOf(params.tab);
   const seeks = params.action === "seekBy" || params.action === "seekTo";
   if (seeks !== (params.seconds !== undefined)) throw new OpError("bad_request", seeks ? `${params.action} needs seconds.` : `${params.action} takes no seconds.`);
+  if (params.action === "seekTo" && (params.seconds as number) < 0) throw new OpError("bad_request", "seekTo takes a position of 0 seconds or more.");
   mediaCommand(t.id, params.action as (typeof ACTIONS)[number], params.seconds as number | undefined);
   return { ok: true };
 }
@@ -64,10 +65,11 @@ async function autofillList(params: Record<string, unknown>) {
   return { addresses, cards: cards.map((c) => ({ id: c.id, name: c.name ?? null, network: c.network, last4: c.last4, expMonth: c.expMonth ?? null, expYear: c.expYear ?? null, created: c.created, modified: c.modified })) };
 }
 
-async function removePassword(params: Record<string, unknown>) {
+async function removePassword(params: Record<string, unknown>, call: SocketCall) {
   const engine = engineOf(params);
   const known = (await listPasswords(engine)).some((p) => p.origin === params.origin && p.username === params.username);
   if (!known) throw new OpError("no_window", "There's no saved login with that origin and username.");
+  call.stillServing();
   await deletePassword(engine, params.origin as string, params.username as string);
   expect(!(await listPasswords(engine)).some((p) => p.origin === params.origin && p.username === params.username), "the login is still saved.");
   return { ok: true };
@@ -79,7 +81,7 @@ export const MISC_METHODS: MethodSpec[] = [
     name: "media.control",
     mutates: true,
     description: "Play, pause, skip or seek a tab's media",
-    params: obj({ tab: TAB, action: oneOf(ACTIONS, "What to do"), seconds: { type: "number", description: "For seekBy and seekTo" } }, ["tab", "action"]),
+    params: obj({ tab: TAB, action: oneOf(ACTIONS, "What to do"), seconds: { type: "number", minimum: -86400, maximum: 864000, description: "For seekBy (may be negative) and seekTo" } }, ["tab", "action"]),
     result: "{ok}",
     run: control,
   },
