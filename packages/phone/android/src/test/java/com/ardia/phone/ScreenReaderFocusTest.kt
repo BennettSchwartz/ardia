@@ -10,6 +10,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -175,6 +176,43 @@ class ScreenReaderFocusTest {
     }
 
     @Test
+    fun theSecondAskReturnsFocusOnlyWhenTalkBackResetItToTheFirstNodeOrNothingHoldsItAndNeverUndoesAUserMove() {
+        val asked = mutableListOf<Int>()
+        var focusOn = "none"
+        val header = stop("Space, Personal") { focusOn == "header" }
+        val target = holding(asked) { focusOn == "target" }
+        val next = stop("Incognito") { focusOn == "next" }
+        val screen = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(header, 200, 100)
+            addView(target, 200, 100)
+            addView(next, 200, 100)
+        }
+        activity.setContentView(screen)
+        layOut()
+        assertTrue(ScreenReaderFocus.firstStop(screen) === header)
+        val looper = shadowOf(Looper.getMainLooper())
+        val focusAction = AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis) { screen }
+        fun afterTheFirstAskFocusMovesTo(place: String): Int {
+            asked.clear()
+            focusOn = "none"
+            requests.start(recheck = true) { target }
+            assertEquals(listOf(focusAction), asked)
+            focusOn = place
+            looper.idleFor(Duration.ofMillis(FocusRequests.RECHECK_AFTER_MS + 100))
+            assertEquals(0, requests.waiting)
+            return asked.size
+        }
+        assertEquals("TalkBack's reset to the first node is undone", 2, afterTheFirstAskFocusMovesTo("header"))
+        assertEquals("focus held by nothing is returned", 2, afterTheFirstAskFocusMovesTo("none"))
+        assertEquals("a user's move to the next node is left alone", 1, afterTheFirstAskFocusMovesTo("next"))
+        assertEquals("focus that stayed needs nothing", 1, afterTheFirstAskFocusMovesTo("target"))
+        header.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        assertTrue("a hidden node is never the first stop", ScreenReaderFocus.firstStop(screen) === next)
+    }
+
+    @Test
     fun aCancelledRequestNeverLooksAgain() {
         val requests = FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis)
         var looked = 0
@@ -293,6 +331,18 @@ class ScreenReaderFocusTest {
         override fun performAccessibilityAction(action: Int, arguments: Bundle?): Boolean {
             asked += action
             return action == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        }
+    }
+
+    private fun stop(label: String, held: () -> Boolean): View = object : View(activity) {
+        init {
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+            contentDescription = label
+        }
+
+        override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+            super.onInitializeAccessibilityNodeInfo(info)
+            if (held()) info.isAccessibilityFocused = true
         }
     }
 

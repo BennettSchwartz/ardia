@@ -8,8 +8,11 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.HorizontalScrollView
 import android.widget.ScrollView
+import android.widget.TextView
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
@@ -47,7 +50,7 @@ class AccessibilityModule : Module() {
     }
 }
 
-internal class FocusRequests(private val handler: Handler, private val clock: () -> Long) {
+internal class FocusRequests(private val handler: Handler, private val clock: () -> Long, private val rootOf: (View) -> View = View::getRootView) {
     companion object {
         const val RETRY_EVERY_MS = 16L
         const val GIVE_UP_AFTER_MS = 500L
@@ -71,7 +74,8 @@ internal class FocusRequests(private val handler: Handler, private val clock: ()
             override fun run() {
                 if (destroyed || pending[id] !== this) return
                 pending.remove(id)
-                ScreenReaderFocus.focus(resolve())
+                val view = resolve() ?: return
+                if (ScreenReaderFocus.lostToReset(view, rootOf(view))) ScreenReaderFocus.focus(view)
             }
         }
         val attempt = object : Runnable {
@@ -127,6 +131,33 @@ internal object ScreenReaderFocus {
     }
 
     fun holds(view: View): Boolean = view.createAccessibilityNodeInfo().isAccessibilityFocused
+
+    fun holder(root: View): View? {
+        if (!root.isShown) return null
+        if (holds(root)) return root
+        if (root is ViewGroup) for (at in 0 until root.childCount) holder(root.getChildAt(at))?.let { return it }
+        return null
+    }
+
+    fun firstStop(root: View): View? {
+        if (!root.isShown || root.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) return null
+        if (isStop(root)) return root
+        if (root is ViewGroup) for (at in 0 until root.childCount) firstStop(root.getChildAt(at))?.let { return it }
+        return null
+    }
+
+    fun lostToReset(target: View, root: View): Boolean {
+        if (holds(target)) return false
+        val holding = holder(root) ?: return true
+        return holding === firstStop(root)
+    }
+
+    private fun isStop(view: View): Boolean {
+        if (!view.isImportantForAccessibility || !view.getGlobalVisibleRect(Rect())) return false
+        val labelled = !view.contentDescription.isNullOrEmpty() || (view is TextView && !view.text.isNullOrEmpty())
+        val scrolls = view is ScrollView || view is HorizontalScrollView
+        return labelled || view.isClickable || view.isLongClickable || (view.isFocusable && !scrolls)
+    }
 
     fun focus(view: View?): Boolean = ready(view) && reachable(view!!) && (holds(view) || view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null))
 
