@@ -368,9 +368,10 @@ declare one, and each group of profiles that shares browser data picks at most o
   `tool` is reserved (below) and refused for now ("passwordManager.fill: tool isn't available yet; use system").
 - `fields` (required, 1 or 2): which fields get the key: `login` (username, email and current password) and
   `oneTimeCode`.
-- `verificationCodeSetup` (`system`): when a page in a profile using this plugin shows an `otpauth://` link or QR code,
-  Ardia offers "Set Up Verification Code in <app>?" and opens it with macOS's handler for `otpauth:` (the Passwords app
-  on a stock Mac). The URL, which holds the code's secret, stays in native code: the page script, JS and the prompt see
+- `verificationCodeSetup` (`system`): when a page in a profile using this plugin shows an `otpauth://` link, or a QR code
+  on a Chromium page, Ardia offers "Set Up Verification Code in <app>?" and opens it with macOS's handler for `otpauth:`
+  (the Passwords app on a stock Mac). QR codes are found on Chromium pages only: WebKit has no `BarcodeDetector`, so a
+  WebKit page that shows its setup code only as a QR image gets no offer; its `otpauth://` links still do. The URL, which holds the code's secret, stays in native code: the page script, JS and the prompt see
   an opaque token, single use, bound to the tab, frame, document, profile, provider generation and handler app.
 - `passkeys` (`system`): the plugin's Settings page shows whether Ardia may use the passkeys saved on this Mac, with
   macOS's access request. It says plainly when the build lacks Apple's browser passkey entitlement (every build today).
