@@ -189,7 +189,7 @@ export async function closeLittleArdia(windowId: string, { mayClose = () => true
   if (quitWarningMayAsk() && (await askBeforeQuitting(windowId, ask, mayClose)) === "cancelled") return "cancelled";
   if (!mayClose()) return "stopped";
   if (!isSmall(store(), windowId) || isWindowClosing(windowId)) return "cancelled";
-  return (await closeWindowAnimated(windowId, { mayCommit: mayClose })) ? "closing" : mayClose() ? "cancelled" : "stopped";
+  return (await closeWindowAnimated(windowId)) ? "closing" : mayClose() ? "cancelled" : "stopped";
 }
 
 export function closeLittleArdiaForAppLink(windowId: string | null) {
