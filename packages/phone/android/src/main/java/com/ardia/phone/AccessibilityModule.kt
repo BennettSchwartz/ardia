@@ -2,7 +2,11 @@ package com.ardia.phone
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Rect
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.ScrollView
@@ -14,17 +18,18 @@ import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 
 class AccessibilityModule : Module() {
-    private fun focusWhenReady(tag: Int, framesLeft: Int) {
-        val view = runCatching { appContext.findView<View>(tag) }.getOrNull()
-        if (ScreenReaderFocus.focus(view) || framesLeft <= 0) return
-        val waiter = view ?: appContext.currentActivity?.window?.decorView ?: return
-        waiter.postOnAnimation { focusWhenReady(tag, framesLeft - 1) }
-    }
+    private val requests by lazy { FocusRequests(Handler(Looper.getMainLooper()), SystemClock::uptimeMillis) }
 
     override fun definition() = ModuleDefinition {
         Name("ArdiaPhoneAccessibility")
 
-        AsyncFunction("focusView") { tag: Int -> focusWhenReady(tag, ScreenReaderFocus.FRAMES_TO_WAIT) }.runOnQueue(Queues.MAIN)
+        AsyncFunction("focusView") { tag: Int -> requests.start { runCatching { appContext.findView<View>(tag) }.getOrNull() } }.runOnQueue(Queues.MAIN)
+
+        AsyncFunction("cancelFocus") { request: Int -> requests.cancel(request) }.runOnQueue(Queues.MAIN)
+
+        OnDestroy {
+            requests.cancelAll()
+        }
 
         AsyncFunction("announce") { text: String ->
             val window = appContext.currentActivity?.window?.decorView ?: return@AsyncFunction
@@ -40,12 +45,59 @@ class AccessibilityModule : Module() {
     }
 }
 
-internal object ScreenReaderFocus {
-    const val FRAMES_TO_WAIT = 2
+internal class FocusRequests(private val handler: Handler, private val clock: () -> Long) {
+    companion object {
+        const val RETRY_EVERY_MS = 16L
+        const val GIVE_UP_AFTER_MS = 500L
+    }
 
+    private var lastId = 0
+    private val pending = HashMap<Int, Runnable>()
+
+    val waiting: Int get() = pending.size
+
+    fun start(resolve: () -> View?): Int {
+        val id = ++lastId
+        val deadline = clock() + GIVE_UP_AFTER_MS
+        val attempt = object : Runnable {
+            override fun run() {
+                if (pending[id] !== this) return
+                if (ScreenReaderFocus.focus(resolve()) || clock() >= deadline) {
+                    pending.remove(id)
+                    return
+                }
+                handler.postDelayed(this, RETRY_EVERY_MS)
+            }
+        }
+        pending[id] = attempt
+        attempt.run()
+        return id
+    }
+
+    fun cancel(id: Int) {
+        pending.remove(id)?.let(handler::removeCallbacks)
+    }
+
+    fun cancelAll() {
+        pending.values.forEach(handler::removeCallbacks)
+        pending.clear()
+    }
+}
+
+internal object ScreenReaderFocus {
     fun ready(view: View?): Boolean = view != null && view.isAttachedToWindow && view.isLaidOut
 
-    fun focus(view: View?): Boolean = ready(view) && view!!.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+    fun reachable(view: View): Boolean {
+        if (!view.isImportantForAccessibility || !view.isShown || !view.getGlobalVisibleRect(Rect())) return false
+        var parent = view.parent
+        while (parent is View) {
+            if (parent.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) return false
+            parent = parent.parent
+        }
+        return true
+    }
+
+    fun focus(view: View?): Boolean = ready(view) && reachable(view!!) && view.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
 
     @Suppress("DEPRECATION")
     fun announce(view: View, text: String) {

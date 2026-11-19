@@ -325,7 +325,7 @@ drawnTest("on Android the space switcher and the Incognito pill are drawn menus,
   press(root, "Incognito, 2 tabs");
   pick(root, "Close Incognito Tabs");
   expect(leave).not.toHaveBeenCalled();
-  press(root, "Cancel");
+  act(() => root.root.findAll((node) => node.props.testID === "drawnConfirmationOutside" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(leave).not.toHaveBeenCalled();
   unmount(root);
 });
@@ -360,5 +360,21 @@ drawnTest("on Android a deck card's long-press menu hides the deck from TalkBack
   act(() => jest.advanceTimersByTime(16));
   expect(covered()).toBe("no-hide-descendants");
   expect(root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.type === "string").length).toBeGreaterThan(0);
+  unmount(root);
+});
+
+drawnTest("on Android TalkBack reaches a deck card's menu through its Tab Options action, opened from the card's frame like a long press with no touch point", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  jest.spyOn(overlay, "measureAnchor").mockResolvedValue({ x: 60, y: 200, width: 280, height: 520 });
+  const root = deck();
+  const card = root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"))[0]!;
+  expect(card.props.accessibilityActions).toContainEqual({ name: "menu", label: "Tab Options" });
+  act(() => card.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  await act(async () => undefined);
+  expect(menuitems(root)).toEqual(["Copy Link", "Share", "Pin to Mac", "Close Tab"]);
+  const { Menu } = require("../components/ui") as typeof import("../components/ui");
+  const placed = root.root.findAll((node) => node.type === Menu)[0]!.props.placer(240);
+  expect(placed.place.top + placed.maxHeight).toBe(720 - 16);
   unmount(root);
 });

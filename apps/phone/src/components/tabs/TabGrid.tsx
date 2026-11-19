@@ -10,7 +10,8 @@ import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
 import { isUnseenReceived } from "../../lib/tabFace";
 import { capsule, ChromeSurface, deckChromeLayout, FadeView, font, screenReaderActions, Symbol, TabFace, tabsLayout, tabsMotion, useTheme } from "../ui";
-import { CardIcon, CardMenu, ReceivedBadge, type Reads } from "./DeckCard";
+import { CARD_MENU_ACTION, CardIcon, CardMenu, ReceivedBadge, type Reads } from "./DeckCard";
+import { nativeMenus } from "../ui/MenuTrigger";
 import { deckHeaderBottom } from "./DeckHeader";
 import { centredGridOffset, tabGridColumns, tabGridInk, tabGridInsets, tabGridLayout, tabGridMotion, tabGridRowHeight, tabGridStartOffset } from "./tabGridLayout";
 
@@ -143,6 +144,7 @@ const TabGridCell = memo(function TabGridCell({ tab, selected, width, aspect, co
             {...screenReaderActions([
               { name: "activate", run: open },
               { name: "close", label: "Close Tab", run: close },
+              ...(onLongPress && !nativeMenus() ? [{ name: "menu", label: CARD_MENU_ACTION, run: () => onLongPress() }] : []),
             ])}
             onPress={open}
             onLongPress={onLongPress}

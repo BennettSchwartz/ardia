@@ -81,7 +81,7 @@ test("with a row's menu open over the tray, Back goes to the menu: the tray's na
   await act(async () => jest.advanceTimersByTime(50));
   expect(mockBack.enabled.at(-1)).toBe(false);
   expect(mockBack.handlers).toBeNull();
-  expect(root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.type === "string").length).toBeGreaterThan(0);
+  expect(root.root.findAll((node) => node.props.testID === "drawnMenuScrim" && typeof node.type === "string").length).toBeGreaterThan(0);
   const backs = listening.mock.calls.filter((call) => call[0] === "hardwareBackPress").map((call) => call[1]);
   expect(backs.length).toBeGreaterThan(0);
   act(() => {
@@ -89,7 +89,7 @@ test("with a row's menu open over the tray, Back goes to the menu: the tray's na
   });
   listening.mockRestore();
   await act(async () => jest.advanceTimersByTime(500));
-  expect(root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.type === "string")).toHaveLength(0);
+  expect(root.root.findAll((node) => node.props.testID === "drawnMenuScrim" && typeof node.type === "string")).toHaveLength(0);
   expect(useSearch.getState().open).toBe(true);
   expect(mockBack.enabled.at(-1)).toBe(true);
   unmount(root);

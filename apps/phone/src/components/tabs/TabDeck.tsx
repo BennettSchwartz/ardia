@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { DeckLookProbe } from "./DeckLookProbe";
 import { useDeckOwnsBar, useSheet, useSurface } from "../../state/browse/hooks";
 import { useHeldDeckOrder, useHeldRootSize, useHeldSearchOpen } from "../../state/browse/deckHold";
 import { beginInteraction, countRender, INTERACTION_WINDOW_MS, interactionPerfEnabled } from "../../state/app/interactionPerf";
-import { Keyboard, Platform, StyleSheet, useWindowDimensions, View } from "react-native";
+import { Keyboard, Platform, StyleSheet, useWindowDimensions, View, type ViewInstance } from "react-native";
+import type { Rect } from "../../lib/menuPlace";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, { cancelAnimation, Easing, runOnJS, runOnUI, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withTiming, type SharedValue } from "react-native-reanimated";
 import { pictureKey, whenPicturePainted } from "../../lib/shownSnapshots";
@@ -71,7 +72,7 @@ import {
 } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useHasArchivedTabs, useIncognito, usePrivateCount, useShownSpace } from "../../state/tabs/hooks";
-import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, Menu, menuExitMs, MenuFloorProvider, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
+import { archiveCardLayout, ConfirmSheet, deckChromeLayout, deckChromeMotion, DeckLookBackdrop, iPhoneOr, DeckLookBackdropBase, FrostSource, measureAnchor, Menu, menuExitMs, MenuFloorProvider, moveTo, pointPlacer, Portal, ScrollActions, Shade, space, tabsCurve, tabsLayout, tabsMotion, type Confirmation, type MenuItem, useDesign, useReduceMotion, usesGlass } from "../ui";
 import { openSettings } from "../../state/settings/hooks";
 import { confirmInSheet, nativeMenus } from "../ui/MenuTrigger";
 import { useSyncEnabled } from "../../state/sync/hooks";
@@ -197,7 +198,7 @@ export const TabDeck = memo(function TabDeck() {
   const [phase, setPhase] = useState<Phase>(first.phase);
   const [menu, setMenu] = useState<"plus" | "chip" | null>(null);
   const [chromeMenu, setChromeMenu] = useState(false);
-  const [cardMenu, setCardMenu] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [cardMenu, setCardMenu] = useState<{ index: number; x: number; y: number; control?: Rect } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [leavingCards, setLeavingCards] = useState<LeavingCard[]>(NO_LEAVING_CARDS);
   const leavingIds = useRef(new Set<string>());
@@ -957,12 +958,12 @@ export const TabDeck = memo(function TabDeck() {
         ? withTiming(target, { duration: tabsMotion.fade, easing: tabsCurve.easeOut }, settled)
         : withSpring(target, { ...tabsMotion.settle, velocity: deckSettleVelocity(g, scroll.value, target, e.velocityX) }, settled);
     });
-  const showCardMenu = (index: number, x: number, y: number) => {
+  const showCardMenu = (index: number, x: number, y: number, control?: Rect) => {
     if (phase.kind !== "settled" || !order[index]) return;
     menuOpenedHaptic();
     hideArchiveCard();
     setMenu(null);
-    setCardMenu({ index, x, y });
+    setCardMenu({ index, x, y, control });
   };
   const longPress = Gesture.LongPress()
     .withTestId("deckLongPress")
@@ -1024,13 +1025,17 @@ export const TabDeck = memo(function TabDeck() {
     const closing = order[at];
     if (closing) remove(closing);
   };
-  const latestActions = useRef({ open, close, closeNow, order });
-  latestActions.current = { open, close, closeNow, order };
+  const latestActions = useRef({ open, close, closeNow, order, showCardMenu });
+  latestActions.current = { open, close, closeNow, order, showCardMenu };
   const cardActions = useMemo(
     () => ({
       open: (at: number) => latestActions.current.open(at),
       close: (at: number) => latestActions.current.close(at, 0),
       closeNow: (at: number) => latestActions.current.closeNow(at),
+      menu: (at: number, card: RefObject<ViewInstance | null>) =>
+        void measureAnchor(card).then((rect) => {
+          if (rect.height > 0) latestActions.current.showCardMenu(at, rect.x, rect.y + rect.height, rect);
+        }),
       openTab: (id: string) => {
         const at = latestActions.current.order.indexOf(id);
         if (at >= 0) latestActions.current.open(at);
@@ -1116,6 +1121,7 @@ export const TabDeck = memo(function TabDeck() {
                     onOpen={cardActions.open}
                     onClose={cardActions.close}
                     onCloseNow={cardActions.closeNow}
+                    onMenu={nativeMenus() ? undefined : cardActions.menu}
                   />
                 );
               }))}
@@ -1255,7 +1261,7 @@ export const TabDeck = memo(function TabDeck() {
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} privately={tabs.get(order[cardMenu.index] ?? "")?.isPrivate === true} at={cardMenu} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
+      {cardMenu ? <CardMenuAt items={cardMenuItems(cardMenu.index)} privately={tabs.get(order[cardMenu.index] ?? "")?.isPrivate === true} at={cardMenu} control={cardMenu.control} floor={deckBarTop} screen={{ width, height }} onDismiss={() => setCardMenu(null)} /> : null}
       {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}
     </Animated.View>
     </MenuFloorProvider>
@@ -1343,11 +1349,11 @@ const styles = StyleSheet.create({
   parked: { transform: [{ translateX: HANDED_OVER_AWAY }] },
 });
 
-function CardMenuAt({ items, privately, at, floor, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; floor: number; screen: { width: number; height: number }; onDismiss: () => void }) {
+function CardMenuAt({ items, privately, at, control, floor, screen, onDismiss }: { items: MenuItem[]; privately: boolean; at: { x: number; y: number }; control?: Rect; floor: number; screen: { width: number; height: number }; onDismiss: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Portal exitMs={menuExitMs(true)}>
-      <Menu items={items} placer={pointPlacer(at, screen, insets, tabsLayout.menuWidth, { floor })} privately={privately} dimmed onDismiss={onDismiss} />
+      <Menu items={items} placer={pointPlacer(at, screen, insets, tabsLayout.menuWidth, { floor, control })} privately={privately} dimmed onDismiss={onDismiss} />
     </Portal>
   );
 }

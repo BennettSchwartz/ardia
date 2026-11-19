@@ -96,7 +96,7 @@ onAndroid("on Android a file input that offers the camera asks in the drawn acti
   const button = (label: string) => root.root.findAll((node) => node.props.accessibilityRole === "button" && node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0]!;
   act(() => button("Take Photo").props.onPress());
   expect(answered).toHaveBeenLastCalledWith("p1", expect.objectContaining({ id: "r1" }), { type: "takePhoto" });
-  act(() => button("Cancel").props.onPress());
+  act(() => root.root.findAll((node) => node.props.testID === "drawnConfirmationOutside" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(answered).toHaveBeenLastCalledWith("p1", expect.objectContaining({ id: "r1" }), { type: "dismiss" });
   unmount(root);
 });

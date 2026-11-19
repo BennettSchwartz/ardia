@@ -5,7 +5,7 @@ export type WindowRect = { x: number; y: number; width: number; height: number }
 
 type Layer = { id: number; node: ReactNode; leaving: boolean };
 
-type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect>; covered: () => boolean };
+type Overlay = { show: (id: number, node: ReactNode | null) => void; leave: (id: number, ms: number) => void; frame: () => Promise<WindowRect>; covered: () => boolean; generation: () => number };
 
 const OverlayContext = createContext<Overlay | null>(null);
 
@@ -25,21 +25,31 @@ export function OverlayHost({ children }: { children: ReactNode }) {
   const root = useRef<ViewInstance>(null);
   const [layers, setLayers] = useState<Layer[]>([]);
   const coveredNow = useRef(false);
+  const shownIds = useRef(new Set<number>());
+  const opened = useRef(0);
   coveredNow.current = layers.some((layer) => !layer.leaving);
   const overlay = useMemo<Overlay>(
     () => ({
-      show: (id, node) =>
+      show: (id, node) => {
+        if (node === null) shownIds.current.delete(id);
+        else if (!shownIds.current.has(id)) {
+          shownIds.current.add(id);
+          opened.current += 1;
+        }
         setLayers((now) => {
           if (node === null) return now.filter((layer) => layer.id !== id);
           if (now.some((layer) => layer.id === id)) return now.map((layer) => (layer.id === id ? { id, node, leaving: false } : layer));
           return [...now.filter((layer) => !layer.leaving), { id, node, leaving: false }];
-        }),
+        });
+      },
       leave: (id, ms) => {
         setLayers((now) => now.map((layer) => (layer.id === id ? { ...layer, leaving: true } : layer)));
+        shownIds.current.delete(id);
         setTimeout(() => setLayers((now) => now.filter((layer) => layer.id !== id || !layer.leaving)), ms);
       },
       frame: () => measure(root.current),
       covered: () => coveredNow.current,
+      generation: () => opened.current,
     }),
     [],
   );
@@ -81,6 +91,11 @@ export function Portal({ exitMs = 0, children }: { exitMs?: number; children: Re
 export function useOverlayCovered() {
   const overlay = useContext(OverlayContext);
   return overlay ? overlay.covered : () => false;
+}
+
+export function useOverlayGeneration() {
+  const overlay = useContext(OverlayContext);
+  return overlay ? overlay.generation : () => 0;
 }
 
 export function useOverlayFrame() {

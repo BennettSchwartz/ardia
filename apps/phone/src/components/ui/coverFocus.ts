@@ -12,6 +12,7 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
   let live = true;
   let frame: number | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let revoke: () => void = () => undefined;
   const ok = () => live && still();
   void AccessibilityInfo.isScreenReaderEnabled().then((on) => {
     if (!on || !ok()) return;
@@ -21,7 +22,7 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
       const view = target();
       const handle = view ? findNodeHandle(view) : null;
       if (!handle || !ok()) return;
-      if (nativeFocus()) focusViewNatively(handle);
+      if (nativeFocus()) revoke = focusViewNatively(handle);
       else AccessibilityInfo.setAccessibilityFocus(handle);
     };
     frame = requestAnimationFrame(() => {
@@ -35,6 +36,7 @@ export function focusForScreenReader(target: () => Focusable | null | undefined,
     live = false;
     if (frame !== null) cancelAnimationFrame(frame);
     if (timer !== null) clearTimeout(timer);
+    revoke();
   };
 }
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
+import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions, type StyleProp, type ViewStyle, type ViewInstance } from "react-native";
 import { lookIsNative } from "@ardia/phone-native";
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withDelay, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -47,6 +47,8 @@ export const MenuFloorProvider = MenuFloorContext.Provider;
 export const useMenuFloor = () => useContext(MenuFloorContext);
 
 const PRESS = menuLook.pressInset;
+
+const SCRIM_ACCESSIBILITY = Platform.OS === "android" ? ({ accessible: false, importantForAccessibility: "no" } as const) : ({ accessibilityLabel: "Dismiss" } as const);
 const CHECK_SHIFT = menuLook.labelInsetChecked - menuLook.labelInset;
 
 type Props = { items: MenuItem[]; place?: ViewStyle; placer?: MenuPlacer; onDismiss: (chosen?: boolean) => void; dimmed?: boolean; origin?: string; frost?: string | null; shown?: boolean; privately?: boolean };
@@ -109,8 +111,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
       dim.value = withTiming(0, { duration: menuMotion.contentFade });
       return;
     }
-    closed.value = withTiming(1, { duration: closing, easing: Easing.inOut(Easing.quad) });
-    glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }) : withDelay(closing, withTiming(0, { duration: menuMotion.contentFade }));
+    closed.value = withTiming(1, { duration: closing, easing: Easing.linear });
+    glass.value = dimmed ? withTiming(0, { duration: closing, easing: Easing.in(Easing.cubic) }) : withDelay(closing - menuMotion.contentFade, withTiming(0, { duration: menuMotion.contentFade }));
     shownContent.value = withTiming(0, { duration: dimmed ? closing : menuMotion.contentFade });
     dim.value = withTiming(0, { duration: menuMotion.heldClose });
   }, [leaving]);
@@ -198,7 +200,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={revealed && !leaving ? "auto" : "none"} collapsable={false} accessibilityElementsHidden={!revealed || leaving} importantForAccessibility={revealed && !leaving ? "auto" : "no-hide-descendants"}>
       {dimmed ? <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: paint.dim }, dimStyle]} /> : null}
-      <Pressable accessibilityLabel="Dismiss" style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={() => onDismiss()} />
+      <Pressable testID="drawnMenuScrim" {...SCRIM_ACCESSIBILITY} style={[StyleSheet.absoluteFill, { backgroundColor: ink.clear }]} onPress={() => onDismiss()} />
       <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, fade]}>
       <Animated.View
         testID="drawnMenu"
@@ -273,7 +275,9 @@ function fixedPlacer(place: ViewStyle, host: Rect, insets: Insets, width: number
   };
 }
 
-export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close + menuMotion.contentFade) + menuMotion.contentFade;
+const EXIT_SLACK_MS = 32;
+
+export const menuExitMs = (dimmed?: boolean) => (dimmed ? menuMotion.heldClose : menuMotion.close) + EXIT_SLACK_MS;
 
 const widthOf = (place: ViewStyle) => (typeof place.width === "number" ? place.width : menuLook.width);
 

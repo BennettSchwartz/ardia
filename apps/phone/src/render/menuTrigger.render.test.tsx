@@ -212,10 +212,17 @@ test("the drawn confirmation is a centred card with one action and no Cancel row
   const text = sheet.root.findAll((node) => typeof node.type === "string" && typeof node.props.children === "string").map((node) => node.props.children).join("\n");
   expect(text).toContain("Close 3 Tabs?");
   expect(text).toContain("They’ll stay in your Archive.");
-  const outside = sheet.root.findAll((node) => node.props.accessibilityLabel === "Cancel" && typeof node.props.onPress === "function" && node.props.accessibilityRole === "button");
-  expect(outside).toHaveLength(1);
+  const outside = sheet.root.findAll((node) => node.props.testID === "drawnConfirmationOutside" && typeof node.props.onPress === "function")[0]!;
   expect(sheet.root.findAll((node) => typeof node.type === "string" && node.props.children === "Cancel")).toHaveLength(0);
-  press(sheet, "Cancel");
+  if (Platform.OS === "android") {
+    expect(outside.props.importantForAccessibility).toBe("no");
+    const action = sheet.root.findAll((node) => node.props.accessibilityLabel === "Close All Tabs" && typeof node.props.onAccessibilityAction === "function")[0]!;
+    expect(action.props.accessibilityActions).toContainEqual({ name: "cancel", label: "Cancel" });
+    act(() => action.props.onAccessibilityAction({ nativeEvent: { actionName: "cancel" } }));
+  } else {
+    expect(outside.props.accessibilityLabel).toBe("Cancel");
+    act(() => outside.props.onPress());
+  }
   back();
   expect(closed).toHaveBeenCalledTimes(2);
   expect(confirmation.run).not.toHaveBeenCalled();
@@ -384,7 +391,7 @@ test("TalkBack moves to the first enabled row once the menu is shown, and back t
   act(() => jest.advanceTimersByTime(1000));
   expect(restored()).toBe(1);
   open();
-  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.props.onPress === "function")[0]!.props.onPress({ nativeEvent: {} }));
+  act(() => root.root.findAll((node) => node.props.testID === "drawnMenuScrim" && typeof node.props.onPress === "function")[0]!.props.onPress({ nativeEvent: {} }));
   act(() => jest.advanceTimersByTime(1000));
   expect(restored()).toBe(2);
   open();
@@ -499,7 +506,7 @@ test("a closed menu stays drawn for its close, out of the way of touches and Tal
   const root = trigger("tap");
   act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(covered(root).importantForAccessibility).toBe("no-hide-descendants");
-  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Dismiss" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  act(() => root.root.findAll((node) => node.props.testID === "drawnMenuScrim" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(root.root.findAll((node) => node.props.testID === "drawnMenu" && typeof node.type === "string")).toHaveLength(1);
   expect(root.root.findAll((node) => typeof node.type === "string" && node.props.pointerEvents === "none" && node.props.accessibilityElementsHidden === true)).not.toHaveLength(0);
   expect(covered(root).importantForAccessibility).toBe("auto");
@@ -606,7 +613,7 @@ test("on Android TalkBack focus goes through the native accessibility-focus acti
   const { focusForScreenReader, announceForScreenReader, ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
   jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
   jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
-  const nativeFocus = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => undefined);
+  const nativeFocus = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => () => undefined);
   const nativeAnnounce = jest.spyOn(phoneNative, "announceNatively").mockImplementation(() => undefined);
   const rnFocus = jest.spyOn(AccessibilityInfo, "setAccessibilityFocus").mockImplementation(() => undefined);
   focusForScreenReader(() => 42 as never);
@@ -625,7 +632,7 @@ test("on Android the confirmation is announced, title and message, as it opens, 
   const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
   jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
   jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
-  jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => undefined);
+  jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => () => undefined);
   const nativeAnnounce = jest.spyOn(phoneNative, "announceNatively").mockImplementation(() => undefined);
   const { ConfirmSheet } = require("../components/ui/ActionSheet") as typeof import("../components/ui/ActionSheet");
   const sheet = renderSurface(<ConfirmSheet confirmation={{ title: "Close 3 Tabs?", message: "They’ll stay in your Archive.", action: "Close All Tabs", run: () => undefined }} onClose={() => undefined} />);
@@ -723,6 +730,19 @@ describe("giving TalkBack focus back to the trigger after a menu closes without 
     unmount(root);
   });
 
+  test("stays dropped once a newer overlay has opened, even after that overlay has closed again", async () => {
+    const { root, open, back, restored, update } = setUp();
+    open();
+    back();
+    act(() => jest.advanceTimersByTime(100));
+    update({ asking: true });
+    act(() => jest.advanceTimersByTime(100));
+    update({ asking: false });
+    await settle();
+    expect(restored()).toBe(0);
+    unmount(root);
+  });
+
   test("is dropped when a newer overlay has opened over the screen", async () => {
     const { root, open, back, restored, update } = setUp();
     open();
@@ -734,4 +754,69 @@ describe("giving TalkBack focus back to the trigger after a menu closes without 
     expect(restored()).toBe(0);
     unmount(root);
   });
+});
+
+test("on Android cancelling a focus after its native request went out revokes that request, so a closing menu's row is never focused late", async () => {
+  if (Platform.OS !== "android") return;
+  const { AccessibilityInfo } = require("react-native") as typeof import("react-native");
+  const phoneNative = require("@ardia/phone-native") as typeof import("@ardia/phone-native");
+  const { focusForScreenReader, ANDROID_FOCUS_DELAY_MS } = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  jest.spyOn(AccessibilityInfo, "isScreenReaderEnabled").mockResolvedValue(true);
+  jest.spyOn(phoneNative, "screenReaderFocusIsNative").mockReturnValue(true);
+  const revoked = jest.fn();
+  const sent = jest.spyOn(phoneNative, "focusViewNatively").mockImplementation(() => revoked);
+  const cancel = focusForScreenReader(() => 42 as never);
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(ANDROID_FOCUS_DELAY_MS + 20));
+  expect(sent).toHaveBeenCalledWith(42);
+  expect(revoked).not.toHaveBeenCalled();
+  cancel();
+  expect(revoked).toHaveBeenCalledTimes(1);
+});
+
+test("a tap menu's close is over at 200 ms, its fade folded into the end of the shrink, and the layer goes a couple of frames later", () => {
+  expect(menuExitMs(false)).toBeLessThanOrEqual(menuMotion.close + 40);
+  expect(menuExitMs(true)).toBeLessThanOrEqual(menuMotion.heldClose + 40);
+});
+
+test("on Android the menu's scrim can't take TalkBack focus, since Back dismisses as PopupMenu's does; iPhone keeps VoiceOver's Dismiss", () => {
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  const scrim = root.root.findAll((node) => node.props.testID === "drawnMenuScrim" && typeof node.props.onPress === "function")[0]!;
+  if (Platform.OS === "android") {
+    expect(scrim.props.importantForAccessibility).toBe("no");
+    expect(scrim.props.accessible).toBe(false);
+    expect(scrim.props.accessibilityLabel).toBeUndefined();
+  } else {
+    expect(scrim.props.accessibilityLabel).toBe("Dismiss");
+  }
+  const focusable = root.root.findAll((node) => typeof node.type === "string" && (node.props.accessible === true || typeof node.props.accessibilityLabel === "string") && node.props.importantForAccessibility !== "no");
+  const labels = focusable.map((node) => node.props.accessibilityLabel).filter(Boolean);
+  expect(labels).toEqual(expect.arrayContaining(["Copy Link", "Send to Device", "Light", "Dark", "Close Tab"]));
+  if (Platform.OS === "android") expect(labels).not.toContain("Dismiss");
+  unmount(root);
+});
+
+test("a picker gives TalkBack focus back to its row after a choice, as PopupMenu does, while other menus don't after a choice", async () => {
+  const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => () => undefined);
+  const opener = { opener: true };
+  const restored = () => asked.mock.calls.filter(([target]) => target() === opener).length;
+  for (const restoresAfterChoice of [true, false]) {
+    asked.mockClear();
+    const root = renderSurface(
+      <MenuTrigger items={[{ label: "After 1 day", onPress: () => undefined }]} trigger="tap" restoresAfterChoice={restoresAfterChoice}>
+        {({ onPress }) => (
+          <Pressable accessibilityLabel="Archive Inactive Tabs" onPress={onPress}>
+            <Text>Archive Inactive Tabs</Text>
+          </Pressable>
+        )}
+      </MenuTrigger>,
+    );
+    act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Archive Inactive Tabs" && typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: opener, nativeEvent: {} }));
+    pickMenu(root, "After 1 day");
+    act(() => jest.advanceTimersByTime(1000));
+    expect(restored()).toBe(restoresAfterChoice ? 1 : 0);
+    unmount(root);
+  }
 });

@@ -299,7 +299,7 @@ test("a screen reader reads each card as main's: the title, the host as its valu
   expect(card.props.accessibilityRole).toBe("button");
   expect(card.props.accessibilityValue).toEqual({ text: new URL(tab.url).host });
   const ios = Platform.OS === "ios";
-  expect(card.props.accessibilityActions).toEqual(ios ? [{ name: "Close Tab" }] : [{ name: "activate" }, { name: "close", label: "Close Tab" }]);
+  expect(card.props.accessibilityActions).toEqual(ios ? [{ name: "Close Tab" }] : [{ name: "activate" }, { name: "close", label: "Close Tab" }, { name: "menu", label: "Tab Options" }]);
   act(() => card.props.onAccessibilityAction({ nativeEvent: { actionName: ios ? "Close Tab" : "close" } }));
   expect(closed).toHaveBeenCalledWith(tab.id);
   if (ios) act(() => card.props.onAccessibilityTap());
@@ -326,6 +326,18 @@ test("the Archive capsule yields to the grid, as main hides its archive card in 
   expect(byTestId(root, "archiveCapsule").length + hosts(root, "archiveCapsule").length).toBeGreaterThan(0);
   toggle();
   expect(byTestId(root, "archiveCapsule").length + hosts(root, "archiveCapsule").length).toBe(0);
+  unmount(root);
+});
+
+onAndroid("a grid card's Tab Options action gives TalkBack the same drawn CardMenu, placed from the card as a long press with no touch point", () => {
+  const root = deck();
+  toggle();
+  const card = cards(root)[0]!;
+  expect(card.props.accessibilityActions).toContainEqual({ name: "menu", label: "Tab Options" });
+  act(() => card.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  const menu = root.root.findAll((node) => node.type === FloatingMenu)[0]!;
+  expect(menu.props.at).toBeNull();
+  expect(menu.props.dimmed).toBe(true);
   unmount(root);
 });
 

@@ -5,7 +5,7 @@ import type { MenuAlign, Point } from "../../lib/menuPlace";
 import { sfName } from "../../lib/sfSymbols";
 import { focusForScreenReader } from "./coverFocus";
 import { menuMotion } from "./motion";
-import { useOverlayCovered } from "./Overlay";
+import { useOverlayCovered, useOverlayGeneration } from "./Overlay";
 import type { Confirmation } from "./Dialog";
 import { FloatingMenu, isSubmenu, useMenuFloor, useMenuFrost, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 import { useTheme } from "./theme";
@@ -23,6 +23,7 @@ type Props = {
   privately?: boolean;
   align?: MenuAlign;
   frost?: string | null;
+  restoresAfterChoice?: boolean;
   place?: ViewStyle;
   dark?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -101,11 +102,12 @@ const pressPoint = (event?: GestureResponderEvent): Point | null => {
   return touch && typeof touch.pageX === "number" && typeof touch.pageY === "number" ? { x: touch.pageX, y: touch.pageY } : null;
 };
 
-function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, frost: frostHere, style, testID, children }: Props) {
+function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, disabled = false, place, privately, align, frost: frostHere, restoresAfterChoice = false, style, testID, children }: Props) {
   const anchor = useRef<ViewInstance>(null);
   const opener = useRef<unknown>(null);
   const cancelRestore = useRef<() => void>(() => undefined);
   const covered = useOverlayCovered();
+  const generation = useOverlayGeneration();
   useEffect(() => () => cancelRestore.current(), []);
   const frostAround = useMenuFrost();
   const frost = frostHere === undefined ? frostAround : frostHere;
@@ -134,12 +136,13 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
       setOpened(null);
       onClose?.();
       cancelRestore.current();
-      if (chosen) return;
+      if (chosen && !restoresAfterChoice) return;
       let cancelFocus: () => void = () => undefined;
+      const openedBefore = generation();
       const wait = setTimeout(() => {
         cancelFocus = focusForScreenReader(
           () => (opener.current ?? anchor.current) as Parameters<typeof findNodeHandle>[0],
-          () => !covered(),
+          () => generation() === openedBefore && !covered(),
         );
       }, menuMotion.heldClose);
       cancelRestore.current = () => {
@@ -148,7 +151,7 @@ function DrawnTrigger({ items, trigger = "longPress", onOpen, onClose, haptic, d
         cancelRestore.current = () => undefined;
       };
     },
-    [onClose],
+    [onClose, restoresAfterChoice],
   );
   const held = trigger === "longPress";
   return (

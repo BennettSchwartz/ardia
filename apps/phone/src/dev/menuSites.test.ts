@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { test } from "node:test";
+import { MENU_OPENERS, OPENER_DEFINITIONS } from "../components/ui/menuOpeners.ts";
 
 const COMPONENTS = join(import.meta.dirname, "..", "components");
 
-type Over = "frostable" | "page" | "sheet" | "system";
+type Over = "frostable" | "page" | "sheet" | "system" | "card";
 
-const DEFINITIONS = ["ui/Menu.tsx", "ui/MenuTrigger.tsx"];
+const OPENERS = new Set<string>(MENU_OPENERS);
 
-const NOT_MENUS = new Set(["MenuIcon", "MenuMaterial", "MenuFrostProvider", "MenuFloorProvider", "MenuSiteSettings", "MenuMain", "ContextMenu.Trigger", "ContextMenu.Items", "PageMenu", "PageMenuWords"]);
+const DEFINITIONS: readonly string[] = OPENER_DEFINITIONS;
 
 const OPAQUE_WRAPPERS = new Set(["TabsMenuTrigger", "PressMenu", "MoreMenu"]);
 
@@ -19,29 +20,32 @@ const SITES: Record<string, Over[]> = {
   "browsing/FloatingBar.tsx": ["page"],
   "browsing/PageMenu.tsx": ["sheet"],
   "browsing/PageMenuWords.tsx": ["sheet"],
-  "browsing/PageRequests.tsx": ["page"],
+  "browsing/PageRequests.tsx": ["card", "page"],
   "browsing/ReaderView.tsx": ["page"],
   "browsing/tabsMenu.tsx": ["page", "page"],
   "column/DeckColumn.tsx": ["page", "page"],
   "column/StartColumn.tsx": ["page"],
   "duo/DuoBrowsing.tsx": ["page"],
-  "duo/DuoSidebar.tsx": ["page", "page", "page", "page", "page"],
+  "duo/DuoSidebar.tsx": ["page", "page", "card", "page", "page", "page"],
   "library/ExpoLibrary.tsx": ["system", "system", "system", "system"],
   "search/SearchTray.tsx": ["page"],
   "search/StartPage.tsx": ["frostable"],
   "search/StartScreen.tsx": ["frostable"],
   "search/StartSpaces.tsx": ["frostable"],
+  "settings/BlockingPages.tsx": ["card", "card"],
+  "settings/DataPages.tsx": ["card"],
   "settings/SettingsKit.tsx": ["sheet"],
   "sync/ExpoSpaces.tsx": ["system", "system"],
   "sync/SpacesView.tsx": ["sheet"],
+  "sync/SyncPage.tsx": ["card"],
   "tabs/ArchiveIntervalCard.tsx": ["frostable", "frostable"],
-  "tabs/ArchiveView.tsx": ["sheet", "sheet"],
+  "tabs/ArchiveView.tsx": ["sheet", "sheet", "card"],
   "tabs/ContainedDeck.tsx": ["frostable"],
   "tabs/DeckBottomBar.tsx": ["frostable", "frostable"],
   "tabs/DeckCard.tsx": ["frostable", "frostable", "frostable"],
   "tabs/DeckHeader.tsx": ["frostable", "frostable", "frostable"],
   "tabs/ExpoArchive.tsx": ["system", "system", "system"],
-  "tabs/TabDeck.tsx": ["frostable", "frostable", "frostable", "frostable"],
+  "tabs/TabDeck.tsx": ["frostable", "frostable", "frostable", "card", "frostable"],
   "tabs/TabGrid.tsx": ["frostable"],
 };
 
@@ -59,7 +63,7 @@ export function menuSites(source: string): Site[] {
   const sites: Site[] = [];
   for (const start of source.matchAll(/(?<![\w.])<([A-Z][\w.]*)/g)) {
     const name = start[1]!;
-    if (!name.includes("Menu") || NOT_MENUS.has(name)) continue;
+    if (!OPENERS.has(name)) continue;
     let depth = 0;
     let at = start.index! + start[0].length;
     for (; at < source.length; at++) {
@@ -97,10 +101,11 @@ test("every drawn menu over a page or the Reader is opaque, since a WebView can'
   assert.deepEqual(frosted, []);
 });
 
-test("the inventory counts sites, not files: a second menu in a listed file, or a menu wrapper in a new file, is found", () => {
+test("the inventory counts sites of the registered menu openers: a second one in a listed file is found, a component that only has Menu in its name is not", () => {
   assert.equal(menuSites('<MenuTrigger items={a}>{() => null}</MenuTrigger>\n<MenuTrigger items={b}>{() => null}</MenuTrigger>').length, 2);
   assert.deepEqual(
-    menuSites('const x = useState<RowMenu | null>(null);\n<PlusMenuButton width={1} onMenu={(open) => setOpen(open)} />').map((site) => site.name),
+    menuSites('const x = useState<RowMenu | null>(null);\n<PlusMenuButton width={1} onMenu={(open) => setOpen(open)} />\n<MenuShortcutHint />\n<ContextMenu.Items />').map((site) => site.name),
     ["PlusMenuButton"],
   );
+  assert.deepEqual(menuSites("<ConfirmSheet confirmation={c} onClose={close} />").map((site) => site.name), ["ConfirmSheet"]);
 });
