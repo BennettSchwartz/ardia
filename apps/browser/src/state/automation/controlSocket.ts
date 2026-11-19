@@ -33,7 +33,7 @@ import { accessProblem, checkedParams, familyOf, methodSpec, methodsCatalog, run
 import { registerSocketAreas } from "./socketAreas";
 import { noteSocketCall } from "../telemetry/cliCounts";
 import { fittedEvent, fittedReply } from "./socketWire";
-import { runNeedsUser } from "./runAsks";
+import { BACKGROUND_RUN_COMMANDS } from "./backgroundRun";
 import { dismissSocketAsks } from "./socketAsk";
 import { dropAllHistoryHandles, dropHistoryHandles } from "./historyHandles";
 import { dropLateResults, forgetTabCalls } from "./tabCalls";
@@ -46,6 +46,7 @@ let applied = false;
 let chain: Promise<void> = Promise.resolve();
 let listening = false;
 const subscriptions = new Map<number, Subscription>();
+const openConnections = new Set<number>();
 const launchSent = new Set<number>();
 const unwrittenRuns = new Set<number>();
 const callers = new Map<number, CliCaller>();
@@ -130,6 +131,7 @@ export function handleControlRequest({ connection, generation: tagged, line }: C
   if ("error" in request) return send(connection, request.id, { error: request.error });
   const { id, method, params } = request;
   if (tagged !== generation || !controlOn()) return send(connection, id, failure("failed", "Control is off."));
+  openConnections.add(connection);
   const ticket = method === "run" ? ++nextTicket : 0;
   const caller = callers.get(connection);
   if (ticket && caller) noteCliCaller(caller);
@@ -171,9 +173,9 @@ export async function windowsWithTargets(windows: AutomationWindow[]): Promise<A
 export function runMethod(params: Record<string, unknown>, background = backgroundInstance): Body {
   const plan = planRun(useBrowser.getState(), params);
   if ("error" in plan) return plan;
-  const needsUser = background ? runNeedsUser(useBrowser.getState(), plan) : null;
-  if (needsUser === "asks") return failure("refused", `${plan.command} would ask first, and this Ardia runs in the background, where nobody can answer, so it didn't run.`);
-  if (needsUser === "interactive") return failure("refused", `${plan.command} opens something only a person can answer (a sheet, dialog, picker, menu, print preview or Cast), and this Ardia runs in the background, so it didn't run.`);
+  if (background && !BACKGROUND_RUN_COMMANDS.has(plan.command)) {
+    return failure("refused", `${plan.command} isn't one of the commands a background Ardia runs, since it may open something only a person can answer; use the matching socket method instead (apply's tab.close, tabs.back, tabs.reload, …).`);
+  }
   try {
     runCommand({ command: plan.command, arg: plan.arg, windowId: plan.windowId }, { strictWindow: plan.windowId !== null, tabId: plan.tabId });
   } catch (error) {
@@ -206,7 +208,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
   if (!("params" in checked)) return checked;
   const { params } = checked;
   const serving = generation;
-  const stillOn = () => generation === serving && controlOn();
+  const stillOn = () => generation === serving && controlOn() && openConnections.has(connection);
   switch (method) {
     case "hello": {
       const tooOld = clientProtocolProblem(params, systemInfo().appVersion);
@@ -249,6 +251,7 @@ function answer(connection: number, method: string, given: Record<string, unknow
 }
 
 function handleClose({ connection }: { connection: number }) {
+  openConnections.delete(connection);
   launchSent.delete(connection);
   callers.delete(connection);
   dropResponder(connection);
@@ -281,6 +284,7 @@ async function start(consent: ConsentToken | null) {
 }
 
 async function stop() {
+  openConnections.clear();
   generation = null;
   dismissSocketAsks();
   dropAllHistoryHandles();
@@ -301,6 +305,7 @@ function sync() {
   applied = on;
   const consent = consentToken();
   if (!on) {
+    openConnections.clear();
     generation = null;
     dismissSocketAsks();
     dropAllHistoryHandles();

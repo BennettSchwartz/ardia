@@ -1,3 +1,5 @@
+import { secureRandomHex } from "../../platform/secureRandom";
+
 export type HistoryPage = { url: string; profileId: string; engine: string };
 
 const MAX_HANDLES = 20_000;
@@ -7,13 +9,18 @@ const pageKey = (page: HistoryPage) => `${page.profileId}\n${page.engine}\n${pag
 
 function randomHandle(taken: Map<string, HistoryPage>): string {
   for (;;) {
-    let id = "h";
-    for (let i = 0; i < 4; i++) id += Math.floor(Math.random() * 0x100000000).toString(36).padStart(7, "0");
+    const id = `h${secureRandomHex(40)}`;
     if (!taken.has(id)) return id;
   }
 }
 
-export function historyHandle(connection: number, page: HistoryPage): string {
+export type HandleScope = { connection: number; serving: () => boolean };
+
+export class AbandonedRequest extends Error {}
+
+export function historyHandle(scope: HandleScope, page: HistoryPage): string {
+  if (!scope.serving()) throw new AbandonedRequest("The connection closed or control went off before the search finished, so it was dropped.");
+  const connection = scope.connection;
   let table = tables.get(connection);
   if (!table) tables.set(connection, (table = { byId: new Map(), byPage: new Map() }));
   const key = pageKey(page);

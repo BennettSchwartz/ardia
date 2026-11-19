@@ -39,7 +39,7 @@ const CHANGED = new Set(["asleep", "awake", "loading"]);
 async function settled(work: Promise<string>, id: string, doing: string, done: string[], stillOn: () => boolean, owner: number): Promise<string> {
   const outcome = await withDeadline(work, NATIVE_DEADLINE_MS, LATE);
   if (outcome === LATE) {
-    awaitLate(id, work, owner);
+    awaitLate(id, work, { connection: owner, serving: stillOn });
     throw stopped(`Tab ${id} didn't finish ${doing} within ${NATIVE_DEADLINE_MS / 1000} s: outcome unknown. Ardia stopped waiting; the tab is busy until the engine answers, and a later batch reports what happened under late.`, done);
   }
   if (!stillOn()) throw stopped(`Control was turned off while tab ${id} was ${doing}; the tabs after it were left alone.`, CHANGED.has(outcome) ? [...done, id] : done);
@@ -71,10 +71,14 @@ export async function wake(results: OpResult[], op: Op, stillOn: () => boolean =
     const t = store().tabs[id];
     if (!t) outcomes[id] = "gone";
     else if (isSleeping(id) && webviews.get(id)) {
-      const reload = webviews.get(id)!.reload().then(
-        () => "awake",
-        () => "failed",
-      );
+      const view = webviews.get(id)!;
+      const attached = () => view.isAttached?.() !== false;
+      const reload = attached()
+        ? view.reload().then(
+            () => (attached() ? "awake" : "no_view"),
+            () => "failed",
+          )
+        : Promise.resolve("no_view");
       outcomes[id] = await settled(reload, id, "waking", done, stillOn, owner);
     } else if (needsPage(t)) {
       store().updateTab(id, { page: wokenPage(t) });
