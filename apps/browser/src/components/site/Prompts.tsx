@@ -158,7 +158,7 @@ export function PasswordPrompt({ tabId, right, top }: { tabId: string; right: nu
   const update = prompt.state === "update";
   const username = chosen ?? prompt.username;
   const answer = guard((action: PasswordPromptAnswer) => {
-    answerPasswordPrompt(tabId, action, username);
+    answerPasswordPrompt(tabId, action, username, prompt);
     setChosen(null);
   });
   const choices = update && prompt.usernames.length > 1 ? prompt.usernames : [];
@@ -204,7 +204,8 @@ export function AutofillPrompt({ tabId, right, top }: { tabId: string; right: nu
   const prompt = usePage(tabId, (p) => p.autofillPrompt);
   const guard = usePromptInputGuard(prompt?.id);
   if (!prompt) return null;
-  const answer = guard((action: AutofillPromptAnswer) => void answerAutofillPrompt(tabId, action));
+  const shownId = prompt.id;
+  const answer = guard((action: AutofillPromptAnswer) => void answerAutofillPrompt(tabId, action, shownId));
   const changes = prompt.changes ?? [];
   const values = (key: "to" | "from") => changes.filter((c) => c[key]).map((c) => c[key]);
   const section = (lines: string[], label?: string) => (

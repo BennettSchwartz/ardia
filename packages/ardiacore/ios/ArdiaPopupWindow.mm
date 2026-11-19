@@ -39,6 +39,11 @@ NSMapTable<ArdiaWebView *, NSPointerArray *> *PasswordPromptSources() {
   return sources;
 }
 
+NSMapTable<ArdiaWebView *, NSNumber *> *PasswordOffers() {
+  static NSMapTable *offers = [NSMapTable weakToStrongObjectsMapTable];
+  return offers;
+}
+
 NSString *HostOf(NSString *url) {
   return [NSURL URLWithString:url ?: @""].host ?: @"";
 }
@@ -403,7 +408,7 @@ NSImage *_Nullable PermissionIcon(NSDictionary *request) {
     return;
   }
   ardia_host::NotePasswordPromptSource(opener, tab);
-  [opener emit:@"passwordPrompt" payload:prompt];
+  [opener emit:@"passwordPrompt" payload:ardia_host::WithPasswordOffer(opener, prompt)];
 }
 
 - (void)window:(ArdiaCoreWindow *)window didRemoveTab:(ArdiaCoreTab *)tab {
@@ -478,6 +483,19 @@ void NotePasswordPromptSource(ArdiaWebView *view, ArdiaCoreTab *source) {
   NSPointerArray *route = [NSPointerArray weakObjectsPointerArray];
   [route addPointer:(__bridge void *)source];
   [PasswordPromptSources() setObject:route forKey:view];
+}
+
+NSDictionary *WithPasswordOffer(ArdiaWebView *view, NSDictionary *prompt) {
+  static NSInteger lastOffer = 0;
+  NSNumber *serial = @(++lastOffer);
+  [PasswordOffers() setObject:serial forKey:view];
+  NSMutableDictionary *payload = [prompt mutableCopy] ?: [NSMutableDictionary dictionary];
+  payload[@"offerSerial"] = serial;
+  return payload;
+}
+
+NSInteger PasswordOfferSerial(ArdiaWebView *view) {
+  return [[PasswordOffers() objectForKey:view] integerValue];
 }
 
 ArdiaCoreTab *PeekPasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *own) {

@@ -29,7 +29,7 @@ let passwordPromptSerial = 0;
 export const passwordPromptId = (prompt: PasswordPrompt) => passwordPromptIds.get(prompt) ?? null;
 
 export function showPasswordPrompt(tabId: string, prompt: PasswordPrompt) {
-  if (prompt.state !== "saved") passwordPromptIds.set(prompt, `pw${++passwordPromptSerial}`);
+  if (prompt.state !== "saved") passwordPromptIds.set(prompt, prompt.offerSerial === undefined ? `pw${++passwordPromptSerial}` : `pw-offer-${prompt.offerSerial}`);
   patchPage(tabId, { passwordPrompt: prompt.state === "saved" ? null : prompt });
 }
 
@@ -52,9 +52,9 @@ export function answerExternalApp(tabId: string, open: boolean, remember = false
   void resolveExternalApp(request.id, open, remember);
 }
 
-export function answerPasswordPrompt(tabId: string, action: PasswordPromptAnswer, username?: string) {
+export function answerPasswordPrompt(tabId: string, action: PasswordPromptAnswer, username?: string, shown?: PasswordPrompt) {
   const prompt = pageOf(tabId).passwordPrompt;
-  if (!prompt) return false;
+  if (!prompt || (shown && prompt !== shown)) return false;
   const offer = prompt.offer === undefined ? {} : { offer: prompt.offer };
   const keeps = action === "save" || action === "update";
   void webviews.get(tabId)?.resolvePasswordPrompt(action, keeps ? { username: username ?? prompt.username, ...offer } : prompt.offer === undefined ? undefined : offer);
@@ -62,9 +62,9 @@ export function answerPasswordPrompt(tabId: string, action: PasswordPromptAnswer
   return true;
 }
 
-export function answerAutofillPrompt(tabId: string, action: AutofillPromptAnswer) {
+export function answerAutofillPrompt(tabId: string, action: AutofillPromptAnswer, id: number) {
   const prompt = pageOf(tabId).autofillPrompt;
-  if (!prompt) return false;
+  if (!prompt || prompt.id !== id) return false;
   void webviews.get(tabId)?.resolveAutofillPrompt(prompt.id, action);
   patchPage(tabId, { autofillPrompt: null });
   return true;
@@ -77,8 +77,9 @@ export async function answerPasswordPromptConfirmed(tabId: string, id: string, a
   if (!prompt || passwordPromptId(prompt) !== id) return "gone";
   const view = webviews.get(tabId);
   if (!view?.answerPasswordPrompt) return "noView";
+  if (prompt.offerSerial === undefined) return "refused";
   const keeps = action === "save" || action === "update";
-  const expected = { state: prompt.state, origin: prompt.origin, username: prompt.username };
+  const expected = { state: prompt.state, origin: prompt.origin, username: prompt.username, offerSerial: prompt.offerSerial };
   if (!(await view.answerPasswordPrompt(action, expected, keeps ? (username ?? prompt.username) : null))) return "refused";
   if (pageOf(tabId).passwordPrompt === prompt) patchPage(tabId, { passwordPrompt: null });
   return "answered";

@@ -76,6 +76,8 @@ void DropPopupWindowPermission(NSString *requestId);
 void NotePasswordPromptSource(ArdiaWebView *view, ArdiaCoreTab *_Nullable source);
 ArdiaCoreTab *_Nullable PasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *_Nullable own);
 ArdiaCoreTab *_Nullable PeekPasswordPromptTab(ArdiaWebView *view, ArdiaCoreTab *_Nullable own);
+NSDictionary *WithPasswordOffer(ArdiaWebView *view, NSDictionary *_Nullable prompt);
+NSInteger PasswordOfferSerial(ArdiaWebView *view);
 
 }
 

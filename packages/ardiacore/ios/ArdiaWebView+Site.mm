@@ -62,7 +62,9 @@ constexpr NSSize kExtensionPopupMaximum = {800, 600};
   [_tab resolveAutofillPrompt:promptId action:action];
 }
 
-- (BOOL)answerPasswordPrompt:(NSString *)action expected:(NSDictionary<NSString *, NSString *> *)expected username:(NSString *)username {
+- (BOOL)answerPasswordPrompt:(NSString *)action expected:(NSDictionary<NSString *, id> *)expected username:(NSString *)username {
+  NSNumber *offer = [expected[@"offerSerial"] isKindOfClass:NSNumber.class] ? expected[@"offerSerial"] : nil;
+  if (!offer || offer.integerValue != ardia_host::PasswordOfferSerial(self)) return NO;
   NSDictionary *shown = ardia_host::PeekPasswordPromptTab(self, _tab).passwordPrompt;
   NSString *state = [shown[@"state"] isKindOfClass:NSString.class] ? shown[@"state"] : nil;
   if (!state || ![state isEqualToString:expected[@"state"] ?: @""]) return NO;

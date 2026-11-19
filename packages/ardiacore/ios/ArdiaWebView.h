@@ -140,8 +140,13 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 @interface ArdiaWebView (ContextMenu)
-+ (nullable NSString *)runCapturedMenuCommand:(NSInteger)command tab:(NSString *)tabId documents:(NSInteger)documents url:(NSString *)url
-    NS_SWIFT_NAME(runCapturedMenuCommand(_:tab:documents:url:));
++ (void)runCapturedMenuCommand:(NSInteger)command
+                           tab:(NSString *)tabId
+                     documents:(NSInteger)documents
+                           url:(NSString *)url
+                     mainFrame:(nullable NSNumber *)mainFrame
+                    completion:(void (^)(NSString *_Nullable problem))completion
+    NS_SWIFT_NAME(runCapturedMenuCommand(_:tab:documents:url:mainFrame:completion:));
 + (void)setSearchEngineName:(NSString *)name;
 + (void)removeSharedImage:(NSURL *)file NS_SWIFT_NAME(removeSharedImage(_:));
 + (void)removeSharedImages;
@@ -216,7 +221,7 @@ NS_ASSUME_NONNULL_BEGIN
     NS_SWIFT_NAME(resolvePasswordPrompt(_:username:password:));
 - (void)resolveAutofillPrompt:(NSInteger)promptId action:(NSString *)action NS_SWIFT_NAME(resolveAutofillPrompt(_:action:));
 - (BOOL)answerPasswordPrompt:(NSString *)action
-                    expected:(NSDictionary<NSString *, NSString *> *)expected
+                    expected:(NSDictionary<NSString *, id> *)expected
                     username:(nullable NSString *)username NS_SWIFT_NAME(answerPasswordPrompt(_:expected:username:));
 - (BOOL)answerAutofillPrompt:(NSInteger)promptId action:(NSString *)action NS_SWIFT_NAME(answerAutofillPrompt(_:action:));
 - (nullable NSString *)executeExtensionAction:(NSString *)extensionId NS_SWIFT_NAME(executeExtensionAction(_:));

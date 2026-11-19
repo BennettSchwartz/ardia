@@ -22,7 +22,7 @@ type NativeHandle = Omit<
   | "requestPictureInPicture"
   | "takeControlPress"
 > & {
-  answerPasswordPrompt(answer: string, expected: { state: string; origin: string; username: string }, username: string | null): Promise<boolean>;
+  answerPasswordPrompt(answer: string, expected: { state: string; origin: string; username: string; offerSerial: number }, username: string | null): Promise<boolean>;
   answerAutofillPrompt(id: number, answer: string): Promise<boolean>;
   requestPictureInPicture(clickAt: number, control: number): Promise<boolean>;
   takeControlPress(clickAt: number, control: number): Promise<boolean>;

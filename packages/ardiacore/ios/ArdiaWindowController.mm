@@ -343,8 +343,9 @@ NSMapTable<ArdiaCoreProfile *, ArdiaWindowController *> *StandaloneWindows() {
 
 - (void)window:(ArdiaCoreWindow *)window passwordPrompt:(NSDictionary<NSString *, id> *)prompt forTab:(ArdiaCoreTab *)tab {
   ArdiaWebView *view = [self viewFor:tab];
-  if (view) ardia_host::NotePasswordPromptSource(view, nil);
-  [view emit:@"passwordPrompt" payload:prompt];
+  if (!view) return;
+  ardia_host::NotePasswordPromptSource(view, nil);
+  [view emit:@"passwordPrompt" payload:ardia_host::WithPasswordOffer(view, prompt)];
 }
 
 - (void)window:(ArdiaCoreWindow *)window autofillPrompt:(NSDictionary<NSString *, id> *)prompt forTab:(ArdiaCoreTab *)tab {
