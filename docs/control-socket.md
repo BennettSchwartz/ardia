@@ -33,8 +33,9 @@ UI update still happens.
   socket calls, through a `may…` callback they take: after `profiles.delete`'s and `extensions.uninstall`'s
   confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes and before the close starts (once the
   window's native close has started, AppKit has already ordered the window out, so the store close always finishes,
-  whatever happens to control meanwhile; turning control off closes the connection, so the client then sees the stream
-  end rather than a reply and has to treat the outcome as unknown); in Little Ardia's close after its quit prompt; in `tabs.reload`,
+  whatever happens to control meanwhile: a close started before control was revoked completes. Turning control off
+  closes the connection, so the client sees the stream end rather than a reply and has to treat the outcome as
+  unknown); in Little Ardia's close after its quit prompt; in `tabs.reload`,
   `tabs.back` and `tabs.forward` after a shared page is handed over, and in cross-engine back after its unsaved-work
   check; in `downloads.open` before it reveals an opened archive; in `history.clear` before the cache write (the engine
   clear already ran, and the cache reconciles from the engine's own events); in `offscreen` after its ownership read;
@@ -46,9 +47,16 @@ UI update still happens.
   next `apply` reports it once under `late` (`{tabId: outcome}`); it's dropped if that connection closed, and an
   answer from before control went off is dropped too. An op's `changed.tabs` lists only tabs it actually changed
   (`asleep`, `awake` after a reload, `loading` when a sleeping tab's page was asked to load), never ones it left alone
-  (`shown`, `already`, `no_view` when the tab's view was gone so nothing reloaded).
-- **A request lives only while its connection and consent do.** Each request captures its connection and the consent
-  generation when it starts (`SocketCall.serving`, `controlSocket.ts`). After every await, a request whose connection
+  (`shown`, `already`, `no_view` when the tab's view is known to be gone, `reload_unverified` when it reloaded but
+  the platform can't say whether the view is still attached). Whether a view is attached is awaited on every platform
+  (`isAttached`, async on Windows and Linux); "can't tell" is never read as attached.
+- **A request lives only while its connection and consent do.** Each request captures its connection and the consent generation when it starts (`SocketCall.serving`,
+  `controlSocket.ts`). A connection counts as gone the moment its peer stops writing: at read EOF the native side tells
+  JS at once (`onPeerFinished`, sent as the connection's close) while it goes on writing the replies already queued,
+  so a search or `apply` still running on it is abandoned then, not when the drain ends. A client that leaves while
+  a confirmation it caused is up takes that question away (by key, `dismissShownOnly`) and frees the window's close
+  guard, as turning control off does; where nothing can dismiss a dialog the guard holds until it's answered and is
+  freed when it closes. After every await, a request whose connection
   closed or whose generation changed is abandoned without touching shared state: the writers of that state check the
   scope themselves, so a search that resumes after a disconnect creates no handle table (`historyHandle`), and an
   `apply` whose wait spans a disconnect or a control toggle registers no busy tab and stores no late result
@@ -73,10 +81,12 @@ UI update still happens.
   have to ask and nobody could see the question (no window of it is visible, or Ardia runs as a background instance), it
   answers `refused` instead of waiting on a dialog nobody can answer, and it never falls back to an app-modal alert. The
   reply comes only after the user answers. `run` keeps its contract (the reply comes at dispatch, and a prompt the
-  command shows belongs to the UI it runs), so in a background instance it runs only a small allowlist and refuses everything else before running it (`backgroundRun.ts`: `newTab`, `newWindow`, `reopenClosedTab`,
+  command shows belongs to the UI it runs), so in a background instance it runs only a small allowlist and refuses everything else before running it (`backgroundRun.ts`: `reopenClosedTab`,
   `toggleSidebar`, `toggleTabLayout`, `nextTab`, `previousTab`, `selectLastTab`, `togglePin`, `duplicateTab`,
-  `toggleMute`, `moveTabUp`, `moveTabDown`, `stop`), each one read to be a plain store or page call and tested in a
-  background fixture to open no sheet, prompt, dialog, picker, menu or external handler. Commands that ask only in
+  `toggleMute`, `moveTabUp`, `moveTabDown`, `stop`), each one read to be a plain store or page call and run for real in a background fixture (a closed tab to reopen, a tab
+  that can move, a view to stop) that checks it did its job and opened no sheet, prompt, dialog, picker, menu or
+  external handler. `newTab` and `newWindow` aren't on it: they load the configured homepage, which can raise
+  Chromium's HTTP-auth dialog; `apply`'s `open` and `windows.create` cover them. Commands that ask only in
   some states (`closeTab`, `renameTab`, `back`, …) aren't on it; their socket methods cover them (`apply`'s
   `tab.close`, `tabs.back`, `tabs.reload`). `state/commands/commandInteraction.ts` documents every command as `quiet`,
   `interactive` or `asksWhen`, and its test checks that every allowlisted command is `quiet`. A visible instance runs
@@ -106,7 +116,8 @@ UI update still happens.
   (default 100, at most 1000) and `offset`, and answer `{ items, total, nextOffset }`; only the page is built. A page
   also stops once it reaches 512 KiB, with `nextOffset` where it stopped, and a string field over 32,768 characters is
   cut there and named in the row's `clipped` list, so any page fits on one line. A clipped value is never a key:
-  `history.search` rows carry an `id`: an opaque handle (160 random bits from `platform/secureRandom.ts`) in a table
+  `history.search` rows carry an `id`: an opaque handle (20 random bytes from `crypto.getRandomValues`, or on Hermes,
+  which has no Web Crypto, only the random bits of native UUID v4s; `platform/secureRandom.ts`) in a table
   kept for this connection
   (`historyHandles.ts`), mapping to the full URL and the profile and engine it was read from. The same page keeps its
   handle on that connection, cold or warm; the table goes when the connection closes or control goes off, and another
@@ -127,7 +138,8 @@ UI update still happens.
   the same way). That bounds a request at two engine calls; the engine's query has no offset, so a further call would
   re-read from the newest page. If that call returns 200,001 rows and the page still isn't full, the answer says
   `truncated: true` with `reason: "scanLimit"` and `total: null`; 200,000 rows or fewer means history was read to its
-  end, so the total is exact; past the
+  end, so the total is exact (counted before the page is cut, so 10 web pages and a `chrome://` row with `limit: 5`
+  report `total: 10`); past the
   20,000-page window it says `reason: "window"`. A follow-up with `nextOffset` works inside both; nothing past the
   budget can be paged to until the engine query takes a starting point (an `engine/` change). Without a query or time range it reads only `offset + limit + 1` pages; with one it reads the
   window and filters it. `truncated: true` means history goes past the window (pages older than the newest 20,000
@@ -173,8 +185,9 @@ UI update still happens.
     oldest retiring one at once, which can cut that client's line even during normal serving (a peer retired for
     passing the request or queue limits while others are retiring). At worst the socket holds 16 live connections with 34 MiB of queued output each and 16 retiring ones with 1 MiB
     each, about 560 MiB. That counts queued bytes; the line being written also holds up to 64 KiB of what already went
-    out (the queue releases the written prefix every 64 KiB), about 2 MiB more across all 32. Retiring connections already
-    keep only their current line, so there's no cheap cut left there; lowering the live 34 MiB would cut the 32
+    out (the queue releases the written prefix every 64 KiB), about 2 MiB more across all 32. An event counts as started, and leaves the 1,000-event count, only once a byte of it is written, so events
+    behind a full socket are still evicted. Retiring connections already keep only their current line, so there's
+    no cheap cut left there; lowering the live 34 MiB would cut the 32
     pending 1 MiB replies a client may have, which is a protocol change.
   - `cli_socket_lines_shrunk` counts replies, events and decide requests that went out shortened.
   - Linux has its own queue in `engine/ardiacore-linux` and doesn't have these rules yet; that's an engine change.

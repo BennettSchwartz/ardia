@@ -1,4 +1,4 @@
-import { secureRandomHex } from "../../platform/secureRandom";
+import { secureRandomBytes } from "../../platform/secureRandom";
 
 export type HistoryPage = { url: string; profileId: string; engine: string };
 
@@ -9,7 +9,7 @@ const pageKey = (page: HistoryPage) => `${page.profileId}\n${page.engine}\n${pag
 
 function randomHandle(taken: Map<string, HistoryPage>): string {
   for (;;) {
-    const id = `h${secureRandomHex(40)}`;
+    const id = `h${Array.from(secureRandomBytes(20), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
     if (!taken.has(id)) return id;
   }
 }
