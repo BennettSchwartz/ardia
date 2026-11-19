@@ -74,7 +74,7 @@ async function attachment(view: WebViewHandle): Promise<boolean | null> {
 
 async function reloadChecked(view: WebViewHandle, stillOn: () => boolean): Promise<string> {
   if ((await attachment(view)) === false) return "no_view";
-  if (!stillOn()) throw new OpError("failed", "The client left or control was turned off before the reload, so nothing reloaded.");
+  if (!stillOn()) return "stopped";
   const reloaded = await view.reload().then(
     () => true,
     () => false,
