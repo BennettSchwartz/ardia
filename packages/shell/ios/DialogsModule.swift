@@ -4,6 +4,7 @@ import ExpoModulesCore
 
 public class DialogsModule: Module {
   private static var shownOnly: [(window: NSWindow, alert: NSAlert)] = []
+  private static var heldFilePicks: [Promise] = []
 
   public func definition() -> ModuleDefinition {
     Name("ArdiaDialogs")
@@ -66,12 +67,20 @@ public class DialogsModule: Module {
       }
     }.runOnQueue(.main)
     AsyncFunction("pickFiles") { (promise: Promise) in
+      if LaunchConfig.shared.testFlag("heldFilePick") { return DialogsModule.heldFilePicks.append(promise) }
       let panel = NSOpenPanel()
       panel.allowsMultipleSelection = true
       panel.canChooseDirectories = false
       panel.begin { response in
         promise.resolve(response == .OK ? panel.urls.map(\.absoluteString) : [])
       }
+    }.runOnQueue(.main)
+    AsyncFunction("devReleaseFilePick") { (urls: [String]) -> Int in
+      guard LaunchConfig.shared.testFlag("heldFilePick") else { return 0 }
+      let held = DialogsModule.heldFilePicks
+      DialogsModule.heldFilePicks = []
+      for promise in held { promise.resolve(urls) }
+      return held.count
     }.runOnQueue(.main)
     AsyncFunction("pickFolder") { (current: String?, prompt: String?, promise: Promise) in
       let panel = NSOpenPanel()
