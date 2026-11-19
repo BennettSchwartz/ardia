@@ -4,6 +4,7 @@
 #import "ArdiaEngineBridge.h"
 #import "ArdiaInternal.h"
 #import "ArdiaExtensionPackage.h"
+#import "ArdiaExtensionStaging.h"
 #import "ArdiaWebViewInternal.h"
 #import "ArdiaRuntime.h"
 
@@ -294,6 +295,7 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
       for (NSString *key in @[ @"popup", @"actionTitle", @"actionIcon", @"sidePanel", @"hasAction" ])
         if (manifest[key]) item[key] = manifest[key];
       item[@"incognitoSplit"] = @([manifest[@"incognitoSplit"] boolValue]);
+      item[@"incognitoAllowed"] = @(manifest[@"incognitoAllowed"] ? [manifest[@"incognitoAllowed"] boolValue] : YES);
       for (NSString *key in @[ @"siteAccess", @"optionsUrl", @"path", @"homepageUrl" ])
         if (!item[key]) item[key] = NSNull.null;
       const BOOL fromStore = [info[@"location"] isEqual:@"FROM_STORE"];
@@ -306,16 +308,13 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
 }
 
 + (NSDictionary *)inspectUnpacked:(NSString *)path {
-  NSString *error = nil;
-  NSString *folder = ardia_extensions::CanonicalFolder(path, &error);
-  if (!folder) return @{@"error" : error};
-  NSMutableDictionary *info = [ardia_extensions::ReadManifest(folder) mutableCopy];
-  if (info[@"error"]) return info;
-  NSString *digest = ardia_extensions::FolderDigest(folder, &error);
-  if (!digest) return @{@"error" : error};
-  info[@"path"] = folder;
-  info[@"digest"] = digest;
-  return info;
+  return ardia_extensions::StageUnpacked(path);
+}
+
++ (void)discardStagedExtension:(NSString *)staged {
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    ardia_extensions::DiscardStaged(staged);
+  });
 }
 
 + (void)run:(NSString *)name profile:(NSString *)profile args:(NSDictionary *)args event:(NSString *)event reply:(ArdiaServiceReply)reply {
@@ -326,15 +325,15 @@ NSString *StoreFolder(NSString *profile, NSString *extensionId, id version) {
   }];
 }
 
-+ (void)installExtension:(NSString *)path digest:(NSString *)digest profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
-  if (!digest.length) return [self installUnpacked:path profile:profile reply:reply];
++ (void)installExtension:(NSString *)path digest:(NSString *)digest staged:(NSString *)staged profile:(NSString *)profile reply:(ArdiaServiceReply)reply {
+  if (!digest.length && !staged.length) return [self installUnpacked:path profile:profile reply:reply];
+  if (!digest.length || !staged.length) return reply(nil, @"An unpacked extension installs from the copy Ardia showed, with its digest.");
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
     NSString *error = nil;
-    NSString *folder = ardia_extensions::CanonicalFolder(path, &error);
-    NSString *now = [folder isEqualToString:path] ? ardia_extensions::FolderDigest(folder, &error) : nil;
+    NSString *installed = ardia_extensions::PromoteStaged(staged, digest, &error);
     dispatch_async(dispatch_get_main_queue(), ^{
-      if (![now isEqualToString:digest]) return reply(nil, @"The extension's folder changed after Ardia showed it, so nothing was added. Load it again to see what it holds now.");
-      [self installUnpacked:folder profile:profile reply:reply];
+      if (!installed) return reply(nil, error);
+      [self installUnpacked:installed profile:profile reply:reply];
     });
   });
 }

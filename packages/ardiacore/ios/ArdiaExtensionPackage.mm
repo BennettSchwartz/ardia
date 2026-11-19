@@ -1,17 +1,13 @@
 #import "ArdiaExtensionPackage.h"
 
 #import <CommonCrypto/CommonDigest.h>
-#include <fcntl.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 namespace ardia_extensions {
 
 namespace {
 
 constexpr unsigned long long kMaxReadBytes = 4ull << 20;
-constexpr NSUInteger kMaxPackageFiles = 20000;
-constexpr unsigned long long kMaxPackageBytes = 1ull << 30;
 
 NSData *ReadRegular(NSString *path, unsigned long long limit) {
   struct stat info;
@@ -36,38 +32,6 @@ bool IsSystemFolder(NSString *folder) {
   for (NSString *tree in @[ @"/System/", @"/bin/", @"/dev/", @"/etc/", @"/private/etc/", @"/sbin/", @"/usr/bin/", @"/usr/lib/", @"/usr/libexec/", @"/usr/sbin/", @"/usr/share/" ])
     if ([within hasPrefix:tree]) return true;
   return [folder isEqualToString:NSHomeDirectory()];
-}
-
-bool HashFile(CC_SHA256_CTX *sha, NSString *path, unsigned long long *total) {
-  int fd = open(path.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW);
-  if (fd < 0) return false;
-  struct stat info;
-  if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode)) {
-    close(fd);
-    return false;
-  }
-  uint64_t size = (uint64_t)info.st_size;
-  CC_SHA256_Update(sha, &size, sizeof size);
-  static const size_t kChunk = 1 << 20;
-  NSMutableData *buffer = [NSMutableData dataWithLength:kChunk];
-  uint64_t read_total = 0;
-  for (;;) {
-    ssize_t got = read(fd, buffer.mutableBytes, kChunk);
-    if (got < 0) {
-      close(fd);
-      return false;
-    }
-    if (got == 0) break;
-    read_total += (uint64_t)got;
-    *total += (unsigned long long)got;
-    if (*total > kMaxPackageBytes) {
-      close(fd);
-      return false;
-    }
-    CC_SHA256_Update(sha, buffer.bytes, (CC_LONG)got);
-  }
-  close(fd);
-  return read_total == size;
 }
 
 NSData *SHA256(NSData *data) {
@@ -239,6 +203,7 @@ NSDictionary *ReadManifest(NSString *folder) {
   NSString *panel = [m[@"side_panel"] isKindOfClass:NSDictionary.class] ? m[@"side_panel"][@"default_path"] : nil;
   out[@"sidePanel"] = [panel isKindOfClass:NSString.class] ? panel : nil;
   out[@"incognitoSplit"] = @([m[@"incognito"] isEqual:@"split"]);
+  out[@"incognitoAllowed"] = @(![m[@"incognito"] isEqual:@"not_allowed"]);
   out[@"homepageUrl"] = [m[@"homepage_url"] isKindOfClass:NSString.class] ? m[@"homepage_url"] : nil;
   out[@"id"] = [m[@"key"] isKindOfClass:NSString.class] ? IdForKey(m[@"key"]) : nil;
   return out;
@@ -261,57 +226,6 @@ NSString *CanonicalFolder(NSString *path, NSString **error) {
     return nil;
   }
   return folder;
-}
-
-NSString *FolderDigest(NSString *folder, NSString **error) {
-  NSURL *root = [NSURL fileURLWithPath:folder isDirectory:YES];
-  NSArray<NSURLResourceKey> *keys = @[ NSURLIsSymbolicLinkKey, NSURLIsDirectoryKey, NSURLIsRegularFileKey ];
-  NSDirectoryEnumerator<NSURL *> *walk = [NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:keys options:0 errorHandler:nil];
-  NSMutableDictionary<NSString *, NSString *> *files = [NSMutableDictionary dictionary];
-  NSString *inside = [folder stringByAppendingString:@"/"];
-  for (NSURL *url in walk) {
-    NSDictionary<NSURLResourceKey, id> *values = [url resourceValuesForKeys:keys error:nil];
-    if ([values[NSURLIsDirectoryKey] boolValue] && ![values[NSURLIsSymbolicLinkKey] boolValue]) continue;
-    NSString *path = url.path;
-    if (![path hasPrefix:inside]) continue;
-    NSString *relative = [path substringFromIndex:inside.length];
-    NSString *target = path;
-    if ([values[NSURLIsSymbolicLinkKey] boolValue]) {
-      char resolved[PATH_MAX];
-      NSString *real = realpath(path.fileSystemRepresentation, resolved) ? @(resolved) : nil;
-      struct stat info;
-      if (!real || ![real hasPrefix:inside] || stat(resolved, &info) != 0 || !S_ISREG(info.st_mode)) {
-        *error = [NSString stringWithFormat:@"%@ links outside the extension's folder or to a folder", relative];
-        return nil;
-      }
-      target = real;
-    } else if (![values[NSURLIsRegularFileKey] boolValue]) {
-      *error = [NSString stringWithFormat:@"%@ isn't a regular file", relative];
-      return nil;
-    }
-    files[relative] = target;
-    if (files.count > kMaxPackageFiles) {
-      *error = [NSString stringWithFormat:@"The folder holds more than %lu files", (unsigned long)kMaxPackageFiles];
-      return nil;
-    }
-  }
-  CC_SHA256_CTX sha;
-  CC_SHA256_Init(&sha);
-  unsigned long long total = 0;
-  for (NSString *relative in [files.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
-    NSData *name = [relative dataUsingEncoding:NSUTF8StringEncoding];
-    CC_SHA256_Update(&sha, name.bytes, (CC_LONG)name.length);
-    CC_SHA256_Update(&sha, "", 1);
-    if (!HashFile(&sha, files[relative], &total)) {
-      *error = total > kMaxPackageBytes ? @"The folder holds more than 1 GB" : [NSString stringWithFormat:@"%@ couldn't be read", relative];
-      return nil;
-    }
-  }
-  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-  CC_SHA256_Final(digest, &sha);
-  NSMutableString *hex = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [hex appendFormat:@"%02x", digest[i]];
-  return hex;
 }
 
 }

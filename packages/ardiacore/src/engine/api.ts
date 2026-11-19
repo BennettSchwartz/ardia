@@ -115,7 +115,8 @@ export type EngineCalls = {
 
   "extensions.list": [Profile, { extensions: InstalledExtension[] }];
   "extensions.inspectUnpacked": [{ path: string }, ExtensionPackage];
-  "extensions.install": [Profile & { path: string; digest?: string }, { id: string }];
+  "extensions.install": [Profile & { path: string; digest?: string; staged?: string }, { id: string }];
+  "extensions.discardStaged": [{ staged: string }, null];
   "extensions.installCrx": [Profile & { path: string }, { id: string }];
   "extensions.setEnabled": [Profile & { id: string; enabled: boolean }, { ok: true }];
   "extensions.uninstall": [Profile & { id: string }, { ok: true }];

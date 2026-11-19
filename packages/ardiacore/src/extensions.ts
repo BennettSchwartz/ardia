@@ -19,6 +19,7 @@ export type InstalledExtension = {
   pinnedIndex?: number;
   incognito: boolean;
   incognitoSplit?: boolean;
+  incognitoAllowed?: boolean;
   fileAccess: boolean;
   userScriptsAvailable?: boolean;
   userScripts?: boolean;
@@ -54,6 +55,7 @@ export type ExtensionPackage = {
   sidePanel: string | null;
   path: string;
   digest?: string;
+  staged?: string;
 };
 
 export type ActionState = {

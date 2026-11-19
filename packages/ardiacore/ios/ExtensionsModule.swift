@@ -40,7 +40,13 @@ public class ExtensionsModule: Module {
   static let calls = CallTable(domain: "extensions", handlers: [
     "list": { args, reply in ArdiaServices.listExtensions(profile: args.profile) { reply.service($0, $1) } },
     "inspectUnpacked": inspectUnpacked,
-    "install": { args, reply in ArdiaServices.installExtension(path: try args.text("path"), digest: try args.optionalText("digest"), profile: args.profile) { reply.service($0, $1) } },
+    "install": { args, reply in
+      ArdiaServices.installExtension(path: try args.text("path"), digest: try args.optionalText("digest"), staged: try args.optionalText("staged"), profile: args.profile) { reply.service($0, $1) }
+    },
+    "discardStaged": { args, reply in
+      ArdiaServices.discardStagedExtension(try args.text("staged"))
+      reply.ok(nil)
+    },
     "installCrx": { args, reply in ArdiaServices.installCrx(path: try args.text("path"), profile: args.profile) { reply.service($0, $1) } },
     "setEnabled": { args, reply in
       ArdiaServices.setExtension(try args.text("id"), enabled: try args.bool("enabled"), profile: args.profile) { reply.service($0, $1) }

@@ -14,6 +14,4 @@ NSString *DataURL(NSString *folder, NSString *relativePath);
 
 NSString *CanonicalFolder(NSString *path, NSString **error);
 
-NSString *FolderDigest(NSString *folder, NSString **error);
-
 }

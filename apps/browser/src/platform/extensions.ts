@@ -20,8 +20,11 @@ export type { ExtensionsSyncApply, InstalledExtension, ActionState, ExtensionPac
 
 export const listExtensions = async (profile: string) => (await call("extensions.list", { profile })).extensions;
 export const inspectUnpackedExtension = (path: string) => call("extensions.inspectUnpacked", { path });
-export const installExtension = async (pkg: Pick<ExtensionPackage, "path" | "digest">, profile: string) =>
-  (await call("extensions.install", { profile, path: pkg.path, ...(pkg.digest ? { digest: pkg.digest } : {}) })).id;
+export const installExtension = async (pkg: Pick<ExtensionPackage, "path" | "digest" | "staged">, profile: string) =>
+  (await call("extensions.install", { profile, path: pkg.path, ...(pkg.digest ? { digest: pkg.digest } : {}), ...(pkg.staged ? { staged: pkg.staged } : {}) })).id;
+export const discardStagedExtension = (pkg: Pick<ExtensionPackage, "staged">) => {
+  if (pkg.staged) void call("extensions.discardStaged", { staged: pkg.staged }).catch(() => {});
+};
 export const installExtensionCrx = (path: string, profile: string) => call("extensions.installCrx", { profile, path });
 export const chooseExtensionFolder = () => call("extensions.chooseFolder");
 export const setExtensionEnabled = async (id: string, profile: string, enabled: boolean) => {
