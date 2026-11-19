@@ -110,7 +110,6 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
   __weak NSScreen *_stashScreen;
 }
 - (void)detach;
-- (void)resizeStarted;
 - (void)toggleKeepOnTop:(id)sender;
 - (void)backToTabFromMenu:(id)sender;
 - (void)windowMoved;
@@ -137,6 +136,10 @@ typedef NS_ENUM(NSInteger, ArdiaPiPEdge) { ArdiaPiPEdgeNone = 0, ArdiaPiPEdgeLef
 @end
 
 @interface ArdiaPiPController (Placement)
+@end
+
+@interface ArdiaPiPController (ResizeCursor)
+- (void)resizeStarted;
 @end
 
 @interface ArdiaPiPController (Swipe)

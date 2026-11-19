@@ -2,6 +2,7 @@
 #import "ArdiaRuntime.h"
 
 #import <dlfcn.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 
 #include <optional>
@@ -40,11 +41,23 @@ NSCursor *CursorFor(ResizePosition position) API_AVAILABLE(macos(15.0)) {
   return [NSCursor frameResizeCursorFromPosition:frame inDirections:NSCursorFrameResizeDirectionsAll];
 }
 
+NSCursor *AppKitCursor(NSString *name, NSCursor *fallback) {
+  SEL selector = NSSelectorFromString(name);
+  if (![NSCursor respondsToSelector:selector]) return fallback;
+  id cursor = ((id (*)(id, SEL))objc_msgSend)(NSCursor.class, selector);
+  return [cursor isKindOfClass:NSCursor.class] ? cursor : fallback;
+}
+
 NSCursor *LegacyCursorFor(ResizePosition position) {
   switch (position) {
     case ResizePosition::kTop:
     case ResizePosition::kBottom: return NSCursor.resizeUpDownCursor;
-    default: return NSCursor.resizeLeftRightCursor;
+    case ResizePosition::kLeft:
+    case ResizePosition::kRight: return NSCursor.resizeLeftRightCursor;
+    case ResizePosition::kTopLeft:
+    case ResizePosition::kBottomRight: return AppKitCursor(@"_windowResizeNorthWestSouthEastCursor", NSCursor.crosshairCursor);
+    case ResizePosition::kTopRight:
+    case ResizePosition::kBottomLeft: return AppKitCursor(@"_windowResizeNorthEastSouthWestCursor", NSCursor.crosshairCursor);
   }
 }
 
@@ -225,15 +238,6 @@ void KeepResizeCursorOnChromeCursorUpdates(Class windowClass) {
     @"resizeStartsWithoutCursor" : @(_resizesWithoutCursor),
     @"edges" : edges,
   };
-}
-
-@end
-
-@implementation ArdiaPiPController (ResizeCursor)
-
-- (void)resizeStarted {
-  ArdiaConsentStamp *stamp = ArdiaConsentStamp.begin;
-  [self.view emit:@"pictureInPictureResized" payload:[stamp onto:[_resizeCursor resizeStarted]]];
 }
 
 @end
