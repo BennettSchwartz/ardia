@@ -99,6 +99,8 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Reader | text size, font | `settings` (`readerTextSize`, `readerFont`) | ✅ `settings.set` |
 | Air traffic (link routing rules) | rules per source app | `air-traffic.json` | 🗺️ `airTraffic.*` |
 | Hooks, config, approvals | hook rules, config.json, approvals | `hooks.json`, `config.json`, `automation-approvals.json` | files the user edits; ⛔ approvals |
+| Prompts on screen | permission, save password, save address or card prompts per tab | memory (`state/tabs/pageState.ts`) | ✅ `permissions.*`, `passwords.prompts`/`respond`, `autofill.prompts`/`respond` |
+| Native menus and the color panel | open `<select>` popups, context menus, Ardia's menus, the menu bar, the color panel | AppKit (`OpenSurfaces.swift`) | ✅ `menus.*`; 🗺️ payment and WebAuthn sheets; ⛔ macOS's own sheets |
 | Telemetry, reports, onboarding, release notes | the app's own bookkeeping | their documents | ⛔ not profile data |
 
 ## Methods
@@ -200,6 +202,79 @@ the user's live sessions on every site. Both are a different consent than "contr
 **Next, if the owner wants it:** `passwords.reveal {origin, username}` behind its own switch in Settings › Advanced
 (off by default) and the macOS re-auth on every call, with Ardia's own sheet naming the program first.
 
+## Native UI: prompts, menus and the color panel
+
+Some of what a person answers in Ardia isn't a page and isn't in a store: a permission prompt already on screen, a
+`<select>` popup, the color panel, a context menu, the menu bar. DevTools can't answer them (issue #2812, rows 3, 14,
+16 and 17), so the socket does, through the same decision path the native UI uses. Every method here is in `methods`
+with its schema, refuses plugin sessions at the dispatcher check point, stops writing when control is turned off, and
+counts in `cli_socket_calls_permissions`, `cli_socket_calls_menus` or `cli_socket_calls_secrets`.
+
+| Method | Mutates | What it does, and the path it takes |
+| --- | --- | --- |
+| `permissions.prompts` | no | The prompt each tab shows (`{id, window, tab, origin, permissions, queued}`); `queued` counts the prompts waiting behind it |
+| `permissions.respond {id, decision}` | yes | `allow` and `block` as the Allow and Don't Allow buttons (remembered), `dismiss` as the close button, `allowOnce` for this visit only (camera, microphone and location; other kinds answer `refused`, because the engine would turn a one-time grant of them into a lasting one). Goes through `answerPermission` → `resolvePermission` → `ResolvePermission` in `ac_permissions.mm`, so the next queued prompt shows, notifications and location still ask macOS, and Chrome records the decision as a click would |
+| `passwords.prompts` | no | Save and update password prompts: origin, state, username and the usernames an update offers; never the password or its length |
+| `passwords.respond {tab, decision, username?}` | yes | `save`, `never`, `update`, `notNow`, `dismiss`, only the buttons that prompt shows; `username` picks one of an update prompt's usernames. Through `answerPasswordPrompt`, which the prompt component now calls too |
+| `autofill.prompts` | no | Save address and save card prompts: kind, origin, title, message and button labels; never the address lines or card |
+| `autofill.respond {tab, decision}` | yes | `accept`, `decline`, `dismiss`, through `answerAutofillPrompt` |
+| `menus.open` | no | Open menus with their items (`path`, `title`, `enabled`, `checked`, `separator`, `submenu`) and the color panel (`color`): `kind` is `select` (a page's `<select>` popup), `page` (a page's context menu), `app` (an Ardia menu), `menuBar`, or `color` |
+| `menus.choose {menu, path}` | yes | Chooses the item with the menu's own action (`-[NSMenu performActionForItemAtIndex:]`, then the menu closes), as a click does: the `<select>` gets trusted `input` and `change`, a context menu runs its command |
+| `menus.chooseColor {menu, color, close?}` | yes | Sets the panel's color and sends the panel's action, as dragging in it does (the page gets `input`); closing it (the default) gives the page `change`, as closing the panel does |
+| `menus.dismiss {menu}` | yes | Closes a menu or the panel without choosing |
+| `menus.bar` | no | The menu bar as shown now: every item's path, title, enabled, checked, shortcut, and its `command` and `arg` when `run` takes it, or its AppKit `action` |
+| `menus.runBar {path, window?}` | yes | An Ardia command goes through `run`, so the automation policy (`automationCommands.ts`: no Quit, no engine switch, the settings `config.json` can't set) still applies; an editing or window item (Undo, Copy, Paste, Select All, Minimize, Zoom) goes through the menu itself. Quit, Hide, Hide Others and system input (Emoji & Symbols, Dictation) are refused |
+
+**Events:** `permission.prompted` (`{id, windowId, tabId, origin, permissions, queued}`), `password.prompted` (named only,
+not in `"*"`), `menu.opened` (`{id, kind, windowId, tabId, items}`, `items` being a count), `menu.closed`,
+`colorPanel.opened`, `colorPanel.closed`. None of them reach plugins.
+
+**What `run` already covered.** `run` and the `commands` catalogue cover every Ardia command in the menu bar; what was
+missing was reading the menu as data (enabled and checked state, which `menuState.ts` computes and `MainMenu` applies)
+and the menu items that aren't Ardia commands (Edit and Window). `menus.bar` and `menus.runBar` add only those.
+
+**How it works.** `OpenSurfaces.swift` (in `packages/shell`) runs in the app process, where Chromium shows these menus,
+and watches `NSMenuDidBeginTracking`/`NSMenuDidEndTracking`. A `<select>` popup is the `NSMenu` of Chromium's
+`WebMenuRunner` (`content/app_shim_remote_cocoa/web_menu_runner_mac.mm`), a page's context menu Chromium's
+`MenuControllerCocoa`; the color panel is the shared `NSColorPanel` whose target is Chromium's `ColorPanelListener`
+(`components/remote_cocoa/app_shim/color_panel_bridge.mm`). Choosing calls the item's own action and the menu ends
+tracking as after a click, so the engine sees exactly what a click gives it. The tab is the page whose view holds the
+popup's anchor or has focus (`+[ArdiaWebView appTabIdContainingView:]`); a page menu with no tab is hidden while any
+private window is open, so a private page's menu never shows.
+
+**Background mode.** A hidden instance (`ARDIA_BACKGROUND=1`) doesn't show a page's context menu: the engine hands it to
+the app (`-tab:runContextMenu:`). While the socket serves, the app now holds it open for the socket, as an `NSMenu` holds
+its tracking loop, until `menus.choose`, `menus.dismiss` or 60 s, and hands the choice back to the engine, which checks
+it against the menu's own model (`FindPicked`). Without a serving socket it logs the menu as before. A `<select>`
+popup and the color panel are real AppKit UI in either mode.
+
+### Payment, passkey and password sheets
+
+| Sheet | Who shows it | Socket |
+| --- | --- | --- |
+| Save or update password, save address or card | Ardia (`Prompts.tsx`, from `ac_password_prompt.mm` and `ac_autofill_prompt.mm`) | ✅ listed and answered above |
+| Payment sheet (`PaymentRequest.show()`) | Chromium's views dialog (`PaymentRequestDialogView`, from `ChromePaymentRequestDelegate::ShowDialog`), not Ardia | 🗺️ needs engine code |
+| Chrome's WebAuthn sheet (choose a passkey, phone, security key) | Chromium's views dialog (`AuthenticatorRequestDialogView`) | 🗺️ needs engine code |
+| iCloud Keychain passkey sheet, Touch ID, the macOS password prompt | macOS (`ASAuthorizationController`, `LAContext`) | ⛔ macOS owns it; the socket can't list or answer it |
+| Print preview | Chrome's `chrome://print` dialog (`PrintPreviewDialogController`) | CLI: attach to the `chrome://print` target once #2808 opens `chrome://` targets |
+
+**Payment sheet, designed.** Ardia doesn't own it today: `ChromePaymentRequestDelegate::ShowDialog` builds Chromium's
+views dialog over the page. To answer it the engine needs a hook beside `g_ardia_create_permission_prompt`
+(`g_ardia_payment_dialog`) that hands the sheet's state to the app: merchant origin, total and its label, the payment
+apps on offer (by name, never their instruments). The app then shows Ardia's own sheet, and the socket gets
+`payments.sheets` and `payments.respond {id, decision: pay|cancel, app?}`. Paying with an installed payment app only
+starts that app (its window asks for anything secret); the socket never sees card data. This is engine work and joins
+#2808's build (or a later engine key); it is not in this change. Until then `PaymentRequest.show()` behaves as Chromium
+does, and the test page's `https://127.0.0.1/pay` method has no app, so it rejects with `NotSupportedError` before any
+sheet.
+
+**Passkeys, designed.** Chrome's own WebAuthn sheet is views UI and needs the same kind of engine hook
+(`g_ardia_authenticator_dialog`) before Ardia can list its steps (choose a passkey, use a phone, a security key) and the
+socket can pick one. Creating or using a passkey then goes to macOS: the iCloud Keychain sheet and Touch ID belong to
+macOS, can't be answered by any app, and shouldn't be: they are the proof that the owner is present. So the socket stops
+at listing Ardia's own step, and the owner touches the sensor. A virtual authenticator (`WebAuthn.addVirtualAuthenticator`
+over DevTools) remains the way to test, never the owner's real keys.
+
 ## Next
 
 Designed, not built in this round, each in its own file under `state/automation/socket<Area>.ts`:
@@ -222,3 +297,6 @@ Designed, not built in this round, each in its own file under `state/automation/
 - **Settings refused today:** `pageEngine` and `websiteEngines` once a socket write can move open pages between engines as
   the Settings pane does; `newTabUrl` and `customSearchUrl` with the URL checks `apply` uses.
 - **Events:** `bookmarks.changed`, `history.removed`, `download.changed`, `profile.changed`.
+- **Native UI, engine side** (with #2808's build or a later key): the payment and WebAuthn hooks above; the context
+  menu's checked state in `DescribeMenu` (`ac_context_menu.mm` reports enabled and visible only); and the tab that opened
+  a `<select>` popup or the color panel passed with it, in place of the focus lookup.
