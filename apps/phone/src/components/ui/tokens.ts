@@ -235,7 +235,6 @@ export const onboardingArt = { appIcon: 60, linkCardWidth: 210, linkCardRadius: 
 export const floatingBarLayout = {
   control: 48,
   gap: 8,
-  edgeInset: 12,
   bottomGap: 21.5,
   glyph: 19,
   menuGlyph: 17,
@@ -251,7 +250,7 @@ export const floatingBarLayout = {
 
 export const floatingPanelLayout = {
   inset: 8,
-  radius: 26,
+  radius: 32.75,
   aboveKeyboard: 8,
   departLift: 120,
   departMs: 200,
@@ -273,7 +272,6 @@ export const startLayout = {
   pageDotsAboveBar: 60,
   barCircle: 48,
   barPlus: { width: 77, height: 48 },
-  barSideInset: 12,
   barGap: 8,
   circleGlyph: 19.2,
   plusGlyph: 22.4,
@@ -291,7 +289,6 @@ export const startLayout = {
   badgeSymbolShare: 0.85,
   badgeSymbolWidth: 1.25,
   badgeEmojiShare: 0.8,
-  badgeInitialShare: 0.55,
   titleSpacing: 8,
   chevron: 12,
   pageDot: 7,
@@ -308,16 +305,15 @@ export const deckChromeLayout = {
   pillHeight: 38,
   pillPadding: 14,
   pillSpacing: 8,
-  pillGlyph: 16,
+  pillSpecs: 20,
   barCircle: 48,
-  barSideInset: 12,
   barGap: 8,
   searchLead: 13,
   searchTrail: 16,
   searchTrailFilled: 8,
   searchSpacing: 8,
   searchGlyph: 16.8,
-  incognitoGlyph: 30,
+  incognitoSpecs: 28,
   incognitoOn: 38,
   clearGlyph: 22.8,
   clearHit: 32,
@@ -340,11 +336,11 @@ export const deckChromeInk = { pill: "#FFFFFF" } as const;
 
 export const startInk = {
   veil: "rgba(255,255,255,0.34)",
-  light: { pageDot: "rgba(0,0,0,0.32)", badge: "#FFFFFF", badgeInk: "#000000" },
-  dark: { pageDot: "rgba(255,255,255,0.32)", badge: "#1C1C1E", badgeInk: "#FFFFFF" },
+  light: { pageDot: "rgba(0,0,0,0.32)", badgeInk: "#000000" },
+  dark: { pageDot: "rgba(255,255,255,0.32)", badgeInk: "#FFFFFF" },
 } as const;
 
-export const chromeLayout = { edge: 0.5, shadowRadius: 10, shadowY: 2 } as const;
+export const chromeLayout = { edge: 0.5, shadowRadius: 10, shadowY: 2, barSideInset: 24 } as const;
 
 export const chromeInk = {
   light: { surface: "#FFFFFF", edge: "rgba(0,0,0,0.12)", shadow: "rgba(0,0,0,0.12)", foreground: "rgba(14,15,16,0.9)", secondary: "rgba(0,0,0,0.5)", notSecure: lightRoles.destructive },
@@ -463,6 +459,10 @@ export const tabsLayout = {
   cardRadius: 13,
   displayCornerRadius: 55,
   faviconSize: 16,
+  specsChip: 20,
+  specsIcon: 14,
+  specsCompact: 14,
+  specsFace: 44,
   headerSpacing: 6,
   headerGap: 8,
   headerHeight: 20,
