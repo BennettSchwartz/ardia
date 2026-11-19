@@ -4,25 +4,27 @@ export type Point = { x: number; y: number };
 
 export type MenuSpot = { left: number; top: number; height: number; origin: string };
 
-export const MENU_ROW = 42;
-export const MENU_HEADING = 30;
-export const MENU_DIVIDER = 20.67;
-export const MENU_PADDING = 19;
+export type MenuSizes = { row: number; heading: number; divider: number; padding: number };
+
+export const IPHONE_MENU_SIZES: MenuSizes = { row: 42, heading: 30, divider: 20.67, padding: 19 };
+
+export const ANDROID_MENU_SIZES: MenuSizes = { row: 48, heading: 36, divider: 8, padding: 16 };
+
 export const MENU_MARGIN = 8;
 
 type Entry = "divider" | { heading: string } | object;
 
-const entryHeight = (item: Entry) => (item === "divider" ? MENU_DIVIDER : "heading" in (item as object) ? MENU_HEADING : MENU_ROW);
+const entryHeight = (item: Entry, sizes: MenuSizes) => (item === "divider" ? sizes.divider : "heading" in (item as object) ? sizes.heading : sizes.row);
 
-export function menuHeight(items: readonly Entry[]): number {
-  return items.reduce<number>((sum, item) => sum + entryHeight(item), MENU_PADDING);
+export function menuHeight(items: readonly Entry[], sizes: MenuSizes = IPHONE_MENU_SIZES): number {
+  return items.reduce<number>((sum, item) => sum + entryHeight(item, sizes), sizes.padding);
 }
 
-export function tallestMenuPage(items: readonly Entry[]): number {
+export function tallestMenuPage(items: readonly Entry[], sizes: MenuSizes = IPHONE_MENU_SIZES): number {
   return items.reduce<number>((tallest, item) => {
     const children = typeof item === "object" && "children" in (item as object) ? (item as { children: readonly Entry[] }).children : null;
-    return children ? Math.max(tallest, MENU_ROW + menuHeight(children), tallestMenuPage(children)) : tallest;
-  }, menuHeight(items));
+    return children ? Math.max(tallest, sizes.row + menuHeight(children, sizes), tallestMenuPage(children, sizes)) : tallest;
+  }, menuHeight(items, sizes));
 }
 
 const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high));

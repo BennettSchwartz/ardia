@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import { FLOATING_BAR_PLACE } from "../../lib/deckGeometry";
+import { ANDROID_MENU_SIZES, IPHONE_MENU_SIZES } from "../../lib/menuPlace";
 export const ink = { white: "#FFFFFF", black: "#000000", clear: "#00000000", knobShadow: "rgba(0,0,0,0.25)" } as const;
 
 const ANDROID_DARK_SURFACE = "#1E1B1D";
@@ -197,10 +198,7 @@ const iPhoneMenuLook = {
   width: 250,
   radius: 30.5,
   rim: 0.5,
-  row: 42,
-  heading: 30,
-  divider: 20.67,
-  padding: 19,
+  ...IPHONE_MENU_SIZES,
   labelInset: 29,
   labelInsetChecked: 43.7,
   labelInsetIcon: 65,
@@ -229,10 +227,7 @@ const androidMenuLook: typeof iPhoneMenuLook = {
   width: 250,
   radius: 16,
   rim: 0.5,
-  row: 48,
-  heading: 36,
-  divider: 17,
-  padding: 16,
+  ...ANDROID_MENU_SIZES,
   labelInset: 16,
   labelInsetChecked: 16,
   labelInsetIcon: 52,
@@ -247,7 +242,7 @@ const androidMenuLook: typeof iPhoneMenuLook = {
   pressInset: 0,
   pressRadius: 0,
   dividerInset: 0,
-  dividerLine: 1,
+  dividerLine: 0,
   label: { fontSize: 16, lineHeight: 24, letterSpacing: 0.5 },
   labelLines: 1,
   iconSide: "leading",

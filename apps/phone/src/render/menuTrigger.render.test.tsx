@@ -128,6 +128,21 @@ test("Android never opens a system menu or action sheet, even where a native one
   expect(mockNative.sheets).toHaveLength(0);
 });
 
+test("the drawn menu splits its groups by divider: on Android an 8 dp gap with no rule, headings and rows kept in order; on iPhone a 20.67-point band with its 1-point line", () => {
+  const root = trigger("tap");
+  act(() => root.root.findAll((node) => node.props.accessibilityLabel === "Trigger" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  const flatten = require("react-native").StyleSheet.flatten;
+  const gaps = root.root.findAll((node) => node.props.testID === "drawnMenuGap" && typeof node.type === "string");
+  const rules = root.root.findAll((node) => node.props.testID === "drawnMenuRule" && typeof node.type === "string");
+  expect(gaps).toHaveLength(2);
+  expect(gaps.map((gap) => flatten(gap.props.style).height)).toEqual(Platform.OS === "android" ? [8, 8] : [20.67, 20.67]);
+  if (Platform.OS === "android") expect(rules).toHaveLength(0);
+  else expect(rules.map((rule) => flatten(rule.props.style))).toEqual([expect.objectContaining({ height: 1, marginHorizontal: 24 }), expect.objectContaining({ height: 1, marginHorizontal: 24 })]);
+  const order = root.root.findAll((node) => typeof node.type === "string" && (node.props.testID === "drawnMenuGap" || node.props.accessibilityRole === "header" || node.props.accessibilityRole === "menuitem")).map((node) => (node.props.testID === "drawnMenuGap" ? "gap" : node.props.accessibilityRole === "header" ? node.props.children : node.props.accessibilityLabel));
+  expect(order).toEqual(["Copy Link", "Send to Device", "gap", "Theme", "Light", "Dark", "gap", "Close Tab"]);
+  unmount(root);
+});
+
 test("a long press opens the drawn menu at the finger, dimmed, and a tap opens it beside its trigger, undimmed", async () => {
   measuredOverlay({ x: 0, y: 80, width: 393, height: 60 });
   const held = trigger("longPress");

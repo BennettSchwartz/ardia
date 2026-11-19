@@ -73,7 +73,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const [content, setContent] = useState<number | null>(null);
   const revealed = shown && (placer === undefined || content !== null);
   const side = useRef<boolean | undefined>(undefined);
-  const spot = placer ? placer(content ?? menuHeight(rows) + (page ? menuLook.row : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined, shrink: undefined };
+  const spot = placer ? placer(content ?? menuHeight(rows, menuLook) + (page ? menuLook.row : 0), side.current) : { place: place ?? {}, origin, maxHeight: undefined, shrink: undefined };
   const shrinkX = MATERIAL ? 1 : spot.shrink?.x ?? menuMotion.fromScale;
   const shrinkY = MATERIAL ? 1 : spot.shrink?.y ?? menuMotion.fromScale;
   const fromScale = MATERIAL ? materialMenuMotion.fromScale : menuMotion.fromScale;
@@ -164,8 +164,8 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const drawn = rows.map((item, index) => {
     if (item === "divider")
       return (
-        <View key={`d${index}`} style={styles.divider}>
-          <View style={[styles.dividerLine, { backgroundColor: paint.divider }]} />
+        <View key={`d${index}`} testID="drawnMenuGap" style={styles.divider}>
+          {menuLook.dividerLine > 0 ? <View testID="drawnMenuRule" style={[styles.dividerLine, { backgroundColor: paint.divider }]} /> : null}
         </View>
       );
     if ("heading" in item)

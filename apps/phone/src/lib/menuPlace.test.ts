@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MENU_DIVIDER, MENU_HEADING, MENU_PADDING, MENU_ROW, menuAt, menuHeight, menuOnTrigger, menuShrink, tallestMenuPage } from "./menuPlace.ts";
+import { ANDROID_MENU_SIZES, IPHONE_MENU_SIZES, menuAt, menuHeight, menuOnTrigger, menuShrink, tallestMenuPage } from "./menuPlace.ts";
+
+const { row: MENU_ROW, heading: MENU_HEADING, divider: MENU_DIVIDER, padding: MENU_PADDING } = IPHONE_MENU_SIZES;
 
 const host = { x: 0, y: 0, width: 392, height: 873 };
 
@@ -24,6 +26,14 @@ test("a menu too tall for either way keeps clear of the edges, and the host's or
 
 test("a menu's height counts its rows, headings and dividers", () => {
   assert.equal(menuHeight([{ heading: "Archive" }, { label: "a" }, { label: "b" }, "divider", { label: "c" }]), MENU_PADDING + MENU_HEADING + MENU_ROW * 3 + MENU_DIVIDER);
+});
+
+test("on Android a group break is an 8 dp gap between 48 dp rows, so the menu's height counts the gap instead of iPhone's 20.67-point divider band", () => {
+  assert.equal(ANDROID_MENU_SIZES.divider, 8);
+  const items = [{ heading: "Archive" }, { label: "a" }, "divider", { label: "b" }, { label: "Send", children: [{ label: "1" }, "divider", { label: "2" }] }] as const;
+  assert.equal(menuHeight(items, ANDROID_MENU_SIZES), 16 + 36 + 48 * 3 + 8);
+  assert.equal(tallestMenuPage(items, ANDROID_MENU_SIZES), 16 + 36 + 48 * 3 + 8);
+  assert.equal(tallestMenuPage([{ label: "Send", children: [{ label: "1" }, "divider", { label: "2" }, { label: "3" }, { label: "4" }] }] as const, ANDROID_MENU_SIZES), 48 + 16 + 48 * 4 + 8);
 });
 
 const room = { x: 0, y: 40, width: 392, height: 793 };
