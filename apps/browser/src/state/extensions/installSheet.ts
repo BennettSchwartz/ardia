@@ -2,6 +2,8 @@ import { chooseExtensionFolder, inspectUnpackedExtension, installExtension, reso
 import { useBrowser } from "../browser/store";
 import { errorText } from "../../lib/errors";
 import { isUtilityWindowId } from "../settings/settingsWindows";
+import { isWindowClosing } from "../windows/closingWindows";
+import { isOpenRegularWindow } from "../windows/small";
 import { noteUnpackedInstall } from "../telemetry/exportCounts";
 import { consentToken, type ConsentToken } from "../telemetry/client";
 import { noteExtensionInstallPromptStale } from "../telemetry/usage";
@@ -13,7 +15,7 @@ const STALE_PROMPT = "This install request has closed. Open the extension's page
 
 const utilityHosts = new Map<string, number>();
 
-const windowCanShow = (windowId: string) => (isUtilityWindowId(windowId) ? (utilityHosts.get(windowId) ?? 0) > 0 : !!useBrowser.getState().windows[windowId]);
+const windowCanShow = (windowId: string) => (isUtilityWindowId(windowId) ? (utilityHosts.get(windowId) ?? 0) > 0 : !!useBrowser.getState().windows[windowId] && !isWindowClosing(windowId));
 
 const sheetCanShow = (request: InstallRequest) => windowCanShow(request.windowId);
 
@@ -31,7 +33,7 @@ export function utilitySheetHost(windowId: string): () => void {
 function shownWindowFor(windowId: string): string | null {
   if (windowCanShow(windowId)) return windowId;
   const s = useBrowser.getState();
-  return [...s.ui.focusOrder, ...s.windowOrder].find((id) => !!s.windows[id] && s.windows[id]!.kind !== "private") ?? null;
+  return [...s.ui.focusOrder, ...s.windowOrder].find((id) => isOpenRegularWindow(s.windows[id])) ?? null;
 }
 
 export function showInstallSheet(next: InstallRequest): boolean {
