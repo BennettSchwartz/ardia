@@ -156,6 +156,7 @@ void AcceptDrops(NSView *root, BOOL accept) {
   if ((self = [super initWithFrame:frameRect])) {
     _profile = @"";
     _visible = YES;
+    _selected = YES;
     _tabIndex = -1;
     self.wantsLayer = YES;
     __weak ArdiaWebView *weakSelf = self;
@@ -170,6 +171,7 @@ void AcceptDrops(NSView *root, BOOL accept) {
 - (void)dealloc {
   if (_interfaceScaleObserver) [NSNotificationCenter.defaultCenter removeObserver:_interfaceScaleObserver];
   if (_sightObserver) [NSNotificationCenter.defaultCenter removeObserver:_sightObserver];
+  [self leaveScreenAhead];
   [self closeBrowser];
 }
 
@@ -187,6 +189,8 @@ void AcceptDrops(NSView *root, BOOL accept) {
 
 - (void)viewWillMoveToWindow:(NSWindow *)newWindow {
   if (!newWindow) [self lendPageToSuccessor];
+  if (self.window && newWindow != self.window && (_visible || _reveal.active)) [ArdiaWebView dropNativeRevealsInWindow:self.window];
+  if (newWindow != self.window) [self leaveScreenAhead];
   [super viewWillMoveToWindow:newWindow];
 }
 
@@ -222,6 +226,12 @@ void AcceptDrops(NSView *root, BOOL accept) {
 - (void)setAdoptId:(NSString *)adoptId {
   _adoptId = [adoptId copy];
   if (self.window) [self ensureTab];
+}
+
+- (void)setSelected:(BOOL)selected {
+  if (_selected == selected) return;
+  _selected = selected;
+  if (selected && _visible && !_standalone) [self requestFocusRestore];
 }
 
 - (void)setNeighbour:(BOOL)neighbour {

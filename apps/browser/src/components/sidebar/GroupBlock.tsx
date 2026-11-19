@@ -1,4 +1,4 @@
-import { createContext, memo, useContext, useEffect, useState } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState } from "react";
 import { Animated, Pressable, View } from "react-native";
 import { useTheme } from "../ui/theme";
 import { useGroup, usePageProfileId, useWindowId, useWindowProfileId } from "../../state/browser/hooks";
@@ -12,7 +12,7 @@ import { MeetingTimeLabel, useMeetingCountdown } from "../live/MeetingCountdown"
 import { HoverSlot } from "../ui/HoverSlot";
 import { Button, ContextMenuArea, FadeLabel, ink, space, Symbol, Text, weight, withAlpha } from "../ui";
 import { commitRename, endRename } from "../../state/sidebar/actions";
-import { useDragFolded, useDragItem, useDropInto } from "./DragProvider";
+import { useDragItem, useDropInto } from "./DragProvider";
 import { useShift, type EntryMotion } from "./EntryMotion";
 import { Fold, useFold } from "./Fold";
 import { GROUP_BORDER, GROUP_INNER_RADIUS, GROUP_INDENT, GROUP_INSET, GROUP_RADIUS, groupMembersPadBottom } from "./geometry";
@@ -72,8 +72,7 @@ export const GroupBlock = memo(function GroupBlock({
 }) {
   const windowId = useWindowId();
   const tokens = useSidebarTokens();
-  const stored = useGroup(groupId, (g) => !!g?.collapsed);
-  const collapsed = useDragFolded(entryKey("group", groupId)) || stored;
+  const collapsed = useGroup(groupId, (g) => !!g?.collapsed);
   const color = useGroup(groupId, (g) => g?.color ?? null);
   const tabIds = useGroupTabIds(groupId);
   const [captured] = useState(newCapture);
@@ -82,7 +81,7 @@ export const GroupBlock = memo(function GroupBlock({
   const profileId = usePageProfileId();
   const keptEntries = useKeptEntries(windowId, profileId, groupId);
   const foldedHeight = () => foldedGroupHeight(windowId, profileId, groupId);
-  const { wrapper, handle, headerRef } = useDragItem(entryKey("group", groupId), { kind: "group", tabIds, section, groupId, collapsed: stored, foldedHeight, parentGroup }, own?.clip);
+  const { wrapper, handle, headerRef } = useDragItem(entryKey("group", groupId), { kind: "group", tabIds, section, groupId, collapsed, foldedHeight, parentGroup }, own?.clip);
   const tail = useDragItem(tailKey({ group: groupId }), { kind: "tail", tabIds: [], section, parentGroup: groupId });
 
   const fold = useFold(collapsed);
@@ -159,8 +158,9 @@ export const SidebarEntry = memo(function SidebarEntry({
 });
 
 const MEASURE_LABEL = { opacity: 0, fontVariant: TABULAR_NUMS } as const;
+const CHEVRON_BOX = { width: 10, height: 10, alignItems: "center", justifyContent: "center" } as const;
 
-function GroupHeader({ groupId, windowId, collapsed, open }: { groupId: string; windowId: string; collapsed: boolean; open: Animated.Value }) {
+const GroupHeader = memo(function GroupHeader({ groupId, windowId, collapsed, open }: { groupId: string; windowId: string; collapsed: boolean; open: Animated.Value }) {
   const theme = useTheme();
   const tokens = useSidebarTokens();
   const group = useGroup(groupId, (g) => g);
@@ -172,6 +172,7 @@ function GroupHeader({ groupId, windowId, collapsed, open }: { groupId: string; 
   const closeControl = useGroupCloseControlWhile(groupId, hovered && !renaming);
   const profileId = usePageProfileId();
   const showsExtra = useShowsExtraTabs(windowId, profileId, groupId);
+  const chevronTurn = useMemo(() => ({ ...CHEVRON_BOX, transform: [{ rotate: open.interpolate({ inputRange: [0, 1], outputRange: ["-90deg", "0deg"] }) }] }), [open]);
   if (!group) return null;
   const target = { kind: "group" as const, id: groupId };
 
@@ -212,15 +213,7 @@ function GroupHeader({ groupId, windowId, collapsed, open }: { groupId: string; 
                     <FadeLabel text={label} fontSize={SIDEBAR_TYPE.title} weight="medium" color={tokens.groupTitle} style={{ position: "absolute", left: 0, right: 0, top: 0, height: TAB_ROW.titleHeight }} />
                   </View>
                   <SharedFolderMark groupId={groupId} />
-                  <Animated.View
-                    style={{
-                      width: 10,
-                      height: 10,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transform: [{ rotate: open.interpolate({ inputRange: [0, 1], outputRange: ["-90deg", "0deg"] }) }],
-                    }}
-                  >
+                  <Animated.View style={chevronTurn}>
                     <Symbol name="chevron.down" size={9} weight="semibold" color={withAlpha(tokens.groupTitle, 0.5)} style={{ width: 10, height: 10 }} />
                   </Animated.View>
                 </Animated.View>
@@ -237,4 +230,4 @@ function GroupHeader({ groupId, windowId, collapsed, open }: { groupId: string; 
       </ContextMenuArea>
     </View>
   );
-}
+});

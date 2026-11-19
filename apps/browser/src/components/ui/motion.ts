@@ -62,6 +62,12 @@ export function nativeLoop(value: Animated.Value, legs: readonly LoopLeg[], iter
 
 export const buttonMotion = { iconPressScale: 0.96, controlPressScale: 0.985 } as const;
 
+export const hoverFade = {
+  show: { duration: 50, easing: curve.fade },
+  hide: { duration: 200, easing: curve.fade },
+  appear: { duration: duration.fast, easing: curve.fade },
+} as const;
+
 export type Fade = { duration: number; easing: EasingFunction; delay?: number };
 
 export function usePresence<T>(value: T | null, motion: { show: Fade; hide: Fade }) {
@@ -127,4 +133,22 @@ export function usePressScaleMotion(enabled = true, pressedScale: number = butto
     onPressIn: enabled ? () => animate(true) : undefined,
     onPressOut: enabled ? () => animate(false) : undefined,
   };
+}
+
+export function useHoverFill(shown: boolean, instant = false, fromMount = false) {
+  const opacity = useRef<Animated.Value | null>(null);
+  if ((shown || fromMount) && !opacity.current) opacity.current = new Animated.Value(shown && instant ? 1 : 0);
+  useEffect(() => {
+    const value = opacity.current;
+    if (!value) return;
+    if (instant || reduceMotion() !== false) {
+      value.stopAnimation();
+      value.setValue(shown ? 1 : 0);
+      return;
+    }
+    const fade = Animated.timing(value, { toValue: shown ? 1 : 0, ...(shown ? hoverFade.show : hoverFade.hide), useNativeDriver: true });
+    fade.start();
+    return () => fade.stop();
+  }, [shown, instant]);
+  return opacity.current;
 }

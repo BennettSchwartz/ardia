@@ -20,10 +20,12 @@ export type AppEvent =
   | { type: "centeredResize"; epoch: string }
   | { type: "appLinkOpened"; windowId: string | null }
   | { type: "littleArdiaReturnedToApp" }
+  | { type: "littleArdiaReturnDropped"; count: number }
   | { type: "littleArdiaLinkKeptBehind"; when: "activation" | "arrival" | "open" | "released" }
   | { type: "windowTitleRead"; epoch: string }
   | { type: "keyHoldReplay"; tag: number; count: number }
   | { type: "littleArdiaGlobalShortcut" }
+  | { type: "littleArdiaGlobalShortcutBehind" }
   | { type: "windowDragLoop"; epoch: string }
   | { type: "engineNotificationPresented"; handedToEngine: boolean; epoch: string }
   | { type: "notificationSettings"; authorization: string; alertSetting: string; alertStyle: string; epoch: string }
