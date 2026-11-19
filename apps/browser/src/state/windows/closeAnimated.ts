@@ -21,9 +21,9 @@ function familyCounts(s: BrowserState, tabIds: readonly string[]) {
   return counts;
 }
 
-type AnimatedCloseOptions = CloseWindowOptions & { replacedBy?: string | null; then?: () => void; mayCommit?: () => boolean };
+type AnimatedCloseOptions = CloseWindowOptions & { replacedBy?: string | null; then?: () => void };
 
-export function closeWindowAnimated(windowId: string, { replacedBy = null, then, mayCommit = () => true, ...options }: AnimatedCloseOptions = {}): Promise<boolean> {
+export function closeWindowAnimated(windowId: string, { replacedBy = null, then, ...options }: AnimatedCloseOptions = {}): Promise<boolean> {
   const s = useBrowser.getState();
   const w = s.windows[windowId];
   if (isWindowClosing(windowId) || !w) return Promise.resolve(false);
@@ -36,7 +36,7 @@ export function closeWindowAnimated(windowId: string, { replacedBy = null, then,
     stopClosingWindow(windowId);
     const after = useBrowser.getState();
     const now = after.windows[windowId];
-    if (!now || !mayCommit()) return done(false);
+    if (!now) return done(false);
     if ([...familyCounts(after, now.tabIds)].some(([key, n]) => n > (leaving.get(key) ?? 0))) {
       focusWindow(windowId);
       return done(false);

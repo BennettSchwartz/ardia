@@ -66,7 +66,7 @@ async function runAll(ops: Op[], stillOn: () => boolean, consent: ConsentToken |
       break;
     }
     try {
-      results.push(await runOp(results, op));
+      results.push(await runOp(results, op, stillOn));
     } catch (thrown) {
       const code = thrown instanceof OpError ? thrown.code : "failed";
       const changed = thrown instanceof OpError ? thrown.changed : undefined;

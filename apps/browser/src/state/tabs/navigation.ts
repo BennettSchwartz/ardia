@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { goBackAcrossEngines } from "../engines/actions";
+import { confirm } from "../../platform/dialogs";
 import { livePageId, withLivePage } from "./livePage";
 import { webviews } from "../../platform/webviews";
 import { useBrowser, type BrowserState } from "../browser/store";
@@ -47,10 +48,23 @@ export function useHistoryAvailability(tabId: string) {
 }
 
 export function goBack(tabId: string, mayAct: () => boolean = () => true): void {
-  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goBack(id, mayAct), mayAct);
-  if (pageOf(tabId).newTabShown) return;
+  void goBackAsking(tabId, mayAct);
+}
+
+export async function goBackAsking(tabId: string, mayAct: () => boolean = () => true, ask: typeof confirm = confirm): Promise<boolean> {
+  if (livePageId(tabId) !== tabId) {
+    let went: Promise<boolean> = Promise.resolve(true);
+    await withLivePage(tabId, (_, id) => (went = goBackAsking(id, mayAct, ask)), mayAct);
+    return went;
+  }
+  if (pageOf(tabId).newTabShown) return true;
+  if (pageOf(tabId).engineBack && !liveOf(tabId).canGoBack) return goBackAcrossEngines(tabId, mayAct, ask);
+  goBackHere(tabId);
+  return true;
+}
+
+function goBackHere(tabId: string) {
   if (liveOf(tabId).canGoBack) return void webviews.get(tabId)?.goBack();
-  if (pageOf(tabId).engineBack) return void goBackAcrossEngines(tabId, mayAct);
   if (pageOf(tabId).backToNewTab) return showNewTab(tabId);
   if (backClosesTab(store(), tabId)) {
     noteBackCloseToOpener();

@@ -25,6 +25,8 @@ final class ControlConnection {
   private var deadline: DispatchWorkItem?
   private(set) var closed = false
   private var finishingLine = false
+  private var draining = false
+  private var readSuspended = false
   private var announced = false
 
   init(
@@ -64,7 +66,7 @@ final class ControlConnection {
   }
 
   func event(_ data: Data) {
-    guard !closed, !finishingLine else { return }
+    guard !closed, !finishingLine, !draining else { return }
     enqueue(output.addEvent(data))
   }
 
@@ -82,8 +84,7 @@ final class ControlConnection {
     queue.asyncAfter(deadline: .now() + Self.retireDeadline, execute: item)
     flush()
     guard !closed else { return }
-    readSource?.cancel()
-    readSource = nil
+    stopReading()
   }
 
   private func announce() {
@@ -101,13 +102,23 @@ final class ControlConnection {
       if !writeArmed { writeSource.resume() }
       writeSource.cancel()
     }
-    readSource?.cancel()
+    stopReading()
     let unwritten = output.takeFinishedTickets() + output.waitingTickets
     output = ControlOutput()
     input = []
     announce()
     report(unwritten)
     Self.retiring.removeValue(forKey: ObjectIdentifier(self))
+  }
+
+  private func stopReading() {
+    guard let source = readSource else { return }
+    readSource = nil
+    if readSuspended {
+      readSuspended = false
+      source.resume()
+    }
+    source.cancel()
   }
 
   private func report(_ tickets: [Int]) {
@@ -134,6 +145,7 @@ final class ControlConnection {
     case .drained:
       if finishingLine { return close() }
       disarmWrite()
+      closeIfDrained()
     case .blocked:
       armWrite()
     case .failed:
@@ -167,6 +179,26 @@ final class ControlConnection {
     let count = buffer.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, Self.readSize) }
     if count > 0 { return take(buffer[0..<count]) }
     if count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) { return }
+    if count == 0 { return drainAfterPeerClosed() }
+    close()
+  }
+
+  private func drainAfterPeerClosed() {
+    draining = true
+    if !readSuspended {
+      readSuspended = true
+      readSource?.suspend()
+    }
+    input = []
+    deadline?.cancel()
+    let item = DispatchWorkItem { [weak self] in self?.close() }
+    deadline = item
+    queue.asyncAfter(deadline: .now() + Self.retireDeadline, execute: item)
+    closeIfDrained()
+  }
+
+  private func closeIfDrained() {
+    guard draining, !closed, output.isEmpty, pendingRequests == 0 else { return }
     close()
   }
 
