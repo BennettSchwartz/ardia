@@ -155,13 +155,13 @@ for (const how of ["reject", "throw"]) {
     assert.equal(ui(engine).status, "paused");
     assert.ok(ui(engine).error);
     assert.equal(docOnDisk().pausedByGuard, true);
-    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 0 });
+    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
     await engine.resumeSync();
     await settle();
     assert.equal(calls.unlock, 2, "the second press runs");
     assert.equal(ui(engine).status, "updated");
     assert.equal(docOnDisk().pausedByGuard, undefined);
-    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1 });
+    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1, sync_loads_refused_damaged: 0 });
     await retire(engine);
   });
 }
@@ -344,7 +344,7 @@ test("the phrase continuation counts with the token taken at the press, not a ne
     await submitted;
     await settle();
     assert.equal(ui(engine).status, "updated");
-    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
   } finally {
     setConsentPeriod(true, "sync-pause-test");
   }

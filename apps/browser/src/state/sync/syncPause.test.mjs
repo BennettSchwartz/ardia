@@ -18,7 +18,7 @@ test("a recovered start with sync on loads nothing, schedules no cycle, and reco
   assert.equal(docOnDisk().pausedByGuard, true);
   assert.deepEqual(docOnDisk().seqs, seqs, "the seqs read from disk are kept");
   assert.deepEqual(sealedFiles(), sealedBefore, "the state and journal parts are untouched");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
 
   S().addBookmark({ profileId: "default", url: "https://three.example/", title: "Three" });
   await engine.syncNow();
@@ -78,7 +78,7 @@ test("Resume unlocks, loads, runs one cycle, and clears the pause only after tha
   assert.equal(engine.useSync.getState().status, "updated");
   assert.equal(docOnDisk().pausedByGuard, undefined, "and cleared once it finished");
   assert.ok(stub.timers.some(({ ms }) => ms === 15_000), "sync carries on as usual");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1, sync_loads_refused_damaged: 0 });
   await retire(engine);
 });
 
@@ -103,7 +103,7 @@ test("a Resume whose cycle fails stays paused, says why, and runs nothing more",
     quit.setQuitting(false);
   }
   assert.deepEqual(sealedFiles(), before, "and quitting writes no state");
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
 });
 
 const lockedMessage = "Enter your recovery phrase to keep syncing on this Mac.";
@@ -147,7 +147,7 @@ test("entering the phrase after that finishes the resume and clears the pause af
   assert.equal(pausedDuringCycle, true);
   assert.equal(engine.useSync.getState().status, "updated");
   assert.equal(docOnDisk().pausedByGuard, undefined);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1 }, "the phrase continues the press, it isn't a second one");
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 1, sync_paused_after_unsettled_starts: 0, sync_resumes: 1, sync_resumes_completed: 1, sync_loads_refused_damaged: 0 }, "the phrase continues the press, it isn't a second one");
   await retire(engine);
 });
 
@@ -173,7 +173,7 @@ test("without a pause, the phrase on a locked start goes down the ordinary path"
   assert.equal(engine.useSync.getState().status, "starting");
   assert.ok(stub.timers.some(({ ms }) => ms === 0), "and a cycle is scheduled at once");
   assert.equal(calls.chainStatus, 0);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
   await retire(engine);
 });
 
@@ -198,7 +198,7 @@ test("with sync off a recovered start changes nothing", async () => {
   assert.equal(engine.useSync.getState().status, "off");
   assert.equal(shell.docs.get("sync.json"), undefined);
   assert.deepEqual(writes.filter((name) => name.startsWith("sync")), []);
-  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+  assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
   await engine.resumeSync();
   assert.equal(calls.unlock, 0);
 });
@@ -210,7 +210,7 @@ test("with sharing off nothing is counted", async () => {
     const engine = await pausedStart(disk);
     await engine.resumeSync();
     assert.equal(engine.useSync.getState().status, "updated");
-    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 });
+    assert.deepEqual(takeSyncPauseCounts(), { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 });
     await retire(engine);
   } finally {
     setConsentPeriod(true, "sync-pause-test");

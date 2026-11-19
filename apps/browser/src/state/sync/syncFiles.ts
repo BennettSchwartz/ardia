@@ -1,5 +1,8 @@
 import { readDocument, removeDocument, saveDocument, writeDocument } from "../../platform/documents";
 import { Clock, emptyScope, restoreJournal, SyncNative, trackTouchedKeys, writtenSeq, type LogFile, type ScopeState, type SyncRecord } from "../../platform/sync";
+import { savedStateDamage, SyncStateDamaged } from "./savedStateChecks";
+
+export { SyncStateDamaged };
 import { parseSaved, unchanged, versionedJson, type Migrations, type SavedObject } from "../../lib/savedDocument";
 import { profileScope } from "./records";
 import { APP_SCOPE, DOC, DOC_MIGRATIONS, DOC_VERSION, JOURNAL, STATE, defaultTypes, emptyDoc, type SyncDoc } from "./syncDoc";
@@ -9,8 +12,8 @@ import { warnFor } from "../telemetry/logs";
 
 type Journal = Record<string, LogFile[]>;
 type ScopeChange = { records: Record<string, SyncRecord | null>; base: Record<string, string | null>; rest: Partial<ScopeState> };
-type JournalPart = { id: number; journal?: Journal; device?: string | null; clock?: string; changes?: Record<string, ScopeChange> };
-type Checkpoint = { covers: number; clock?: string; scopes: SyncDoc["scopes"] };
+export type JournalPart = { id: number; journal?: Journal; device?: string | null; clock?: string; changes?: Record<string, ScopeChange>; malformed?: string };
+type Checkpoint = { covers: number; clock?: string; scopes: SyncDoc["scopes"]; malformed?: string };
 
 const CHECKPOINT_VERSION = 1;
 const CHECKPOINT_MIGRATIONS: Migrations = { 0: (doc) => (typeof doc.covers === "number" ? doc : { covers: -1, scopes: doc }) };
@@ -33,9 +36,12 @@ function readScopes(v: unknown): SyncDoc["scopes"] {
 }
 
 function readCheckpoint(doc: SavedObject | null): Checkpoint {
-  if (!doc || typeof doc.covers !== "number") return { covers: -1, scopes: {} };
-  return { covers: doc.covers, clock: stringOr(doc.clock, undefined), scopes: readScopes(doc.scopes) };
+  if (!doc) return { covers: -1, scopes: {} };
+  if (!Number.isSafeInteger(doc.covers) || (doc.covers as number) < -1) return { covers: -1, scopes: {}, malformed: "covers" };
+  return { covers: doc.covers as number, clock: stringOr(doc.clock, undefined), scopes: readScopes(doc.scopes) };
 }
+
+const presentButNotMap = (doc: SavedObject, field: string) => doc[field] !== undefined && !isFields(doc[field]);
 
 function readPart(doc: SavedObject | null): JournalPart {
   if (!doc) return { id: 0 };
@@ -45,6 +51,7 @@ function readPart(doc: SavedObject | null): JournalPart {
     device: stringOr(doc.device, null),
     clock: stringOr(doc.clock, undefined),
     changes: isFields(doc.changes) ? (doc.changes as Record<string, ScopeChange>) : undefined,
+    malformed: presentButNotMap(doc, "journal") ? "batches" : presentButNotMap(doc, "changes") ? "changes" : undefined,
   };
 }
 
@@ -129,27 +136,28 @@ export function syncFiles(current: () => SyncDoc) {
     const found: JournalPart[] = [];
     const take = async (sealed: string | null) => void found.push(readPart(parseSaved(await openSealed(sealed), PART_VERSION, PART_MIGRATIONS)));
     const legacy = readDocument(JOURNAL);
-    journal.legacy = !!legacy;
-    journal.bytes = legacy?.length ?? 0;
+    const read = { legacy: !!legacy, bytes: legacy?.length ?? 0, parts: 0 };
     await take(legacy);
-    journal.parts = 0;
     for (let n = 1; ; n++) {
       const part = readDocument(journalPart(n));
       if (!part) break;
-      journal.parts = n;
-      journal.bytes += part.length;
+      read.parts = n;
+      read.bytes += part.length;
       await take(part);
     }
-    return found;
+    return { found, read };
   }
 
   const loadState = () =>
     serial(async () => {
       const sealedState = readDocument(STATE);
-      const { scopes, covers, clock: savedClock } = readCheckpoint(parseSaved(await openSealed(sealedState), CHECKPOINT_VERSION, CHECKPOINT_MIGRATIONS));
-      const parts = await readJournal();
+      const { scopes, covers, clock: savedClock, malformed } = readCheckpoint(parseSaved(await openSealed(sealedState), CHECKPOINT_VERSION, CHECKPOINT_MIGRATIONS));
+      const { found: parts, read } = await readJournal();
       const doc = current();
       const live = new Set([APP_SCOPE, ...Object.values(doc.profiles).map((link) => profileScope(link.syncId))]);
+      const damage = savedStateDamage({ scopes, parts, covers, checkpointMalformed: malformed, clock: savedClock, device: doc.deviceId, live, seqs: doc.seqs });
+      if (damage) throw new SyncStateDamaged(damage);
+      Object.assign(journal, read);
       const clock = new Clock(doc.deviceId ?? "", doc.clock);
       if (savedClock) clock.observe(savedClock);
       const batches: Journal = {};
@@ -239,7 +247,7 @@ export function syncFiles(current: () => SyncDoc) {
   function clearJournal() {
     journal.batches = {};
     for (let n = countedParts(); n > 0; n--) removeDocument(journalPart(n));
-    if (journal.legacy) writeDocument(JOURNAL, "");
+    if (journal.legacy || readDocument(JOURNAL)) writeDocument(JOURNAL, "");
     Object.assign(journal, { parts: 0, bytes: 0, legacy: false });
   }
 
@@ -376,5 +384,5 @@ export function syncFiles(current: () => SyncDoc) {
     });
   }
 
-  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded, docsSettled: () => docQueue };
+  return { read, loadState, persistJournal, watchScope, save, saveDocNow, unload, startOver, checkpoint, writtenSeqs, loaded: () => state.loaded, docsSettled: () => docQueue, journalCounts: () => ({ parts: journal.parts, bytes: journal.bytes, legacy: journal.legacy, lastId: journal.lastId }) };
 }

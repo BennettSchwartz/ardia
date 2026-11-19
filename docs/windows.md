@@ -780,6 +780,20 @@ is plain Chromium.
   `unsettledStarts` still 0, the same `seqs`, the same SHA-256 for `sync-state.nns`, every `sync-journal-*.nns` and
   the sync folder, no unlock line or cycle, and `sync_paused_by_launch_guard` once (and
   `sync_paused_after_unsettled_starts` never) in the local telemetry copy. The start after it must still be paused.
+- Sync judges its saved state before it loads it (#2623), with the checks it already applies to files from the sync
+  folder: every record has a stamp the clock can read, an origin and a value, every base entry is text, this device's
+  batches are well-formed log files, and the bookkeeping and maps the load, the summary and the first cycle walk have
+  the right shape, as do `covers`, the saved clocks and `sync.json`'s sequence numbers. Only what the load uses is
+  judged: another device's batches, and an unlinked scope's base, are not. It's shared code (`savedStateChecks.ts`,
+  with the checks from `packages/sync`'s `fileChecks.ts` and `isStamp` in `hlc.ts`). A state that fails loads nothing: no scope, journal count or clock
+  changes, no cycle runs, and nothing is written, deleted or rebuilt. Settings says "Sync's saved data on this PC is
+  damaged, so Sync can't load it. To rebuild it, stop syncing here, then turn Sync on again with your recovery
+  phrase." (stalled after a start or Sync Now, paused after a Resume), and Stop Syncing stays offered; it clears the old single journal file too, so the rejoin doesn't meet it again. It doesn't
+  rebuild by itself because an emptied scope also loses the device's record of what it last synced: without it, the
+  next cycle would publish old local values with fresh stamps, putting back what other devices deleted and
+  overwriting their newer edits. Stopping and joining again with the recovery phrase gives the device a new identity
+  that takes the shared state first. Found on the #2570 profile, whose damaged session had saved a record without its
+  stamp; `usage_counts.sync_loads_refused_damaged` counts such loads, at most once a session.
 - A window closed while minimized keeps its restored place and size for the next launch (the frame event's restored
   bounds); it used to save the minimized frame and come back as a 480 x 360 window in the corner.
 - `scripts/windows/relaunch-check.ps1` (CI, after the installer check) installs the build and closes and reopens

@@ -7,7 +7,7 @@ const stockSave = documents.saveDocument;
 const ui = (engine) => engine.useSync.getState();
 const ordinaryStart = (disk, before) => pausedStart(disk, { recoveredStart: false, before });
 const snapshot = () => new Map(shell.docs);
-const NO_COUNTS = { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0 };
+const NO_COUNTS = { sync_paused_by_launch_guard: 0, sync_paused_after_unsettled_starts: 0, sync_resumes: 0, sync_resumes_completed: 0, sync_loads_refused_damaged: 0 };
 
 async function runSettleTimer() {
   const due = stub.timers.filter(({ ms }) => ms === 120_000);
