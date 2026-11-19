@@ -49,7 +49,7 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Windows | kind, profile shown, frame, maximized, full screen, tab layout, auto-hide, sidebar, focus order | `session.json` (`windows`, `windowOrder`), `launch-layout.json` | ✅ `windows`, `windows.*`; 🗺️ frame, maximize, full screen |
 | Tabs | url, title, custom title and icon, pin, muted, zoom, page state, opener, created, last active | `session.json` (`tabs`), Chrome's tab restore | ✅ `apply` ops, `tabs.*` |
 | Groups and folders | name, icon, colour, collapsed, pinned, nesting, members | `session.json` (`groups`), sync (`groupLooks`) | ✅ `apply` `group.*`, `workspace` |
-| Pinned (Top Apps tiles, pinned rows, tile folders) | pin kind, pinned URL, tile folders, Top Apps sharing | `session.json` (`pinChoices`, `pinSync`, `parkedPins`), sync | ✅ `apply` `tab.pin`/`tab.unpin`, `tabs.setPinnedUrl`, `tabs.returnToPinnedUrl`; 🗺️ tile folders |
+| Pinned (Top Apps tiles, pinned rows, tile folders) | pin kind, pinned URL, tile folders, Top Apps sharing | `session.json` (`pinChoices`, `pinSync`, `parkedPins`), sync | ✅ `apply` `tab.pin`/`tab.unpin`, `tabs.setPinnedUrl`, `tabs.returnToPinnedUrl`, `pins.*` (tile folders) |
 | Spaces (profiles) | name, colour, icon, theme, shared data, Top Apps sharing, open-tab sync, order, default | `session.json` (`profiles`, `profileOrder`, `settings.defaultProfileId`), Chrome profile dirs | ✅ `profiles.*` |
 | Splits | panes, orientation, sizes, stacks | `session.json` (`splits`) | ✅ `splits.*` |
 | Peek | the page peeked from each tab | memory | ✅ `peek.*` |
@@ -69,15 +69,15 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | Saved passwords | origin, username, password | Chrome's Login Data (keychain-sealed) | 🔍 `passwords.list` (no passwords); ⛔ reveal, see Secrets |
 | Autofill | addresses, cards | Chrome's Web Data | 🔍 `autofill.list` (no card numbers); ⛔ card numbers |
 | Cookies and site data | cookies, storage per origin | Chrome's Cookies and storage | ✅ `sites.clearData`; ⛔ cookie values |
-| Favicons | icon per page | Chrome's Favicons database, app cache | 🗺️ `favicons.get` |
-| Shared folders | groups backed by a folder, their identities | `shared-folders.json`, `.ardia-folder.json` | 🗺️ `sharedFolders.*` |
-| Live folders | GitHub, calendar and document sources | `live.json` | 🗺️ `live.*` |
+| Favicons | icon per page | Chrome's Favicons database, app cache | 🔍 `favicons.get` |
+| Shared folders | groups backed by a folder, their identities | `shared-folders.json`, `.ardia-folder.json` | ✅ `sharedFolders.*` |
+| Live folders | pull request and document folders, their items, hidden and read state, connected accounts | `live.json` | ✅ `live.*`; ⛔ account tokens |
 | Sidebar layout | width, side, pinned collapsed, auto-hide | `settings` (`sidebarWidth`, `sidebarSide`, `autoHideTabs`), profiles (`pinnedCollapsed`) | ✅ through `settings.set`, `profiles.update`, `windows.setLayout` |
-| Presets and themes | setup codes, profile looks, theme files | `settings`, `themes/*.json`, profiles (`theme`) | ✅ `profiles.setLook`; 🗺️ `presets.apply` |
+| Presets and themes | setup codes, profile looks, theme files | `settings`, `themes/*.json`, profiles (`theme`) | ✅ `profiles.setLook`, `presets.apply`, `presets.describe` |
 | Omnibox | providers, bangs state, approvals | `settings.omniboxProviders`, `bangs-state.json`, `automation-approvals.json` | ✅ providers through `settings.set`; 🗺️ bangs |
 | Session and restore | the whole workspace | `session.json` | ✅ through the areas above; ⛔ the raw document |
 | Reader | text size, font | `settings` (`readerTextSize`, `readerFont`) | ✅ `settings.set` |
-| Air traffic (link routing rules) | rules per source app | `air-traffic.json` | 🗺️ `airTraffic.*` |
+| Air traffic (link routing rules) | rules per source app, Everything Else | `air-traffic.json` | ✅ `airTraffic.*` |
 | Hooks, config, approvals | hook rules, config.json, approvals | `hooks.json`, `config.json`, `automation-approvals.json` | files the user edits; ⛔ approvals |
 | Telemetry, reports, onboarding, release notes | the app's own bookkeeping | their documents | ⛔ not profile data |
 
@@ -122,6 +122,12 @@ changes it today, 🔍 read only, 🗺️ designed below, ⛔ deliberately not e
 | media | `media.list` | `media.control {tab, action, seconds?}` |
 | sync | `sync.status` | none yet |
 | passwords, autofill | `passwords.list {profile?}`, `autofill.list {profile?}` | `passwords.remove {origin, username}` |
+| pins (tile folders) | `pins.folders {window?}` | `pins.createFolder {tabs, name?}`, `pins.renameFolder {folder, name}`, `pins.removeFolder {folder}`, `pins.addToFolder {folder, tabs}`, `pins.removeFromFolder {tabs}` |
+| favicons | `favicons.get {url, profile?}` | none |
+| sharedFolders | `sharedFolders.list` | `sharedFolders.share {group, parent?}`, `sharedFolders.add {path, window?}`, `sharedFolders.sync {group}`, `sharedFolders.stop {group}` |
+| live | `live.list {profile?}`, `live.items {folder}` | `live.create {kind, profile?, sources?, name?}`, `live.update`, `live.remove`, `live.refresh`, `live.hide {folder, items}`, `live.unhide`, `live.markRead {folder, items?}`, `live.setRepoHidden {folder, repo, hidden}`, `live.open {folder, item, window?}` |
+| presets | `presets.describe {code}` | `presets.apply {code, window?}` |
+| airTraffic | `airTraffic.rules`, `airTraffic.test {url, from?}` | `airTraffic.addRule`, `airTraffic.updateRule {id, …}`, `airTraffic.removeRule {id}`, `airTraffic.moveRule {id, index}`, `airTraffic.setFallback {open, profile?, group?}` |
 
 `settings.set` takes the same keys and values `config.json` does (`state/settings/configAllowlist.ts`, checked by
 `checkedSettings`), applied with `updateSettings`, so a value the Settings UI can choose is a value the command can set.
@@ -131,6 +137,34 @@ command can't switch control itself on or off), and so does `allowJavaScriptFrom
 AppleScript run script in every page). `pageEngine`, `websiteEngines`, `protectedVideoInWebKit`, `newTabUrl`,
 `customSearchUrl` and `extensionSearchEngines` are refused in this first round, as `run` refuses `changesEngine`; they are
 listed under Next.
+
+### Tile folders, icons, shared and live folders, presets, Air Traffic
+
+Each area is its own file: `socketPins.ts`, `socketFavicons.ts`, `socketSharedFolders.ts`, `socketLive.ts`,
+`socketPresets.ts`, `socketAirTraffic.ts`, and counts in its own family (`pins`, `favicons`, `shared_folders`, `live`,
+`presets`, `air_traffic`).
+
+- **Tile folders** (`state/pins/tileFolders.ts`, the same transforms the sidebar's drag and Rename/Remove Folder menu
+  apply). A folder lives in one window's Top Apps for the profile the window shows, so `pins.folders` takes a window;
+  `pins.createFolder` pins its tabs as tiles, and every tab must be in one main window and its profile. Removing a
+  folder, or a tab from it, leaves the tabs pinned as tiles, as the menu does; a folder left with one tab dissolves.
+- **Favicons.** `favicons.get` answers from the app's icon cache (`resolveFavicon`) and otherwise from the profile's
+  icon database (`faviconsFor`), with `{found, mime, data}` (base64). It never fetches from the network, so reading
+  icons can't tell a site the page is open.
+- **Shared folders** (`state/sharedFolders`). `share` makes the folder in iCloud Drive's Ardia folder (or `parent`
+  when iCloud Drive is off) and syncs it once; instead of the macOS share sheet, the reply carries the folder's path and
+  file URL for the command to share. `add` binds a folder someone shared as a new pinned folder, as Add Shared Folder
+  does without its folder picker. `stop` is Stop Syncing: the group and the files stay.
+- **Live folders** (`state/live`). `create` refuses a source that isn't connected (connecting asks for tokens and a
+  browser sign-in, so it stays in Settings › Automations); `remove` is Delete Live Folder and closes its tabs, as the
+  menu does. Account tokens are never read.
+- **Presets.** `presets.apply` is Settings › Apply a setup code (`applySetupCode`): the code's settings, and its colour
+  and pinned apps on the given or focused main window's profile. `presets.describe` decodes a code without applying it.
+- **Air Traffic Control** (`state/airTraffic/store.ts`). Rules are `{from, when, profile, open, group}`: `from` an app
+  (`{name, bundleId?}`, any app when null), `when` a condition (`any`, `site` with `host`, `pattern`, `contains` or
+  `equals` with `text`) checked as the Settings pane checks it, `profile` null for the profile used last, `group` a key
+  from `airTraffic.rules` and only with `open: "tab"`. `moveRule` takes the new index; `setFallback {open: null}`
+  puts Everything Else back to Ardia's usual choice; `test` is the pane's link tester.
 
 ### Events
 
@@ -161,14 +195,6 @@ Designed, not built in this round, each in its own file under `state/automation/
   `frame`, `maximized` and `fullScreen` follow the native window (`windows/windowSync.ts`), so these need a native
   call that moves the window (`ArdiaWindows`), which doesn't exist yet; `run` covers full screen through its command.
 
-- **Tile folders:** `pins.folders {profile?}`, `pins.createFolder {tabs, name}`, `pins.renameFolder`, `pins.removeFolder`
-  through `state/pins/tileFolders.ts`.
-- **Favicons:** `favicons.get {url, profile?}` → the cached PNG as base64, through `resolveFavicon`.
-- **Shared folders:** `sharedFolders.list`, `sharedFolders.share {group}`, `sharedFolders.stop {group}` through
-  `state/sharedFolders/actions.ts`.
-- **Live folders:** `live.list`, `live.refresh {folder}`, `live.hide {folder, item}` through `state/live`.
-- **Presets:** `presets.apply {code}` through `applySetupCode`.
-- **Air traffic:** `airTraffic.rules`, `airTraffic.setRule {app, route}` through `state/airTraffic/rules.ts`.
 - **Sync:** `sync.now`, `sync.setType {type, on}`, `sync.setProfile {profile, on}`, `sync.sendTab {tab, device}`
   through `state/sync/engine.ts`.
 - **Extensions:** `extensions.install {webStoreId}` (opens the install prompt the user confirms), `extensions.configure`.
