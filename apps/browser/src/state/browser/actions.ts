@@ -49,7 +49,7 @@ export function switchToTab(tabId: string) {
   if (tab.windowId !== focusedWindowOf(store())) focus(tab.windowId);
 }
 
-export async function closeTab(tabId: string) {
+export async function closeTab(tabId: string, mayWrite: () => boolean = () => true) {
   const consent = consentToken();
   const s = store();
   const tab = s.tabs[tabId];
@@ -59,6 +59,7 @@ export async function closeTab(tabId: string) {
   if (last && managesWindowClose(w.id, "lastTab")) return;
   if (last && (asksBeforeClosingLastTab(w.id) || quitWarningMayAsk())) {
     const { decision, suppressWarning } = await decideLastTabClose(w.id);
+    if (!mayWrite()) return;
     if (suppressWarning) store().updateSettings({ warnBeforeClosingLastTab: false });
     if (decision === "cancel") return;
     applyHeldReports();
@@ -73,12 +74,12 @@ export async function closeTab(tabId: string) {
   store().closeTab(tabId);
 }
 
-export async function closeGroup(groupId: string) {
+export async function closeGroup(groupId: string, mayWrite: () => boolean = () => true) {
   const s = store();
   const group = s.groups[groupId];
   const w = group && s.windows[group.windowId];
   if (!group || !w) return;
-  if (!(await groupCloseAllowed(w.id, groupId))) return;
+  if (!(await groupCloseAllowed(w.id, groupId)) || !mayWrite()) return;
   if (s.settings.warnBeforeClosingTabGroup && !rootOf(s.groups, groupId)?.pinned) {
     const tabs = plural(group.tabIds.length, "tab");
     const { confirmed, suppressed } = await confirm({
@@ -88,6 +89,7 @@ export async function closeGroup(groupId: string) {
       suppression: "Don’t ask me again",
       windowId: w.id,
     });
+    if (!mayWrite()) return;
     if (suppressed) store().updateSettings({ warnBeforeClosingTabGroup: false });
     if (!confirmed) return;
     applyHeldReports();

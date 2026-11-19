@@ -91,3 +91,11 @@ export function refuseSyncedLinkChange(tabId: string | null | undefined, what: s
   const hit = sharedRootOfTab(s, t.id);
   if (hit) throw new OpError("refused", `Tab ${t.id} is a link in shared folder ${hit}, and ${what} would change the link it syncs; ${SHARED_GROUPS_SIDEBAR_ONLY}.`);
 }
+
+export function refuseSharedRunCommand(command: string, tabId: string | null) {
+  if (!tabId) return;
+  if (command === "back" || command === "forward") return refuseSyncedLinkChange(tabId, command === "back" ? "going back" : "going forward");
+  if (command !== "closeTab" && command !== "closeTabGroup") return;
+  const hit = sharedRootOfTab(store(), tabId);
+  if (hit) throw new OpError("refused", `Group ${hit} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so ${command} didn't run.`);
+}

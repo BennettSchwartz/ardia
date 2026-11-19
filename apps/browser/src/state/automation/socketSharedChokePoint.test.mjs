@@ -108,3 +108,25 @@ test("no socket method changes what a shared folder syncs: each either leaves it
   }
   assert.deepEqual(changed, [], "methods that changed a shared folder's synced state");
 });
+
+test("run closeTabGroup on a shared folder's group, or a group inside it, is refused and the group stays", async () => {
+  for (const member of [(x) => x.one, (x) => S().groups[x.inner].tabIds[0]]) {
+    const f = await fixture();
+    S().activate(member(f));
+    const reply = await send("run", { command: "closeTabGroup", window: f.windowId });
+    assert.equal(errorOf(reply)?.code, "refused", JSON.stringify(reply));
+    assert.ok(S().groups[f.shared] && S().groups[f.inner], "both groups stay");
+  }
+});
+
+test("closeGroup checks its guard after each await and writes nothing once it fails", async () => {
+  const { closeGroup } = await import("../browser/actions.ts");
+  S().hydrate({});
+  const windowId = S().createWindow({ url: "https://home.example/" });
+  const a = S().newTab(windowId, { url: "https://a.example/", background: true });
+  const group = S().groupTabs([a], { name: "Plain" });
+  await closeGroup(group, () => false);
+  assert.ok(S().groups[group], "the group stays when the guard fails after the await");
+  await closeGroup(group);
+  assert.ok(!S().groups[group], "the group closes when nothing guards it");
+});
