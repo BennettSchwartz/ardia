@@ -3,6 +3,7 @@ import { nativeModule, type ConfirmOptions, type PromptOptions } from "@ardia/sh
 const Dialogs = nativeModule("ArdiaDialogs");
 
 export const confirm = (options: ConfirmOptions) => Dialogs.confirm(options);
+export const canDismissShownOnlyDialogs = () => typeof Dialogs.dismissShownOnly === "function";
 export const dismissShownOnlyDialogs = async () => {
   await Dialogs.dismissShownOnly?.();
 };
