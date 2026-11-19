@@ -5,6 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 @interface ArdiaChromeWindowHost : NSObject
 
 @property(class, nonatomic, readonly) CGFloat windowCornerRadius;
+@property(class, nonatomic, readonly) CGFloat drawnWindowCornerRadius;
 
 + (CGFloat)frameCornerRadiusOfWindow:(NSWindow *)window;
 
@@ -48,9 +49,17 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property(class, nonatomic, copy, nullable) BOOL (^shouldCloseHandler)(NSWindow *window);
 @property(class, nonatomic, copy, nullable) BOOL (^refusesUnhandledKeyHandler)(NSWindow *window, NSEvent *event);
+@property(class, nonatomic, copy, nullable) NSString *(^focusHandoffSummaryHandler)(NSWindow *window);
 + (BOOL)windowShouldClose:(NSWindow *)window;
 + (BOOL)windowFullScreenIsForPage:(NSWindow *)window;
 + (BOOL)userSeesWindow:(nullable NSWindow *)window NS_SWIFT_NAME(userSees(_:));
+
+@end
+
+@interface ArdiaChromeWindowHost (PictureInPicture)
+
++ (BOOL)isVideoPictureInPictureWindow:(NSWindow *)window;
++ (BOOL)consumePictureInPictureActivation;
 
 @end
 

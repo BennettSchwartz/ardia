@@ -1,17 +1,8 @@
-import {
-  emptyScope,
-  EXTENSION_PREFIX,
-  folderTransport,
-  syncScope,
-  SyncNative,
-  visible,
-  type FolderInfo,
-  type PhraseResult,
-} from "../../platform/sync";
+import { emptyScope, EXTENSION_PREFIX, folderTransport, syncScope, SyncNative, visible, type FolderInfo, type PhraseResult } from "../../platform/sync";
 import { create } from "zustand";
 import { useBrowser } from "../browser/store";
 import { engineProfile } from "../browser/model";
-import { historyExpired } from "./adapters";
+import { historyExpired } from "./historyAdapter";
 import { settingsToReapply } from "./settingsAdapter";
 import { watchExtensionIntents } from "./extensions";
 import { appAdapters, extensionsOf, forgetScopeAdapters, profileAdapters, typeSynced } from "./scopeAdapters";
@@ -22,7 +13,7 @@ import { editClock, startEditClock } from "./editClock";
 import { addLinkedProfile, appScopeOf, linkedProfileId, linkProfiles, readyToPair, remoteProfileRecord, sharedDataChain } from "./profileLinks";
 import { summarize } from "./syncSummary";
 import { takeCycleWork, timedCycle } from "./cycleWork";
-import { markDeviceRemoved, markRemoved, settleRemovals, takeSyncedDeviceRemovals, takeSyncedProfileRemovals } from "./profileRemoval";
+import { freezeRemovals, markDeviceRemoved, markRemoved, settleRemovals, takeReturnedDeviceRemovals, takeReturnedProfileRemovals, takeSyncedDeviceRemovals, takeSyncedProfileRemovals } from "./profileRemoval";
 import { profileScope } from "./records";
 import { queueSend, sendTargetsIn } from "./sentTabs";
 import { errorText } from "../../lib/errors";
@@ -30,6 +21,8 @@ import { isQuitting, saveBeforeQuit } from "../app/quit";
 import { onProfilesOpened, profileOpened } from "../profiles/profileLoading";
 import { markOpenTabsSynced, openTabsClosed, recordOpenTabCloses } from "./openTabCloses";
 import { PLATFORM_TERMS } from "../../lib/platformTerms";
+import { consentToken } from "../telemetry/client";
+import { warnFor } from "../telemetry/logs";
 
 export { onTabsReceived } from "./sentTabs";
 export { takeOpenTabSyncCounts } from "../telemetry/openTabSyncCounts";
@@ -67,7 +60,7 @@ function noteSnapshot({ snapshotBytes }: { snapshotBytes: number }) {
 }
 
 export function takeSnapshotWrites() {
-  const taken = { ...snapshotWrites, ...takeCycleWork(), removedProfiles: takeSyncedProfileRemovals(), removedDevices: takeSyncedDeviceRemovals() };
+  const taken = { ...snapshotWrites, ...takeCycleWork(), removedProfiles: takeSyncedProfileRemovals(), removedDevices: takeSyncedDeviceRemovals(), removalsReturned: takeReturnedProfileRemovals() + takeReturnedDeviceRemovals() };
   snapshotWrites = { count: 0, bytes: 0 };
   return taken;
 }
@@ -128,6 +121,7 @@ async function runCycle({ retiring = false, forcePasswords = false }: CycleOptio
 }
 
 async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string, device: string, { retiring, forcePasswords }: Required<CycleOptions>) {
+  const consent = consentToken();
   clearTimeout(timer);
   const slow = setTimeout(() => useSync.getState().status === "updated" && publishUi({ status: "updating" }), 1000);
   try {
@@ -139,6 +133,7 @@ async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string,
     if (editClock().device !== device) startEditClock(device, doc.clock);
     const clock = editClock();
     const app = appScopeOf(doc);
+    if (freezeRemovals(doc)) save();
     const appSettled = watchScope(APP_SCOPE, app, clock);
     try {
       noteSnapshot(await syncScope({
@@ -196,7 +191,7 @@ async function cycleOnce(native: NonNullable<typeof SyncNative>, folder: string,
     if ((error as { code?: unknown } | null)?.code === "ERR_SYNC_FOLDER_UNREADABLE") {
       publishUi({ status: "offline", error: "The sync folder can’t be read. Check that it’s still there and that Ardia can open it." });
     } else if (useSync.getState().status !== "locked") {
-      console.warn("[sync] cycle failed", error);
+      warnFor(consent, "[sync] cycle failed", error);
       publishUi({ status: "stalled", error: errorText(error) });
     }
   } finally {
@@ -291,7 +286,8 @@ export async function stopSync({ deleteData = false } = {}) {
   const native = SyncNative;
   if (!native || !doc.enabled) return;
   clearTimeout(timer);
-  const reportFailure = (error: unknown) => console.warn("[sync] the last cycle before stopping failed", error);
+  const consent = consentToken();
+  const reportFailure = (error: unknown) => warnFor(consent, "[sync] the last cycle before stopping failed", error);
   while (cycle) await cycle.catch(reportFailure);
   if (useSync.getState().status !== "locked") await runCycle({ retiring: true }).catch(reportFailure);
   clearTimeout(timer);
@@ -300,7 +296,7 @@ export async function stopSync({ deleteData = false } = {}) {
     try {
       await native.deleteChain(folder);
     } catch (error) {
-      console.warn("[sync] deleting sync data failed", error);
+      warnFor(consent, "[sync] deleting sync data failed", error);
     }
   }
   if (doc.deviceId) await native.forget(doc.deviceId);
@@ -362,6 +358,7 @@ export function startSync() {
   publishUi({ status: doc.enabled ? "starting" : "off" });
   watchExtensions();
   if (doc.enabled && doc.deviceId) {
+    const consent = consentToken();
     void SyncNative.unlock(doc.deviceId)
       .then(async (ok) => {
         if (!ok) return publishUi({ status: "locked", error: `Enter your recovery phrase to keep syncing on this ${PLATFORM_TERMS.computer}.` });
@@ -370,7 +367,7 @@ export function startSync() {
         scheduleSync(500);
       })
       .catch((error: unknown) => {
-        console.warn("[sync] unlocking at launch failed", error);
+        warnFor(consent, "[sync] unlocking at launch failed", error);
         publishUi({ status: "stalled", error: errorText(error) });
       });
   }

@@ -78,7 +78,7 @@ export function linuxCapabilities(host: ArdiaHost | undefined = ardiaHost): Linu
   };
 }
 
-export const WEB_ENGINE_SETTINGS = ["advanced.pageEngine", "advanced.fairPlayInChromium", "advanced.websiteEngines"] as const;
+export const WEB_ENGINE_SETTINGS = ["advanced.pageEngine", "advanced.websiteEngines"] as const;
 
 export function unavailableSettingIds(capabilities: LinuxCapabilities, settingIds: readonly string[]): Set<string> {
   const ids = new Set<string>(["general.autoUpdate"]);
@@ -95,6 +95,7 @@ export function unavailableSettingIds(capabilities: LinuxCapabilities, settingId
 
 export const unavailableCommands = (capabilities: LinuxCapabilities): Set<string> =>
   new Set([
+    "copyLastFreeze",
     ...(capabilities.externalLinks ? [] : ["emailPageLocation"]),
     ...(capabilities.linksFromOtherApps ? [] : ["toggleOpenLinksInLittleArdia"]),
     ...(capabilities.webkit ? [] : ["togglePageEngine", "toggleJavaScriptFromAppleEvents"]),

@@ -15,10 +15,12 @@ import { AdvancedPane } from "./panes/Advanced";
 import { AppearancePane } from "./panes/Appearance";
 import { AutomationsPane } from "./panes/Automations";
 import { GeneralPane } from "./panes/General";
+import { PluginsPane } from "./panes/Plugins";
 import { ProfilesPane } from "./panes/Profiles";
 import { ShortcutsPane } from "./panes/Shortcuts";
 import { TabsPane } from "./panes/Tabs";
 import { useSettingsSheet } from "../../state/settings/sheet";
+import { SettingsConsentSheet } from "../plugins/SettingsConsentSheet";
 import { goToSettingsPane, SETTINGS_WINDOW_ID, settingsBack, settingsForward, useSettingsNav, type SettingsPane, type SettingsPlace } from "../../state/settings/settingsWindows";
 import { closeProfileIconPickerIn } from "../../state/profiles/iconPicker";
 import { ProfileIconPicker } from "../profiles/ProfileIconPicker";
@@ -31,6 +33,7 @@ import { markCaptionRegions } from "../../state/windows/controls";
 import { LIGHTS_CENTER } from "../../state/windows/dockMotion";
 import { setTrafficLightsCenter } from "../../state/windows/nativeWindow";
 import { WindowControls } from "../window/WindowControls";
+import { noteSettingsScroll } from "../../state/settings/growingRows";
 
 const SIDEBAR = settingsLayout.sidebarWidth;
 const TOOLBAR = pageToolbar.window.height;
@@ -147,7 +150,10 @@ export function SettingsWindow() {
         <ScrollView
           ref={scroller}
           scrollEventThrottle={16}
-          onScroll={(e) => void (scrollTop.current = e.nativeEvent.contentOffset.y)}
+          onScroll={({ nativeEvent: { contentOffset, layoutMeasurement, contentSize } }) => {
+            scrollTop.current = contentOffset.y;
+            noteSettingsScroll(contentOffset.y, layoutMeasurement.height, contentSize.height);
+          }}
           onLayout={(e) => void (viewport.current = e.nativeEvent.layout.height)}
           contentContainerStyle={PANE_SCROLL}>
           <View key={page} ref={content} collapsable={false} style={PANE_COLUMN}>
@@ -163,6 +169,7 @@ export function SettingsWindow() {
       </View>
       <ProfileIconPicker windowId={SETTINGS_WINDOW_ID} />
       {sheet}
+      <SettingsConsentSheet />
       <WindowControls windowId={SETTINGS_WINDOW_ID} centerY={TOOLBAR / 2} size={WINDOW_CONTROLS.regular} />
     </View>
   );
@@ -178,6 +185,7 @@ const PANE_VIEWS: Record<SettingsPane, (place: SettingsPlace) => ReactNode> = {
   tabs: (place) => <TabsPane {...place} />,
   appearance: (place) => <AppearancePane {...place} />,
   automations: (place) => <AutomationsPane {...place} />,
+  plugins: (place) => <PluginsPane {...place} />,
   shortcuts: (place) => <ShortcutsPane {...place} />,
   advanced: (place) => <AdvancedPane {...place} />,
 };

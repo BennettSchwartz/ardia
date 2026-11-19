@@ -19,6 +19,8 @@ BOOL (^gShouldClose)(NSWindow *);
 
 void (^gSwapped)(NSWindow *, NSWindow *);
 
+NSString *(^gFocusHandoffSummary)(NSWindow *);
+
 const void *const kFloatsForWindowManagersKey = &kFloatsForWindowManagersKey;
 
 void AnswerFloatingSubrole(Class windowClass) {
@@ -126,6 +128,10 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
   return WindowCornerRadius(nil);
 }
 
++ (CGFloat)drawnWindowCornerRadius {
+  return DrawnWindowCornerRadius(nil);
+}
+
 + (CGFloat)frameCornerRadiusOfWindow:(NSWindow *)window {
   if (window.styleMask & NSWindowStyleMaskFullScreen) return 0;
   NSView *frame = window.contentView.superview;
@@ -214,6 +220,7 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
     ArdiaWindowController *shown = weakController;
     if (!p || !coreWindow || !shown) return;
     coreWindow.activeProfile = p;
+    ardia_host::NoteProfileSwitch(p, coreWindow.window);
     const double activeMs = (CACurrentMediaTime() - started) * 1000;
     ArdiaCoreTab *tab = [ArdiaTabStrip activeTabInWindow:shown profile:p];
     ArdiaWebView *view = tab ? [ArdiaTabRegistry viewForTab:tab] : nil;
@@ -251,6 +258,7 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
     objc_setAssociatedObject(window, kLightsShownKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(window, kLightsMoveKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     TranslateTrafficLights(window, 0);
+    TuckTrafficLightsOutsideWindow(window);
   }
   if (!placed) {
     objc_setAssociatedObject(window, kLightsTrailingKey, trailing ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -335,6 +343,14 @@ NSView *ArdiaWindowRootView(NSWindow *window) {
 
 + (BOOL (^)(NSWindow *, NSEvent *))refusesUnhandledKeyHandler {
   return gRefusesUnhandledKey;
+}
+
++ (void)setFocusHandoffSummaryHandler:(NSString *(^)(NSWindow *))handler {
+  gFocusHandoffSummary = [handler copy];
+}
+
++ (NSString *(^)(NSWindow *))focusHandoffSummaryHandler {
+  return gFocusHandoffSummary;
 }
 
 + (void)embedRootView:(NSView *)root inWindow:(NSWindow *)window {

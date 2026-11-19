@@ -11,7 +11,6 @@ import type {
   DiscardReason,
   DisplayMediaRequest,
   DownloadNavigation,
-  FairPlayReport,
   FindResult,
   FocusRestoreOutcome,
   LoadError,
@@ -26,6 +25,8 @@ import type {
   PasswordPrompt,
   PictureInPictureState,
   PictureInPictureDrag,
+  PictureInPictureResize,
+  PictureInPictureSkip,
   ProtectedMediaRequest,
   ScrollState,
   SecurityInfo,
@@ -57,9 +58,10 @@ type NativeEvents = {
   onNotification: WebNotification;
   onNotificationClose: { id: string };
   onPictureInPicture: PictureInPictureState;
-  onAutoPictureInPictureKept: { appSwitch?: boolean; reason?: string };
+  onAutoPictureInPictureKept: { appSwitch?: boolean; reason?: string; epoch?: string };
   onPictureInPictureDragged: PictureInPictureDrag;
-  onPictureInPictureSkip: { seconds: number };
+  onPictureInPictureResized: PictureInPictureResize;
+  onPictureInPictureSkip: PictureInPictureSkip;
   onMediaFault: MediaFault;
   onActivateRequest: ActivateRequest;
   onDisplayMediaRequest: DisplayMediaRequest;
@@ -71,7 +73,6 @@ type NativeEvents = {
   onSelection: { selection: PageSelection | null };
   onScroll: { state: ScrollState };
   onProtectedMedia: ProtectedMediaRequest;
-  onFairPlay: FairPlayReport;
   onAutoplayBlocked: { count?: number };
   onReady: object;
   onDiscarded: { url: string; reason?: DiscardReason | "" };
@@ -113,6 +114,7 @@ const PAGE_EVENTS = {
   onPictureInPicture: "pictureInPicture",
   onAutoPictureInPictureKept: "autoPictureInPictureKept",
   onPictureInPictureDragged: "pictureInPictureDragged",
+  onPictureInPictureResized: "pictureInPictureResized",
   onPictureInPictureSkip: "pictureInPictureSkip",
   onMediaFault: "mediaFault",
   onActivateRequest: "activateRequest",
@@ -125,7 +127,6 @@ const PAGE_EVENTS = {
   onSelection: "selection",
   onScroll: "scroll",
   onProtectedMedia: "protectedMedia",
-  onFairPlay: "fairPlay",
   onAutoplayBlocked: "autoplayBlocked",
   onReady: "ready",
   onDiscarded: "discarded",
@@ -163,9 +164,10 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onNotification: (e) => [e],
   onNotificationClose: (e) => [e.id],
   onPictureInPicture: (e) => [e],
-  onAutoPictureInPictureKept: (e) => [e.reason === "nothingPlaying" ? "nothingPlaying" : e.appSwitch ? "appSwitch" : "onScreen"],
-  onPictureInPictureDragged: (e) => [{ offCursor: !!e.offCursor, slowMove: !!e.slowMove }],
-  onPictureInPictureSkip: (e) => [e.seconds],
+  onAutoPictureInPictureKept: (e) => [e.reason === "nothingPlaying" ? "nothingPlaying" : e.appSwitch ? "appSwitch" : "onScreen", typeof e.epoch === "string" ? e.epoch : ""],
+  onPictureInPictureDragged: (e) => [{ offCursor: !!e.offCursor, slowMove: !!e.slowMove, epoch: e.epoch }],
+  onPictureInPictureResized: (e) => [{ inside: !!e.inside, cursorShown: !!e.cursorShown, epoch: e.epoch }],
+  onPictureInPictureSkip: (e) => [{ seconds: e.seconds, epoch: e.epoch }],
   onMediaFault: (e) => [e],
   onActivateRequest: (e) => [e],
   onDisplayMediaRequest: (e) => [e],
@@ -177,7 +179,6 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onSelection: (e) => [e.selection],
   onScroll: (e) => [e.state],
   onProtectedMedia: (e) => [e],
-  onFairPlay: (e) => [e],
   onAutoplayBlocked: (e) => [Number.isInteger(e.count) ? Math.min(Math.max(e.count!, 1), 20) : 1],
   onReady: () => [],
   onDiscarded: (e) => [toAppUrl(e.url), e.reason || null],
