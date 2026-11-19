@@ -62,10 +62,8 @@ export function refreshFolder(folderId: string, interactive = false): Promise<vo
 
 export function refreshFolderWhile(folderId: string, interactive: boolean, allowed: () => boolean): Promise<void> {
   const running = inflight.get(folderId);
-  if (running && passGuards.get(folderId) !== allowed) {
-    return running.catch(() => undefined).then(() => (allowed() ? refreshFolderWhile(folderId, interactive, allowed) : undefined));
-  }
   if (running) {
+    if (passGuards.get(folderId) !== allowed) return running.catch(() => undefined).then(() => (allowed() ? refreshFolderWhile(folderId, interactive, allowed) : undefined));
     if (fetchingWith.has(folderId) && settingsOf(live().folders[folderId]) !== fetchingWith.get(folderId)) queueFollowUp(folderId, allowed);
     return running;
   }
@@ -104,10 +102,7 @@ function claimRefresh(folderId: string) {
 }
 
 function staleRun(folderId: string, folder: LiveFolder, allowed: () => boolean): boolean {
-  if (!allowed()) {
-    setStatus(folderId, { state: "idle" });
-    return true;
-  }
+  if (!allowed()) return (setStatus(folderId, { state: "idle" }), true);
   if (settingsOf(live().folders[folderId]) === settingsOf(folder)) return false;
   if (!followUps.has(folderId)) queueFollowUp(folderId, always);
   return true;
