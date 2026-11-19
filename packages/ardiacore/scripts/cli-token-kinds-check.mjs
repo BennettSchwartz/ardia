@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { X509Certificate, createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { launchVariables, session, sleep } from "../../../scripts/lib/instance.mjs";
@@ -11,7 +13,10 @@ Checks the two kinds of token connection in one hidden instance with two windows
 DevTools port). It needs a test build: it launches with the test flags privatePasteboard and pluginInputHold and aborts
 before its first step unless the engine reports both. A Developer ID build ignores test flags, so there it stops at
 that gate (the expected result on a signed build). pluginInputHold holds a plugin's mouse deliveries for 2 s and its
-out-of-scope detaches for 5 s, so a delivery admitted before its tab leaves lands after the tab is back, every run.
+out-of-scope detaches for 5 s, so a delivery admitted before its tab leaves lands after the tab is back, every run,
+and cliControlStatus's pluginDeliveriesRefusedDeparted proves the gate refused it. It needs openssl: a local HTTPS
+server with a throwaway certificate (trusted by SPKI through chromiumSwitches) is the positive navigate case. Drags are
+checked in the main frame and in a cross-site frame, each against an owner drag that does drop.
 The ardia command's token (kind cli) gets every method and target, including Browser.setDownloadBehavior, a chrome://
 page and the browser target. A plugin credential minted for window 1 (engine.cliPluginCredential, kind plugin) sees and
 attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
@@ -45,29 +50,52 @@ const work = mkdtempSync(join(tmpdir(), "ac-token-kinds-"));
 const data = join(work, "d");
 mkdirSync(data);
 
+const DRAG_LOG = `window.dragLog = [];
+for (const type of ["dragstart", "dragend", "dragenter", "dragover", "drop"]) document.addEventListener(type, (e) => { if (type !== "dragstart" && type !== "dragend") e.preventDefault(); dragLog.push(type); }, true);`;
+const XCHILD = `<!doctype html><title>xchild</title>
+<div id=drag draggable=true style="position:fixed;left:10px;top:10px;width:80px;height:30px;background:#ccc">drag</div>
+<div id=drop style="position:fixed;left:10px;top:60px;width:80px;height:30px;background:#eee">drop</div>
+<script>${DRAG_LOG}</script>`;
 const PICKERS = `<textarea id=area style="position:fixed;left:240px;top:40px;width:200px;height:60px"></textarea>
 <button id=open style="position:fixed;left:0;top:40px;width:200px;height:40px">open</button>
 <button id=save style="position:fixed;left:0;top:90px;width:200px;height:40px">save</button>
 <button id=dir style="position:fixed;left:0;top:140px;width:200px;height:40px">dir</button>
 <div id=drag draggable=true style="position:fixed;left:240px;top:120px;width:80px;height:30px;background:#ccc">drag</div>
 <div id=drop style="position:fixed;left:240px;top:170px;width:80px;height:30px;background:#eee">drop</div>
+<button id=clicker style="position:fixed;left:0;top:200px;width:200px;height:30px">click</button>
+<template id=tpl><p id=tplp>template</p></template>
 <script>
-window.dragLog = [];
-for (const type of ["dragstart", "dragend"]) drag.addEventListener(type, () => dragLog.push(type));
-for (const type of ["dragenter", "dragover", "drop"]) drop.addEventListener(type, (e) => { e.preventDefault(); dragLog.push(type); });
+${DRAG_LOG}
+window.clicks = 0;
+clicker.onclick = () => window.clicks++;
 const report = (p) => p.then((v) => (window.picked = v), (e) => (window.picked = "error:" + e.name));
 open.onclick = () => report(showOpenFilePicker().then(async ([h]) => "open:" + h.name + ":" + (await (await h.getFile()).text())));
 save.onclick = () => report(showSaveFilePicker().then(async (h) => { const w = await h.createWritable(); await w.write("saved by the page"); await w.close(); return "save:" + h.name; }));
 dir.onclick = () => report(showDirectoryPicker().then(async (d) => { window.dirHandle = d; const names = []; for await (const [n] of d.entries()) names.push(n); return "dir:" + names.sort().join(","); }));
 </script>`;
+let port = 0;
 const server = createServer((req, res) => {
   res.setHeader("content-type", "text/html");
-  const answer = () => res.end(`<!doctype html><title>${req.url.slice(1)}</title><input type=file id=f>${PICKERS}`);
+  if (req.url === "/child") return res.end(`<!doctype html><title>child</title><p id=childp>child</p>`);
+  if (req.url === "/xchild") return res.end(XCHILD);
+  const frames = req.url === "/one" ? `<iframe id=child src="/child" style="position:fixed;left:460px;top:40px;width:160px;height:80px"></iframe><iframe id=xsite src="http://localhost:${port}/xchild" style="position:fixed;left:460px;top:140px;width:160px;height:120px"></iframe>` : "";
+  const answer = () => res.end(`<!doctype html><title>${req.url.slice(1)}</title><input type=file id=f>${PICKERS}${frames}`);
   if (req.url.startsWith("/slow")) setTimeout(answer, 3000);
   else answer();
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
-const origin = `http://127.0.0.1:${server.address().port}`;
+port = server.address().port;
+const origin = `http://127.0.0.1:${port}`;
+const certDir = mkdtempSync(join(tmpdir(), "ac-token-kinds-cert-"));
+execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", join(certDir, "key.pem"), "-out", join(certDir, "cert.pem")], { stdio: "ignore" });
+const certPem = readFileSync(join(certDir, "cert.pem"));
+const spki = createHash("sha256").update(new X509Certificate(certPem).publicKey.export({ type: "spki", format: "der" })).digest("base64");
+const secure = createSecureServer({ key: readFileSync(join(certDir, "key.pem")), cert: certPem }, (req, res) => {
+  res.setHeader("content-type", "text/html");
+  res.end(`<!doctype html><title>secure</title><p>secure</p>`);
+});
+await new Promise((r) => secure.listen(0, "127.0.0.1", r));
+const secureOrigin = `https://127.0.0.1:${secure.address().port}`;
 
 writeFileSync(join(data, "session.json"), JSON.stringify(session({
   settings: { cliControl: true },
@@ -135,7 +163,7 @@ function connect(url) {
 const refused = (reply) => !!reply.error;
 const text = (reply) => (reply.error ? reply.error.message : JSON.stringify(reply.result).slice(0, 120));
 
-const testEnv = Object.entries(launchVariables({ test: { privatePasteboard: true, pluginInputHold: true } })).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+const testEnv = Object.entries(launchVariables({ instance: { chromiumSwitches: `--ignore-certificate-errors-spki-list=${spki}` }, test: { privatePasteboard: true, pluginInputHold: true } })).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
 execFileSync("open", ["-g", "-n", "--env", "ARDIA_BACKGROUND=1", "--env", `ARDIA_DATA_DIR=${data}`, ...testEnv, app]);
 const controlFile = join(data, "Chromium", "ArdiaControl.json");
 let pid = null;
@@ -198,7 +226,7 @@ try {
   const areaNode = await nodeIn("#area");
   const openNode = await nodeIn("#open");
   const reads = [
-    ["DOM.querySelectorAll", { nodeId: rootNode, selector: "button" }, (r) => r.nodeIds?.length === 3],
+    ["DOM.querySelectorAll", { nodeId: rootNode, selector: "button" }, (r) => r.nodeIds?.length === 4],
     ["DOM.getAttributes", { nodeId: openNode }, (r) => r.attributes?.includes("open")],
     ["DOM.getOuterHTML", { nodeId: openNode }, (r) => r.outerHTML?.startsWith("<button")],
     ["DOM.getBoxModel", { nodeId: openNode }, (r) => !!r.model],
@@ -206,7 +234,7 @@ try {
     ["DOM.describeNode", { nodeId: openNode }, (r) => r.node?.nodeName === "BUTTON"],
     ["DOM.getNodeForLocation", { x: 100, y: 60 }, (r) => !!r.backendNodeId],
     ["Accessibility.getPartialAXTree", { nodeId: openNode }, (r) => r.nodes?.length > 0],
-    ["Accessibility.queryAXTree", { nodeId: rootNode, role: "button" }, (r) => r.nodes?.length === 3],
+    ["Accessibility.queryAXTree", { nodeId: rootNode, role: "button" }, (r) => r.nodes?.length === 4],
   ];
   for (const [method, params, good] of reads) {
     const reply = await plugin.send(method, params, ps);
@@ -219,10 +247,6 @@ try {
   check("plugin: DOM.focus and DOM.scrollIntoViewIfNeeded work on its own node", !refused(focused) && !refused(scrolled), `${text(focused)} ${text(scrolled)}`);
   const wheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 60, deltaX: 0, deltaY: 50 }, ps);
   check("plugin: a mouseWheel event answers", !refused(wheel), text(wheel));
-  const dragSteps = [["mousePressed", 280, 135, 1], ["mouseMoved", 280, 145, 1], ["mouseMoved", 280, 165, 1], ["mouseMoved", 280, 185, 1], ["mouseReleased", 280, 185, 0]];
-  const dragReplies = [];
-  for (const [type, x, y, buttons] of dragSteps) dragReplies.push(await plugin.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, ps));
-  await sleep(500);
 
   const allowed = [
     ["DOM.getDocument", {}],
@@ -279,8 +303,44 @@ try {
   await sleep(1500);
   const leaked = plugin.events.filter((e) => e.method?.startsWith("Network.") || e.method === "Runtime.consoleAPICalled");
   check("plugin: no Network or console event reaches it", leaked.length === 0, leaked.map((e) => e.method).join(" "));
-  const dragLog = (await cli.send("Runtime.evaluate", { expression: "window.dragLog.join(',')", returnByValue: true }, csOne)).result?.result?.value ?? "";
-  check("plugin: a press, move and release over a draggable element starts no drag (no dragenter, dragover or drop)", typeof dragLog === "string" && !/dragenter|dragover|drop(,|$)/.test(dragLog) && dragReplies.every((r) => !r.error || /Not allowed/.test(r.error.message)), `${dragLog || "no drag events"}; ${dragReplies.map(text).join(" | ")}`);
+  const dragPath = (x, from, to) => [["mousePressed", x, from, 1], ["mouseMoved", x, from + 10, 1], ["mouseMoved", x, (from + to) / 2, 1], ["mouseMoved", x, to, 1], ["mouseReleased", x, to, 0]];
+  const dragWith = async (client, session, path) => {
+    const replies = [];
+    for (const [type, x, y, buttons] of path) replies.push(await client.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1 }, session));
+    await sleep(500);
+    return replies;
+  };
+  const logOf = async (session) => (await cli.send("Runtime.evaluate", { expression: "(() => { const log = window.dragLog.join(','); window.dragLog = []; return log; })()", returnByValue: true }, session)).result?.result?.value;
+  await logOf(csOne);
+  const pluginDrag = await dragWith(plugin, ps, dragPath(280, 135, 185));
+  const pluginLog = await logOf(csOne);
+  check("plugin: a drag from its press in the main frame shows dragstart then dragend and nothing else, anywhere in the document", pluginLog === "dragstart,dragend" && pluginDrag.every((r) => !refused(r)), `${pluginLog}; ${pluginDrag.map(text).join(" | ")}`);
+  const clicksOf = async () => (await cli.send("Runtime.evaluate", { expression: "window.clicks", returnByValue: true }, csOne)).result?.result?.value;
+  const clicksBefore = await clicksOf();
+  for (const type of ["mousePressed", "mouseReleased"]) await plugin.send("Input.dispatchMouseEvent", { type, x: 100, y: 215, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 }, ps);
+  await sleep(300);
+  const clicksAfter = await clicksOf();
+  check("plugin: its next click after the refused drag is delivered", clicksAfter === clicksBefore + 1, `${clicksBefore} -> ${clicksAfter}`);
+  await dragWith(cli, csOne, dragPath(280, 135, 185));
+  const ownerLog = await logOf(csOne);
+  check("cli: the owner's drag over the same elements still drags and drops", /^dragstart,.*dragenter.*dragover.*drop.*dragend$/.test(ownerLog ?? ""), ownerLog);
+  await plugin.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, ps);
+  const xsite = await until("the cross-site frame session", async () => plugin.events.find((e) => e.method === "Target.attachedToTarget" && e.params?.targetInfo?.url?.endsWith("/xchild")) ?? null, 10000).catch(() => null);
+  const xsiteTarget = (await cli.send("Target.getTargets")).result?.targetInfos?.find((t) => t.type === "iframe" && t.url.endsWith("/xchild"));
+  const cliXsite = xsiteTarget && (await cli.send("Target.attachToTarget", { targetId: xsiteTarget.targetId, flatten: true })).result?.sessionId;
+  if (cliXsite) await logOf(cliXsite);
+  const xsiteDrag = xsite ? await dragWith(plugin, xsite.params.sessionId, dragPath(50, 25, 75)) : [];
+  const xsiteLog = cliXsite ? await logOf(cliXsite) : null;
+  check("plugin: a drag from its press in a cross-site frame (its own frame session) shows dragstart then dragend and nothing else", !!xsite && xsiteLog === "dragstart,dragend" && xsiteDrag.every((r) => !refused(r)), `${xsiteLog}; ${xsiteDrag.map(text).join(" | ")}`);
+  if (cliXsite) {
+    await dragWith(cli, cliXsite, dragPath(50, 25, 75));
+    const ownerXsite = await logOf(cliXsite);
+    check("cli: the owner's drag in the cross-site frame still drops", /drop/.test(ownerXsite ?? ""), ownerXsite);
+  }
+  const childFrame = (await plugin.send("Page.getFrameTree", {}, ps)).result?.frameTree?.childFrames?.find((f) => f.frame?.url?.endsWith("/child"))?.frame?.id;
+  const childAx = childFrame && (await plugin.send("Accessibility.getFullAXTree", { frameId: childFrame }, ps));
+  const pierced = JSON.stringify((await plugin.send("DOM.getDocument", { depth: -1, pierce: true }, ps)).result ?? {});
+  check("plugin: an in-scope child frame is traversed (frame tree, accessibility tree and pierced DOM)", !!childFrame && !refused(childAx) && JSON.stringify(childAx.result?.nodes ?? []).includes("child") && pierced.includes("childp"), childAx ? text(childAx) : "no child frame");
   const runtimeEvents = plugin.events.filter((e) => e.method?.startsWith("Runtime."));
   check("plugin: no Runtime event reaches it", runtimeEvents.length === 0, runtimeEvents.map((e) => e.method).join(" "));
   const activeIs = async (id) => (await cli.send("Runtime.evaluate", { expression: `document.activeElement?.id === ${JSON.stringify(id)}`, returnByValue: true }, csOne)).result?.result?.value === true;
@@ -403,7 +463,7 @@ try {
   const focusedByBackend = await plugin.send("DOM.focus", { backendNodeId: button?.backendDOMNodeId }, ps);
   const resolved = await plugin.send("DOM.resolveNode", { backendNodeId: button?.backendDOMNodeId }, ps);
   check("plugin: a backendNodeId from its own tab's accessibility tree describes and focuses, and DOM.resolveNode is refused", !!button && !refused(described) && !refused(focusedByBackend) && refused(resolved), `${text(described)} ${text(focusedByBackend)} ${text(resolved)}`);
-  await cli.send("Runtime.evaluate", { expression: `window.open(${JSON.stringify(`${origin}/four`)})`, userGesture: true }, csOne);
+  await cli.send("Runtime.evaluate", { expression: `window.popupRef = window.open(${JSON.stringify(`${origin}/four`)}), true`, userGesture: true }, csOne);
   const popup = await until("the popup", async () => (await urlsOf(cli)).find((t) => t.url === `${origin}/four`) ?? null, 15000).catch(() => null);
   const movedPopup = await appEval(`const t = Object.values(ac.store.getState().tabs).find((x) => x?.url?.endsWith("/four")); if (t) ac.actions.moveTabToWindow(t.id, "w2"); return !!t`);
   await sleep(1000);
@@ -422,15 +482,30 @@ try {
   const ownFrames = JSON.stringify((await plugin.send("Page.getFrameTree", {}, ps)).result ?? {});
   const ownTree = JSON.stringify((await plugin.send("DOM.getDocument", { depth: -1, pierce: true }, ps)).result ?? {});
   check("plugin: frame traversal stays in its own page (another tab's frame is refused and never listed)", !!popupFrameId && refused(foreignAx) && !ownFrames.includes(popupFrameId) && !ownTree.includes(popupFrameId), `${text(foreignAx)}`);
-  await cli.send("Runtime.evaluate", { expression: "(() => { const p = document.createElement('p'); p.id = 'adoptme'; p.textContent = 'adopt me'; document.body.append(p); return true })()" }, csOne);
-  const adoptRoot = await pluginRoot();
-  const adoptNode = (await plugin.send("DOM.querySelector", { nodeId: adoptRoot, selector: "#adoptme" }, ps)).result?.nodeId;
-  const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const n = window.opener?.document.getElementById('adoptme'); if (!n) return false; document.body.append(document.adoptNode(n)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
+  const findNode = (node, test) => test(node) ? node : [...(node.children ?? []), ...(node.templateContent ? [node.templateContent] : []), ...(node.contentDocument ? [node.contentDocument] : [])].map((c) => findNode(c, test)).find(Boolean);
+  const mapped = (await plugin.send("DOM.getDocument", { depth: -1 }, ps)).result?.root;
+  const tplNode = mapped && findNode(mapped, (n) => n.nodeName === "P" && (n.attributes ?? []).includes("tplp"))?.nodeId;
+  const beforeAdoption = await plugin.send("DOM.describeNode", { nodeId: tplNode }, ps);
+  const adopted = (await cli.send("Runtime.evaluate", { expression: "(() => { const t = window.opener?.document.getElementById('tpl'); if (!t) return false; document.body.append(document.adoptNode(t)); return true })()", returnByValue: true }, popupSession)).result?.result?.value;
   const adoptedReads = [];
-  for (const [method, params] of [["DOM.getAttributes", { nodeId: adoptNode }], ["DOM.getOuterHTML", { nodeId: adoptNode }], ["DOM.getBoxModel", { nodeId: adoptNode }], ["DOM.describeNode", { nodeId: adoptNode }], ["DOM.focus", { nodeId: adoptNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: adoptNode }], ["Accessibility.getPartialAXTree", { nodeId: adoptNode }], ["Accessibility.queryAXTree", { nodeId: adoptNode }]]) {
+  for (const [method, params] of [["DOM.getAttributes", { nodeId: tplNode }], ["DOM.getOuterHTML", { nodeId: tplNode }], ["DOM.getBoxModel", { nodeId: tplNode }], ["DOM.describeNode", { nodeId: tplNode }], ["DOM.focus", { nodeId: tplNode }], ["DOM.scrollIntoViewIfNeeded", { nodeId: tplNode }], ["Accessibility.getPartialAXTree", { nodeId: tplNode }], ["Accessibility.queryAXTree", { nodeId: tplNode }]]) {
     adoptedReads.push([method, await plugin.send(method, params, ps)]);
   }
-  check("plugin: a node the page adopted into a window-2 document is refused by nodeId for every read, focus and scroll", !!adoptNode && adopted === true && adoptedReads.every(([, r]) => refused(r)), adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
+  check("plugin: a template node it mapped stays mapped when the page adopts the template into a window-2 document, and every read, focus and scroll by that nodeId is refused as not in this page", !!tplNode && !refused(beforeAdoption) && adopted === true && adoptedReads.every(([, r]) => /that nodeId isn't in this page/.test(r.error?.message ?? "")), `before: ${text(beforeAdoption)}; ` + adoptedReads.map(([m, r]) => `${m}: ${text(r)}`).join(" | "));
+  await cli.send("Runtime.evaluate", { expression: "(() => { const s = document.createElement('section'); s.id = 'axroot'; s.innerHTML = '<button>ax</button>'; document.body.append(s); return true })()" }, csOne);
+  const axRoot = (await plugin.send("DOM.querySelector", { nodeId: await pluginRoot(), selector: "#axroot" }, ps)).result?.nodeId;
+  await cli.send("Debugger.enable", {}, csOne);
+  const pauseMark = cli.events.length;
+  cli.raw(556001, "Runtime.evaluate", { expression: "debugger; popupRef.document.body.append(popupRef.document.adoptNode(document.getElementById('axroot'))); true", returnByValue: true }, csOne);
+  const paused = await until("the debugger pause", async () => cli.events.slice(pauseMark).some((e) => e.method === "Debugger.paused") || null, 8000).catch(() => false);
+  const queryMark = plugin.replies.length;
+  plugin.raw(556002, "Accessibility.queryAXTree", { nodeId: axRoot, role: "button" }, ps);
+  await sleep(500);
+  const answeredWhilePaused = plugin.replies.slice(queryMark).some((m) => m.id === 556002);
+  await cli.send("Debugger.resume", {}, csOne);
+  const pending = (await plugin.repliesTo(556002, queryMark, 3000))[0];
+  await cli.send("Debugger.disable", {}, csOne);
+  check("plugin: a queryAXTree pending while its root moved to a window-2 document is refused when it resumes", !!axRoot && paused === true && !answeredWhilePaused && /left this page while the query was pending/.test(pending?.error?.message ?? ""), `paused ${paused}, answered while paused ${answeredWhilePaused}, ${pending ? text(pending) : "no reply"}`);
 
   const folder = join(work, "picked");
   mkdirSync(folder);
@@ -476,11 +551,11 @@ try {
 
   const threeTarget = (await urlsOf(plugin)).find((t) => t.url === `${origin}/three`);
   const s3 = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
-  const schemes = [[`${origin}/three`, true], ["about:blank", true], ["https://127.0.0.1:1/", true], ["javascript:void 0", false], ["data:text/html,x", false], [`blob:${origin}/x`, false], ["file:///etc/hosts", false], ["chrome://version", false], [`view-source:${origin}/three`, false], [`filesystem:${origin}/temporary/x`, false], ["ftp://127.0.0.1/x", false], ["ardia://settings", false]];
+  const schemes = [[`${origin}/three`, true], ["about:blank", true], [`${secureOrigin}/secure`, true], ["javascript:void 0", false], ["data:text/html,x", false], [`blob:${origin}/x`, false], ["file:///etc/hosts", false], ["chrome://version", false], [`view-source:${origin}/three`, false], [`filesystem:${origin}/temporary/x`, false], ["ftp://127.0.0.1/x", false], ["ardia://settings", false]];
   for (const [url, allowedScheme] of schemes) {
     const reply = await plugin.send("Page.navigate", { url }, s3);
     const refusedByPolicy = refused(reply) && /isn't allowed for a plugin/.test(reply.error?.message ?? "");
-    check(`plugin: Page.navigate to ${url.split(":")[0]}: is ${allowedScheme ? "allowed" : "refused"}`, allowedScheme ? !refusedByPolicy : refusedByPolicy, text(reply));
+    check(`plugin: Page.navigate to ${url.split(":")[0]}: is ${allowedScheme ? "allowed and loads" : "refused"}`, allowedScheme ? !refused(reply) && !reply.result?.errorText && !!reply.result?.frameId : refusedByPolicy, text(reply));
   }
   const navigatedPlain = await plugin.send("Page.navigate", { url: `${origin}/three` }, s3);
   check("plugin: Page.navigate with only a web url answers", !refused(navigatedPlain), text(navigatedPlain));
@@ -491,6 +566,8 @@ try {
   const wheels = async () => (await cli.send("Runtime.evaluate", { expression: "window.wheels", returnByValue: true }, cs3)).result?.result?.value;
   const inWindow = (tab, win) => until(`${tab} in ${win}`, async () =>
     ((await appEval(`return ac.engine.call("tabs.strips")`))?.strips ?? []).some((s) => s.appWindow === win && s.tabs.some((t) => t.key === tab)) || null, 8000).then(() => true, () => false);
+  const departedRefusals = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginDeliveriesRefusedDeparted ?? -1;
+  const refusalsBefore = await departedRefusals();
   for (let i = 0; i < 20; i++) plugin.raw(660000 + i, "Input.dispatchMouseEvent", { type: "mouseMoved", x: 10 + i * 5, y: 10 + i * 3 }, s3);
   for (let i = 0; i < 5; i++) plugin.raw(661000 + i, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 50, y: 50, deltaX: 0, deltaY: 20 }, s3);
   const sentAt = Date.now();
@@ -503,15 +580,19 @@ try {
   await sleep(2500);
   const movesAfterReturn = await moves();
   const wheelsAfterReturn = await wheels();
+  const refusalsAfter = await departedRefusals();
   const outAndBack = await plugin.send("DOM.getDocument", {}, s3);
   const detachedS3 = await until("the detach of the moved session", async () => plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === s3) || null, 10000).catch(() => false);
   check("plugin: a tab moved to the other window (confirmed natively) and back stays detached", reachedOther && cameBack && !!s3 && refused(outAndBack) && detachedS3, `reached w2 ${reachedOther}, back in w1 ${cameBack}, ${text(outAndBack)}`);
-  check("plugin: mouse and wheel input its departed session queued, delivered after the tab came back, never lands", backBeforeDelivery && movesAtDeparture === 0 && movesAfterReturn === 0 && wheelsAfterReturn === 0, `back before delivery ${backBeforeDelivery}, moves ${movesAtDeparture}/${movesAfterReturn}, wheels ${wheelsAfterReturn}`);
+  check("plugin: mouse and wheel input its departed session queued reached the gate after hit testing, after the tab came back, and the gate refused all 25 for the old session", backBeforeDelivery && refusalsBefore >= 0 && refusalsAfter - refusalsBefore === 25 && movesAtDeparture === 0 && movesAfterReturn === 0 && wheelsAfterReturn === 0, `back before delivery ${backBeforeDelivery}, gate refusals ${refusalsBefore} -> ${refusalsAfter}, moves ${movesAtDeparture}/${movesAfterReturn}, wheels ${wheelsAfterReturn}`);
   const old = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: 20 }, s3);
   const fresh = (await plugin.send("Target.attachToTarget", { targetId: threeTarget?.targetId, flatten: true })).result?.sessionId;
   const freshMove = await plugin.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 30, y: 30 }, fresh);
+  const freshWheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 30, y: 30, deltaX: 0, deltaY: 20 }, fresh);
   await sleep(300);
-  check("plugin: the departed session's input is refused and a fresh attach to the returned tab takes input", refused(old) && !!fresh && !refused(freshMove) && (await moves()) > movesAfterReturn, `${text(old)} ${text(freshMove)}`);
+  const freshMoves = await moves();
+  const freshWheels = await wheels();
+  check("plugin: the departed session's input is refused, and a fresh attach to the returned tab delivers a mouse move and a wheel event", refused(old) && !!fresh && !refused(freshMove) && !refused(freshWheel) && freshMoves > movesAfterReturn && freshWheels > wheelsAfterReturn, `${text(old)} ${text(freshMove)} ${text(freshWheel)} moves ${freshMoves} wheels ${freshWheels}`);
 
   const t3Target = (await urlsOf(cli)).find((t) => t.url === `${origin}/three`);
   const direct = await connect(`ws://127.0.0.1:${control.port}/devtools/page/${t3Target?.targetId}?token=${encodeURIComponent(minted.credential)}`).catch(() => null);
@@ -576,6 +657,8 @@ try {
   cli.ws.close();
 } finally {
   server.close();
+  secure.close();
+  rmSync(certDir, { recursive: true, force: true });
   if (pid) try { process.kill(pid); } catch {}
   rmSync(work, { recursive: true, force: true });
 }

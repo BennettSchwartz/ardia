@@ -7,6 +7,7 @@ namespace {
 
 bool g_private_pasteboard_active = false;
 bool g_plugin_input_hold = false;
+int g_plugin_deliveries_refused_departed = 0;
 
 }
 
@@ -26,9 +27,15 @@ bool CliPluginInputHold() {
   return g_plugin_input_hold;
 }
 
+void CountPluginDeliveryRefusedDeparted() {
+  ++g_plugin_deliveries_refused_departed;
+}
+
 void AddCliTestSignals(base::DictValue& status) {
   status.Set("privatePasteboard", g_private_pasteboard_active);
   status.Set("pluginInputHold", g_plugin_input_hold);
+  status.Set("pluginDeliveriesRefusedDeparted",
+             g_plugin_deliveries_refused_departed);
 }
 
 }

@@ -75,8 +75,11 @@ bool TokenClient::MaySessionInput(const std::string& session) {
   if (session.empty()) {
     return !IsBrowserHost(root_host_.get());
   }
-  return targets_.contains(session) && !detaching_.contains(session) &&
-         SessionInScope(session);
+  if (detaching_.contains(session)) {
+    CountPluginDeliveryRefusedDeparted();
+    return false;
+  }
+  return targets_.contains(session) && SessionInScope(session);
 }
 
 bool TokenClient::RootInScope() {

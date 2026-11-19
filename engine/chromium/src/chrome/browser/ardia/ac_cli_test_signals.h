@@ -15,6 +15,7 @@ void NoteCliPrivatePasteboard(bool active);
 bool CliPrivatePasteboardActive();
 void NoteCliPluginInputHold(bool active);
 bool CliPluginInputHold();
+void CountPluginDeliveryRefusedDeparted();
 void AddCliTestSignals(base::DictValue& status);
 
 }
