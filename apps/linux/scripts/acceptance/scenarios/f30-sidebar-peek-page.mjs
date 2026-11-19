@@ -59,7 +59,7 @@ export default {
                 record.handleFrames++;
                 const region = mark.getBoundingClientRect();
                 const grip = handle.getBoundingClientRect();
-                if (grip.left < region.left - 0.5 || grip.right > region.right + 0.5) record.handleUncovered++;
+                if (grip.left < region.left - 0.5 || grip.right > region.right + 0.5 || grip.top < region.top - 0.5 || grip.bottom > region.bottom + 0.5) record.handleUncovered++;
               }
             }
             requestAnimationFrame(sample);
@@ -81,7 +81,7 @@ export default {
         await t.screenshot(shell, `peek-${side}-${addressBar}`);
         assert.ok(record.opens >= 2 && record.closes >= 2, `the sidebar must peek out and slide away twice: ${js(record)}`);
         assert.ok(record.regionRequests > 0, "the shell's host requests must be read by the recorder");
-        assert.ok(record.handleFrames > 0, "the resize handle must be found beside the peek");
+        assert.equal(record.handleFrames, record.peekFrames, "the resize handle must be found beside the peek on every frame");
         assert.equal(record.handleUncovered, 0, "the peek's input region must cover the resize handle on every frame");
         assert.ok(!record.sent.includes(false), `the page was hidden during the peek: ${js(record.sent)}`);
         return { viewports: record.sent.length, peekFrames: record.peekFrames };
