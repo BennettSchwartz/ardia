@@ -11,7 +11,28 @@ import { extensionProfile, nextInstallKey, useExtensions, type InstallRequest } 
 
 const STALE_PROMPT = "This install request has closed. Open the extension's page in the Chrome Web Store and add it again.";
 
-const sheetCanShow = (request: InstallRequest) => isUtilityWindowId(request.windowId) || !!useBrowser.getState().windows[request.windowId];
+const utilityHosts = new Map<string, number>();
+
+const windowCanShow = (windowId: string) => (isUtilityWindowId(windowId) ? (utilityHosts.get(windowId) ?? 0) > 0 : !!useBrowser.getState().windows[windowId]);
+
+const sheetCanShow = (request: InstallRequest) => windowCanShow(request.windowId);
+
+export function utilitySheetHost(windowId: string): () => void {
+  utilityHosts.set(windowId, (utilityHosts.get(windowId) ?? 0) + 1);
+  return () => {
+    const left = (utilityHosts.get(windowId) ?? 1) - 1;
+    if (left > 0) return void utilityHosts.set(windowId, left);
+    utilityHosts.delete(windowId);
+    const request = useExtensions.getState().install;
+    if (request?.windowId === windowId && request.status !== "installing") cancelInstall(request.key);
+  };
+}
+
+function shownWindowFor(windowId: string): string | null {
+  if (windowCanShow(windowId)) return windowId;
+  const s = useBrowser.getState();
+  return [...s.ui.focusOrder, ...s.windowOrder].find((id) => !!s.windows[id] && s.windows[id]!.kind !== "private") ?? null;
+}
 
 export function showInstallSheet(next: InstallRequest): boolean {
   const current = useExtensions.getState().install;
@@ -24,7 +45,10 @@ export function showInstallSheet(next: InstallRequest): boolean {
 function showHeldPrompt() {
   if (useExtensions.getState().install) return;
   const held = takeHeldPrompt();
-  if (held) showInstallSheet({ key: nextInstallKey(), windowId: held.windowId, profile: held.prompt.profile, source: "webStore", status: "prompt", prompt: held.prompt });
+  if (!held) return;
+  const windowId = shownWindowFor(held.windowId);
+  if (!windowId) return declinePrompt(held.prompt);
+  showInstallSheet({ key: nextInstallKey(), windowId, profile: held.prompt.profile, source: "webStore", status: "prompt", prompt: held.prompt });
 }
 
 export function showInstallPrompt(windowId: string, prompt: ExtensionInstallPrompt) {

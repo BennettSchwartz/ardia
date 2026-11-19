@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 const { useBrowser } = await import("../browser/store.ts");
 const { startAutomation } = await import("./controlSocket.ts");
-const { useExtensions, confirmInstall, cancelInstall, showInstallPrompt, loadUnpacked, refreshExtensions } = await import("../extensions/actions.ts");
+const { useExtensions, confirmInstall, cancelInstall, showInstallPrompt, loadUnpacked, refreshExtensions, utilitySheetHost } = await import("../extensions/actions.ts");
 const { SETTINGS_WINDOW_ID } = await import("../settings/settingsWindows.ts");
 const stub = await import("../../test-native/index.ts");
 const { extensionWorld, gate, row } = await import("./fixtures/extensionWorld.mjs");
@@ -69,6 +69,7 @@ test("a socket folder install is refused on every platform, before any path chec
       assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
       assert.equal(reply.error.message, "installing an unpacked folder from the socket isn't supported; use Settings › Extensions › Load Unpacked");
     }
+    assert.equal((await call("extensions.install", { folder: null })).error?.code, "bad_request", "a folder that isn't a string fails the schema first");
     assert.equal(inspected, 0);
     assert.equal(useExtensions.getState().install, null);
   } finally {
@@ -129,6 +130,34 @@ test("closing the window while Adding… leaves no error sheet behind for a wind
   gates.install = null;
 });
 
+test("a failed Add after the Settings sheet closed frees the slot, and a held store prompt goes to a window that can show it", async () => {
+  const { folders, gates, windowId } = await setup();
+  folders.set("/tmp/s/ext", { id: "sss" });
+  const closeHost = utilitySheetHost(SETTINGS_WINDOW_ID);
+  const shown = await loadFromSettings("/tmp/s/ext");
+  const refusal = gate();
+  gates.install = refusal.shut.then(() => {
+    throw new Error("Chromium refused it");
+  });
+  void confirmInstall(shown.key);
+  await settle();
+  showInstallPrompt(SETTINGS_WINDOW_ID, { requestId: "held", profile: "", type: "install", name: "Held", icon: "", permissions: [] });
+  closeHost();
+  assert.equal(useExtensions.getState().install?.status, "installing", "closing Settings doesn't drop an install already under way");
+  refusal.open();
+  await settle();
+  const now = useExtensions.getState().install;
+  assert.deepEqual([now?.status, now?.windowId], ["prompt", windowId], "no error sheet for the closed Settings sheet; the held prompt shows in a browser window");
+  cancelInstall();
+  gates.install = null;
+
+  const reopen = utilitySheetHost(SETTINGS_WINDOW_ID);
+  const again = await loadFromSettings("/tmp/s/ext");
+  reopen();
+  await settle();
+  assert.equal(useExtensions.getState().install, null, `a ready sheet in a closed Settings sheet is let go (${again.key})`);
+});
+
 test("the Web Store fast path checks control after the list it waited on", async () => {
   const { list, gates } = await setup();
   list.push(row("abcdefghijklmnopabcdefghijklmnop"));
@@ -164,9 +193,33 @@ test("configure checks a packed extension's Incognito against the list Chromium 
   assert.equal((await ok("extensions.configure", { id: "packed", incognito: true })).incognito, true);
 });
 
+test("an Incognito change is refused before any write when eligibility can't be confirmed: a Linux or Windows row without the field, or a manifest macOS couldn't read", async () => {
+  const { list, writes } = await setup();
+  list.push(row("linuxish", { siteAccess: "ON_CLICK" }), row("unreadable", { siteAccess: "ON_CLICK", incognitoAllowed: null }));
+  for (const id of ["linuxish", "unreadable"]) {
+    for (const incognito of [true, false]) {
+      const reply = await call("extensions.configure", { id, siteAccess: "allSites", incognito });
+      assert.equal(reply.error?.code, "refused", JSON.stringify(reply));
+      assert.match(reply.error.message, /can't confirm incognito eligibility/);
+    }
+  }
+  assert.deepEqual(writes, [], "nothing was written");
+  assert.deepEqual(list.map((x) => x.siteAccess), ["ON_CLICK", "ON_CLICK"]);
+});
+
+test("when Chromium declines Incognito after site access was written, site access is put back and the call fails", async () => {
+  const { list, writes } = await setup();
+  list.push(row("declines", { siteAccess: "ON_CLICK", incognitoAllowed: true, refuseIncognito: true }));
+  const reply = await call("extensions.configure", { id: "declines", siteAccess: "allSites", incognito: true });
+  assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
+  assert.match(reply.error.message, /site access was put back/);
+  assert.deepEqual(writes.map((w) => w.siteAccess ?? `incognito:${w.incognito}`), ["allSites", "incognito:true", "onClick"]);
+  assert.deepEqual([list[0].siteAccess, list[0].incognito], ["ON_CLICK", false]);
+});
+
 test("configure answers failed when the readback after its write fails, never the cached row", async () => {
   const { list, gates } = await setup();
-  list.push(row("rb"));
+  list.push(row("rb", { incognitoAllowed: true }));
   await refreshExtensions("");
   gates.breakListsOnWrite = true;
   const reply = await call("extensions.configure", { id: "rb", incognito: true });
