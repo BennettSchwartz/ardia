@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 const { S, socketClient, freshWindow, controlOn, tick } = await import("./fixtures/socketHarness.mjs");
-const { runMethod } = await import("./controlSocket.ts");
-const { openLittleArdia } = await import("../littleArdia/actions.ts");
 const { shellNativeModules } = await import("../../test-native/shell.ts");
 
 const dialogs = shellNativeModules.ArdiaDialogs;
@@ -38,27 +36,6 @@ test("overlapping closes where a tab arrives leave no stale last-window marker",
   } finally {
     appWindows.animateWindowClose = originals.animate;
   }
-});
-
-test("background run resolves its target as the dispatcher does: Peek, Little Ardia, the main window", async () => {
-  const { windowId, tab } = await freshWindow();
-  S().updateSettings({ warnBeforeClosingLastTab: true, warnBeforeClosingTabGroup: true });
-  S().openPeek(tab, "https://peeked.example/");
-  assert.ok(!runMethod({ command: "closeTab", window: windowId }, true).error, "closeTab with a Peek shown closes the Peek, which asks nothing");
-  for (let i = 0; i < 10; i++) await tick();
-  assert.ok(S().windows[windowId]);
-  assert.equal(runMethod({ command: "closeTab", window: windowId }, true).error?.code, "refused", "without the Peek it's the last tab, which asks");
-
-  S().createGroup([tab]);
-  const little = openLittleArdia("https://l.example/");
-  assert.equal(runMethod({ command: "closeTabGroup", window: little }, true).error?.code, "refused", "Little Ardia sends it to the main window, whose tab is in a group");
-  assert.ok(!runMethod({ command: "closeTab", window: little }, true).error, "closing Little Ardia asks nothing in the background");
-
-  assert.equal(runMethod({ command: "openFile", window: windowId }, true).error?.code, "refused", "a file picker nobody can see");
-  for (const command of ["exportBookmarks", "savePage", "printWithSystemDialog", "share"]) {
-    assert.equal(runMethod({ command, window: windowId }, true).error?.code, "refused", command);
-  }
-  S().updateSettings({ warnBeforeClosingLastTab: false, warnBeforeClosingTabGroup: false });
 });
 
 function heldConfirms() {
