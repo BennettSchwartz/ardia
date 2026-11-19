@@ -11,7 +11,10 @@ const DesignContext = createContext<Design>(appDesign);
 
 export const useDesign = () => useContext(DesignContext);
 
-export const usePageUnderBars = () => useDesign() === "redesigned" && pageObscuresInsets();
+export const usePageUnderBars = () => {
+  const design = useDesign();
+  return (design === "redesigned" || design === "material") && pageObscuresInsets();
+};
 
 export function DesignProvider({ design, children }: { design: Design; children: ReactNode }) {
   return <DesignContext.Provider value={design}>{children}</DesignContext.Provider>;

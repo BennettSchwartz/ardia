@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Image, StyleSheet, Text, View } from "react-native";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { placeholderIndex } from "../../lib/tabFace";
 import { forgetPicturePainted, notePicturePainted, noteSnapshotAspect, noteSnapshotShown, pictureKey, snapshotAspect, snapshotWasShown } from "../../lib/shownSnapshots";
@@ -25,7 +25,7 @@ type Props = { tab: TabFaceTab; title: string; host: string; tone: string | null
 export function TabFace({ tab, title, host, tone, roles, compact, paintedAs }: Props) {
   const fill = tabFill(tab, tone, roles);
   const face = <PlainFace tab={tab} title={title} host={host} fill={fill} roles={roles} compact={compact} />;
-  if (tab.snapshotFileName) return <Snapshot key={tab.snapshotFileName} uri={tab.snapshotFileName} fill={fill} under={face} paintedAs={paintedAs} />;
+  if (tab.snapshotFileName) return <Snapshot uri={tab.snapshotFileName} fill={fill} under={face} paintedAs={paintedAs} />;
   return face;
 }
 
@@ -66,11 +66,20 @@ function PlainFace({ tab, title, host, fill, roles, compact }: { tab: TabFaceTab
 }
 
 function Snapshot({ uri, fill, under, paintedAs }: { uri: string; fill: string; under: ReactNode; paintedAs?: string }) {
+  const [shownUri, setShownUri] = useState(uri);
+  const [previous, setPrevious] = useState<{ uri: string; aspect: number | null } | null>(null);
   const [aspect, setAspect] = useState<number | null>(() => snapshotAspect(uri));
   const [loaded, setLoaded] = useState(false);
   const [wasShown] = useState(() => snapshotWasShown(uri));
   const [covered, setCovered] = useState(!wasShown);
   const appear = useSharedValue(wasShown ? 1 : 0);
+  if (shownUri !== uri) {
+    if (loaded) setPrevious({ uri: shownUri, aspect });
+    setShownUri(uri);
+    setLoaded(false);
+    setAspect(snapshotAspect(uri) ?? (loaded ? aspect : null));
+    if (loaded || snapshotWasShown(uri)) setCovered(false);
+  }
   const appearing = useAnimatedStyle(() => ({ opacity: appear.value }));
   useEffect(() => {
     if (!loaded) return;
@@ -84,6 +93,15 @@ function Snapshot({ uri, fill, under, paintedAs }: { uri: string; fill: string; 
   return (
     <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]}>
       {covered ? under : null}
+      {previous ? (
+        <Image
+          source={{ uri: previous.uri }}
+          resizeMethod="scale"
+          style={previous.aspect ? [styles.snapshot, { aspectRatio: previous.aspect }] : StyleSheet.absoluteFill}
+          resizeMode="cover"
+          fadeDuration={0}
+        />
+      ) : null}
       <Animated.Image
         source={{ uri }}
         resizeMethod="scale"
@@ -94,7 +112,9 @@ function Snapshot({ uri, fill, under, paintedAs }: { uri: string; fill: string; 
             setAspect(width / height);
           }
           setLoaded(true);
-          if (snapshotWasShown(uri)) {
+          setPrevious(null);
+          if (snapshotWasShown(uri) || previous !== null) {
+            noteSnapshotShown(uri);
             appear.value = 1;
             setCovered(false);
             return;

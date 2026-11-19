@@ -11,9 +11,11 @@ config.resolver.disableHierarchicalLookup = true;
 config.cacheVersion = [config.cacheVersion, process.env.EXPO_PUBLIC_ARDIA_LAB === "true" ? "lab" : "store"].join(":");
 
 const steppedWindow = path.resolve(projectRoot, "src/lib/steppedWindow.ts");
+const prettyFormatCjs = require.resolve("pretty-format");
 const expoUiRecycling = `${path.sep}@expo${path.sep}ui${path.sep}build${path.sep}recycling${path.sep}`;
 const upstreamResolve = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === "pretty-format") return { type: "sourceFile", filePath: prettyFormatCjs };
   if (platform === "ios" && moduleName === "./window" && context.originModulePath.includes(expoUiRecycling)) return { type: "sourceFile", filePath: steppedWindow };
   return upstreamResolve ? upstreamResolve(context, moduleName, platform) : context.resolveRequest(context, moduleName, platform);
 };

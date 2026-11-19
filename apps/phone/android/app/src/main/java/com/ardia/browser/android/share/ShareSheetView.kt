@@ -28,12 +28,13 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -158,16 +159,15 @@ private fun ShareHeader(model: ShareSheetModel) {
             }
         }
         val close = stringResource(R.string.share_close)
-        Box(
-            Modifier
-                .size(30.dp)
-                .clip(CircleShape)
-                .background(BrowsePalette.fieldFill.current)
-                .clickable(onClickLabel = close, role = Role.Button, onClick = model.cancel)
-                .testTag(ShareTags.CLOSE),
-            contentAlignment = Alignment.Center,
+        FilledTonalIconButton(
+            onClick = model.cancel,
+            modifier = Modifier.testTag(ShareTags.CLOSE),
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = BrowsePalette.fieldFill.current,
+                contentColor = BrowsePalette.foregroundSecondary.current,
+            ),
         ) {
-            Icon(ArdiaSymbols.xmark, contentDescription = close, modifier = Modifier.size(14.dp), tint = BrowsePalette.foregroundSecondary.current)
+            Icon(ArdiaSymbols.xmark, contentDescription = close, modifier = Modifier.size(18.dp))
         }
     }
 }

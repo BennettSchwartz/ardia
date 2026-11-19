@@ -15,8 +15,17 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
+import expo.modules.kotlin.records.Field
+import expo.modules.kotlin.records.Record
+
+class MaterialSearchAppearanceRecord : Record {
+    @Field val dark: Boolean? = null
+
+    @Field val scheme: Map<String, String>? = null
+}
 
 internal object MaterialScheme {
     val dynamic: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -295,6 +304,35 @@ class MaterialModule : Module() {
         OnStopObserving { main.post { stopWatching() } }
 
         OnDestroy { main.post { stopWatching() } }
+
+        View(MaterialSearchBarView::class) {
+            Events("onTypedChange", "onSubmit", "onFocusChange", "onSuffixChange", "onClearPress", "onVoicePress", "onIncognitoPress")
+
+            Prop("text") { view: MaterialSearchBarView, text: String? -> view.textProp = text ?: "" }
+            Prop("textEventCount") { view: MaterialSearchBarView, count: Int? -> view.textCountProp = count ?: 0 }
+            Prop("offer") { view: MaterialSearchBarView, offer: Map<String, Any?>? ->
+                view.setOffer(offer?.get("query") as? String, offer?.get("completion") as? String)
+            }
+            Prop("selectsAllOnFocus") { view: MaterialSearchBarView, value: Boolean? -> view.setSelectsAllOnFocus(value == true) }
+            Prop("placeholder") { view: MaterialSearchBarView, text: String? -> view.setPlaceholder(text) }
+            Prop("fieldLabel") { view: MaterialSearchBarView, value: String? -> view.setLabel(value) }
+            Prop("incognito") { view: MaterialSearchBarView, value: Boolean? -> view.setIncognito(value == true) }
+            Prop("showsVoice") { view: MaterialSearchBarView, value: Boolean? -> view.setShowsVoice(value == true) }
+            Prop("fieldOnly") { view: MaterialSearchBarView, value: Boolean? -> view.setFieldOnly(value == true) }
+            Prop("embedded") { view: MaterialSearchBarView, value: Boolean? -> view.embedded = value == true }
+            Prop("appearance") { view: MaterialSearchBarView, value: MaterialSearchAppearanceRecord? ->
+                view.dark = value?.dark
+                view.scheme = value?.scheme
+            }
+
+            OnViewDidUpdateProps { view -> view.propsUpdated() }
+
+            AsyncFunction("focus") { view: MaterialSearchBarView -> view.focusField() }.runOnQueue(Queues.MAIN)
+
+            AsyncFunction("blur") { view: MaterialSearchBarView -> view.blurField() }.runOnQueue(Queues.MAIN)
+
+            AsyncFunction("setText") { view: MaterialSearchBarView, text: String, selectsAll: Boolean? -> view.replace(text, selectsAll == true) }.runOnQueue(Queues.MAIN)
+        }
     }
 
     private companion object {

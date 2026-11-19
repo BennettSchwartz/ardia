@@ -9,7 +9,7 @@ import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
 import { shownTone } from "../../lib/pageTone";
 import { snapshotPageTop } from "../../lib/shownSnapshots";
-import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, space, Symbol, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useTheme, isDarkColor, type MenuItem, type MotionCurve, type SymbolName } from "../ui";
+import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, space, Symbol, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useReduceMotion, useTheme, isDarkColor, type MenuItem, type MotionCurve, type SymbolName } from "../ui";
 import { MenuTrigger, nativeMenus, spaceSystemImage, type MenuHandlers } from "../ui/MenuTrigger";
 import { hideArchiveCard } from "../../state/browse/archiveCard";
 import { OPENING_COVER_ID } from "../../state/browse/store";
@@ -194,7 +194,17 @@ export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion
     const p = cardPose(g, m.role, m.relative, now.scaleProgress, now.positionProgress, m.lift, m.fade, m.isLast);
     const top = p.y - (g.cardHeight * p.scale) / 2 - tabsLayout.headerGap - tabsLayout.headerHeight;
     const growing = m.role === "expanded" || m.role === "launcher";
-    return { pose: p, top, place: deckHeaderPlacement(p.x - (g.cardWidth * p.scale) / 2, p.visible), z: m.z, expanded: m.role === "expanded", rest: growing ? now.scaleProgress : 1 };
+    return {
+      pose: p,
+      top,
+      place: deckHeaderPlacement(p.x - (g.cardWidth * p.scale) / 2, p.visible),
+      z: m.z,
+      expanded: m.role === "expanded",
+      launcher: m.role === "launcher",
+      growing,
+      restLeft: deckLeading(g, m.relative),
+      rest: growing ? now.scaleProgress : 1,
+    };
   }, [g, id]);
   const cardStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
@@ -202,7 +212,7 @@ export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion
     return {
       zIndex: placed.value.z,
       opacity: covering.value === id ? 0 : p.opacity,
-      borderRadius: corner / Math.max(p.scale, 0.01),
+      borderRadius: placed.value.launcher ? restCorner : corner / Math.max(p.scale, 0.01),
       transform: [{ translateX: p.x - g.cardWidth / 2 }, { translateY: p.y - g.cardHeight / 2 }, { scale: p.scale }],
     };
   }, [g, restCorner]);
@@ -227,6 +237,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
   countRender("DeckCard");
   const theme = useTheme();
   const design = useDesign();
+  const reduceMotion = useReduceMotion();
   const tone = shownTone(useHeldPageTone(tab.id), tab.themeColorHex);
   const { scaleProgress } = motion;
   const { placed, cardStyle, reachStyle } = useCardPlacement(tab.id, g, motion);
@@ -267,7 +278,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
     <>
       <Animated.View
         testID="deckCard"
-        needsOffscreenAlphaCompositing
+        needsOffscreenAlphaCompositing={reduceMotion}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
         style={[

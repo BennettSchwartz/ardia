@@ -1,9 +1,7 @@
-import { useMemo } from "react";
 import { deckGeometry, deckLeading, deckVisibleWidth, type DeckGeometry } from "../../lib/deckGeometry";
 import type { MaterialScheme } from "../../lib/material/schemes";
-import { schemeFor } from "../../lib/material/schemePick";
-import { useMaterialSchemePair, useMaterialTheme } from "../ui/materialTheme";
-import { materialSize } from "../ui/materialTokens";
+import { useMaterialTheme } from "../ui/materialTheme";
+import { materialBottomBar, materialSize } from "../ui/materialTokens";
 import { tabsLayout } from "../ui/tokens";
 
 export const MATERIAL_DECK = {
@@ -25,7 +23,7 @@ export const MATERIAL_DECK = {
 
 const REDESIGN_BAR_ABOVE_SAFE_BOTTOM = 11;
 
-export const materialBottomRowCenter = (safeBottom: number) => safeBottom + MATERIAL_DECK.edge + materialSize.fab / 2;
+export const materialBottomRowCenter = (safeBottom: number) => safeBottom + materialBottomBar.inset + materialBottomBar.height / 2;
 
 export function fitsMaterialChrome(g: DeckGeometry): boolean {
   const cardTop = g.cardCenterY - g.cardHeight / 2;
@@ -67,13 +65,6 @@ export function materialCloseAt(g: DeckGeometry, count: number, scroll: number, 
   return -1;
 }
 
-export function useIncognitoScheme(): MaterialScheme {
-  const pair = useMaterialSchemePair();
-  return useMemo(() => schemeFor(pair, true), [pair]);
-}
-
 export function useDeckScheme(incognito: boolean): MaterialScheme {
-  const { scheme } = useMaterialTheme();
-  const dark = useIncognitoScheme();
-  return incognito ? dark : scheme;
+  return useMaterialTheme(incognito).scheme;
 }

@@ -1,6 +1,6 @@
 import { Platform, ScrollView, StyleSheet } from "react-native";
 import { act, type ReactTestInstance } from "react-test-renderer";
-import { SettingsView } from "../components/settings/SettingsView";
+import { MaterialSettingsScreen, SettingsView } from "../components/settings/SettingsView";
 import { materialAppBarFill } from "../components/settings/MaterialSettingsKit";
 import { DesignProvider } from "../components/ui";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
@@ -9,6 +9,7 @@ import * as settingsActions from "../state/settings/actions";
 import { closeSettings, openSettings, pushSettings, useSettingsNav } from "../state/settings/nav";
 import { currentPreferences, loadPreferences, setPreference } from "../state/settings/store";
 import { classicOnAndroid, renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { pages } from "../platform/pages";
 
 const onAndroid = Platform.OS === "android" ? test : test.skip;
 const LIGHT = SEEDED_SCHEMES.ardia.light;
@@ -17,6 +18,7 @@ beforeEach(() => {
   jest.useFakeTimers();
   withTabs(1);
   setDynamicScheme(null);
+  jest.spyOn(pages, "listsSitePermissions").mockReturnValue(false);
   openSettings();
 });
 
@@ -29,27 +31,33 @@ afterEach(() => {
 
 type Root = ReturnType<typeof renderSurface>;
 const node = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.type === "string")[0];
-const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function")[0]!;
+const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function" && found.props.android_ripple !== undefined)[0]!;
 const flat = (found: ReactTestInstance | undefined) => StyleSheet.flatten(found?.props.style) ?? {};
 
 const settings = () =>
   renderSurface(
     <DesignProvider design="material">
-      <SettingsView />
+      <MaterialSettingsScreen />
     </DesignProvider>,
   );
 
-onAndroid("Settings in the material design opens on a Material top app bar: 64 dp on surfaceContainer, the title in titleLarge, and no iOS chevrons on its rows", () => {
+onAndroid("Material Settings fills the screen with a 112 dp medium top app bar and no sheet scrim or grip", () => {
   const root = settings();
+  expect(flat(node(root, "materialSettingsScreen"))).toMatchObject(StyleSheet.absoluteFill);
+  expect(node(root, "materialScrim")).toBeUndefined();
+  expect(node(root, "materialSheetGrip")).toBeUndefined();
   expect(flat(node(root, "materialSettingsPage")).backgroundColor).toBe(LIGHT.surfaceContainer);
   const bar = node(root, "materialTopAppBar")!;
   expect(flat(bar).backgroundColor).toBe(LIGHT.surfaceContainer);
   expect(flat(bar.findAll((found) => typeof found.type === "string" && flat(found).minHeight === 64)[0])).toMatchObject({ minHeight: 64 });
-  expect(flat(node(root, "settingsTitle"))).toMatchObject({ fontSize: 22, color: LIGHT.onSurface });
+  expect(flat(node(root, "materialMediumTitle"))).toMatchObject({ height: 48, fontSize: 28, color: LIGHT.onSurface });
+  expect(node(root, "settingsTitle")!.props.children).toBeNull();
   const row = node(root, "materialSettingsRow:Search Engine")!;
   expect(flat(row).minHeight).toBeGreaterThanOrEqual(56);
   expect(pressable(root, "materialSettingsRow:Search Engine").props.android_ripple).toMatchObject({ borderless: false });
   expect(row.findAll((found) => found.props.name === "chevronRight")).toHaveLength(0);
+  expect(flat(node(root, "materialSettingsIconSlot"))).toMatchObject({ width: 24, height: 24 });
+  expect(row.findAll((found) => found.props.name === "magnifyingglass")[0]?.props.color).toBe(LIGHT.onSurfaceVariant);
   unmount(root);
 });
 
@@ -58,6 +66,10 @@ onAndroid("the app bar takes surfaceContainerHigh once the list scrolls under it
   const list = root.root.findAll((found) => found.type === ScrollView)[0]!;
   act(() => list.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 80 } } }));
   expect(flat(node(root, "materialTopAppBar")).backgroundColor).toBe(LIGHT.surfaceContainerHigh);
+  expect(node(root, "settingsTitle")!.props.children).toBe("Settings");
+  expect(flat(node(root, "settingsTitle"))).toMatchObject({ fontSize: 22 });
+  act(() => list.props.onScroll({ nativeEvent: { contentOffset: { x: 0, y: 0 } } }));
+  expect(node(root, "settingsTitle")!.props.children).toBeNull();
   expect(materialAppBarFill(LIGHT, false)).toBe(LIGHT.surfaceContainer);
   unmount(root);
 });
@@ -153,5 +165,18 @@ onAndroid("Settings closes from a close icon at the start of its top app bar, wi
     pressable(root, "materialSettingsClose").props.onPress();
   });
   expect(closing).toHaveBeenCalled();
+  unmount(root);
+});
+
+onAndroid("Collapse Bottom Bar in Material Site Settings starts on by default and persists turning off", () => {
+  setPreference("collapsesBottomBar", null);
+  act(() => pushSettings({ page: "siteSettings" }));
+  const root = settings();
+  const row = () => pressable(root, "materialSettingsRow:Collapse Bottom Bar");
+  expect(row().props.accessibilityState.checked).toBe(true);
+  act(() => row().props.onPress());
+  expect(row().props.accessibilityState.checked).toBe(false);
+  expect(currentPreferences().collapsesBottomBar).toBe(false);
+  setPreference("collapsesBottomBar", null);
   unmount(root);
 });

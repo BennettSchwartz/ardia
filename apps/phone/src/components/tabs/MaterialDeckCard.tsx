@@ -10,7 +10,7 @@ import { useHeldPageTone } from "../../state/browse/deckHold";
 import { display } from "../../state/search/omnibox";
 import { useIncognito } from "../../state/tabs/hooks";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { barHeight, FadeView, Favicon, screenReaderActions, Symbol, TabFace, tabsInk, tabsLayout, usePageUnderBars, useTheme } from "../ui";
+import { barHeight, FadeView, Favicon, screenReaderActions, Symbol, TabFace, tabsInk, tabsLayout, usePageUnderBars, useReduceMotion, useTheme } from "../ui";
 import { rolesFromScheme } from "../ui/materialRoles";
 import { materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { nativeMenus } from "../ui/MenuTrigger";
@@ -20,6 +20,7 @@ import { MATERIAL_DECK, materialOnScreen, useDeckScheme } from "./MaterialDeckLa
 export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geometry: g, motion, onOpen, onClose, onCloseNow }: DeckCardProps) {
   countRender("DeckCard");
   const theme = useTheme();
+  const reduceMotion = useReduceMotion();
   const scheme = useDeckScheme(tab.isPrivate);
   const backdrop = useDeckScheme(useIncognito());
   const roles = useMemo(() => (tab.isPrivate ? { ...theme, ...rolesFromScheme(scheme, true) } : theme), [tab.isPrivate, theme, scheme]);
@@ -27,8 +28,9 @@ export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geo
   const { scaleProgress } = motion;
   const { placed, cardStyle, reachStyle } = useCardPlacement(tab.id, g, motion, materialShape.large);
   const shownWidth = useDerivedValue(() => {
-    const p = placed.value.pose;
-    return materialOnScreen(g, p.x - (g.cardWidth * p.scale) / 2, p.visible);
+    const { pose: p, growing, restLeft } = placed.value;
+    const left = growing ? restLeft : p.x - (g.cardWidth * p.scale) / 2;
+    return materialOnScreen(g, left, p.visible);
   }, [g]);
   const headerStyle = useAnimatedStyle(() => {
     const { pose: p, top } = placed.value;
@@ -58,14 +60,15 @@ export const MaterialDeckCard = memo(function MaterialDeckCard({ tab, index, geo
       {isUnseenReceived(tab) ? <ReceivedBadge /> : null}
     </>
   );
+  const shadowStyle = useAnimatedStyle(() => ({ elevation: placed.value.growing ? 0 : MATERIAL_DECK.cardElevation }));
   return (
     <>
       <Animated.View
         testID="deckCard"
-        needsOffscreenAlphaCompositing
+        needsOffscreenAlphaCompositing={reduceMotion}
         accessibilityElementsHidden
         importantForAccessibility="no-hide-descendants"
-        style={[styles.card, { width: g.cardWidth, height: g.cardHeight, backgroundColor: fill }, cardStyle]}
+        style={[styles.card, { width: g.cardWidth, height: g.cardHeight, backgroundColor: fill }, cardStyle, shadowStyle]}
       >
         {nativeMenus() ? (
           <DeckCardMenu tab={tab} index={index} onClose={onClose} fill={fill}>

@@ -150,7 +150,7 @@ onAndroid("the deck keeps its card geometry where the Material bars fit, and mov
   expect(fitsMaterialChrome(short)).toBe(true);
   expect(short.cardCenterY - short.cardHeight / 2 - 8 - 20).toBeGreaterThanOrEqual(52 + 64);
   expect(short.cardCenterY + short.cardHeight / 2).toBeLessThanOrEqual(740 - 48 - 16 - 56);
-  expect(short.barCenterY).toBe(740 - 48 - 16 - 28);
+  expect(short.barCenterY).toBe(740 - 48 - 8 - 32);
   expect(short.safeBottom).toBe(48);
 });
 
@@ -168,26 +168,27 @@ onAndroid("the top app bar is Material's: 64 dp under the status bar on surface,
   unmount(root);
 });
 
-onAndroid("new tab is a 56 dp FAB at the bottom end in primaryContainer with the large shape and a ripple; a tap opens a tab and its long press keeps the + menu", () => {
+onAndroid("the capsule keeps add on the right with a 48 dp target and its long press menu", () => {
   const opened = jest.spyOn(browse, "newTab").mockImplementation(() => undefined);
   const root = deck();
   const fab = pressable(root, "materialDeckFab")!;
   expect(fab.props.accessibilityLabel).toBe("New Tab");
-  expect(flat(fab)).toMatchObject({ width: 56, height: 56, borderRadius: 16, backgroundColor: LIGHT.primaryContainer });
-  expect(fab.props.android_ripple).toMatchObject({ foreground: true, color: "rgba(0, 81, 57, 0.1)" });
+  expect(flat(fab)).toMatchObject({ width: 48, height: 48, borderRadius: 9999 });
+  expect(flat(fab).backgroundColor).toBeUndefined();
+  expect(fab.props.android_ripple).toMatchObject({ borderless: true, radius: 20 });
   act(() => fab.props.onPress());
   expect(opened).toHaveBeenCalledTimes(1);
   const trigger = root.root.findAll((node) => node.type === MenuTrigger && node.findAll((inner) => inner.props.testID === "materialDeckFab").length > 0)[0]!;
   expect(trigger.props.trigger).toBe("longPress");
   expect(trigger.props.items.map((item: { label: string }) => item.label)).toContain("New Incognito Tab");
   const row = flat(host(root, "materialDeckBottomRow"));
-  expect(row).toMatchObject({ bottom: SAFE.bottom + 16, right: 16, height: 56 });
+  expect(row).toMatchObject({ bottom: SAFE.bottom + 8, right: 16, height: 64, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainer });
   unmount(root);
 });
 
-onAndroid("Search Tabs is a Material search field: 56 dp, full shape, surfaceContainerHigh, and it still filters the cards", () => {
+onAndroid("Search Tabs occupies the capsule center and still filters cards", () => {
   const root = deck();
-  expect(flat(host(root, "materialDeckSearch"))).toMatchObject({ height: 56, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
+  expect(flat(host(root, "materialDeckSearch"))).toMatchObject({ height: 48, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
   const field = root.root.findAll((node) => node.props.testID === "deckSearchField" && typeof node.props.onChangeText === "function")[0]!;
   expect(field.props.placeholder).toBe("Search Tabs");
   act(() => field.props.onChangeText("Site 2"));
@@ -214,11 +215,13 @@ onAndroid("Incognito takes the dark scheme of the same colours: its chip, its ca
   unmount(root);
   withPrivates(2, true);
   const incognito = deck();
-  expect(flat(host(incognito, "materialDeckBackdrop")).backgroundColor).toBe(DARK.surface);
-  expect(flat(host(incognito, "materialDeckTopBar")).backgroundColor).toBe(DARK.surface);
+  expect(flat(host(incognito, "materialDeckBackdrop")).backgroundColor).toBe("#000000");
+  expect(flat(host(incognito, "materialDeckTopBar")).backgroundColor).toBe("#000000");
+  expect(flat(host(incognito, "materialDeckBottomRow")).backgroundColor).toBe("#000000");
+  expect(flat(host(incognito, "materialDeckSearch")).backgroundColor).toBe("#000000");
   const fab = pressable(incognito, "materialDeckFab")!;
   expect(fab.props.accessibilityLabel).toBe("New Incognito Tab");
-  expect(flat(fab).backgroundColor).toBe(DARK.primaryContainer);
+  expect(flat(fab).backgroundColor).toBeUndefined();
   for (const title of hosts(incognito, "deckHeaderTitle")) expect(flat(title).color).toBe(DARK.onSurface);
   unmount(incognito);
 });
@@ -229,8 +232,8 @@ onAndroid("a scheme change re-themes the open deck: cards, top app bar, search, 
   act(() => setDynamicScheme(WALLPAPER));
   expect(flat(cards(root).find((card) => flat(card).backgroundColor !== WALLPAPER.dark.surfaceContainerLow))!.backgroundColor).toBe("#ABCDEF");
   expect(flat(host(root, "materialDeckTopBar")).backgroundColor).toBe(WALLPAPER.light.surface);
+  expect(flat(host(root, "materialDeckBottomRow")).backgroundColor).toBe(WALLPAPER.light.surfaceContainer);
   expect(flat(host(root, "materialDeckSearch")).backgroundColor).toBe(WALLPAPER.light.surfaceContainerHigh);
-  expect(flat(pressable(root, "materialDeckFab")).backgroundColor).toBe(WALLPAPER.light.primaryContainer);
   expect(flat(pressable(root, "materialDeckIncognito")).backgroundColor).toBe("#123456");
   unmount(root);
 });
@@ -277,15 +280,17 @@ test("the Material deck opens on the active card itself, so a last tab opens ful
   expect(deckOpeningScroll(0, 3, true)).toBe(0);
 });
 
-onAndroid("the FAB's shadow view wraps its menu trigger, so the trigger's native view can't clip the shadow to a hard edge", () => {
+onAndroid("Archive Tabs opens the archive from the capsule's left, with Search Tabs centered and add on the right", () => {
   const root = deck();
-  const shadow = host(root, "materialDeckFabShadow")!;
-  expect(shadow.findAll((found) => found.type === MenuTrigger)).toHaveLength(1);
-  expect(StyleSheet.flatten(shadow.props.style)).toMatchObject({ borderRadius: 16, elevation: MATERIAL_DECK.fabElevation });
+  const order = root.root.findAll((found) => typeof found.type === "string" && ["materialDeckArchive", "materialDeckSearch", "materialDeckFab"].includes(found.props.testID)).map((found) => found.props.testID);
+  expect(order).toEqual(["materialDeckArchive", "materialDeckSearch", "materialDeckFab"]);
+  act(() => pressable(root, "materialDeckArchive")!.props.onPress());
+  expect(browse.useBrowse.getState().sheet).toBe("archive");
+  expect(telemetry.countUsage).toHaveBeenCalledWith("archive_bar_opened");
   unmount(root);
 });
 
 test("the deck's search row rises by the whole keyboard on Android, whose reported height leaves out the navigation bar", () => {
-  expect(materialKeyboardLift(300, 48, "android")).toBe(300 + MATERIAL_DECK.keyboardGap - MATERIAL_DECK.edge);
-  expect(materialKeyboardLift(300, 34, "ios")).toBe(300 + MATERIAL_DECK.keyboardGap - 34 - MATERIAL_DECK.edge);
+  expect(materialKeyboardLift(300, 48, "android")).toBe(300 + MATERIAL_DECK.keyboardGap - 8);
+  expect(materialKeyboardLift(300, 34, "ios")).toBe(300 + MATERIAL_DECK.keyboardGap - 34 - 8);
 });

@@ -26,6 +26,8 @@ export const materialShape = { none: 0, extraSmall: 4, small: 8, medium: 12, lar
 
 export const MATERIAL_SEGMENT_GAP = 2;
 
+export const materialBottomBar = { height: 64, field: 48, inset: 8, edge: 16, gap: 4 } as const;
+
 export const materialSegmentCorners = (index: number, count: number) => {
   const top = index === 0 ? materialShape.largeIncreased : materialShape.extraSmall;
   const bottom = index === count - 1 ? materialShape.largeIncreased : materialShape.extraSmall;

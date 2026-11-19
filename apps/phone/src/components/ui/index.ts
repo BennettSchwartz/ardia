@@ -12,6 +12,7 @@ export { barReturnMotion, deckChromeMotion, duration, iPhoneOr, moveTo, pageMenu
 export { ConfirmDialog, Dialog, showActionSheet, type Confirmation, type DialogButton } from "./Dialog";
 export { FloatingMenu, Menu, type MenuAction, type MenuItem, type MenuSubmenu } from "./Menu";
 export { confirmInSheet, MenuTrigger, nativeMenus, onNativeMenuOpened, spaceSystemImage, type MenuHandlers } from "./MenuTrigger";
+export { MaterialIconButton, materialIconButtonColors, materialIconRipple, type MaterialIconButtonProps, type MaterialIconButtonSize, type MaterialIconButtonVariant } from "./MaterialIconButton";
 export { Shade } from "./Shade";
 export { measureAnchor, OverlayHost, Portal } from "./Overlay";
 export { Sheet, usePresence } from "./Sheet";

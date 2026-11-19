@@ -48,7 +48,7 @@ export function SettingsRoot() {
   const material = design === "material";
   const dynamicColors = wallpaperColorsEnabled(usePreferences((p) => p.colorChoice), usePreferences((p) => p.dynamicColors));
   return (
-    <SettingsPage title="Settings" onClose={material ? closeSettings : undefined} trailing={material ? undefined : <BarButton title="Done" emphasized onPress={closeSettings} />}>
+    <SettingsPage title="Settings" mediumAppBar onClose={material ? closeSettings : undefined} trailing={material ? undefined : <BarButton title="Done" emphasized onPress={closeSettings} />}>
       {syncOffered() ? (
         <Group>
           <SyncCard stacks={stacks} />
@@ -87,9 +87,9 @@ export function SettingsRoot() {
           <AppearanceRow />
         </Group>
       ) : material ? (
-        <Group footer={dynamicColors ? "Use colors from your wallpaper." : "Choose a color for Ardia."}>
+        <Group header="Appearance" footer={dynamicColors ? "Use colors from your wallpaper." : "Choose a color for Ardia."}>
           <ToggleRow title="Dynamic Colors" icon="paintpaletteFill" tint={settingsTint.neutral} value={dynamicColors} onChange={setDynamicColors} />
-          {!dynamicColors ? <ColorRow /> : null}
+          {!dynamicColors ? <ColorRow plainIcon /> : null}
         </Group>
       ) : (
         <Group>
@@ -97,25 +97,29 @@ export function SettingsRoot() {
           {syncEnabled ? <MatchMyMac /> : null}
         </Group>
       )}
-      <Group>
+      <Group header={material ? "Browsing" : undefined}>
         <NavRow title="Site Settings" icon="globe" tint={settingsTint.neutral} divider={offersDefault} onPress={() => pushSettings({ page: "siteSettings" })} />
         {offersDefault ? <NavRow title="Default Browser" icon="safariFill" tint={settingsTint.defaultBrowser} onPress={() => pushSettings({ page: "defaultBrowser" })} /> : null}
       </Group>
-      <Group>
+      <Group header={material ? "Search" : undefined}>
         <NavRow title="Search Engine" icon="magnifyingglass" tint={settingsTint.search} value={engineName} divider onPress={() => pushSettings({ page: "searchEngine" })} />
         <ToggleRow title="Search Suggestions" icon="textMagnifyingglass" tint={settingsTint.blue} value={suggestions} divider onChange={setSearchSuggestions} />
         <ToggleRow title="Auto-Open Keyboard" icon="keyboardFill" tint={settingsTint.keyboard} value={keyboard} onChange={setAutoOpenKeyboard} />
       </Group>
-      <Group>
+      <Group header={material ? "Tabs and links" : undefined}>
         <PickerRow title="Archive Inactive Tabs" icon="archivebox" tint={settingsTint.archive} options={INTERVALS} selected={interval} divider onSelect={setArchiveInterval} />
         <PickerRow title="Open App Links In" icon="arrowUpForwardAppFill" tint={settingsTint.appLinks} options={APP_LINKS} selected={appLinks} divider onSelect={setAppLinks} />
         <NavRow title="Clear Browsing Data" icon="eraserFill" tint={settingsTint.clearData} divider onPress={() => pushSettings({ page: "clearData" })} />
-        <Pressable accessibilityRole="button" onPress={exportOpenTabs} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
-          <IconTile icon="squareAndArrowUp" tint={settingsTint.export} />
-          <Text style={[font.body, { color: theme.label }]}>Export Open Tabs</Text>
-        </Pressable>
+        {material ? (
+          <NavRow title="Export Open Tabs" icon="squareAndArrowUp" tint={settingsTint.export} onPress={exportOpenTabs} />
+        ) : (
+          <Pressable accessibilityRole="button" onPress={exportOpenTabs} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
+            <IconTile icon="squareAndArrowUp" tint={settingsTint.export} />
+            <Text style={[font.body, { color: theme.label }]}>Export Open Tabs</Text>
+          </Pressable>
+        )}
       </Group>
-      <Group footer={PHONE_SHARING_COPY.summary}>
+      <Group header={material ? "Privacy" : undefined} footer={PHONE_SHARING_COPY.summary}>
         <ToggleRow
           title={PHONE_SHARING_COPY.toggle}
           icon="checkmarkShield"
@@ -126,12 +130,16 @@ export function SettingsRoot() {
         />
         <NavRow title={PHONE_SHARING_COPY.whatsSent} icon="info" tint={settingsTint.neutral} onPress={() => pushSettings({ page: "whatsSent" })} />
       </Group>
-      <Group>
-        <Pressable accessibilityRole="button" onPress={showOnboardingFromSettings} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
-          <IconTile icon="handWave" tint={settingsTint.onboarding} />
-          <Text style={[font.body, { color: theme.label }]}>Show Onboarding</Text>
-        </Pressable>
-        <View style={[styles.divider, { backgroundColor: theme.separator }]} />
+      <Group header={material ? "More" : undefined}>
+        {material ? (
+          <NavRow title="Show Onboarding" icon="handWave" tint={settingsTint.onboarding} onPress={showOnboardingFromSettings} />
+        ) : (
+          <Pressable accessibilityRole="button" onPress={showOnboardingFromSettings} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
+            <IconTile icon="handWave" tint={settingsTint.onboarding} />
+            <Text style={[font.body, { color: theme.label }]}>Show Onboarding</Text>
+          </Pressable>
+        )}
+        {!material ? <View style={[styles.divider, { backgroundColor: theme.separator }]} /> : null}
         <NavRow title="About Ardia" icon="info" tint={settingsTint.neutral} onPress={() => pushSettings({ page: "about" })} />
       </Group>
       <Text style={[font.footnote, styles.centered, { color: theme.secondaryLabel }]}>{appVersion()}</Text>

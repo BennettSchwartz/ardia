@@ -42,7 +42,7 @@ afterEach(() => {
 
 type Root = ReturnType<typeof renderSurface>;
 const node = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.type === "string")[0];
-const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function")[0]!;
+const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function" && found.props.android_ripple !== undefined)[0]!;
 const flat = (found: ReactTestInstance | undefined) => StyleSheet.flatten(found?.props.style) ?? {};
 
 async function openMenu(wrap: (menu: React.ReactElement) => React.ReactNode = (menu) => <DesignProvider design="material">{menu}</DesignProvider>) {
@@ -65,12 +65,18 @@ onAndroid("the material page menu is a Material bottom sheet: a title row, navig
   expect(node(root, "materialMenuIcon:Forward")!.props.accessibilityState).toMatchObject({ disabled: true });
   for (const title of ["Reader", "Copy Link", "Share"]) {
     const action = node(root, `materialMenuAction:${title}`);
-    expect(flat(action)).toMatchObject({ height: 40, borderRadius: 9999, backgroundColor: LIGHT.secondaryContainer });
-    expect(action!.props.hitSlop).toBe(4);
+    expect(flat(action)).toMatchObject({ height: 40, borderRadius: 9999, backgroundColor: LIGHT.secondaryContainer, flexGrow: 1, flexShrink: 1 });
+    expect(flat(action).flex).toBeUndefined();
+    expect(action!.props.hitSlop).toEqual({ top: 4, bottom: 4, left: 4, right: 4 });
+    const label = action!.findAll((found) => found.type === "Text")[0]!;
+    expect(label.props.ellipsizeMode).toBe("tail");
+    expect(flat(label).flexShrink).toBe(1);
   }
   const row = node(root, "pageMenuRow:Find on Page");
   expect(flat(row).minHeight).toBe(56);
+  expect(row!.findAll((found) => found.type === "Text")[0]!.props.numberOfLines).toBeUndefined();
   expect(pressable(root, "pageMenuRow:Find on Page").props.android_ripple).toMatchObject({ borderless: false });
+  expect(node(root, "menuToggle:Block Ads and Trackers")!.findAll((found) => found.type === "Text")[0]!.props.numberOfLines).toBeUndefined();
   expect(root.root.findAll((found) => found.props.testID === "materialMenuDivider")).toHaveLength(0);
   const group = root.root.findAll((found) => found.props.testID === "materialMenuGroup" && typeof found.type === "string")[1]!;
   expect(flat(group).gap).toBe(2);
@@ -124,6 +130,25 @@ onAndroid("a wallpaper scheme change re-themes the open menu", async () => {
   const root = await openMenu();
   act(() => setDynamicScheme({ light: SEEDED_SCHEMES.pink.light, dark: SEEDED_SCHEMES.pink.dark }));
   expect(flat(node(root, "materialMenuAction:Reader")).backgroundColor).toBe(SEEDED_SCHEMES.pink.light.secondaryContainer);
+  unmount(root);
+});
+
+onAndroid("Site Settings opens inside the Material page menu sheet and Back returns to the menu", async () => {
+  const root = await openMenu();
+  await act(async () => {
+    pressable(root, "pageMenuRow:Site Settings").props.onPress();
+  });
+  expect(useSettingsNav.getState().open).toBe(false);
+  expect(node(root, "materialSheet")).toBeDefined();
+  expect(node(root, "materialSiteSettingsHeader")).toBeDefined();
+  expect(node(root, "materialPageMenuSiteSettings")).toBeDefined();
+  expect(node(root, "materialPageMenu")).toBeUndefined();
+  expect(flat(node(root, "materialSettingsSegment")).backgroundColor).toBe(LIGHT.surfaceContainerHighest);
+  act(() => {
+    pressable(root, "siteSettingsSheetBack").props.onPress();
+  });
+  expect(node(root, "materialPageMenu")).toBeDefined();
+  expect(node(root, "materialPageMenuSiteSettings")).toBeUndefined();
   unmount(root);
 });
 

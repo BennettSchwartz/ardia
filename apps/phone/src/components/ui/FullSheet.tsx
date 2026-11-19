@@ -53,8 +53,9 @@ export function FullSheet<T extends string>({ sheet, progress, onDismiss, childr
   const bottomCorner = material ? 0 : iPhoneOr(screenCornerRadius(tabsLayout.displayCornerRadius), 0);
   const presence = useRef(initialPresence(sheet));
   const [, redraw] = useState(0);
-  const height = useSharedValue(Math.max(1, window.height - top));
-  const offset = useSharedValue(sheet ? 0 : height.value);
+  const initialHeight = Math.max(1, window.height - top);
+  const height = useSharedValue(initialHeight);
+  const offset = useSharedValue(sheet ? 0 : initialHeight);
   const dragFrom = useSharedValue(0);
   const scrollTop = useSharedValue(0);
   const touch = useSharedValue({ x: 0, y: 0, inList: false });

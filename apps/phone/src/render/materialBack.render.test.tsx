@@ -46,6 +46,21 @@ onAndroid("an open Material sheet claims predictive back: it follows the swipe d
   expect(claims).toHaveLength(0);
 });
 
+onAndroid("when a Material sheet has an onBack handler, a committed back invokes onBack instead of dismissing the sheet", () => {
+  const dismissed = jest.fn();
+  const back = jest.fn();
+  const root = material(
+    <Sheet open onDismiss={dismissed} onBack={back} onHidden={() => undefined}>
+      <Text>Subpage</Text>
+    </Sheet>,
+  );
+  act(() => top().onProgress?.(0.5, "left"));
+  act(() => top().onCommit?.());
+  expect(back).toHaveBeenCalledTimes(1);
+  expect(dismissed).not.toHaveBeenCalled();
+  unmount(root);
+});
+
 onAndroid("a Material dialog or menu opened over a sheet takes Back from it, and gives it back when it closes", () => {
   const sheet = jest.fn();
   const dialog = jest.fn();

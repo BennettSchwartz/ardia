@@ -119,3 +119,9 @@ The phone app (`apps/phone`) sends to the same pipeline with service `ardia-phon
 ## Site downloads
 
 The Site page's **Where they clicked Download** panel splits `download_clicked` two ways: by platform first, then by the button's place on the page (`location`). The platform comes from the event's `platform` and `arch` properties, which the site sends from 0.2.47-nightly.3 on: `windows x64`, `windows arm64` or `linux x64`. Clicks without a `platform` count as Mac, because before Windows and Linux builds the site offered only the Mac download; older ranges therefore show Mac only. People is distinct visitors, Clicks is raw clicks. The Mac funnel stays on Funnels.
+
+Android search reports full-screen sheet expansions as the consent-gated daily `usage_counts.search_sheet_expanded` count on `ardia-phone`. Incognito expansions do not count. Compare it with `searches` to track use of the expanded result list; neither count includes queries or page content.
+
+Compare `usage_counts.site_settings_sheet_expanded` with `site_settings_sheet_opened` to track use of the full-screen Android address bar menu. Both are consent-gated counts that exclude Incognito.
+
+Android Find on Page: compare phone `usage_counts.find_closed_bar` with `find_opened_bar` after the Material touch fix. The close counter counts each non-private session once, whether it ends through Close or Back. Counts require usage sharing.

@@ -42,13 +42,14 @@ export function usePresence(open: boolean): {
 type Props = {
   open: boolean;
   onDismiss: () => void;
+  onBack?: () => void;
   onHidden: () => void;
   fill?: string;
   children: ReactNode;
 };
 
 export function Sheet(props: Props) {
-  return useDesign() === "material" ? <MaterialSheet open={props.open} onDismiss={props.onDismiss} onHidden={props.onHidden}>{props.children}</MaterialSheet> : <ClassicSheet {...props} />;
+  return useDesign() === "material" ? <MaterialSheet open={props.open} onDismiss={props.onDismiss} onBack={props.onBack} onHidden={props.onHidden}>{props.children}</MaterialSheet> : <ClassicSheet {...props} />;
 }
 
 function ClassicSheet({ open, onDismiss, onHidden, fill, children }: Props) {

@@ -3,6 +3,8 @@ import * as reanimated from "react-native-reanimated";
 import { getAnimatedStyle } from "react-native-reanimated";
 import { act, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { Surfaces } from "../App";
+import { BottomBar } from "../components/browsing/BottomBar";
+import { MaterialBottomBar } from "../components/ui/MaterialBottomBar";
 import { DECK, deckGeometry } from "../lib/deckGeometry";
 
 import { coverFrame } from "../components/tabs/DeckCard";
@@ -300,7 +302,7 @@ onAndroid("without ArdiaOpeningCard, Android opens a card as before: no opening 
   unmount(root);
 });
 
-test("while a deck card grows into the page, Android draws the page bar's own buttons at the screen's bottom, so the bar never goes blank; iPhone, which opens through the opening card, doesn't", () => {
+test("while a deck card grows into the page, Android retains one permanent bar without a page-bar ghost", () => {
   jest.spyOn(launchFlags, "launchArguments").mockImplementation(() => NO_LAUNCH_ARGUMENTS);
   const root = renderSurface(<Surfaces />);
   const ghost = () => root.root.findAll((node) => node.props.testID === "pageBarGhost" && typeof node.type !== "string")[0];
@@ -308,11 +310,27 @@ test("while a deck card grows into the page, Android draws the page bar's own bu
   act(() => sendDeckCommand({ kind: "openFocused" }));
   advance(16);
   if (Platform.OS === "android") {
-    expect(ghost()).toBeDefined();
-    expect(ghost()!.findAll((node) => node.props.accessibilityLabel === "Tabs").length).toBeGreaterThan(0);
+    expect(ghost()).toBeUndefined();
+    expect(root.root.findAll((node) => node.type === MaterialBottomBar)).toHaveLength(1);
+    const bar = root.root.findAll((node) => node.props.testID === "materialBottomBar" && typeof node.type === "string")[0]!;
+    expect(bar.props.pointerEvents).toBe("none");
   } else {
     expect(ghost()).toBeUndefined();
   }
+  unmount(root);
+});
+
+onAndroid("opening the Material tab switcher retains the permanent bar and never draws a ghost or classic BottomBar", () => {
+  jest.spyOn(launchFlags, "launchArguments").mockImplementation(() => NO_LAUNCH_ARGUMENTS);
+  useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, veiled: null, leaving: null });
+  const root = renderSurface(<Surfaces />, { flushTimers: false });
+  const ghost = () => root.root.findAll((node) => node.props.testID === "pageBarGhost" && typeof node.type !== "string")[0];
+  expect(ghost()).toBeUndefined();
+  act(() => void browseStore.showDeck());
+  advance(16);
+  expect(ghost()).toBeUndefined();
+  expect(root.root.findAll((node) => node.type === MaterialBottomBar)).toHaveLength(1);
+  expect(root.root.findAll((node) => node.type === BottomBar)).toHaveLength(0);
   unmount(root);
 });
 

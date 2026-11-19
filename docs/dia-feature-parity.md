@@ -863,3 +863,20 @@ reproduced.
     ACFavicons, Move to Window, Alloy screen-sharing, import-Keychain and `Menus.swift` comments; the README (it still
     described WebKit). The `ArdiaSwipe.mm` responder-delegate comment went with Findings 3 (R1).
 14. No `TODO`/`FIXME`/`XXX` markers in the code paths audited.
+
+### Android bottom navigation
+
+| Feature | Reference | Ardia | Verification |
+| --- | --- | --- | --- |
+| Rounded bottom bar | Owner reference | ✅ | Android Material capsule: Tabs left, search/address center, add right; tab switcher changes to Archive Tabs, Search Tabs and add. One permanently mounted `MaterialBottomBar` above both screens switches controls with `isTabOverview`; transitions add no second bar. Hold address for the page menu. Watch phone `usage_counts.archive_bar_opened`, `search_tabs_opened` and `tabs_opened`. |
+| Seamless Material search | Owner reference | ✅ | Android More options and search results use the same Material sheet and URL capsule. The docked bar supplies the fill and corners in both modes, including while the URL is editable. Tapping the address in More options switches to suggestions and moves the same bar as the keyboard opens. Direct search widens the capsule for 150 ms and raises it into the sheet over 400 ms. Incognito, voice, clear and native inline completion are inside the field. Search can expand to full screen and stays raised when the keyboard closes or shrinks. Render checks cover the same sheet and bar across the transition, result placement, keyboard lift and dismissal. Watch existing consent-gated `usage_counts.search_sheet_expanded`, `usage_counts.tray_back_swiped` and `searches`. |
+| Incognito black backgrounds | Owner bug report | ✅ | Pitch-black start, search sheet, page address bar, native search capsule and tab switcher backgrounds in both appearance settings, with readable dark-palette controls. Focused render checks cover light and dark. Device visual verification pending because another session owns the emulator. Color-only fix; no telemetry added and Incognito activity stays uncounted. |
+
+### Android settings layout
+
+Standard Android in-app icons use Google's Material Symbols Rounded in shared React Native controls and native Compose menus (owner request, 2026-11-18). Shared custom artwork and incognito eyes are retained; iOS icons are unchanged. Verified with 178 icon render checks across iOS and Android, native vector tests and an Android debug build. Emulator visual check pending because another session owns the device. Artwork-only change, no new measurable action or telemetry field.
+
+| Feature | Reference | Ardia | Verification |
+| --- | --- | --- | --- |
+| Settings screen | Owner reference | ✅ | Settings fills the Android screen. Its medium Material top app bar collapses from 112 dp to 64 dp as the list scrolls at default text size. The segmented rows keep their neutral icons and fixed 24 dp icon slots. |
+| Address bar page menu | Owner reference | ✅ | The Android address bar’s menu matches the iPhone menu’s action order, with platform-dependent actions shown when available. The URL capsule widens on both sides and docks at the top with Back, Forward, the editable page title, optional Pin to Mac and Reload or Stop. Swipe up to expand or down to return to compact height. The opening URL keeps its leading characters. Taps on menu rows stay with the row, and vertical drags resize the sheet only past the drag threshold. Find on Page reuses the native Material search field with a search keyboard, an unobscured page, and match navigation. Closing Find dismisses its keyboard and restores the menu immediately even if a match scrolled the page. Android Material controls use native gesture hit testing after animated moves. Back or keyboard dismissal ends Find. Compare `usage_counts.find_closed_bar` with `find_opened_bar` to watch completed find sessions. Site Settings uses a plain header. Back restores the address bar in the menu. Compare phone `usage_counts.site_settings_sheet_expanded` with `site_settings_sheet_opened`. |

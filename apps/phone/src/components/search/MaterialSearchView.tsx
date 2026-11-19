@@ -1,185 +1,192 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Keyboard, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
+import { Keyboard, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import Animated, { useAnimatedKeyboard, useAnimatedReaction, useAnimatedScrollHandler, useAnimatedStyle, useDerivedValue, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { inlineOffer } from "../../lib/inlineOffer";
+import { trayMaxHeight } from "../../lib/trayMotion";
+import { MaterialSearchBar, type MaterialSearchBarHandle } from "../../platform/completingField";
 import { activateRow, cancelSearch, submitSearch, toggleTrayIncognito } from "../../state/browse/store";
 import { menuOpenedHaptic, trayRowActions } from "../../state/browse/tabMenus";
-import { useSearchFieldVersion, useSearchInitialText, useSearchOpen, useSearchRows, useSearchSession, useSearchText } from "../../state/search/hooks";
+import { useSurface } from "../../state/browse/hooks";
+import { useSearchCompletedFor, useSearchCompletion, useSearchFieldVersion, useSearchFromDockedMenu, useSearchInitialText, useSearchOpen, useSearchRows, useSearchSession, useSearchText } from "../../state/search/hooks";
 import { refinedText, type TrayRow } from "../../state/search/omnibox";
 import { searchState, setSearchText, typeSearch } from "../../state/search/store";
-import { useIncognito } from "../../state/tabs/hooks";
-import { canSearchByVoice, presentVoiceSearch, useVoice } from "../../state/voice/store";
-import { predictiveBack } from "@ardia/phone-native";
-import { countUsage } from "../../state/telemetry/telemetry";
-import { useTabs } from "../../state/tabs/store";
 import { useTrayCovers } from "../../state/search/trayBack";
-import { FloatingMenu, Symbol, useTheme } from "../ui";
+import { useIncognito, useSelectedTab } from "../../state/tabs/hooks";
+import { useTabs } from "../../state/tabs/store";
+import { countUsage } from "../../state/telemetry/telemetry";
+import { canSearchByVoice, presentVoiceSearch, useVoice } from "../../state/voice/store";
+import { FloatingMenu, Symbol, usePresence, useTheme } from "../ui";
+import { useMaterialSearchBarVisible } from "../browsing/PersistentMaterialBar";
+import { barAddress } from "../browsing/FloatingBar";
+import { MaterialAddressContent } from "../ui/MaterialBottomBar";
 import { useReduceMotion } from "../ui/contrast";
-import { backSwipe, useMaterialRipple } from "../ui/MaterialSurfaces";
+import { rolesFromScheme } from "../ui/materialRoles";
+import { MaterialSheet, materialSheetMs, type MaterialSheetSearch } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
-import { materialDuration, materialMotion, materialMove, materialShape, materialSize, materialType } from "../ui/materialTokens";
-import { reducedMotionMs } from "../ui/motion";
+import { MATERIAL_SEGMENT_GAP, materialBottomBar, materialDuration, materialSegmentCorners, materialShape, materialSize, materialType } from "../ui/materialTokens";
 import { SuggestionRow } from "./SuggestionRow";
-import { TrayInput, type TrayInputHandle } from "./TrayInput";
 
-const HEADER_HEIGHT = 72;
-
-export const materialSearchMs = (reduceMotion: boolean, entering: boolean) =>
-  reduceMotion ? reducedMotionMs(materialDuration.short3) : entering ? materialMotion.fadeThroughIn.durationMs : materialMotion.fadeThroughOut.durationMs;
-
+const SHEET_ABOVE_KEYBOARD = 340;
 const FOCUS_AFTER_ENTER_MS = 32;
 
-export const materialSearchFocusDelay = (enterMs: number, sinceOpenMs: number) => Math.max(0, enterMs - sinceOpenMs) + FOCUS_AFTER_ENTER_MS;
+export const materialSearchMs = (reduceMotion: boolean, entering: boolean) =>
+  materialSheetMs(reduceMotion, entering) + (reduceMotion ? 0 : materialDuration.short3);
+
+export const materialSearchFocusDelay = (enterMs: number, sinceOpenMs: number) =>
+  Math.max(0, enterMs - sinceOpenMs) + FOCUS_AFTER_ENTER_MS;
+
+export const countSearchExpansion = () => {
+  if (!useTabs.getState().incognito) countUsage("search_sheet_expanded");
+};
+
+const countSearchBackSwipe = () => {
+  if (!useTabs.getState().incognito) countUsage("tray_back_swiped");
+};
+
+export function useMaterialSheetSearch(searching: boolean): MaterialSheetSearch {
+  const incognito = useIncognito();
+  const insets = useSafeAreaInsets();
+  const surface = useSurface();
+  const { height, width, fontScale } = useWindowDimensions();
+  const keyboard = useAnimatedKeyboard({ isStatusBarTranslucentAndroid: true, isNavigationBarTranslucentAndroid: true });
+  const preferred = SHEET_ABOVE_KEYBOARD + materialBottomBar.field * (fontScale - 1);
+  const bodyMaxHeight = trayMaxHeight(preferred, height - insets.top, insets.bottom, materialSize.topAppBar);
+  const keyboardPeak = useSharedValue(0);
+  useAnimatedReaction(
+    () => ({ lift: keyboard.height.value, width, searching }),
+    (next, previous) => {
+      if (!next.searching || !previous?.searching || previous.width !== next.width) keyboardPeak.value = next.searching ? next.lift : 0;
+      else if (next.lift > keyboardPeak.value) keyboardPeak.value = next.lift;
+    },
+  );
+  const sheetHeight = useDerivedValue(() => {
+    const dock = Math.max(keyboard.height.value, keyboardPeak.value, insets.bottom);
+    const available = Math.max(insets.bottom, height - insets.top - materialSize.topAppBar);
+    return Math.min(bodyMaxHeight + dock, Math.max(available, keyboard.height.value));
+  });
+  const voice = useVoice((state) => state.presented);
+  const covered = useTrayCovers((state) => state.covers > 0);
+  const barSide = Math.max(insets.left, insets.right) + materialBottomBar.edge + materialBottomBar.inset + (surface === "start" ? 0 : materialSize.touchTarget + materialBottomBar.gap);
+  return { height: sheetHeight, keyboard: keyboard.height, barSide, claimsBack: !voice && !covered, incognito, onBackSwipe: countSearchBackSwipe };
+}
 
 export function MaterialSearchTray() {
   const open = useSearchOpen();
+  const fromDockedMenu = useSearchFromDockedMenu();
   const session = useSearchSession();
-  const [mounted, setMounted] = useState(open ? session : null);
-  useEffect(() => {
-    if (open) setMounted(session);
-  }, [open, session]);
-  if (mounted === null) return null;
-  return <MaterialSearchView key={mounted} open={open} onGone={() => setMounted(null)} />;
+  const standalone = open && !fromDockedMenu;
+  const presence = usePresence(standalone);
+  if (!presence.mounted || fromDockedMenu) return null;
+  return <StandaloneMaterialSearch key={session} open={standalone} onHidden={presence.hidden} />;
 }
 
-function MaterialSearchView({ open, onGone }: { open: boolean; onGone: () => void }) {
-  const { scheme } = useMaterialTheme();
-  const insets = useSafeAreaInsets();
-  const reduceMotion = useReduceMotion();
-  const icon = useMaterialRipple(true);
+function StandaloneMaterialSearch({ open, onHidden }: { open: boolean; onHidden: () => void }) {
+  useMaterialSearchBarVisible();
+  const search = useMaterialSheetSearch(true);
+  const scrollY = useSharedValue(0);
+  return (
+    <MaterialSheet
+      open={open}
+      onDismiss={cancelSearch}
+      onHidden={onHidden}
+      search={search}
+      expandableList={{ scrollY, compactMaxHeight: SHEET_ABOVE_KEYBOARD, onExpand: countSearchExpansion }}
+      dockedBar={(spread) => <MaterialSearchField open={open} spread={spread} />}
+    >
+      <MaterialSearchResults scrollY={scrollY} />
+    </MaterialSheet>
+  );
+}
+
+export function MaterialSearchField({ open, dockedMenu = false, spread }: { open: boolean; dockedMenu?: boolean; spread?: SharedValue<number> }) {
   const incognito = useIncognito();
-  const shown = useSharedValue(0);
-  const back = useSharedValue(0);
+  const { scheme, dark } = useMaterialTheme(incognito);
+  const reduceMotion = useReduceMotion();
   const version = useSearchFieldVersion();
-  const field = useRef<TrayInputHandle | null>(null);
+  const initialText = useSearchInitialText();
+  const completion = useSearchCompletion();
+  const completedFor = useSearchCompletedFor();
+  const field = useRef<MaterialSearchBarHandle | null>(null);
+  const fieldWidth = useRef(0);
+  const surface = useSurface();
+  const tab = useSelectedTab();
+  const editingStyle = useAnimatedStyle(() => ({ opacity: spread ? Math.max(0, 2 * spread.value - 1) : 1 }));
+  const landingStyle = useAnimatedStyle(() => ({ opacity: spread ? Math.max(0, 1 - 2 * spread.value) : 0 }));
   const openedAt = useRef(Date.now());
-  const voice = useVoice((state) => state.presented);
-  const covered = useTrayCovers((state) => state.covers > 0);
-  const claimsBack = open && !voice && !covered;
+  const submitted = useRef(false);
+  const [text, setText] = useState(() => searchState().text);
   useEffect(() => {
-    if (!claimsBack) return;
-    const swipe = backSwipe(() => {
-      if (!useTabs.getState().incognito) countUsage("tray_back_swiped");
-    });
-    const claim = predictiveBack.claim({
-      onProgress: (progress) => {
-        swipe.progress(progress);
-        back.value = progress;
-      },
-      onCancel: () => {
-        swipe.cancel();
-        back.value = materialMove(0, "standard", materialDuration.short4);
-      },
-      onCommit: () => {
-        swipe.commit();
-        cancelSearch();
-      },
-    });
-    return () => {
-      claim.remove();
-      back.value = 0;
-    };
-  }, [claimsBack]);
+    setText(searchState().text);
+  }, [version]);
   useEffect(() => {
-    if (open) {
-      shown.value = materialMove(1, materialMotion.fadeThroughIn.easing, materialSearchMs(reduceMotion, true));
+    if (!open) {
+      field.current?.blur();
+      Keyboard.dismiss();
       return;
     }
-    field.current?.blur();
-    Keyboard.dismiss();
-    const gone = (finished?: boolean) => {
-      "worklet";
-      if (finished) runOnJS(onGone)();
-    };
-    shown.value = materialMove(0, materialMotion.fadeThroughOut.easing, materialSearchMs(reduceMotion, false), gone);
-  }, [open]);
-  const enter = useAnimatedStyle(() => ({ opacity: shown.value, transform: [{ scale: (0.96 + 0.04 * shown.value) * (1 - 0.1 * back.value) }, { translateY: back.value * 24 }], borderRadius: back.value * 28 }));
-  const surface = incognito ? scheme.inverseSurface : scheme.surfaceContainerHigh;
-  const ink = incognito ? scheme.inverseOnSurface : scheme.onSurface;
-  const inkVariant = incognito ? scheme.inverseOnSurface : scheme.onSurfaceVariant;
-  return (
-    <Animated.View
-      testID="materialSearchView"
-      accessibilityViewIsModal={open}
-      collapsable={false}
-      accessibilityElementsHidden={!open}
-      importantForAccessibility={open ? "auto" : "no-hide-descendants"}
-      pointerEvents={open ? "auto" : "none"}
-      style={[StyleSheet.absoluteFill, { backgroundColor: surface, paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }, enter]}>
-      <View testID="materialSearchHeader" style={styles.header}>
-        <Pressable testID="materialSearchBack" accessibilityRole="button" accessibilityLabel="Close Search" android_ripple={icon} onPress={cancelSearch} style={styles.iconButton}>
-          <View style={styles.flipped}>
-            <Symbol name="arrowRight" size={materialSize.icon} color={ink} />
-          </View>
-        </Pressable>
-        <MaterialSearchField key={version} first={version === 0} ink={ink} hint={inkVariant} accent={scheme.primary} handle={field} focusDelayMs={materialSearchFocusDelay(materialSearchMs(reduceMotion, true), Date.now() - openedAt.current)} />
-        <Pressable
-          testID="materialSearchIncognito"
-          accessibilityRole="button"
-          accessibilityLabel={incognito ? "Deactivate Incognito" : "Activate Incognito"}
-          accessibilityState={{ selected: incognito }}
-          android_ripple={icon}
-          onPress={toggleTrayIncognito}
-          style={[styles.iconButton, incognito ? { backgroundColor: scheme.inversePrimary } : null]}
-        >
-          <Symbol name="eyeglasses" size={materialSize.icon} color={incognito ? scheme.onPrimaryContainer : inkVariant} />
-        </Pressable>
-      </View>
-      <View style={[styles.divider, { backgroundColor: incognito ? scheme.outline : scheme.outlineVariant }]} />
-      <MaterialSearchRows incognito={incognito} ink={inkVariant} />
-    </Animated.View>
-  );
-}
-
-function MaterialSearchField({ first, ink, hint, accent, handle, focusDelayMs }: { first: boolean; ink: string; hint: string; accent: string; handle: React.MutableRefObject<TrayInputHandle | null>; focusDelayMs: number }) {
-  const icon = useMaterialRipple(true);
-  const initialText = useSearchInitialText();
-  const incognito = useIncognito();
-  const [start] = useState(() => searchState().text);
-  const [hasText, setHasText] = useState(start.length > 0);
-  const input = useRef<TrayInputHandle | null>(null);
-  const submitted = useRef(false);
-  useEffect(() => {
-    const focus = setTimeout(() => input.current?.focus(), focusDelayMs);
+    const enterMs = dockedMenu ? 0 : materialSearchMs(reduceMotion, true);
+    const delay = materialSearchFocusDelay(enterMs, Date.now() - openedAt.current);
+    const focus = setTimeout(() => field.current?.focus(), delay);
     return () => clearTimeout(focus);
-  }, []);
+  }, [version, open]);
+
   return (
-    <>
-      <TrayInput
-        ref={(made) => {
-          input.current = made;
-          handle.current = made;
-        }}
-        style={[materialType.bodyLarge, styles.input]}
-        start={start}
-        selectsStart={first && Boolean(initialText)}
-        color={ink}
-        placeholderColor={hint}
-        accent={accent}
-        keyboardAppearance={incognito ? "dark" : "default"}
-        onTyped={(text) => {
-          if (text.length > 0 !== hasText) setHasText(text.length > 0);
-          typeSearch(text);
-        }}
-        onSubmit={(text) => {
-          if (submitted.current) return;
-          if (submitSearch(text)) submitted.current = true;
-        }}
-      />
-      {hasText ? (
-        <Pressable testID="materialSearchClear" accessibilityRole="button" accessibilityLabel="Clear Text" android_ripple={icon} onPress={() => input.current?.clearsInPlace() || setSearchText("")} style={styles.iconButton}>
-          <Symbol name="xmark" size={materialSize.icon} color={hint} />
-        </Pressable>
-      ) : !incognito && canSearchByVoice() ? (
-        <Pressable testID="materialSearchVoice" accessibilityRole="button" accessibilityLabel="Voice Search" android_ripple={icon} onPress={presentVoiceSearch} style={styles.iconButton}>
-          <Symbol name="mic" size={materialSize.icon} color={hint} />
-        </Pressable>
+    <View style={styles.fieldClip}>
+      <Animated.View testID="materialSearchEditing" onLayout={(event) => { fieldWidth.current = event.nativeEvent.layout.width; }} style={[styles.bar, !open && fieldWidth.current > 0 ? { width: fieldWidth.current } : null, editingStyle]}>
+        <MaterialSearchBar
+          key={version}
+          ref={field}
+          testID="materialSearchBar"
+          embedded
+          style={styles.bar}
+          text={text}
+          offer={inlineOffer(completion, completedFor)}
+          selectsAllOnFocus={version === 0 && Boolean(initialText)}
+          incognito={incognito}
+          showsVoice={canSearchByVoice()}
+          appearance={{ dark, scheme }}
+          onTypedChange={(next) => {
+            setText(next);
+            typeSearch(next);
+          }}
+          onSubmit={(displayed) => {
+            if (submitted.current) return;
+            if (submitSearch(displayed)) submitted.current = true;
+          }}
+          onClearPress={() => {
+            setText("");
+            setSearchText("");
+          }}
+          onVoicePress={presentVoiceSearch}
+          onIncognitoPress={toggleTrayIncognito}
+        />
+      </Animated.View>
+      {spread ? (
+        <Animated.View testID="materialSearchLanding" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.landing, landingStyle]}>
+          {surface === "browsing" && tab ? (
+            <>
+              <MaterialAddressContent address={barAddress(tab)} scheme={scheme} testID="materialSearchLandingHost" />
+              <View style={styles.landingAction}><Symbol name="ellipsis" size={20} color={scheme.onSurfaceVariant} /></View>
+            </>
+          ) : (
+            <>
+              <Symbol name="magnifyingglass" size={materialSize.icon} color={scheme.onSurfaceVariant} />
+              <Text numberOfLines={1} style={[materialType.bodyLarge, styles.landingText, { color: scheme.onSurfaceVariant }]}>{surface === "deck" ? "Search Tabs" : "Search or type address"}</Text>
+            </>
+          )}
+        </Animated.View>
       ) : null}
-    </>
+    </View>
   );
 }
 
-function MaterialSearchRows({ incognito, ink }: { incognito: boolean; ink: string }) {
+export function MaterialSearchResults({ scrollY }: { scrollY: SharedValue<number> }) {
+  const incognito = useIncognito();
+  const onScroll = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+  const { scheme } = useMaterialTheme(incognito);
   const theme = useTheme();
   const rows = useSearchRows();
   const typed = useSearchText();
@@ -192,18 +199,29 @@ function MaterialSearchRows({ incognito, ink }: { incognito: boolean; ink: strin
   }, []);
   if (incognito && !typed.trim())
     return (
-      <View testID="materialSearchIncognitoNote" style={styles.note}>
-        <Symbol name="eyeglasses" size={materialSize.icon * 2} color={ink} />
-        <Text style={[materialType.titleMedium, { color: ink }]}>You’re browsing Incognito</Text>
+      <View testID="materialSearchIncognitoNote" style={[styles.group, styles.note, materialSegmentCorners(0, 1), { backgroundColor: scheme.surfaceContainer }]}>
+        <Symbol name="eyeglasses" size={materialSize.icon} color={scheme.onSurfaceVariant} />
+        <Text style={[materialType.titleMedium, styles.noteText, { color: scheme.onSurfaceVariant }]}>You’re browsing Incognito</Text>
       </View>
     );
+  const rowRoles = incognito ? rolesFromScheme(scheme, true) : theme;
   return (
-    <>
-      <ScrollView testID="materialSearchRows" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerStyle={styles.rows}>
-        {rows.map((row, index) => (
-          <SuggestionRow key={index} row={row} typed={typed} roles={theme} menu={trayRowActions(row)} onActivate={activateRow} onRefine={refine} onMenu={showMenu} />
-        ))}
-      </ScrollView>
+    <View testID="materialSearchResults" style={styles.results}>
+      <Animated.ScrollView testID="materialSearchRows" onScroll={onScroll} scrollEventThrottle={16} keyboardShouldPersistTaps="handled" keyboardDismissMode="none">
+        {rows.length ? (
+          <View testID="materialSearchGroup" style={[styles.group, styles.segments]}>
+            {rows.map((row, index) => (
+              <View
+                key={index}
+                testID="materialSearchSegment"
+                style={[styles.segment, materialSegmentCorners(index, rows.length)]}
+              >
+                <SuggestionRow row={row} typed={typed} roles={rowRoles} menu={trayRowActions(row)} onActivate={activateRow} onRefine={refine} onMenu={showMenu} />
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </Animated.ScrollView>
       {menu ? (
         <FloatingMenu
           items={trayRowActions(menu.row).map((action) => ({ label: action.label, icon: action.icon, onPress: action.run }))}
@@ -211,16 +229,20 @@ function MaterialSearchRows({ incognito, ink }: { incognito: boolean; ink: strin
           onDismiss={() => setMenu(null)}
         />
       ) : null}
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { height: HEADER_HEIGHT, flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 4 },
-  iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },
-  flipped: { transform: [{ scaleX: -1 }] },
-  input: { flex: 1, paddingVertical: 0, height: materialSize.touchTarget },
-  divider: { height: 1 },
-  rows: { paddingVertical: 8 },
-  note: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },
+  fieldClip: { width: "100%", height: materialBottomBar.field, overflow: "hidden", borderRadius: materialShape.full },
+  landing: { ...StyleSheet.absoluteFill, flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 12, paddingRight: 4 },
+  landingText: { flex: 1 },
+  landingAction: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center" },
+  bar: { width: "100%", height: materialBottomBar.field },
+  results: { flex: 1 },
+  group: { marginHorizontal: 16 },
+  segments: { gap: MATERIAL_SEGMENT_GAP, paddingVertical: 4 },
+  segment: { overflow: "hidden" },
+  note: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12 },
+  noteText: { flexShrink: 1 },
 });

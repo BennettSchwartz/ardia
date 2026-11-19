@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, Text, TextInput, View } from "react-native";
 import { withAlpha } from "../../lib/color";
-import { MATERIAL_STATE } from "./materialRoles";
+import { MaterialIconButton } from "./MaterialIconButton";
 import { useMaterialTheme } from "./materialTheme";
 import { materialShape, materialSize, materialType } from "./materialTokens";
 import { Symbol } from "./Symbol";
@@ -30,14 +30,7 @@ export function MaterialTopBar({ title, titleTestID, nav, navLabel, onNav, actio
 type ActionProps = { testID?: string; icon: SymbolName; label: string; ink?: string; turned?: boolean; flipped?: boolean; onPress: () => void };
 
 export function MaterialIconAction({ testID, icon, label, ink, turned, flipped, onPress }: ActionProps) {
-  const { scheme } = useMaterialTheme();
-  return (
-    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} android_ripple={{ color: withAlpha(scheme.onSurface, MATERIAL_STATE.pressed), borderless: true }} onPress={onPress} style={styles.icon}>
-      <View style={turned ? styles.turned : flipped ? styles.flipped : null}>
-        <Symbol name={icon} size={materialSize.icon} color={ink ?? scheme.onSurfaceVariant} />
-      </View>
-    </Pressable>
-  );
+  return <MaterialIconButton testID={testID} icon={icon} label={label} ink={ink} turned={turned} flipped={flipped} onPress={onPress} />;
 }
 
 type FieldProps = { value: string; placeholder: string; onChangeText: (text: string) => void; testID?: string };
@@ -77,9 +70,6 @@ const EMPTY_SIDE = 72;
 const styles = StyleSheet.create({
   bar: { flexDirection: "row", alignItems: "center", minHeight: materialSize.topAppBar, paddingHorizontal: 4, gap: 4 },
   title: { flex: 1, paddingHorizontal: 4 },
-  icon: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
-  turned: { transform: [{ rotate: "90deg" }] },
-  flipped: { transform: [{ scaleX: -1 }] },
   field: { height: materialSize.searchBar, borderRadius: materialShape.full, flexDirection: "row", alignItems: "center", gap: 16, paddingLeft: 16, paddingRight: 4, overflow: "hidden" },
   input: { flex: 1, height: materialSize.touchTarget, paddingVertical: 0 },
   empty: { width: EMPTY_SIDE, height: EMPTY_SIDE, borderRadius: EMPTY_SIDE / 2, alignItems: "center", justifyContent: "center" },

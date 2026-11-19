@@ -9,6 +9,7 @@ import { setDynamicScheme } from "../state/app/dynamicScheme";
 import * as browse from "../state/browse/store";
 import { dismissSearch, presentSearch } from "../state/search/store";
 import { useTabs } from "../state/tabs/store";
+import { currentPreferences, setPreference } from "../state/settings/store";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 const onAndroid = Platform.OS === "android" ? test : test.skip;
@@ -31,7 +32,7 @@ afterEach(() => {
 
 type Root = ReturnType<typeof renderSurface>;
 const node = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.type === "string")[0];
-const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function")[0]!;
+const pressable = (root: Root, id: string) => root.root.findAll((found) => found.props.testID === id && typeof found.props.onPress === "function" && found.props.android_ripple !== undefined)[0]!;
 const flat = (found: ReactTestInstance | undefined) => StyleSheet.flatten(found?.props.style) ?? {};
 
 const start = () =>
@@ -41,7 +42,7 @@ const start = () =>
     </DesignProvider>,
   );
 
-onAndroid("the material start screen is the scheme's surfaces, a top app bar of 48 dp icon buttons, and the logo with a 56 dp Material search bar centred under it", () => {
+onAndroid("the material start screen is the scheme's surfaces, a top app bar of 48 dp icon buttons, the centred logo, and a Material bottom search bar like the web URL bar", () => {
   const root = start();
   expect(node(root, "materialStart")).toBeDefined();
   expect(root.root.findAll((found) => found.type === Backdrop)[0]!.props.colors).toEqual([LIGHT.surface, LIGHT.surfaceContainerLow]);
@@ -49,7 +50,19 @@ onAndroid("the material start screen is the scheme's surfaces, a top app bar of 
     expect(flat(node(root, `materialStart:${label}`))).toMatchObject({ width: 48, height: 48 });
     expect(pressable(root, `materialStart:${label}`).props.android_ripple).toMatchObject({ borderless: true });
   }
-  expect(flat(node(root, "materialStartSearch"))).toMatchObject({ height: 56, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
+  expect(node(root, "materialStartCenter")!.findAll((found) => found.props.testID === "materialStartSearch")).toHaveLength(0);
+  expect(flat(node(root, "materialStartBottomBar"))).toMatchObject({
+    position: "absolute",
+    bottom: 32,
+    left: 16,
+    right: 16,
+    height: 64,
+    borderRadius: 9999,
+    backgroundColor: "transparent",
+    elevation: 0,
+  });
+  expect(node(root, "materialStartBottomBar")!.findAll((found) => found.props.testID === "materialStartSearch").length).toBeGreaterThan(0);
+  expect(flat(node(root, "materialStartSearch"))).toMatchObject({ height: 48, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
   expect(pressable(root, "materialStartSearch").props.android_ripple).toMatchObject({ borderless: false });
   expect(node(root, "startDeckBar")).toBeUndefined();
   unmount(root);
@@ -80,6 +93,7 @@ onAndroid("with tabs open the leading button is Tabs, and it shows the deck", ()
   act(() => browse.useBrowse.setState({ surface: "start", sheet: null }));
   const deck = jest.spyOn(browse, "showDeck").mockImplementation(() => Promise.resolve());
   const root = start();
+  expect(flat(node(root, "materialStartBottomBar"))).toMatchObject({ backgroundColor: LIGHT.surfaceContainer, elevation: 3 });
   act(() => {
     pressable(root, "materialStart:Tabs").props.onPress();
   });
@@ -87,19 +101,24 @@ onAndroid("with tabs open the leading button is Tabs, and it shows the deck", ()
   unmount(root);
 });
 
-onAndroid("in Incognito the start screen is the scheme's inverse surface and says so", () => {
+onAndroid.each(["light", "dark"] as const)("in Incognito the start screen stays dark with %s appearance", (appearance) => {
+  const previous = currentPreferences().schemeChoice;
+  act(() => setPreference("schemeChoice", appearance));
   act(() => useTabs.setState({ incognito: true }));
   const root = start();
-  expect(flat(node(root, "materialStartBackdrop")).backgroundColor).toBe(LIGHT.inverseSurface);
+  expect(flat(node(root, "materialStartBackdrop")).backgroundColor).toBe("#000000");
+  expect(flat(node(root, "materialStartBottomBar"))).toMatchObject({ backgroundColor: "transparent", elevation: 0 });
+  expect(flat(node(root, "materialStartSearch")).backgroundColor).toBe("#000000");
   expect(root.root.findAll((found) => found.props.children === "You’re browsing Incognito").length).toBeGreaterThan(0);
   expect(node(root, "materialStart:New Tab")).toBeDefined();
   unmount(root);
+  act(() => setPreference("schemeChoice", previous));
 });
 
 onAndroid("while search is open the start screen's controls leave touch and TalkBack, and they fade through on Material's timings", () => {
   const root = start();
   act(() => presentSearch("start", ""));
-  for (const id of ["materialStartTopBar", "materialStartCenter"]) {
+  for (const id of ["materialStartTopBar", "materialStartCenter", "materialStartBottomBar"]) {
     expect(node(root, id)!.props).toMatchObject({ pointerEvents: "none", importantForAccessibility: "no-hide-descendants", accessibilityElementsHidden: true });
   }
   expect(materialStartMs(true, true)).toBe(0);

@@ -52,6 +52,7 @@ import {
   closeTabFromDeck,
   consumeDeckEntrance,
   deckEntranceCapture,
+  noteDeckShrinking,
   peekDeckEntrance,
   deckEntered,
   leaveIncognito,
@@ -90,6 +91,7 @@ import { MaterialDeckBackdrop, MaterialDeckChrome, MaterialDeckEmpty } from "./M
 import { MATERIAL_DECK, materialBottomRowCenter, materialCloseAt, materialDeckGeometry } from "./MaterialDeckLayout";
 import { materialDuration, materialMove, materialSize } from "../ui/materialTokens";
 import { PageBarGhost } from "../browsing/PageBarGhost";
+import { useMaterialBarHosted } from "../browsing/PersistentMaterialBar";
 import { screenCornerRadius } from "../../state/app/displayCorner";
 import { TabGrid } from "./TabGrid";
 import { tabGridMotion } from "./tabGridLayout";
@@ -125,7 +127,7 @@ const entrancePhase = (ids: readonly string[], target: string | null): Phase => 
 
 const sameOrder = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, index) => id === b[index]);
 
-export const TabDeck = memo(function TabDeck() {
+export const TabDeck = memo(function TabDeck({ coversPage }: { coversPage?: SharedValue<number> } = {}) {
   countRender("TabDeck");
   const measuresInteractions = interactionPerfEnabled();
   const deckSurface = useSurface();
@@ -137,6 +139,7 @@ export const TabDeck = memo(function TabDeck() {
   const design = useDesign();
   const redesigned = design === "redesigned";
   const material = design === "material";
+  const materialBarHosted = useMaterialBarHosted();
   const searchChrome = redesigned || material;
   const glassChrome = redesigned && usesGlass();
   const gridAvailable = redesigned && deckGridOffered();
@@ -256,8 +259,11 @@ export const TabDeck = memo(function TabDeck() {
   const shownIds = useMemo(() => deckShownIds(order, leavingCards), [order, leavingCards]);
   const contained = containedDeckScroll();
   const DeckCardView = contained ? ContainedDeckCard : material ? MaterialDeckCard : DeckCard;
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: deckPhase.value === DECK_PHASE.closing ? 1 : Math.min(1, positionProgress.value * BACKDROP_LEAD) }));
   const cardsOpacity = useSharedValue(first.cardsOpacity);
+  const backdropStyle = useAnimatedStyle(
+    () => ({ opacity: deckPhase.value === DECK_PHASE.closing ? 1 : material ? cardsOpacity.value : Math.min(1, positionProgress.value * BACKDROP_LEAD) }),
+    [material],
+  );
   const cardsShift = useSharedValue(0);
   const handedOverAway = useSharedValue(0);
   const handOverStyle = useAnimatedStyle(() => ({ transform: [{ translateX: handedOverAway.value * HANDED_OVER_AWAY }] }));
@@ -342,6 +348,7 @@ export const TabDeck = memo(function TabDeck() {
     scaleProgress.value = 0;
     positionProgress.value = 0;
     cardsOpacity.value = 0;
+    if (coversPage) coversPage.value = 0;
     touching.value = false;
   }, [shown, order, heldSelected]);
 
@@ -367,7 +374,9 @@ export const TabDeck = memo(function TabDeck() {
     scaleProgress.value = 0;
     positionProgress.value = 0;
     const shrink = () => {
+      noteDeckShrinking(entrance);
       cardsOpacity.value = 1;
+      if (material && coversPage) coversPage.value = 1;
       scaleProgress.value = moveTo(1, tabsMotion.openScale);
       positionProgress.value = moveTo(1, tabsMotion.openPosition, (finished) => {
         "worklet";
@@ -383,6 +392,7 @@ export const TabDeck = memo(function TabDeck() {
       return () => deckEntered(entrance);
     }
     cardsOpacity.value = 0;
+    if (coversPage) coversPage.value = 0;
     let frame = 0;
     let live = true;
     let waited = false;
@@ -927,11 +937,16 @@ export const TabDeck = memo(function TabDeck() {
       }}
     >
       <Animated.View style={[StyleSheet.absoluteFill, backdropStyle]} pointerEvents="none">
-        <DeckLookBackdropBase />
-        <FrostSource name={DECK_FROST} style={StyleSheet.absoluteFill} pointerEvents="none">
-          <DeckLookBackdrop baseOutside />
-        </FrostSource>
-        {material ? <MaterialDeckBackdrop incognito={incognito} /> : null}
+        {material ? (
+          <MaterialDeckBackdrop incognito={incognito} />
+        ) : (
+          <>
+            <DeckLookBackdropBase />
+            <FrostSource name={DECK_FROST} style={StyleSheet.absoluteFill} pointerEvents="none">
+              <DeckLookBackdrop baseOutside />
+            </FrostSource>
+          </>
+        )}
       </Animated.View>
       <Shade shaded={menu !== null || (chromeMenu && !nativeMenus()) || cardMenu !== null || confirmation !== null}>
         <ColumnContent column={column} width={width} clips>
@@ -1002,13 +1017,14 @@ export const TabDeck = memo(function TabDeck() {
         ) : null}
         {openingCard && tabs.get(openingCard.id) ? <OpeningCard key={openingCard.id} tab={tabs.get(openingCard.id)!} geometry={g} centerX={openingCard.x} centerY={openingCard.y} growsAtMount={openingCard.path === "coveringCard"} endsSquare={openingCard.path === "coveringCard"} onGrowing={() => openingCardGrowing(openingCard.id)} onLanded={openingCard.path === "coveringCard" ? () => landCoveringCard(openingCard.id) : undefined} /> : null}
         </ColumnContent>
-        {Platform.OS === "android" && !redesigned && !column && phase.id && (phase.kind === "opening" || (phase.kind === "closing" && openPath.current === "deckCard")) && tabs.get(phase.id) ? <PageBarGhost tab={tabs.get(phase.id)!} positionProgress={positionProgress} /> : null}
+        {Platform.OS === "android" && !redesigned && !(material && materialBarHosted) && !column && phase.id && (phase.kind === "opening" || (phase.kind === "closing" && openPath.current === "deckCard")) && tabs.get(phase.id) ? <PageBarGhost tab={tabs.get(phase.id)!} positionProgress={positionProgress} cardsOpacity={cardsOpacity} /> : null}
         <MotionView testID="deckChromeFade" style={StyleSheet.absoluteFill} pointerEvents="box-none" to={{ opacity: openingCard ? 0 : 1 }} motion={openingCard ? OPENING_CARD_MOTION : CHROME_BACK}>
         {material ? (
-          <Animated.View testID="materialDeckChrome" style={[StyleSheet.absoluteFill, chromeStyle]} pointerEvents={phase.kind === "settled" ? "box-none" : "none"} collapsable={false} importantForAccessibility={phase.kind === "settled" ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={phase.kind !== "settled"}>
+          <View testID="materialDeckChrome" style={StyleSheet.absoluteFill} pointerEvents={phase.kind === "settled" ? "box-none" : "none"} collapsable={false} importantForAccessibility={phase.kind === "settled" ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={phase.kind !== "settled"}>
             <ColumnContent column={column} width={width}>
               <MaterialDeckChrome
                 shown={shown}
+                barBlocked={phase.kind !== "settled" || openingCard !== null || menu !== null || chromeMenu || cardMenu !== null || confirmation !== null || deckSheet !== null || trayOpen}
                 safeTop={g.safeTop}
                 safeSide={g.safeSide}
                 safeBottom={insets.bottom}
@@ -1016,6 +1032,7 @@ export const TabDeck = memo(function TabDeck() {
                 incognito={incognito}
                 privateCount={privateCount}
                 hasTabs={allTabs.length > 0}
+                chromeStyle={chromeStyle}
                 onQuery={setNeedle}
                 onCloseIncognito={confirmLeaveIncognito}
                 onCloseAll={confirmCloseAll}
@@ -1023,7 +1040,7 @@ export const TabDeck = memo(function TabDeck() {
                 onMenu={setChromeMenu}
               />
             </ColumnContent>
-          </Animated.View>
+          </View>
         ) : redesigned ? (
           <Animated.View testID="deckRedesignedChrome" style={glassChrome ? StyleSheet.absoluteFill : [StyleSheet.absoluteFill, chromeStyle]} pointerEvents={phase.kind === "settled" ? "box-none" : "none"} collapsable={false} importantForAccessibility={phase.kind === "settled" ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={phase.kind !== "settled"}>
             <ChromeGlassShown progress={positionProgress} initiallyIn={first.progress >= DECK_CHROME_FROM} away={!shown || phase.kind === "closing" || openingCard !== null}>

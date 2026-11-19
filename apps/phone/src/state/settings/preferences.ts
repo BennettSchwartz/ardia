@@ -13,7 +13,7 @@ export type Preferences = {
   appLinks: AppLinkPreference;
   searchSuggestions: boolean;
   searchEngineId: string;
-  collapsesBottomBar: boolean;
+  collapsesBottomBar: boolean | null;
   autoOpensKeyboard: boolean;
   hasFinishedOnboarding: boolean;
   archiveCardShown: boolean;
@@ -33,7 +33,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   appLinks: "ardia",
   searchSuggestions: true,
   searchEngineId: "google",
-  collapsesBottomBar: false,
+  collapsesBottomBar: null,
   autoOpensKeyboard: true,
   hasFinishedOnboarding: false,
   archiveCardShown: false,

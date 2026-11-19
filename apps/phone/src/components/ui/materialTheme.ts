@@ -4,6 +4,7 @@ import { schemeFor, schemePairFor } from "../../lib/material/schemePick";
 import { useDynamicScheme } from "../../state/app/dynamicScheme";
 import { currentDarkScheme, useAppearanceDesign, useDarkScheme } from "../../state/settings/appearance";
 import { currentPreferences, usePreferences } from "../../state/settings/store";
+import { ink } from "./tokens";
 
 export type MaterialTheme = { scheme: MaterialScheme; dark: boolean };
 
@@ -14,10 +15,14 @@ export function useMaterialSchemePair() {
   return useMemo(() => schemePairFor(choice, dynamic, enabled), [choice, dynamic, enabled]);
 }
 
-export function useMaterialTheme(): MaterialTheme {
-  const dark = useDarkScheme();
+export function useMaterialTheme(incognito = false): MaterialTheme {
+  const preferredDark = useDarkScheme();
+  const dark = incognito || preferredDark;
   const pair = useMaterialSchemePair();
-  return useMemo(() => ({ scheme: schemeFor(pair, dark), dark }), [pair, dark]);
+  return useMemo(() => {
+    const scheme = schemeFor(pair, dark);
+    return { scheme: incognito ? { ...scheme, surface: ink.black, surfaceContainer: ink.black, surfaceContainerHigh: ink.black } : scheme, dark };
+  }, [pair, dark, incognito]);
 }
 
 export function currentMaterialTheme(): MaterialTheme {

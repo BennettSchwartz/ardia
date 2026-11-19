@@ -3,573 +3,107 @@ package com.ardia.design
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.PathNode
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
 
-private const val STROKE = 1.9f
-private const val BOLD = 2.1f
-private const val SHIELD = "M12 2.8l7.5 2.9v5.6c0 4.8-3.1 8.6-7.5 10-4.4-1.4-7.5-5.2-7.5-10V5.7z"
-private const val CLOUD = "M7 19C4.2 19 2.5 17.1 2.5 14.8C2.5 12.6 4.1 10.9 6.3 10.7C7 7.6 9.4 5.5 12.4 5.5C15.4 5.5 17.6 7.5 18.2 10.3" +
-    "C20.2 10.7 21.5 12.4 21.5 14.6C21.5 17 19.7 19 17.2 19Z"
-private const val DOCUMENT = "M13.5 3H7.5A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V8.5z"
-private const val DOCUMENT_FOLD = "M13.5 3v3.5a2 2 0 0 0 2 2H19"
-
-internal class SymbolPath {
-    val nodes = ArrayList<PathNode>()
-
-    fun svg(data: String) {
-        nodes += addPathNodes(data)
-    }
-
-    fun moveTo(x: Float, y: Float) {
-        nodes += PathNode.MoveTo(x, y)
-    }
-
-    fun lineTo(x: Float, y: Float) {
-        nodes += PathNode.LineTo(x, y)
-    }
-
-    fun close() {
-        nodes += PathNode.Close
-    }
-
-    fun line(x1: Float, y1: Float, x2: Float, y2: Float) {
-        moveTo(x1, y1)
-        lineTo(x2, y2)
-    }
-
-    fun polyline(vararg points: Float) {
-        moveTo(points[0], points[1])
-        for (index in 2 until points.size step 2) lineTo(points[index], points[index + 1])
-    }
-
-    fun polygon(vararg points: Float) {
-        polyline(*points)
-        close()
-    }
-
-    fun ellipse(centerX: Float, centerY: Float, radiusX: Float, radiusY: Float) {
-        moveTo(centerX - radiusX, centerY)
-        nodes += PathNode.ArcTo(radiusX, radiusY, 0f, true, true, centerX + radiusX, centerY)
-        nodes += PathNode.ArcTo(radiusX, radiusY, 0f, true, true, centerX - radiusX, centerY)
-        close()
-    }
-
-    fun circle(centerX: Float, centerY: Float, radius: Float) = ellipse(centerX, centerY, radius, radius)
-
-    fun roundRect(x: Float, y: Float, width: Float, height: Float, radius: Float) {
-        val r = minOf(radius, width / 2, height / 2)
-        moveTo(x + r, y)
-        lineTo(x + width - r, y)
-        nodes += PathNode.ArcTo(r, r, 0f, false, true, x + width, y + r)
-        lineTo(x + width, y + height - r)
-        nodes += PathNode.ArcTo(r, r, 0f, false, true, x + width - r, y + height)
-        lineTo(x + r, y + height)
-        nodes += PathNode.ArcTo(r, r, 0f, false, true, x, y + height - r)
-        lineTo(x, y + r)
-        nodes += PathNode.ArcTo(r, r, 0f, false, true, x + r, y)
-        close()
-    }
-
-    fun sparkle(centerX: Float, centerY: Float, radius: Float) {
-        val pinch = radius * 0.14f
-        moveTo(centerX, centerY - radius)
-        nodes += PathNode.QuadTo(centerX + pinch, centerY - pinch, centerX + radius, centerY)
-        nodes += PathNode.QuadTo(centerX + pinch, centerY + pinch, centerX, centerY + radius)
-        nodes += PathNode.QuadTo(centerX - pinch, centerY + pinch, centerX - radius, centerY)
-        nodes += PathNode.QuadTo(centerX - pinch, centerY - pinch, centerX, centerY - radius)
-        close()
-    }
-}
-
-internal class SymbolScope(private val builder: ImageVector.Builder) {
-    fun stroke(width: Float = STROKE, block: SymbolPath.() -> Unit) {
-        builder.addPath(
-            pathData = SymbolPath().apply(block).nodes,
-            stroke = SolidColor(Color.Black),
-            strokeLineWidth = width,
-            strokeLineCap = StrokeCap.Round,
-            strokeLineJoin = StrokeJoin.Round,
-        )
-    }
-
-    fun fill(evenOdd: Boolean = false, block: SymbolPath.() -> Unit) {
-        builder.addPath(
-            pathData = SymbolPath().apply(block).nodes,
-            pathFillType = if (evenOdd) PathFillType.EvenOdd else PathFillType.NonZero,
-            fill = SolidColor(Color.Black),
-        )
-    }
-
-    fun roundedFill(width: Float, block: SymbolPath.() -> Unit) {
-        builder.addPath(
-            pathData = SymbolPath().apply(block).nodes,
-            fill = SolidColor(Color.Black),
-            stroke = SolidColor(Color.Black),
-            strokeLineWidth = width,
-            strokeLineJoin = StrokeJoin.Round,
-        )
-    }
-
-    fun group(
-        rotate: Float = 0f,
-        pivotX: Float = 12f,
-        pivotY: Float = 12f,
-        scale: Float = 1f,
-        translationX: Float = 0f,
-        translationY: Float = 0f,
-        block: SymbolScope.() -> Unit,
-    ) {
-        builder.addGroup(
-            rotate = rotate,
-            pivotX = pivotX,
-            pivotY = pivotY,
-            scaleX = scale,
-            scaleY = scale,
-            translationX = translationX,
-            translationY = translationY,
-        )
-        block()
-        builder.clearGroup()
-    }
-}
-
-private fun symbol(name: String, block: SymbolScope.() -> Unit): ImageVector {
+private fun material(name: String, scaled: Boolean, vararg paths: String): ImageVector {
     val builder = ImageVector.Builder(name = name, defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
-    SymbolScope(builder).block()
+    if (scaled) builder.addGroup(scaleX = 0.025f, scaleY = 0.025f, translationY = 24f)
+    for (path in paths) builder.addPath(pathData = addPathNodes(path), fill = SolidColor(Color.Black))
+    if (scaled) builder.clearGroup()
     return builder.build()
 }
 
-private fun SymbolScope.raisedHand() {
-    fill {
-        roundRect(6.9f, 4.6f, 2.6f, 10f, 1.3f)
-        roundRect(9.9f, 2.8f, 2.6f, 11f, 1.3f)
-        roundRect(12.9f, 3.6f, 2.6f, 10f, 1.3f)
-        roundRect(15.9f, 6f, 2.4f, 8.5f, 1.2f)
-        roundRect(6.9f, 9.8f, 11.4f, 11.7f, 4.6f)
-    }
-    group(rotate = -38f, pivotX = 7f, pivotY = 15f) { fill { roundRect(2.4f, 13.8f, 6.6f, 2.5f, 1.25f) } }
-}
-
-private fun SymbolScope.laptop(screenX: Float, screenWidth: Float, baseFrom: Float, baseTo: Float) {
-    stroke { roundRect(screenX, 5f, screenWidth, 10.5f, 1.6f) }
-    stroke(BOLD) { line(baseFrom, 18.5f, baseTo, 18.5f) }
-}
-
 object ArdiaSymbols {
-    val plus by lazy { symbol("plus") { stroke(BOLD) { line(12f, 5f, 12f, 19f); line(5f, 12f, 19f, 12f) } } }
-    val minus by lazy { symbol("minus") { stroke(BOLD) { line(5f, 12f, 19f, 12f) } } }
-    val xmark by lazy { symbol("xmark") { stroke(BOLD) { line(6.5f, 6.5f, 17.5f, 17.5f); line(17.5f, 6.5f, 6.5f, 17.5f) } } }
-    val checkmark by lazy { symbol("checkmark") { stroke(BOLD) { polyline(5f, 12.5f, 9.8f, 17.3f, 19f, 6.6f) } } }
-    val chevronUp by lazy { symbol("chevron.up") { stroke(BOLD) { polyline(5.5f, 15.5f, 12f, 9f, 18.5f, 15.5f) } } }
-    val chevronDown by lazy { symbol("chevron.down") { stroke(BOLD) { polyline(5.5f, 8.5f, 12f, 15f, 18.5f, 8.5f) } } }
-    val chevronLeft by lazy { symbol("chevron.left") { stroke(BOLD) { polyline(15.5f, 5f, 8.5f, 12f, 15.5f, 19f) } } }
-    val chevronRight by lazy { symbol("chevron.right") { stroke(BOLD) { polyline(8.5f, 5f, 15.5f, 12f, 8.5f, 19f) } } }
-    val chevronUpChevronDown by lazy {
-        symbol("chevron.up.chevron.down") { stroke { polyline(8f, 9.5f, 12f, 5.5f, 16f, 9.5f); polyline(8f, 14.5f, 12f, 18.5f, 16f, 14.5f) } }
-    }
-    val chevronLeftForwardslashChevronRight by lazy {
-        symbol("chevron.left.forwardslash.chevron.right") {
-            stroke { polyline(7.5f, 7f, 2.5f, 12f, 7.5f, 17f); polyline(16.5f, 7f, 21.5f, 12f, 16.5f, 17f); line(14f, 4.5f, 10f, 19.5f) }
-        }
-    }
-    val arrowRight by lazy { symbol("arrow.right") { stroke { line(4f, 12f, 19.5f, 12f); polyline(13.5f, 6f, 19.5f, 12f, 13.5f, 18f) } } }
-    val arrowUpForward by lazy { symbol("arrow.up.forward") { stroke { line(6.5f, 17.5f, 17f, 7f); polyline(8.5f, 7f, 17f, 7f, 17f, 15.5f) } } }
-    val arrowUturnBackward by lazy {
-        symbol("arrow.uturn.backward") { stroke { polyline(8.5f, 13.5f, 3.5f, 8.5f, 8.5f, 3.5f); svg("M3.5 8.5H14a6 6 0 0 1 0 12H10.5") } }
-    }
-    val arrowClockwise by lazy {
-        symbol("arrow.clockwise") { stroke { svg("M19.5 12.5A7.5 7.5 0 1 1 15.6 5.9"); polyline(13.96f, 2.25f, 15.6f, 5.9f, 11.64f, 6.45f) } }
-    }
-    val arrowRightCircle by lazy {
-        symbol("arrow.right.circle") { stroke { circle(12f, 12f, 9f); line(7.5f, 12f, 16f, 12f); polyline(12.5f, 8.5f, 16f, 12f, 12.5f, 15.5f) } }
-    }
-    val arrowDownCircleFill by lazy {
-        symbol("arrow.down.circle.fill") {
-            fill(evenOdd = true) {
-                circle(12f, 12f, 10f)
-                polygon(10.9f, 6.3f, 13.1f, 6.3f, 13.1f, 12.9f, 15.4f, 10.6f, 16.95f, 12.15f, 12f, 17.1f, 7.05f, 12.15f, 8.6f, 10.6f, 10.9f, 12.9f)
-            }
-        }
-    }
-    val arrowUpForwardAppFill by lazy {
-        symbol("arrow.up.forward.app.fill") {
-            val arrow = floatArrayOf(
-                10.9f, 17.7f, 13.1f, 17.7f, 13.1f, 11.1f, 15.4f, 13.4f, 16.95f, 11.85f, 12f, 6.9f, 7.05f, 11.85f, 8.6f, 13.4f, 10.9f, 11.1f,
-            )
-            fill(evenOdd = true) {
-                roundRect(3f, 3f, 18f, 18f, 5.5f)
-                polygon(*SymbolGeometry.transform(arrow, 45f, 0.85f, 12f, 12.3f))
-            }
-        }
-    }
-    val arrowUpForwardSquare by lazy {
-        symbol("arrow.up.forward.square") {
-            stroke { roundRect(3.5f, 3.5f, 17f, 17f, 4.5f); line(9f, 15f, 15.2f, 8.8f); polyline(10f, 8.8f, 15.2f, 8.8f, 15.2f, 14f) }
-        }
-    }
-    val squareAndArrowUp by lazy {
-        symbol("square.and.arrow.up") {
-            stroke {
-                svg("M8.5 9.5H7.5A2.5 2.5 0 0 0 5 12v6.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V12a2.5 2.5 0 0 0-2.5-2.5h-1")
-                line(12f, 2.8f, 12f, 14.5f)
-                polyline(8.6f, 6.2f, 12f, 2.8f, 15.4f, 6.2f)
-            }
-        }
-    }
-    val squareAndArrowUpFill by lazy {
-        symbol("square.and.arrow.up.fill") {
-            fill(evenOdd = true) {
-                roundRect(4.5f, 9f, 15f, 12.5f, 2.8f)
-                polygon(9.6f, 9f, 14.4f, 9f, 14.4f, 15.8f, 9.6f, 15.8f)
-            }
-            stroke(2f) { line(12f, 2.8f, 12f, 14.3f); polyline(8.6f, 6.2f, 12f, 2.8f, 15.4f, 6.2f) }
-        }
-    }
-    val trash by lazy {
-        symbol("trash") {
-            stroke {
-                line(4f, 6.5f, 20f, 6.5f)
-                svg("M9.5 6.5V4.8a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.7")
-                svg("M6 6.5l1 13a2 2 0 0 0 2 1.8h6a2 2 0 0 0 2-1.8l1-13")
-                line(10f, 10.5f, 10f, 17.5f)
-                line(14f, 10.5f, 14f, 17.5f)
-            }
-        }
-    }
-    val archivebox by lazy {
-        symbol("archivebox") {
-            stroke {
-                roundRect(3f, 3.5f, 18f, 5f, 1.4f)
-                svg("M4.5 8.5V18a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5V8.5")
-                line(10f, 12.5f, 14f, 12.5f)
-            }
-        }
-    }
-    val archiveboxFill by lazy {
-        symbol("archivebox.fill") {
-            fill { roundRect(2.5f, 3f, 19f, 5.2f, 1.6f) }
-            fill(evenOdd = true) { roundRect(4f, 9.4f, 16f, 11.6f, 2.4f); roundRect(9f, 11.8f, 6f, 2.2f, 1.1f) }
-        }
-    }
-    val squareStack by lazy {
-        symbol("square.stack") { stroke { roundRect(4f, 8.5f, 16f, 12.5f, 3f); line(6.5f, 5.5f, 17.5f, 5.5f); line(9f, 2.8f, 15f, 2.8f) } }
-    }
-    val squareOnSquare by lazy {
-        symbol("square.on.square") {
-            stroke {
-                roundRect(3.5f, 8f, 12.5f, 12.5f, 2.6f)
-                svg("M8 8V6.5A2.5 2.5 0 0 1 10.5 4h7A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H16")
-            }
-        }
-    }
-    val squareOnSquareDashed by lazy {
-        symbol("square.on.square.dashed") {
-            stroke { roundRect(3.5f, 8f, 12.5f, 12.5f, 2.6f) }
-            stroke(1.7f) {
-                line(8f, 6f, 8f, 6.6f)
-                line(10.4f, 4f, 11.8f, 4f)
-                line(14.4f, 4f, 15.8f, 4f)
-                line(18.6f, 4.3f, 19.7f, 5.4f)
-                line(20f, 8.2f, 20f, 9.6f)
-                line(20f, 12.2f, 20f, 13.6f)
-                line(17.4f, 16f, 18.6f, 15.7f)
-            }
-        }
-    }
-    val docOnDoc by lazy {
-        symbol("doc.on.doc") {
-            stroke {
-                roundRect(4f, 7f, 11.5f, 14.5f, 2.4f)
-                svg("M8.5 7V5.4A2.4 2.4 0 0 1 10.9 3h6.7A2.4 2.4 0 0 1 20 5.4v9.7a2.4 2.4 0 0 1-2.4 2.4h-2.1")
-            }
-        }
-    }
-    val docText by lazy {
-        symbol("doc.text") { stroke { svg(DOCUMENT); svg(DOCUMENT_FOLD); line(8.5f, 13f, 15.5f, 13f); line(8.5f, 16.5f, 13.5f, 16.5f) } }
-    }
-    val docPlaintext by lazy {
-        symbol("doc.plaintext") {
-            stroke { svg(DOCUMENT); svg(DOCUMENT_FOLD); line(8.5f, 10f, 11.5f, 10f); line(8.5f, 13f, 15.5f, 13f); line(8.5f, 16.5f, 15.5f, 16.5f) }
-        }
-    }
-    val listBulletRectangle by lazy {
-        symbol("list.bullet.rectangle") {
-            stroke { roundRect(2.5f, 4.5f, 19f, 15f, 3.2f); line(10f, 10f, 17f, 10f); line(10f, 14f, 17f, 14f) }
-            fill { circle(7f, 10f, 1.2f); circle(7f, 14f, 1.2f) }
-        }
-    }
-    val listBulletRectanglePortraitFill by lazy {
-        symbol("list.bullet.rectangle.portrait.fill") {
-            fill(evenOdd = true) {
-                roundRect(4.5f, 2.5f, 15f, 19f, 3.2f)
-                for (row in floatArrayOf(8f, 12f, 16f)) {
-                    circle(8.4f, row, 1.15f)
-                    roundRect(10.6f, row - 0.9f, 5.4f, 1.8f, 0.9f)
-                }
-            }
-        }
-    }
-    val line3HorizontalDecrease by lazy {
-        symbol("line.3.horizontal.decrease") { stroke { line(4f, 7f, 20f, 7f); line(7f, 12f, 17f, 12f); line(10f, 17f, 14f, 17f) } }
-    }
-    val ellipsis by lazy { symbol("ellipsis") { fill { circle(5.5f, 12f, 1.75f); circle(12f, 12f, 1.75f); circle(18.5f, 12f, 1.75f) } } }
-    val magnifyingglass by lazy { symbol("magnifyingglass") { stroke { circle(10.5f, 10.5f, 6.5f) }; stroke(2.2f) { line(15.3f, 15.3f, 20f, 20f) } } }
-    val textMagnifyingglass by lazy {
-        symbol("text.magnifyingglass") {
-            stroke { line(3f, 6f, 13f, 6f); line(3f, 10.5f, 8f, 10.5f); line(3f, 15f, 7f, 15f); circle(15f, 14f, 4.2f); line(18.1f, 17.1f, 21f, 20f) }
-        }
-    }
-    val globe by lazy {
-        symbol("globe") {
-            stroke(1.6f) {
-                circle(12f, 12f, 9f)
-                svg("M12 3c-2.6 2.5-3.8 5.5-3.8 9s1.2 6.5 3.8 9")
-                svg("M12 3c2.6 2.5 3.8 5.5 3.8 9s-1.2 6.5-3.8 9")
-                line(3f, 12f, 21f, 12f)
-                svg("M4.8 7.6c4.6 1.3 9.8 1.3 14.4 0")
-                svg("M4.8 16.4c4.6-1.3 9.8-1.3 14.4 0")
-            }
-        }
-    }
-    val safariFill by lazy {
-        symbol("safari.fill") {
-            fill(evenOdd = true) { circle(12f, 12f, 10f); polygon(16.6f, 7.4f, 13.4f, 13.4f, 7.4f, 16.6f, 10.6f, 10.6f) }
-            fill { polygon(16.6f, 7.4f, 13.4f, 13.4f, 10.6f, 10.6f) }
-        }
-    }
-    val star by lazy { symbol("star") { stroke(1.8f) { polygon(*SymbolGeometry.star(12f, 12.6f, 9.6f, 4.1f)) } } }
-    val starFill by lazy { symbol("star.fill") { roundedFill(1.4f) { polygon(*SymbolGeometry.star(12f, 12.6f, 9.6f, 4.1f)) } } }
-    val pinFill by lazy {
-        symbol("pin.fill") {
-            fill { svg("M8.6 2.8h6.8a.8.8 0 0 1 .6 1.3L14.8 6v3.3l2.7 3a1 1 0 0 1-.7 1.7H7.2a1 1 0 0 1-.7-1.7l2.7-3V6L8 4.1a.8.8 0 0 1 .6-1.3z") }
-            stroke(1.8f) { line(12f, 14f, 12f, 21.2f) }
-        }
-    }
-    val moonFill by lazy { symbol("moon.fill") { fill { svg("M20 14.5A8.5 8.5 0 1 1 9.5 4A8 8 0 0 0 20 14.5Z") } } }
-    val mic by lazy {
-        symbol("mic") { stroke { roundRect(9f, 2.8f, 6f, 11.4f, 3f); svg("M5.8 11a6.2 6.2 0 0 0 12.4 0"); line(12f, 17.2f, 12f, 21f) } }
-    }
-    val micFill by lazy {
-        symbol("mic.fill") {
-            fill { roundRect(8.6f, 2.5f, 6.8f, 12f, 3.4f) }
-            stroke { svg("M5.8 11a6.2 6.2 0 0 0 12.4 0"); line(12f, 17.2f, 12f, 21f) }
-        }
-    }
-    val stopFill by lazy { symbol("stop.fill") { fill { roundRect(5.5f, 5.5f, 13f, 13f, 2.8f) } } }
-    val keyboardFill by lazy {
-        symbol("keyboard.fill") {
-            fill(evenOdd = true) {
-                roundRect(1.8f, 5.5f, 20.4f, 13f, 2.6f)
-                for (row in floatArrayOf(8.2f, 11.2f)) {
-                    for (key in 0 until 6) roundRect(3.4f + key * 3f, row, 2.2f, 1.9f, 0.5f)
-                }
-                roundRect(7f, 14.4f, 10f, 1.9f, 0.6f)
-            }
-        }
-    }
-    val info by lazy {
-        symbol("info") {
-            fill { circle(12f, 6.3f, 1.5f) }
-            stroke(2f) { polyline(10f, 10.5f, 12.2f, 10.5f, 12.2f, 18.7f); line(9.6f, 18.7f, 14.6f, 18.7f) }
-        }
-    }
-    val equalCircleFill by lazy {
-        symbol("equal.circle.fill") {
-            fill(evenOdd = true) { circle(12f, 12f, 10f); roundRect(7.3f, 8.8f, 9.4f, 2f, 1f); roundRect(7.3f, 13.2f, 9.4f, 2f, 1f) }
-        }
-    }
-    val xmarkCircleFill by lazy {
-        symbol("xmark.circle.fill") { fill(evenOdd = true) { circle(12f, 12f, 10f); polygon(*SymbolGeometry.cross(12f, 12f, 4.4f, 1.05f)) } }
-    }
-    val checkmarkCircleFill by lazy {
-        symbol("checkmark.circle.fill") {
-            fill(evenOdd = true) {
-                circle(12f, 12f, 10f)
-                polygon(*SymbolGeometry.thickPolyline(floatArrayOf(7.2f, 12.4f, 10.6f, 15.8f, 16.8f, 8.6f), 1.1f, 0.4f))
-            }
-        }
-    }
-    val checkmarkShield by lazy { symbol("checkmark.shield") { stroke { svg(SHIELD); polyline(8.8f, 12.2f, 11.1f, 14.5f, 15.4f, 9.6f) } } }
-    val checkmarkShieldFill by lazy {
-        symbol("checkmark.shield.fill") {
-            fill(evenOdd = true) { svg(SHIELD); polygon(*SymbolGeometry.thickPolyline(floatArrayOf(8.6f, 12.3f, 11.1f, 14.8f, 15.6f, 9.6f), 1f, 0.3f)) }
-        }
-    }
-    val shieldLefthalfFilled by lazy {
-        symbol("shield.lefthalf.filled") {
-            stroke { svg(SHIELD) }
-            fill { svg("M12 2.8L4.5 5.7v5.6c0 4.8 3.1 8.6 7.5 10z") }
-        }
-    }
-    val checkmarkIcloudFill by lazy {
-        symbol("checkmark.icloud.fill") {
-            fill(evenOdd = true) { svg(CLOUD); polygon(*SymbolGeometry.thickPolyline(floatArrayOf(8.6f, 13.4f, 11f, 15.8f, 15.6f, 11f), 0.95f, 0.3f)) }
-        }
-    }
-    val paperplaneFill by lazy { symbol("paperplane.fill") { roundedFill(1.2f) { polygon(21f, 3f, 3.2f, 10.4f, 10.3f, 13.7f, 13.6f, 20.8f) } } }
-    val folderFill by lazy {
-        symbol("folder.fill") {
-            fill { svg("M3 7.5A2.5 2.5 0 0 1 5.5 5H9.6l2 2.2h6.9A2.5 2.5 0 0 1 21 9.7v8.8A2.5 2.5 0 0 1 18.5 21h-13A2.5 2.5 0 0 1 3 18.5z") }
-        }
-    }
-    val laptopcomputer by lazy { symbol("laptopcomputer") { laptop(4.5f, 15f, 2f, 22f) } }
-    val macbook by lazy { symbol("macbook") { laptop(4f, 16f, 1.5f, 22.5f) } }
-    val iphone by lazy {
-        symbol("iphone") {
-            stroke { roundRect(6.8f, 2.5f, 10.4f, 19f, 2.8f) }
-            fill { roundRect(10.4f, 4.4f, 3.2f, 1.2f, 0.6f) }
-        }
-    }
-    val macbookAndIphone by lazy {
-        symbol("macbook.and.iphone") {
-            stroke(1.7f) { roundRect(2f, 5f, 13f, 9.5f, 1.4f); roundRect(16.2f, 7.5f, 6.3f, 12f, 1.7f) }
-            stroke(2f) { line(0.9f, 17.5f, 14.4f, 17.5f) }
-        }
-    }
-    val laptopcomputerAndArrowDown by lazy {
-        symbol("laptopcomputer.and.arrow.down") {
-            laptop(4.5f, 15f, 2f, 22f)
-            stroke(1.7f) { line(12f, 7f, 12f, 12.6f); polyline(9.6f, 10.4f, 12f, 12.8f, 14.4f, 10.4f) }
-        }
-    }
-    val platterFilledBottomAndArrowDownIphone by lazy {
-        symbol("platter.filled.bottom.and.arrow.down.iphone") {
-            stroke { roundRect(6f, 2f, 12f, 20f, 2.8f) }
-            fill { roundRect(8.3f, 14.2f, 7.4f, 5.4f, 1.4f) }
-            stroke(1.7f) { line(12f, 5.2f, 12f, 11.4f); polyline(9.6f, 9.2f, 12f, 11.6f, 14.4f, 9.2f) }
-        }
-    }
-    val qrcodeViewfinder by lazy {
-        symbol("qrcode.viewfinder") {
-            stroke {
-                svg("M3.5 8V5.5a2 2 0 0 1 2-2H8")
-                svg("M16 3.5h2.5a2 2 0 0 1 2 2V8")
-                svg("M20.5 16v2.5a2 2 0 0 1-2 2H16")
-                svg("M8 20.5H5.5a2 2 0 0 1-2-2V16")
-            }
-            fill {
-                roundRect(7.5f, 7.5f, 3.6f, 3.6f, 0.6f)
-                roundRect(12.9f, 7.5f, 3.6f, 3.6f, 0.6f)
-                roundRect(7.5f, 12.9f, 3.6f, 3.6f, 0.6f)
-                roundRect(13f, 13f, 1.6f, 1.6f, 0.3f)
-                roundRect(14.9f, 14.9f, 1.6f, 1.6f, 0.3f)
-            }
-        }
-    }
-    val gearshape by lazy { symbol("gearshape") { stroke(1.8f) { polygon(*SymbolGeometry.gear(12f, 12f, 9.6f, 7.6f, 8)); circle(12f, 12f, 3.1f) } } }
-    val gear by lazy { symbol("gear") { stroke(1.7f) { polygon(*SymbolGeometry.gear(12f, 12f, 9.4f, 7.9f, 12)); circle(12f, 12f, 3f) } } }
-    val clockArrowCirclepath by lazy {
-        symbol("clock.arrow.circlepath") {
-            stroke { svg("M5 12A7.5 7.5 0 1 0 7.2 6.7"); polyline(2.6f, 9.6f, 5f, 12f, 7.4f, 9.6f); polyline(12.5f, 8f, 12.5f, 12.3f, 15.3f, 14.1f) }
-        }
-    }
-    val characterCursorIbeam by lazy {
-        symbol("character.cursor.ibeam") {
-            stroke {
-                polyline(3f, 19f, 7.5f, 5.5f, 12f, 19f)
-                line(4.6f, 14.5f, 10.4f, 14.5f)
-                line(18f, 5f, 18f, 19f)
-                line(16f, 4.5f, 20f, 4.5f)
-                line(16f, 19.5f, 20f, 19.5f)
-            }
-        }
-    }
-    val textformatSize by lazy {
-        symbol("textformat.size") {
-            stroke { polyline(2.5f, 19f, 8f, 5f, 13.5f, 19f); line(4.6f, 14f, 11.4f, 14f) }
-            stroke(1.8f) { polyline(14.2f, 19f, 17.6f, 10.5f, 21f, 19f); line(15.3f, 16.2f, 19.9f, 16.2f) }
-        }
-    }
-    val textformatSizeLarger by lazy {
-        symbol("textformat.size.larger") { stroke(BOLD) { polyline(5f, 20f, 12f, 3.5f, 19f, 20f); line(7.6f, 14.5f, 16.4f, 14.5f) } }
-    }
-    val textformatSizeSmaller by lazy {
-        symbol("textformat.size.smaller") { stroke { polyline(7.5f, 18f, 12f, 7f, 16.5f, 18f); line(9.2f, 14f, 14.8f, 14f) } }
-    }
+    val plus by lazy { material("add", true, "M440-440H240q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h200v-200q0-17 11.5-28.5T480-760q17 0 28.5 11.5T520-720v200h200q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H520v200q0 17-11.5 28.5T480-200q-17 0-28.5-11.5T440-240v-200Z") }
+    val minus by lazy { material("remove", true, "M240-440q-17 0-28.5-11.5T200-480q0-17 11.5-28.5T240-520h480q17 0 28.5 11.5T760-480q0 17-11.5 28.5T720-440H240Z") }
+    val xmark by lazy { material("close", true, "M480-424 284-228q-11 11-28 11t-28-11q-11-11-11-28t11-28l196-196-196-196q-11-11-11-28t11-28q11-11 28-11t28 11l196 196 196-196q11-11 28-11t28 11q11 11 11 28t-11 28L536-480l196 196q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-424Z") }
+    val checkmark by lazy { material("check", true, "m382-354 339-339q12-12 28-12t28 12q12 12 12 28.5T777-636L410-268q-12 12-28 12t-28-12L182-440q-12-12-11.5-28.5T183-497q12-12 28.5-12t28.5 12l142 143Z") }
+    val chevronUp by lazy { material("expand_less", true, "M480-529 324-373q-11 11-28 11t-28-11q-11-11-11-28t11-28l184-184q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l184 184q11 11 11 28t-11 28q-11 11-28 11t-28-11L480-529Z") }
+    val chevronDown by lazy { material("expand_more", true, "M480-362q-8 0-15-2.5t-13-8.5L268-557q-11-11-11-28t11-28q11-11 28-11t28 11l156 156 156-156q11-11 28-11t28 11q11 11 11 28t-11 28L508-373q-6 6-13 8.5t-15 2.5Z") }
+    val chevronLeft by lazy { material("chevron_left", true, "m432-480 156 156q11 11 11 28t-11 28q-11 11-28 11t-28-11L348-452q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l184-184q11-11 28-11t28 11q11 11 11 28t-11 28L432-480Z") }
+    val chevronRight by lazy { material("chevron_right", true, "M504-480 348-636q-11-11-11-28t11-28q11-11 28-11t28 11l184 184q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L404-268q-11 11-28 11t-28-11q-11-11-11-28t11-28l156-156Z") }
+    val chevronUpChevronDown by lazy { material("unfold_more", true, "m480-236 93-93q12-12 29-12t29 12q12 12 12 29t-12 29L508-148q-6 6-13 8.5t-15 2.5q-8 0-15-2.5t-13-8.5L329-271q-12-12-12-29t12-29q12-12 29-12t29 12l93 93Zm0-484-93 93q-12 12-29 12t-29-12q-12-12-12-29t12-29l123-123q6-6 13-8.5t15-2.5q8 0 15 2.5t13 8.5l123 123q12 12 12 29t-12 29q-12 12-29 12t-29-12l-93-93Z") }
+    val chevronLeftForwardslashChevronRight by lazy { material("code", true, "m193-479 155 155q11 11 11 28t-11 28q-11 11-28 11t-28-11L108-452q-6-6-8.5-13T97-480q0-8 2.5-15t8.5-13l184-184q12-12 28.5-12t28.5 12q12 12 12 28.5T349-635L193-479Zm574-2L612-636q-11-11-11-28t11-28q11-11 28-11t28 11l184 184q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L668-268q-12 12-28 11.5T612-269q-12-12-12-28.5t12-28.5l155-155Z") }
+    val arrowRight by lazy { material("arrow_forward", true, "M647-440H200q-17 0-28.5-11.5T160-480q0-17 11.5-28.5T200-520h447L451-716q-12-12-11.5-28t12.5-28q12-11 28-11.5t28 11.5l264 264q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L508-188q-11 11-27.5 11T452-188q-12-12-12-28.5t12-28.5l195-195Z") }
+    val arrowUpForward by lazy { material("north_east", true, "M680-624 244-188q-11 11-28 11t-28-11q-11-11-11-28t11-28l436-436H400q-17 0-28.5-11.5T360-720q0-17 11.5-28.5T400-760h320q17 0 28.5 11.5T760-720v320q0 17-11.5 28.5T720-360q-17 0-28.5-11.5T680-400v-224Z") }
+    val arrowUturnBackward by lazy { material("undo", true, "M320-200q-17 0-28.5-11.5T280-240q0-17 11.5-28.5T320-280h244q63 0 109.5-40T720-420q0-60-46.5-100T564-560H312l76 76q11 11 11 28t-11 28q-11 11-28 11t-28-11L188-572q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l144-144q11-11 28-11t28 11q11 11 11 28t-11 28l-76 76h252q97 0 166.5 63T800-420q0 94-69.5 157T564-200H320Z") }
+    val arrowClockwise by lazy { material("refresh", true, "M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-70q0-17 11.5-28.5T760-800q17 0 28.5 11.5T800-760v200q0 17-11.5 28.5T760-520H560q-17 0-28.5-11.5T520-560q0-17 11.5-28.5T560-600h128q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q68 0 124.5-34.5T692-367q8-14 22.5-19.5t29.5-.5q16 5 23 21t-1 30q-41 80-117 128t-169 48Z") }
+    val arrowRightCircle by lazy { material("arrow_circle_right", true, "m488-440-36 36q-11 11-11 28t11 28q11 11 28 11t28-11l104-104q12-12 12-28t-12-28L508-612q-11-11-28-11t-28 11q-11 11-11 28t11 28l36 36H360q-17 0-28.5 11.5T320-480q0 17 11.5 28.5T360-440h128Zm-8 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z") }
+    val arrowDownCircleFill by lazy { material("download_for_offline_fill1", true, "M320-280h320q17 0 28.5-11.5T680-320q0-17-11.5-28.5T640-360H320q-17 0-28.5 11.5T280-320q0 17 11.5 28.5T320-280Zm120-274-36-35q-11-11-27.5-11T348-588q-11 11-11 28t11 28l104 104q12 12 28 12t28-12l104-104q11-11 11.5-27.5T612-588q-11-11-27.5-11.5T556-589l-36 35v-126q0-17-11.5-28.5T480-720q-17 0-28.5 11.5T440-680v126Zm40 474q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z") }
+    val arrowUpForwardAppFill by lazy { material("open_in_new", true, "M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h240q17 0 28.5 11.5T480-800q0 17-11.5 28.5T440-760H200v560h560v-240q0-17 11.5-28.5T800-480q17 0 28.5 11.5T840-440v240q0 33-23.5 56.5T760-120H200Zm560-584L416-360q-11 11-28 11t-28-11q-11-11-11-28t11-28l344-344H600q-17 0-28.5-11.5T560-800q0-17 11.5-28.5T600-840h200q17 0 28.5 11.5T840-800v200q0 17-11.5 28.5T800-560q-17 0-28.5-11.5T760-600v-104Z") }
+    val arrowUpForwardSquare by lazy { material("open_in_new", true, "M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h240q17 0 28.5 11.5T480-800q0 17-11.5 28.5T440-760H200v560h560v-240q0-17 11.5-28.5T800-480q17 0 28.5 11.5T840-440v240q0 33-23.5 56.5T760-120H200Zm560-584L416-360q-11 11-28 11t-28-11q-11-11-11-28t11-28l344-344H600q-17 0-28.5-11.5T560-800q0-17 11.5-28.5T600-840h200q17 0 28.5 11.5T840-800v200q0 17-11.5 28.5T800-560q-17 0-28.5-11.5T760-600v-104Z") }
+    val squareAndArrowUp by lazy { material("share", true, "M720-80q-50 0-85-35t-35-85q0-7 1-14.5t3-13.5L322-392q-17 15-38 23.5t-44 8.5q-50 0-85-35t-35-85q0-50 35-85t85-35q23 0 44 8.5t38 23.5l282-164q-2-6-3-13.5t-1-14.5q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35q-23 0-44-8.5T638-672L356-508q2 6 3 13.5t1 14.5q0 7-1 14.5t-3 13.5l282 164q17-15 38-23.5t44-8.5q50 0 85 35t35 85q0 50-35 85t-85 35Zm0-640q17 0 28.5-11.5T760-760q0-17-11.5-28.5T720-800q-17 0-28.5 11.5T680-760q0 17 11.5 28.5T720-720ZM240-440q17 0 28.5-11.5T280-480q0-17-11.5-28.5T240-520q-17 0-28.5 11.5T200-480q0 17 11.5 28.5T240-440Zm480 280q17 0 28.5-11.5T760-200q0-17-11.5-28.5T720-240q-17 0-28.5 11.5T680-200q0 17 11.5 28.5T720-160Zm0-600ZM240-480Zm480 280Z") }
+    val squareAndArrowUpFill by lazy { material("share", true, "M720-80q-50 0-85-35t-35-85q0-7 1-14.5t3-13.5L322-392q-17 15-38 23.5t-44 8.5q-50 0-85-35t-35-85q0-50 35-85t85-35q23 0 44 8.5t38 23.5l282-164q-2-6-3-13.5t-1-14.5q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35q-23 0-44-8.5T638-672L356-508q2 6 3 13.5t1 14.5q0 7-1 14.5t-3 13.5l282 164q17-15 38-23.5t44-8.5q50 0 85 35t35 85q0 50-35 85t-85 35Zm0-640q17 0 28.5-11.5T760-760q0-17-11.5-28.5T720-800q-17 0-28.5 11.5T680-760q0 17 11.5 28.5T720-720ZM240-440q17 0 28.5-11.5T280-480q0-17-11.5-28.5T240-520q-17 0-28.5 11.5T200-480q0 17 11.5 28.5T240-440Zm480 280q17 0 28.5-11.5T760-200q0-17-11.5-28.5T720-240q-17 0-28.5 11.5T680-200q0 17 11.5 28.5T720-160Zm0-600ZM240-480Zm480 280Z") }
+    val trash by lazy { material("delete", true, "M280-120q-33 0-56.5-23.5T200-200v-520q-17 0-28.5-11.5T160-760q0-17 11.5-28.5T200-800h160q0-17 11.5-28.5T400-840h160q17 0 28.5 11.5T600-800h160q17 0 28.5 11.5T800-760q0 17-11.5 28.5T760-720v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM400-280q17 0 28.5-11.5T440-320v-280q0-17-11.5-28.5T400-640q-17 0-28.5 11.5T360-600v280q0 17 11.5 28.5T400-280Zm160 0q17 0 28.5-11.5T600-320v-280q0-17-11.5-28.5T560-640q-17 0-28.5 11.5T520-600v280q0 17 11.5 28.5T560-280ZM280-720v520-520Z") }
+    val archivebox by lazy { material("archive", true, "M480-560q-17 0-28.5 11.5T440-520v128l-36-36q-11-11-28-11t-28 11q-11 11-11 28t11 28l104 104q12 12 28 12t28-12l104-104q11-11 11-28t-11-28q-11-11-28-11t-28 11l-36 36v-128q0-17-11.5-28.5T480-560Zm-280-80v440h560v-440H200Zm0 520q-33 0-56.5-23.5T120-200v-499q0-14 4.5-27t13.5-24l50-61q11-14 27.5-21.5T250-840h460q18 0 34.5 7.5T772-811l50 61q9 11 13.5 24t4.5 27v499q0 33-23.5 56.5T760-120H200Zm16-600h528l-34-40H250l-34 40Zm264 300Z") }
+    val archiveboxFill by lazy { material("archive", true, "M480-560q-17 0-28.5 11.5T440-520v128l-36-36q-11-11-28-11t-28 11q-11 11-11 28t11 28l104 104q12 12 28 12t28-12l104-104q11-11 11-28t-11-28q-11-11-28-11t-28 11l-36 36v-128q0-17-11.5-28.5T480-560Zm-280-80v440h560v-440H200Zm0 520q-33 0-56.5-23.5T120-200v-499q0-14 4.5-27t13.5-24l50-61q11-14 27.5-21.5T250-840h460q18 0 34.5 7.5T772-811l50 61q9 11 13.5 24t4.5 27v499q0 33-23.5 56.5T760-120H200Zm16-600h528l-34-40H250l-34 40Zm264 300Z") }
+    val squareStack by lazy { material("tab_group", true, "M320-240q-33 0-56.5-23.5T240-320v-480q0-33 23.5-56.5T320-880h480q33 0 56.5 23.5T880-800v480q0 33-23.5 56.5T800-240H320Zm0-80h480v-320H560q-17 0-28.5-11.5T520-680v-120H320v480ZM160-80q-33 0-56.5-23.5T80-160v-520q0-17 11.5-28.5T120-720q17 0 28.5 11.5T160-680v520h520q17 0 28.5 11.5T720-120q0 17-11.5 28.5T680-80H160Zm160-720v480-480Z") }
+    val squareOnSquare by lazy { material("tab", true, "M160-240h640v-320H560q-17 0-28.5-11.5T520-600v-120H160v480Zm0 80q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80v-480 480Z") }
+    val squareOnSquareDashed by lazy { material("tab", true, "M160-240h640v-320H560q-17 0-28.5-11.5T520-600v-120H160v480Zm0 80q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-80v-480 480Z") }
+    val docOnDoc by lazy { material("content_copy", true, "M360-240q-33 0-56.5-23.5T280-320v-480q0-33 23.5-56.5T360-880h360q33 0 56.5 23.5T800-800v480q0 33-23.5 56.5T720-240H360Zm0-80h360v-480H360v480ZM200-80q-33 0-56.5-23.5T120-160v-520q0-17 11.5-28.5T160-720q17 0 28.5 11.5T200-680v520h400q17 0 28.5 11.5T640-120q0 17-11.5 28.5T600-80H200Zm160-240v-480 480Z") }
+    val docText by lazy { material("description", true, "M360-240h240q17 0 28.5-11.5T640-280q0-17-11.5-28.5T600-320H360q-17 0-28.5 11.5T320-280q0 17 11.5 28.5T360-240Zm0-160h240q17 0 28.5-11.5T640-440q0-17-11.5-28.5T600-480H360q-17 0-28.5 11.5T320-440q0 17 11.5 28.5T360-400ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h287q16 0 30.5 6t25.5 17l194 194q11 11 17 25.5t6 30.5v447q0 33-23.5 56.5T720-80H240Zm280-560v-160H240v640h480v-440H560q-17 0-28.5-11.5T520-640ZM240-800v200-200 640-640Z") }
+    val docPlaintext by lazy { material("article", true, "M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Zm0-80h560v-560H200v560Zm0-560v560-560Zm120 480h200q17 0 28.5-11.5T560-320q0-17-11.5-28.5T520-360H320q-17 0-28.5 11.5T280-320q0 17 11.5 28.5T320-280Zm0-160h320q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H320q-17 0-28.5 11.5T280-480q0 17 11.5 28.5T320-440Zm0-160h320q17 0 28.5-11.5T680-640q0-17-11.5-28.5T640-680H320q-17 0-28.5 11.5T280-640q0 17 11.5 28.5T320-600Z") }
+    val listBulletRectangle by lazy { material("list_alt_fill1", true, "M320-280q17 0 28.5-11.5T360-320q0-17-11.5-28.5T320-360q-17 0-28.5 11.5T280-320q0 17 11.5 28.5T320-280Zm0-160q17 0 28.5-11.5T360-480q0-17-11.5-28.5T320-520q-17 0-28.5 11.5T280-480q0 17 11.5 28.5T320-440Zm0-160q17 0 28.5-11.5T360-640q0-17-11.5-28.5T320-680q-17 0-28.5 11.5T280-640q0 17 11.5 28.5T320-600Zm160 320h160q17 0 28.5-11.5T680-320q0-17-11.5-28.5T640-360H480q-17 0-28.5 11.5T440-320q0 17 11.5 28.5T480-280Zm0-160h160q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H480q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0-160h160q17 0 28.5-11.5T680-640q0-17-11.5-28.5T640-680H480q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z") }
+    val listBulletRectanglePortraitFill by lazy { material("list_alt_fill1", true, "M320-280q17 0 28.5-11.5T360-320q0-17-11.5-28.5T320-360q-17 0-28.5 11.5T280-320q0 17 11.5 28.5T320-280Zm0-160q17 0 28.5-11.5T360-480q0-17-11.5-28.5T320-520q-17 0-28.5 11.5T280-480q0 17 11.5 28.5T320-440Zm0-160q17 0 28.5-11.5T360-640q0-17-11.5-28.5T320-680q-17 0-28.5 11.5T280-640q0 17 11.5 28.5T320-600Zm160 320h160q17 0 28.5-11.5T680-320q0-17-11.5-28.5T640-360H480q-17 0-28.5 11.5T440-320q0 17 11.5 28.5T480-280Zm0-160h160q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H480q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm0-160h160q17 0 28.5-11.5T680-640q0-17-11.5-28.5T640-680H480q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600ZM200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h560q33 0 56.5 23.5T840-760v560q0 33-23.5 56.5T760-120H200Z") }
+    val line3HorizontalDecrease by lazy { material("filter_list", true, "M440-240q-17 0-28.5-11.5T400-280q0-17 11.5-28.5T440-320h80q17 0 28.5 11.5T560-280q0 17-11.5 28.5T520-240h-80ZM280-440q-17 0-28.5-11.5T240-480q0-17 11.5-28.5T280-520h400q17 0 28.5 11.5T720-480q0 17-11.5 28.5T680-440H280ZM160-640q-17 0-28.5-11.5T120-680q0-17 11.5-28.5T160-720h640q17 0 28.5 11.5T840-680q0 17-11.5 28.5T800-640H160Z") }
+    val ellipsis by lazy { material("more_horiz", true, "M240-400q-33 0-56.5-23.5T160-480q0-33 23.5-56.5T240-560q33 0 56.5 23.5T320-480q0 33-23.5 56.5T240-400Zm240 0q-33 0-56.5-23.5T400-480q0-33 23.5-56.5T480-560q33 0 56.5 23.5T560-480q0 33-23.5 56.5T480-400Zm240 0q-33 0-56.5-23.5T640-480q0-33 23.5-56.5T720-560q33 0 56.5 23.5T800-480q0 33-23.5 56.5T720-400Z") }
+    val magnifyingglass by lazy { material("search", true, "M380-320q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l224 224q11 11 11 28t-11 28q-11 11-28 11t-28-11L532-372q-30 24-69 38t-83 14Zm0-80q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z") }
+    val textMagnifyingglass by lazy { material("find_in_page", true, "M240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h323q18 0 34 7.5t27 21.5l157 189q9 11 14 24t5 27v451q0 27-24.5 37t-43.5-9L560-302q-17 11-37 16.5t-43 5.5q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 23-5.5 43T618-360l102 104v-356L562-800H240v640h333q20 0 30 12.5t10 27.5q0 15-10 27.5T573-80H240Zm240-280q33 0 56.5-23.5T560-440q0-33-23.5-56.5T480-520q-33 0-56.5 23.5T400-440q0 33 23.5 56.5T480-360Zm0-80Zm0 0Z") }
+    val globe by lazy { material("language", true, "M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 31.5-155.5t86-127Q252-817 325-848.5T480-880q83 0 155.5 31.5t127 86q54.5 54.5 86 127T880-480q0 82-31.5 155t-86 127.5q-54.5 54.5-127 86T480-80Zm0-82q26-36 45-75t31-83H404q12 44 31 83t45 75Zm-104-16q-18-33-31.5-68.5T322-320H204q29 50 72.5 87t99.5 55Zm208 0q56-18 99.5-55t72.5-87H638q-9 38-22.5 73.5T584-178ZM170-400h136q-3-20-4.5-39.5T300-480q0-21 1.5-40.5T306-560H170q-5 20-7.5 39.5T160-480q0 21 2.5 40.5T170-400Zm216 0h188q3-20 4.5-39.5T580-480q0-21-1.5-40.5T574-560H386q-3 20-4.5 39.5T380-480q0 21 1.5 40.5T386-400Zm268 0h136q5-20 7.5-39.5T800-480q0-21-2.5-40.5T790-560H654q3 20 4.5 39.5T660-480q0 21-1.5 40.5T654-400Zm-16-240h118q-29-50-72.5-87T584-782q18 33 31.5 68.5T638-640Zm-234 0h152q-12-44-31-83t-45-75q-26 36-45 75t-31 83Zm-200 0h118q9-38 22.5-73.5T376-782q-56 18-99.5 55T204-640Z") }
+    val safariFill by lazy { material("explore_fill1", true, "M480-440q-17 0-28.5-11.5T440-480q0-17 11.5-28.5T480-520q17 0 28.5 11.5T520-480q0 17-11.5 28.5T480-440Zm0 360q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0 0q-134 0-227-93t-93-227q0-134 93-227t227-93q134 0 227 93t93 227q0 134-93 227t-227 93Zm67-234q6-3 11-8t8-11l117-250q5-10-2.5-17.5T663-683L413-566q-6 3-11 8t-8 11L277-297q-5 10 2.5 17.5T297-277l250-117Z") }
+    val star by lazy { material("star", true, "m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143Zm126 18L314-169q-11 7-23 6t-21-8q-9-7-14-17.5t-2-23.5l44-189-147-127q-10-9-12.5-20.5T140-571q4-11 12-18t22-9l194-17 75-178q5-12 15.5-18t21.5-6q11 0 21.5 6t15.5 18l75 178 194 17q14 2 22 9t12 18q4 11 1.5 22.5T809-528L662-401l44 189q3 13-2 23.5T690-171q-9 7-21 8t-23-6L480-269Zm0-201Z") }
+    val starFill by lazy { material("star_fill1", true, "M480-269 314-169q-11 7-23 6t-21-8q-9-7-14-17.5t-2-23.5l44-189-147-127q-10-9-12.5-20.5T140-571q4-11 12-18t22-9l194-17 75-178q5-12 15.5-18t21.5-6q11 0 21.5 6t15.5 18l75 178 194 17q14 2 22 9t12 18q4 11 1.5 22.5T809-528L662-401l44 189q3 13-2 23.5T690-171q-9 7-21 8t-23-6L480-269Z") }
+    val pinFill by lazy { material("push_pin_fill1", false, "m16 12 2 2v2h-5v6l-1 1-1-1v-6H6v-2l2-2V5H7V3h10v2h-1Z") }
+    val moonFill by lazy { material("dark_mode_fill1", true, "M480-120q-151 0-255.5-104.5T120-480q0-138 90-239.5T440-838q13-2 23 3.5t16 14.5q6 9 6.5 21t-7.5 23q-17 26-25.5 55t-8.5 61q0 90 63 153t153 63q31 0 61.5-9t54.5-25q11-7 22.5-6.5T819-479q10 5 15.5 15t3.5 24q-14 138-117.5 229T480-120Z") }
+    val mic by lazy { material("mic", true, "M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm0-240Zm-40 480v-83q-92-13-157.5-78T203-479q-2-17 9-29t28-12q17 0 28.5 11.5T284-480q14 70 69.5 115T480-320q72 0 127-45.5T676-480q4-17 15.5-28.5T720-520q17 0 28 12t9 29q-14 91-79 157t-158 79v83q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Zm40-320q17 0 28.5-11.5T520-520v-240q0-17-11.5-28.5T480-800q-17 0-28.5 11.5T440-760v240q0 17 11.5 28.5T480-480Z") }
+    val micFill by lazy { material("mic_fill1", true, "M480-400q-50 0-85-35t-35-85v-240q0-50 35-85t85-35q50 0 85 35t35 85v240q0 50-35 85t-85 35Zm-40 240v-83q-92-13-157.5-78T203-479q-2-17 9-29t28-12q17 0 28.5 11.5T284-480q14 70 69.5 115T480-320q72 0 127-45.5T676-480q4-17 15.5-28.5T720-520q17 0 28 12t9 29q-14 91-79 157t-158 79v83q0 17-11.5 28.5T480-120q-17 0-28.5-11.5T440-160Z") }
+    val stopFill by lazy { material("stop_fill1", true, "M240-320v-320q0-33 23.5-56.5T320-720h320q33 0 56.5 23.5T720-640v320q0 33-23.5 56.5T640-240H320q-33 0-56.5-23.5T240-320Z") }
+    val keyboardFill by lazy { material("keyboard_fill1", true, "M160-200q-33 0-56.5-23.5T80-280v-400q0-33 23.5-56.5T160-760h640q33 0 56.5 23.5T880-680v400q0 33-23.5 56.5T800-200H160Zm200-120h240q17 0 28.5-11.5T640-360q0-17-11.5-28.5T600-400H360q-17 0-28.5 11.5T320-360q0 17 11.5 28.5T360-320ZM240-560q17 0 28.5-11.5T280-600q0-17-11.5-28.5T240-640q-17 0-28.5 11.5T200-600q0 17 11.5 28.5T240-560Zm120 0q17 0 28.5-11.5T400-600q0-17-11.5-28.5T360-640q-17 0-28.5 11.5T320-600q0 17 11.5 28.5T360-560Zm120 0q17 0 28.5-11.5T520-600q0-17-11.5-28.5T480-640q-17 0-28.5 11.5T440-600q0 17 11.5 28.5T480-560Zm120 0q17 0 28.5-11.5T640-600q0-17-11.5-28.5T600-640q-17 0-28.5 11.5T560-600q0 17 11.5 28.5T600-560Zm120 0q17 0 28.5-11.5T760-600q0-17-11.5-28.5T720-640q-17 0-28.5 11.5T680-600q0 17 11.5 28.5T720-560ZM240-440q17 0 28.5-11.5T280-480q0-17-11.5-28.5T240-520q-17 0-28.5 11.5T200-480q0 17 11.5 28.5T240-440Zm120 0q17 0 28.5-11.5T400-480q0-17-11.5-28.5T360-520q-17 0-28.5 11.5T320-480q0 17 11.5 28.5T360-440Zm120 0q17 0 28.5-11.5T520-480q0-17-11.5-28.5T480-520q-17 0-28.5 11.5T440-480q0 17 11.5 28.5T480-440Zm120 0q17 0 28.5-11.5T640-480q0-17-11.5-28.5T600-520q-17 0-28.5 11.5T560-480q0 17 11.5 28.5T600-440Zm120 0q17 0 28.5-11.5T760-480q0-17-11.5-28.5T720-520q-17 0-28.5 11.5T680-480q0 17 11.5 28.5T720-440Z") }
+    val info by lazy { material("info", true, "M480-280q17 0 28.5-11.5T520-320v-160q0-17-11.5-28.5T480-520q-17 0-28.5 11.5T440-480v160q0 17 11.5 28.5T480-280Zm0-320q17 0 28.5-11.5T520-640q0-17-11.5-28.5T480-680q-17 0-28.5 11.5T440-640q0 17 11.5 28.5T480-600Zm0 520q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z") }
+    val equalCircleFill by lazy { material("do_not_disturb_on_fill1", true, "M320-440h320q17 0 28.5-11.5T680-480q0-17-11.5-28.5T640-520H320q-17 0-28.5 11.5T280-480q0 17 11.5 28.5T320-440ZM480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z") }
+    val xmarkCircleFill by lazy { material("cancel_fill1", true, "m480-424 116 116q11 11 28 11t28-11q11-11 11-28t-11-28L536-480l116-116q11-11 11-28t-11-28q-11-11-28-11t-28 11L480-536 364-652q-11-11-28-11t-28 11q-11 11-11 28t11 28l116 116-116 116q-11 11-11 28t11 28q11 11 28 11t28-11l116-116Zm0 344q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Z") }
+    val checkmarkCircleFill by lazy { material("check_circle", true, "m424-408-86-86q-11-11-28-11t-28 11q-11 11-11 28t11 28l114 114q12 12 28 12t28-12l226-226q11-11 11-28t-11-28q-11-11-28-11t-28 11L424-408Zm56 328q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z") }
+    val checkmarkShield by lazy { material("verified_user", true, "m438-452-56-56q-12-12-28-12t-28 12q-12 12-12 28.5t12 28.5l84 85q12 12 28 12t28-12l170-170q12-12 12-28.5T636-593q-12-12-28.5-12T579-593L438-452Zm42 368q-7 0-13-1t-12-3q-135-45-215-166.5T160-516v-189q0-25 14.5-45t37.5-29l240-90q14-5 28-5t28 5l240 90q23 9 37.5 29t14.5 45v189q0 140-80 261.5T505-88q-6 2-12 3t-13 1Zm0-80q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z") }
+    val checkmarkShieldFill by lazy { material("verified_user", true, "m438-452-56-56q-12-12-28-12t-28 12q-12 12-12 28.5t12 28.5l84 85q12 12 28 12t28-12l170-170q12-12 12-28.5T636-593q-12-12-28.5-12T579-593L438-452Zm42 368q-7 0-13-1t-12-3q-135-45-215-166.5T160-516v-189q0-25 14.5-45t37.5-29l240-90q14-5 28-5t28 5l240 90q23 9 37.5 29t14.5 45v189q0 140-80 261.5T505-88q-6 2-12 3t-13 1Zm0-80q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z") }
+    val shieldLefthalfFilled by lazy { material("shield", true, "M480-84q-7 0-13-1t-12-3q-135-45-215-166.5T160-516v-189q0-25 14.5-45t37.5-29l240-90q14-5 28-5t28 5l240 90q23 9 37.5 29t14.5 45v189q0 140-80 261.5T505-88q-6 2-12 3t-13 1Zm0-80q104-33 172-132t68-220v-189l-240-90-240 90v189q0 121 68 220t172 132Zm0-316Z") }
+    val checkmarkIcloudFill by lazy { material("cloud_done", true, "m413-395-56-56q-12-12-28-12t-28 12q-12 12-12 28.5t12 28.5l85 86q12 12 28 12t28-12l169-169q12-12 12-29t-12-29q-12-12-29-12t-29 12L413-395ZM260-160q-91 0-155.5-63T40-377q0-78 47-139t123-78q25-92 100-149t170-57q117 0 198.5 81.5T760-520q69 8 114.5 59.5T920-340q0 75-52.5 127.5T740-160H260Zm0-80h480q42 0 71-29t29-71q0-42-29-71t-71-29h-60v-80q0-83-58.5-141.5T480-720q-83 0-141.5 58.5T280-520h-20q-58 0-99 41t-41 99q0 58 41 99t99 41Zm220-240Z") }
+    val paperplaneFill by lazy { material("send", true, "M792-443 176-183q-20 8-38-3.5T120-220v-520q0-22 18-33.5t38-3.5l616 260q25 11 25 37t-25 37ZM200-280l474-200-474-200v140l240 60-240 60v140Zm0 0v-400 400Z") }
+    val folderFill by lazy { material("folder_fill1", true, "M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h207q16 0 30.5 6t25.5 17l57 57h320q33 0 56.5 23.5T880-640v400q0 33-23.5 56.5T800-160H160Z") }
+    val laptopcomputer by lazy { material("laptop_mac", true, "M80-160q-33 0-56.5-23.5T0-240h160q-33 0-56.5-23.5T80-320v-440q0-33 23.5-56.5T160-840h640q33 0 56.5 23.5T880-760v440q0 33-23.5 56.5T800-240h160q0 33-23.5 56.5T880-160H80Zm400-40q17 0 28.5-11.5T520-240q0-17-11.5-28.5T480-280q-17 0-28.5 11.5T440-240q0 17 11.5 28.5T480-200ZM160-320h640v-440H160v440Zm0 0v-440 440Z") }
+    val macbook by lazy { material("laptop_mac", true, "M80-160q-33 0-56.5-23.5T0-240h160q-33 0-56.5-23.5T80-320v-440q0-33 23.5-56.5T160-840h640q33 0 56.5 23.5T880-760v440q0 33-23.5 56.5T800-240h160q0 33-23.5 56.5T880-160H80Zm400-40q17 0 28.5-11.5T520-240q0-17-11.5-28.5T480-280q-17 0-28.5 11.5T440-240q0 17 11.5 28.5T480-200ZM160-320h640v-440H160v440Zm0 0v-440 440Z") }
+    val iphone by lazy { material("smartphone", true, "M280-40q-33 0-56.5-23.5T200-120v-720q0-33 23.5-56.5T280-920h400q33 0 56.5 23.5T760-840v720q0 33-23.5 56.5T680-40H280Zm0-120v40h400v-40H280Zm0-80h400v-480H280v480Zm0-560h400v-40H280v40Zm0 0v-40 40Zm0 640v40-40Z") }
+    val macbookAndIphone by lazy { material("devices", true, "M140-160q-25 0-42.5-17.5T80-220q0-25 17.5-42.5T140-280h20v-440q0-33 23.5-56.5T240-800h560q17 0 28.5 11.5T840-760q0 17-11.5 28.5T800-720H240v440h180q25 0 42.5 17.5T480-220q0 25-17.5 42.5T420-160H140Zm460 0q-17 0-28.5-11.5T560-200v-400q0-17 11.5-28.5T600-640h240q17 0 28.5 11.5T880-600v400q0 17-11.5 28.5T840-160H600Zm40-120h160v-280H640v280Zm0 0h160-160Z") }
+    val laptopcomputerAndArrowDown by lazy { material("install_desktop", true, "M320-160v-40H160q-33 0-56.5-23.5T80-280v-480q0-33 23.5-56.5T160-840h280q17 0 28.5 11.5T480-800q0 17-11.5 28.5T440-760H160v480h640v-80q0-17 11.5-28.5T840-400q17 0 28.5 11.5T880-360v80q0 33-23.5 56.5T800-200H640v40q0 17-11.5 28.5T600-120H360q-17 0-28.5-11.5T320-160Zm320-393v-247q0-17 11.5-28.5T680-840q17 0 28.5 11.5T720-800v247l76-75q11-11 27.5-11.5T852-628q11 11 11 28t-11 28L708-428q-12 12-28 12t-28-12L508-572q-11-11-11.5-27.5T508-628q11-11 28-11t28 11l76 75Z") }
+    val platterFilledBottomAndArrowDownIphone by lazy { material("swipe_down_alt", true, "M480-97q-8 0-15-2.5t-13-8.5L348-212q-11-11-11-27.5t11-28.5q12-12 28.5-12t28.5 12l35 35v-171q-69-14-114.5-68.5T280-600q0-83 58.5-141.5T480-800q83 0 141.5 58.5T680-600q0 73-45.5 127.5T520-404v171l36-36q11-11 27.5-11t28.5 12q11 11 11 28t-11 28L508-108q-6 6-13 8.5T480-97Zm0-383q50 0 85-35t35-85q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 50 35 85t85 35Zm0-120Z") }
+    val qrcodeViewfinder by lazy { material("qr_code_scanner", true, "M120-680q-17 0-28.5-11.5T80-720v-120q0-17 11.5-28.5T120-880h120q17 0 28.5 11.5T280-840q0 17-11.5 28.5T240-800h-80v80q0 17-11.5 28.5T120-680Zm0 600q-17 0-28.5-11.5T80-120v-120q0-17 11.5-28.5T120-280q17 0 28.5 11.5T160-240v80h80q17 0 28.5 11.5T280-120q0 17-11.5 28.5T240-80H120Zm600 0q-17 0-28.5-11.5T680-120q0-17 11.5-28.5T720-160h80v-80q0-17 11.5-28.5T840-280q17 0 28.5 11.5T880-240v120q0 17-11.5 28.5T840-80H720Zm120-600q-17 0-28.5-11.5T800-720v-80h-80q-17 0-28.5-11.5T680-840q0-17 11.5-28.5T720-880h120q17 0 28.5 11.5T880-840v120q0 17-11.5 28.5T840-680ZM700-200v-60h60v60h-60Zm0-120v-60h60v60h-60Zm-60 60v-60h60v60h-60Zm-60 60v-60h60v60h-60Zm-60-60v-60h60v60h-60Zm120-120v-60h60v60h-60Zm-60 60v-60h60v60h-60Zm-60-60v-60h60v60h-60Zm40-140q-17 0-28.5-11.5T520-560v-160q0-17 11.5-28.5T560-760h160q17 0 28.5 11.5T760-720v160q0 17-11.5 28.5T720-520H560ZM240-200q-17 0-28.5-11.5T200-240v-160q0-17 11.5-28.5T240-440h160q17 0 28.5 11.5T440-400v160q0 17-11.5 28.5T400-200H240Zm0-320q-17 0-28.5-11.5T200-560v-160q0-17 11.5-28.5T240-760h160q17 0 28.5 11.5T440-720v160q0 17-11.5 28.5T400-520H240Zm20 260h120v-120H260v120Zm0-320h120v-120H260v120Zm320 0h120v-120H580v120Z") }
+    val gearshape by lazy { material("settings", true, "M433-80q-27 0-46.5-18T363-142l-9-66q-13-5-24.5-12T307-235l-62 26q-25 11-50 2t-39-32l-47-82q-14-23-8-49t27-43l53-40q-1-7-1-13.5v-27q0-6.5 1-13.5l-53-40q-21-17-27-43t8-49l47-82q14-23 39-32t50 2l62 26q11-8 23-15t24-12l9-66q4-26 23.5-44t46.5-18h94q27 0 46.5 18t23.5 44l9 66q13 5 24.5 12t22.5 15l62-26q25-11 50-2t39 32l47 82q14 23 8 49t-27 43l-53 40q1 7 1 13.5v27q0 6.5-2 13.5l53 40q21 17 27 43t-8 49l-48 82q-14 23-39 32t-50-2l-60-26q-11 8-23 15t-24 12l-9 66q-4 26-23.5 44T527-80h-94Zm7-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z") }
+    val gear by lazy { material("settings", true, "M433-80q-27 0-46.5-18T363-142l-9-66q-13-5-24.5-12T307-235l-62 26q-25 11-50 2t-39-32l-47-82q-14-23-8-49t27-43l53-40q-1-7-1-13.5v-27q0-6.5 1-13.5l-53-40q-21-17-27-43t8-49l47-82q14-23 39-32t50 2l62 26q11-8 23-15t24-12l9-66q4-26 23.5-44t46.5-18h94q27 0 46.5 18t23.5 44l9 66q13 5 24.5 12t22.5 15l62-26q25-11 50-2t39 32l47 82q14 23 8 49t-27 43l-53 40q1 7 1 13.5v27q0 6.5-2 13.5l53 40q21 17 27 43t-8 49l-48 82q-14 23-39 32t-50-2l-60-26q-11 8-23 15t-24 12l-9 66q-4 26-23.5 44T527-80h-94Zm7-80h79l14-106q31-8 57.5-23.5T639-327l99 41 39-68-86-65q5-14 7-29.5t2-31.5q0-16-2-31.5t-7-29.5l86-65-39-68-99 42q-22-23-48.5-38.5T533-694l-13-106h-79l-14 106q-31 8-57.5 23.5T321-633l-99-41-39 68 86 64q-5 15-7 30t-2 32q0 16 2 31t7 30l-86 65 39 68 99-42q22 23 48.5 38.5T427-266l13 106Zm42-180q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Zm-2-140Z") }
+    val clockArrowCirclepath by lazy { material("history", true, "M480-120q-126 0-223-76.5T131-392q-4-15 6-27.5t27-14.5q16-2 29 6t18 24q24 90 99 147t170 57q117 0 198.5-81.5T760-480q0-117-81.5-198.5T480-760q-69 0-129 32t-101 88h70q17 0 28.5 11.5T360-600q0 17-11.5 28.5T320-560H160q-17 0-28.5-11.5T120-600v-160q0-17 11.5-28.5T160-800q17 0 28.5 11.5T200-760v54q51-64 124.5-99T480-840q75 0 140.5 28.5t114 77q48.5 48.5 77 114T840-480q0 75-28.5 140.5t-77 114q-48.5 48.5-114 77T480-120Zm40-376 100 100q11 11 11 28t-11 28q-11 11-28 11t-28-11L452-452q-6-6-9-13.5t-3-15.5v-159q0-17 11.5-28.5T480-680q17 0 28.5 11.5T520-640v144Z") }
+    val characterCursorIbeam by lazy { material("text_fields", true, "M340-160q-25 0-42.5-17.5T280-220v-460H140q-25 0-42.5-17.5T80-740q0-25 17.5-42.5T140-800h400q25 0 42.5 17.5T600-740q0 25-17.5 42.5T540-680H400v460q0 25-17.5 42.5T340-160Zm360 0q-25 0-42.5-17.5T640-220v-260h-60q-25 0-42.5-17.5T520-540q0-25 17.5-42.5T580-600h240q25 0 42.5 17.5T880-540q0 25-17.5 42.5T820-480h-60v260q0 25-17.5 42.5T700-160Z") }
+    val textformatSize by lazy { material("text_fields", true, "M340-160q-25 0-42.5-17.5T280-220v-460H140q-25 0-42.5-17.5T80-740q0-25 17.5-42.5T140-800h400q25 0 42.5 17.5T600-740q0 25-17.5 42.5T540-680H400v460q0 25-17.5 42.5T340-160Zm360 0q-25 0-42.5-17.5T640-220v-260h-60q-25 0-42.5-17.5T520-540q0-25 17.5-42.5T580-600h240q25 0 42.5 17.5T880-540q0 25-17.5 42.5T820-480h-60v260q0 25-17.5 42.5T700-160Z") }
+    val textformatSizeLarger by lazy { material("text_increase", true, "m187-343-41 114q-5 14-16 21.5t-25 7.5q-23 0-36.5-19.5T63-261l176-469q5-14 17-22t26-8h36q15 0 26.5 8t16.5 22l177 470q8 22-5.5 41T496-200q-14 0-26-8t-17-22l-40-113H187Zm29-81h168l-82-232h-4l-82 232Zm504-16h-80q-17 0-28.5-11.5T600-480q0-17 11.5-28.5T640-520h80v-80q0-17 11.5-28.5T760-640q17 0 28.5 11.5T800-600v80h80q17 0 28.5 11.5T920-480q0 17-11.5 28.5T880-440h-80v80q0 17-11.5 28.5T760-320q-17 0-28.5-11.5T720-360v-80Z") }
+    val textformatSizeSmaller by lazy { material("text_decrease", true, "M640-440q-17 0-28.5-11.5T600-480q0-17 11.5-28.5T640-520h240q17 0 28.5 11.5T920-480q0 17-11.5 28.5T880-440H640Zm-453 97-41 114q-5 14-16 21.5t-25 7.5q-23 0-36.5-19.5T63-261l176-469q5-14 17-22t26-8h36q15 0 26.5 8t16.5 22l177 470q8 22-5.5 41T496-200q-14 0-26-8t-17-22l-40-113H187Zm29-81h168l-82-232h-4l-82 232Z") }
+    val eyeglasses by lazy { material("eyeglasses", true, "M274-360q31 0 55.5-18t34.5-47l15-46q16-48-8-88.5T302-600H161l19 157q5 35 31.5 59t62.5 24Zm412 0q36 0 62.5-24t31.5-59l19-157H659q-45 0-69 41t-8 89l14 45q10 29 34.5 47t55.5 18Zm-412 80q-66 0-115.5-43.5T101-433L80-600q-17 0-28.5-11.5T40-640q0-17 11.5-28.5T80-680h222q44 0 80.5 21.5T440-600h81q21-37 57.5-58.5T659-680h221q17 0 28.5 11.5T920-640q0 17-11.5 28.5T880-600l-21 167q-8 66-57.5 109.5T686-280q-57 0-102.5-32.5T520-399l-15-45q-2-7-4-14.5t-4-21.5h-34q-2 12-4 19.5t-4 14.5l-15 46q-18 54-63.5 87T274-280Z") }
+    val eraserFill by lazy { material("ink_eraser_fill1", true, "M690-240h150q17 0 28.5 11.5T880-200q0 17-11.5 28.5T840-160H610l80-80Zm-483 80q-8 0-15.5-3t-13.5-9l-73-73q-23-23-23.5-57t22.5-58l440-456q23-24 56.5-24t56.5 23l199 199q23 23 23 57t-23 57L532-172q-6 6-13.5 9t-15.5 3H207Z") }
+    val exclamationmarkTriangleFill by lazy { material("warning_fill1", true, "M109-120q-11 0-20-5.5T75-140q-5-9-5.5-19.5T75-180l370-640q6-10 15.5-15t19.5-5q10 0 19.5 5t15.5 15l370 640q6 10 5.5 20.5T885-140q-5 9-14 14.5t-20 5.5H109Zm371-120q17 0 28.5-11.5T520-280q0-17-11.5-28.5T480-320q-17 0-28.5 11.5T440-280q0 17 11.5 28.5T480-240Zm0-120q17 0 28.5-11.5T520-400v-120q0-17-11.5-28.5T480-560q-17 0-28.5 11.5T440-520v120q0 17 11.5 28.5T480-360Z") }
+    val handRaisedFill by lazy { material("front_hand", true, "M520-920q17 0 28.5 11.5T560-880v360q0 17-11.5 28.5T520-480q-17 0-28.5-11.5T480-520v-360q0-17 11.5-28.5T520-920Zm-160 40q17 0 28.5 11.5T400-840v320q0 17-11.5 28.5T360-480q-17 0-28.5-11.5T320-520v-320q0-17 11.5-28.5T360-880ZM500-40q-142 0-241-99t-99-241v-380q0-17 11.5-28.5T200-800q17 0 28.5 11.5T240-760v380q0 109 75.5 184.5T500-120q109 0 184.5-75.5T760-380v-140q-17 0-28.5 11.5T720-480v120q0 17-11.5 28.5T680-320h-80q-33 0-56.5 23.5T520-240v40q0 17-11.5 28.5T480-160q-17 0-28.5-11.5T440-200v-40q0-66 47-113t113-47h40v-400q0-17 11.5-28.5T680-840q17 0 28.5 11.5T720-800v207q10-3 19.5-5t20.5-2h40q17 0 28.5 11.5T840-560v180q0 142-99 241T500-40Zm40-320Z") }
+    val handWaveFill by lazy { material("waving_hand", true, "M680-39q-17 0-28.5-12T640-80q0-17 11.5-28.5T680-120q66 0 113-47t47-113q0-17 12-29t29-12q17 0 28.5 12t11.5 29q0 100-70.5 170.5T680-39ZM80-640q-17 0-29-11.5T39-680q0-100 70.5-170.5T280-921q17 0 29 11.5t12 28.5q0 17-12 29t-29 12q-66 0-113 47t-47 113q0 17-11.5 28.5T80-640Zm689-143q12 12 12 28t-12 28L515-472q-11 12-27.5 11.5T459-472q-12-12-12-28.5t12-28.5l254-254q12-12 28-12t28 12Zm71 127q12 12 12 28.5T840-599L614-373q-11 11-27.5 11T558-373q-12-12-12.5-28.5T557-430l226-226q12-12 28.5-12t28.5 12ZM211-211q-91-91-91-219t91-219l92-92q12-12 28-12t28 12l31 31q7 7 12 14.5t10 15.5l148-149q12-12 28.5-12t28.5 12q12 12 12 28.5T617-772L444-599l-85 84 19 19q46 46 44 110t-49 111l-1 1q-11 11-27.5 11T316-274q-12-12-12-28.5t12-28.5q23-23 25.5-54.5T321-440l-47-46q-12-12-12-28.5t12-28.5l57-56q12-12 12-28.5T331-656l-64 64q-68 68-68 162.5T267-267q68 68 163 68t163-68l239-240q12-12 28.5-12t28.5 12q12 12 12 28.5T889-450L649-211q-91 91-219 91t-219-91Zm219-219Z") }
+    val handPointUpLeftFill by lazy { material("touch_app_fill1", true, "M419-80q-28 0-52.5-12T325-126L124-381q-8-9-7-21.5t9-20.5q20-21 48-25t52 11l74 45v-328q0-17 11.5-28.5T340-760q17 0 29 11.5t12 28.5v200h299q50 0 85 35t35 85v160q0 66-47 113T640-80H419Zm60-520q-17 0-28.5-11.5T439-640q0-2 5-20 8-14 12-28.5t4-31.5q0-50-35-85t-85-35q-50 0-85 35t-35 85q0 17 4 31.5t12 28.5q3 5 4 10t1 10q0 17-11 28.5T202-600q-11 0-20.5-6T167-621q-13-22-20-47t-7-52q0-83 58.5-141.5T340-920q83 0 141.5 58.5T540-720q0 27-7 52t-20 47q-5 9-14 15t-20 6Z") }
+    val handDrawFill by lazy { material("swipe", true, "M480-860q-88 0-169 31t-147 89h86q13 0 21.5 8.5T280-710q0 13-8.5 21.5T250-680H120q-17 0-28.5-11.5T80-720v-130q0-13 8.5-21.5T110-880q13 0 21.5 8.5T140-850v51q72-59 159-90t181-31q94 0 181 31t159 90v-51q0-13 8.5-21.5T850-880q13 0 21.5 8.5T880-850v130q0 17-11.5 28.5T840-680H710q-13 0-21.5-8.5T680-710q0-13 8.5-21.5T710-740h86q-66-58-147-89t-169-31Zm-7 780q-24 0-46-9t-39-26L212-292q-11-11-11.5-27.5T211-348l3-3q16-16 37.5-21.5t42.5.5l66 19v-327q0-17 11.5-28.5T400-720q17 0 28.5 11.5T440-680v380q0 20-16 32t-35 7l-46-13 102 102q5 5 12.5 8.5T473-160h167q33 0 56.5-23.5T720-240v-160q0-17 11.5-28.5T760-440q17 0 28.5 11.5T800-400v160q0 66-47 113T640-80H473Zm47-480q17 0 28.5 11.5T560-520v120q0 17-11.5 28.5T520-360q-17 0-28.5-11.5T480-400v-120q0-17 11.5-28.5T520-560Zm120 40q17 0 28.5 11.5T680-480v80q0 17-11.5 28.5T640-360q-17 0-28.5-11.5T600-400v-80q0-17 11.5-28.5T640-520Zm-69 240Z") }
+    val handDraw by lazy { material("swipe", true, "M480-860q-88 0-169 31t-147 89h86q13 0 21.5 8.5T280-710q0 13-8.5 21.5T250-680H120q-17 0-28.5-11.5T80-720v-130q0-13 8.5-21.5T110-880q13 0 21.5 8.5T140-850v51q72-59 159-90t181-31q94 0 181 31t159 90v-51q0-13 8.5-21.5T850-880q13 0 21.5 8.5T880-850v130q0 17-11.5 28.5T840-680H710q-13 0-21.5-8.5T680-710q0-13 8.5-21.5T710-740h86q-66-58-147-89t-169-31Zm-7 780q-24 0-46-9t-39-26L212-292q-11-11-11.5-27.5T211-348l3-3q16-16 37.5-21.5t42.5.5l66 19v-327q0-17 11.5-28.5T400-720q17 0 28.5 11.5T440-680v380q0 20-16 32t-35 7l-46-13 102 102q5 5 12.5 8.5T473-160h167q33 0 56.5-23.5T720-240v-160q0-17 11.5-28.5T760-440q17 0 28.5 11.5T800-400v160q0 66-47 113T640-80H473Zm47-480q17 0 28.5 11.5T560-520v120q0 17-11.5 28.5T520-360q-17 0-28.5-11.5T480-400v-120q0-17 11.5-28.5T520-560Zm120 40q17 0 28.5 11.5T680-480v80q0 17-11.5 28.5T640-360q-17 0-28.5-11.5T600-400v-80q0-17 11.5-28.5T640-520Zm-69 240Z") }
+    val sparkles by lazy { material("auto_awesome", false, "M19 8.3q-.125 0-.262-.075Q18.6 8.15 18.55 8l-.8-1.75-1.75-.8q-.15-.05-.225-.188Q15.7 5.125 15.7 5t.075-.263Q15.85 4.6 16 4.55l1.75-.8.8-1.75q.05-.15.188-.225.137-.075.262-.075t.263.075q.137.075.187.225l.8 1.75 1.75.8q.15.05.225.187.075.138.075.263t-.075.262Q22.15 5.4 22 5.45l-1.75.8-.8 1.75q-.05.15-.187.225-.138.075-.263.075Zm0 14q-.125 0-.262-.075-.138-.075-.188-.225l-.8-1.75-1.75-.8q-.15-.05-.225-.188-.075-.137-.075-.262t.075-.262q.075-.138.225-.188l1.75-.8.8-1.75q.05-.15.188-.225.137-.075.262-.075t.263.075q.137.075.187.225l.8 1.75 1.75.8q.15.05.225.188.075.137.075.262t-.075.262q-.075.138-.225.188l-1.75.8-.8 1.75q-.05.15-.187.225-.138.075-.263.075ZM9 18.575q-.275 0-.525-.15T8.1 18l-1.6-3.5L3 12.9q-.275-.125-.425-.375-.15-.25-.15-.525t.15-.525q.15-.25.425-.375l3.5-1.6L8.1 6q.125-.275.375-.425.25-.15.525-.15t.525.15q.25.15.375.425l1.6 3.5 3.5 1.6q.275.125.425.375.15.25.15.525t-.15.525q-.15.25-.425.375l-3.5 1.6L9.9 18q-.125.275-.375.425-.25.15-.525.15Zm0-3.425L10 13l2.15-1L10 11 9 8.85 8 11l-2.15 1L8 13ZM9 12Z") }
+    val paintpaletteFill by lazy { material("palette_fill1", true, "M480-80q-82 0-155-31.5t-127.5-86Q143-252 111.5-325T80-480q0-83 32.5-156t88-127Q256-817 330-848.5T488-880q80 0 151 27.5t124.5 76q53.5 48.5 85 115T880-518q0 115-70 176.5T640-280h-74q-9 0-12.5 5t-3.5 11q0 12 15 34.5t15 51.5q0 50-27.5 74T480-80ZM260-440q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120-160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm200 0q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Zm120 160q26 0 43-17t17-43q0-26-17-43t-43-17q-26 0-43 17t-17 43q0 26 17 43t43 17Z") }
+    val link by lazy { material("link", true, "M280-280q-83 0-141.5-58.5T80-480q0-83 58.5-141.5T280-680h120q17 0 28.5 11.5T440-640q0 17-11.5 28.5T400-600H280q-50 0-85 35t-35 85q0 50 35 85t85 35h120q17 0 28.5 11.5T440-320q0 17-11.5 28.5T400-280H280Zm80-160q-17 0-28.5-11.5T320-480q0-17 11.5-28.5T360-520h240q17 0 28.5 11.5T640-480q0 17-11.5 28.5T600-440H360Zm200 160q-17 0-28.5-11.5T520-320q0-17 11.5-28.5T560-360h120q50 0 85-35t35-85q0-50-35-85t-85-35H560q-17 0-28.5-11.5T520-640q0-17 11.5-28.5T560-680h120q83 0 141.5 58.5T880-480q0 83-58.5 141.5T680-280H560Z") }
     val eyes by lazy {
-        symbol("eyes") {
-            fill(evenOdd = true) {
-                ellipse(7.6f, 12f, 3.6f, 7f)
-                ellipse(16.4f, 12f, 3.6f, 7f)
-                ellipse(6.9f, 13f, 1.65f, 2.8f)
-                ellipse(15.7f, 13f, 1.65f, 2.8f)
-            }
-        }
-    }
-    val eyeglasses by lazy {
-        symbol("eyeglasses") {
-            stroke {
-                circle(6.3f, 13.5f, 3.6f)
-                circle(17.7f, 13.5f, 3.6f)
-                svg("M9.9 13.2a2.6 2.6 0 0 1 4.2 0")
-                line(2.7f, 13f, 4.4f, 7.5f)
-                line(21.3f, 13f, 19.6f, 7.5f)
-            }
-        }
-    }
-    val eraserFill by lazy {
-        symbol("eraser.fill") {
-            fill(evenOdd = true) {
-                svg("M13.6 3.9a1.6 1.6 0 0 1 2.3 0l4.2 4.2a1.6 1.6 0 0 1 0 2.3L11 19.5H6.8l-3-3a1.6 1.6 0 0 1 0-2.3z")
-                polygon(7.76f, 10.14f, 14.06f, 16.44f, 13.14f, 17.36f, 6.84f, 11.06f)
-            }
-        }
-    }
-    val exclamationmarkTriangleFill by lazy {
-        symbol("exclamationmark.triangle.fill") {
-            fill(evenOdd = true) {
-                svg("M10.3 3.9a2 2 0 0 1 3.4 0l8.2 14.2a2 2 0 0 1-1.7 3H3.8a2 2 0 0 1-1.7-3z")
-                roundRect(10.95f, 8.3f, 2.1f, 7.2f, 1.05f)
-                circle(12f, 17.9f, 1.25f)
-            }
-        }
-    }
-    val handRaisedFill by lazy { symbol("hand.raised.fill") { raisedHand() } }
-    val handWaveFill by lazy {
-        symbol("hand.wave.fill") {
-            group(rotate = -24f, pivotX = 12f, pivotY = 13f) { raisedHand() }
-            stroke(1.5f) { svg("M3.4 8.4a6.5 6.5 0 0 1 2.4-4.2"); svg("M18.4 21a6.5 6.5 0 0 0 3.6-3") }
-        }
-    }
-    val handPointUpLeftFill by lazy {
-        symbol("hand.point.up.left.fill") {
-            group(rotate = -35f, pivotX = 13f, pivotY = 14f) {
-                fill {
-                    roundRect(9.9f, 1.5f, 2.7f, 11f, 1.35f)
-                    roundRect(9.6f, 9.4f, 9.8f, 12f, 4f)
-                }
-                fill { roundRect(6.2f, 12f, 5f, 2.5f, 1.25f) }
-            }
-        }
-    }
-    val handDrawFill by lazy {
-        symbol("hand.draw.fill") {
-            stroke(1.6f) { svg("M2.5 9.5c1.5-3.5 4-4.5 5-2.5s-1 4.5 1 5 4-3 5.5-3") }
-            group(rotate = -15f, pivotX = 12f, pivotY = 12f, scale = 0.62f, translationX = 4.5f, translationY = 4.5f) { raisedHand() }
-        }
-    }
-    val handDraw by lazy { handDrawFill }
-    val sparkles by lazy { symbol("sparkles") { fill { sparkle(10f, 13.5f, 7f); sparkle(18f, 5.5f, 3.6f); sparkle(18.6f, 18.2f, 2.6f) } } }
-    val paintpaletteFill by lazy {
-        symbol("paintpalette.fill") {
-            fill(evenOdd = true) {
-                svg("M12 2.5C6.8 2.5 2.5 6.6 2.5 11.7c0 5 4.1 9.3 9.2 9.3 1.4 0 2.1-.8 2.1-1.8 0-.5-.2-.9-.5-1.3-.3-.4-.5-.8-.5-1.3 0-1 .8-1.8 1.8-1.8h2.2c3 0 5.2-2.3 5.2-5.2C22 6.5 17.5 2.5 12 2.5z")
-                circle(7.3f, 11.6f, 1.5f)
-                circle(9.6f, 7.4f, 1.5f)
-                circle(14.4f, 7.4f, 1.5f)
-                circle(17.1f, 11.2f, 1.5f)
-            }
-        }
-    }
-    val link by lazy {
-        symbol("link") {
-            group(rotate = -45f) { stroke { roundRect(3.6f, 9.2f, 9.8f, 5.6f, 2.8f); roundRect(10.6f, 9.2f, 9.8f, 5.6f, 2.8f) } }
-        }
+        ImageVector.Builder(name = "eyes", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
+            addPath(
+                pathData = addPathNodes("M4 12A3.6 7 0 1 1 11.2 12A3.6 7 0 1 1 4 12ZM12.8 12A3.6 7 0 1 1 20 12A3.6 7 0 1 1 12.8 12ZM5.25 13A1.65 2.8 0 1 1 8.55 13A1.65 2.8 0 1 1 5.25 13ZM14.05 13A1.65 2.8 0 1 1 17.35 13A1.65 2.8 0 1 1 14.05 13Z"),
+                pathFillType = PathFillType.EvenOdd,
+                fill = SolidColor(Color.Black),
+            )
+        }.build()
     }
 
     private val byName: Map<String, () -> ImageVector> = mapOf(
@@ -655,8 +189,6 @@ object ArdiaSymbols {
         "link" to { link },
         "paintpalette.fill" to { paintpaletteFill },
     )
-
-    val names: Set<String> get() = byName.keys
 
     fun named(sfSymbol: String): ImageVector? = byName[sfSymbol]?.invoke()
 }

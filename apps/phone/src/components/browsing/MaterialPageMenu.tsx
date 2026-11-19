@@ -1,10 +1,12 @@
 import { Children, type ReactNode } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { Pressable } from "react-native-gesture-handler";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { withAlpha } from "../../lib/color";
 import { copy } from "../../lib/platformCopy";
 import {
   canPrintPages,
+  closeMenuSubpage,
   closePageMenu,
   copyCurrentLink,
   editPageQuery,
@@ -13,6 +15,7 @@ import {
   menuReload,
   menuStop,
   openInDefaultBrowser,
+  openSiteSettings,
   openSiteSettingsRoute,
   pinCurrentToMac,
   printCurrentPage,
@@ -29,11 +32,15 @@ import {
 } from "../../state/page/actions";
 import type { MenuModel } from "../../state/page/pageMenu";
 import { useMenuTitle, useTitleFeedback } from "../../state/page/hooks";
+import type { MenuPage } from "../../state/page/store";
+import type { SettingsRoute } from "../../state/settings/nav";
 import { openLibrary, type LibrarySection } from "../../state/library/store";
 import { useIsPinned, useSendTargets } from "../../state/sync/hooks";
 import { syncOffered } from "../../state/sync/offer";
 import { useTab } from "../../state/tabs/hooks";
-import { Favicon, Symbol, Toggle, type MenuItem, type SymbolName } from "../ui";
+import { MaterialSettingsSheetSurface } from "../settings/MaterialSettingsKit";
+import { AllowedSites, SiteSettingsGroups } from "../settings/SitePages";
+import { Favicon, MaterialIconButton, Symbol, Toggle, type MenuItem, type SymbolName } from "../ui";
 import { MATERIAL_STATE } from "../ui/materialRoles";
 import { useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
@@ -51,12 +58,53 @@ function openFromMenu(section: LibrarySection) {
   openLibrary(section);
 }
 
-export function MaterialPageMenu({ tabId, model, onTranslate }: { tabId: string; model: MenuModel; onTranslate: () => void }) {
-  const large = useWindowDimensions().fontScale >= copy().menuLargeTextScale;
-  const devices = useSendTargets(tabId);
+const openDirectSiteSettingsRoute = (route: SettingsRoute) => openSiteSettingsRoute(route, { direct: true });
+
+export function MaterialPageMenu({ tabId, model, page = "main", onTranslate }: { tabId: string; model: MenuModel; page?: MenuPage; onTranslate: () => void }) {
+  if (page === "siteSettings") {
+    return (
+      <>
+        <MaterialSiteSettingsHeader onBack={closeMenuSubpage} />
+        <ScrollView testID="materialPageMenuSiteSettings" contentContainerStyle={styles.column} bounces={false}>
+          <MaterialSiteSettingsContent />
+        </ScrollView>
+      </>
+    );
+  }
   return (
     <ScrollView testID="materialPageMenu" contentContainerStyle={styles.column} bounces={false}>
       <MenuHeader tabId={tabId} model={model} />
+      <MaterialPageMenuItems tabId={tabId} model={model} onTranslate={onTranslate} />
+    </ScrollView>
+  );
+}
+
+export function MaterialSiteSettingsHeader({ onBack }: { onBack: () => void }) {
+  const { scheme } = useMaterialTheme();
+  return (
+    <View testID="materialSiteSettingsHeader" style={styles.subpageHeader}>
+      <MaterialIconButton testID="siteSettingsSheetBack" icon="arrowRight" flipped label="Back" ink={scheme.onSurface} onPress={onBack} />
+      <Text accessibilityRole="header" numberOfLines={1} style={[materialType.titleLarge, styles.flex, { color: scheme.onSurface }]}>
+        Site Settings
+      </Text>
+    </View>
+  );
+}
+
+export function MaterialSiteSettingsContent() {
+  return (
+    <MaterialSettingsSheetSurface>
+      <SiteSettingsGroups openRoute={openDirectSiteSettingsRoute} />
+      <AllowedSites />
+    </MaterialSettingsSheetSurface>
+  );
+}
+
+export function MaterialPageMenuItems({ tabId, model, onTranslate, onFind = showFind }: { tabId: string; model: MenuModel; onTranslate: () => void; onFind?: () => void }) {
+  const large = useWindowDimensions().fontScale >= copy().menuLargeTextScale;
+  const devices = useSendTargets(tabId);
+  return (
+    <>
       {large ? (
         <Group>
           <ListRow icon="docPlaintext" title="Reader" enabled={model.tiles} onPress={showReader} />
@@ -72,7 +120,7 @@ export function MaterialPageMenu({ tabId, model, onTranslate }: { tabId: string;
       )}
       <Groups>
         <Group>
-          <ListRow icon="textMagnifyingglass" title="Find on Page" enabled={model.find} onPress={showFind} />
+          <ListRow icon="textMagnifyingglass" title="Find on Page" enabled={model.find} onPress={onFind} />
           {model.isWebPage && devices.length ? <SendRow devices={devices} /> : null}
           {canPrintPages() ? <ListRow icon="printer" title="Print" enabled={model.print} onPress={printCurrentPage} /> : null}
         </Group>
@@ -96,7 +144,7 @@ export function MaterialPageMenu({ tabId, model, onTranslate }: { tabId: string;
               onChange={setBlockersOn}
             />
           ) : null}
-          <ListRow icon="gearshape" title="Site Settings" enabled onPress={() => openSiteSettingsRoute({ page: "siteSettings" })} />
+          <ListRow icon="gearshape" title="Site Settings" enabled onPress={openSiteSettings} />
         </Group>
         {model.pageRows && model.offersDefaultBrowser ? (
           <Group>
@@ -104,7 +152,7 @@ export function MaterialPageMenu({ tabId, model, onTranslate }: { tabId: string;
           </Group>
         ) : null}
       </Groups>
-    </ScrollView>
+    </>
   );
 }
 
@@ -145,23 +193,7 @@ function PinButton({ tabId, enabled }: { tabId: string; enabled: boolean }) {
 }
 
 function IconButton({ icon, label, enabled, selected, onPress }: { icon: SymbolName; label: string; enabled: boolean; selected?: boolean; onPress: () => void }) {
-  const { scheme } = useMaterialTheme();
-  const ripple = useMaterialRipple(true);
-  const ink = !enabled ? withAlpha(scheme.onSurface, MATERIAL_STATE.disabledContent) : selected ? scheme.primary : scheme.onSurfaceVariant;
-  return (
-    <Pressable
-      testID={`materialMenuIcon:${label}`}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled: !enabled, ...(selected === undefined ? {} : { selected }) }}
-      disabled={!enabled}
-      android_ripple={ripple}
-      onPress={onPress}
-      style={styles.iconButton}
-    >
-      <Symbol name={icon} size={materialSize.icon} color={ink} />
-    </Pressable>
-  );
+  return <MaterialIconButton testID={`materialMenuIcon:${label}`} icon={icon} label={label} enabled={enabled} selected={selected} onPress={onPress} />;
 }
 
 function TonalButton({ icon, title, enabled, onPress }: { icon: SymbolName; title: string; enabled: boolean; onPress: () => void }) {
@@ -182,7 +214,7 @@ function TonalButton({ icon, title, enabled, onPress }: { icon: SymbolName; titl
       style={[styles.tonal, { backgroundColor: fill }]}
     >
       <Symbol name={icon} size={18} color={ink} />
-      <Text numberOfLines={1} style={[materialType.labelLarge, { color: ink }]}>
+      <Text numberOfLines={1} ellipsizeMode="tail" style={[materialType.labelLarge, styles.tonalLabel, { color: ink }]}>
         {title}
       </Text>
     </Pressable>
@@ -215,11 +247,11 @@ function RowContent({ icon, title, enabled, supporting, trailing }: { icon: Symb
     <>
       <Symbol name={icon} size={materialSize.icon} color={enabled ? scheme.onSurfaceVariant : off} />
       <View style={styles.flex}>
-        <Text numberOfLines={1} style={[materialType.bodyLarge, { color: enabled ? scheme.onSurface : off }]}>
+        <Text style={[materialType.bodyLarge, { color: enabled ? scheme.onSurface : off }]}>
           {title}
         </Text>
         {supporting ? (
-          <Text numberOfLines={1} style={[materialType.bodyMedium, styles.digits, { color: enabled ? scheme.onSurfaceVariant : off }]}>
+          <Text style={[materialType.bodyMedium, styles.digits, { color: enabled ? scheme.onSurfaceVariant : off }]}>
             {supporting}
           </Text>
         ) : null}
@@ -323,15 +355,16 @@ function ZoomRow({ model, large }: { model: MenuModel; large: boolean }) {
 
 const styles = StyleSheet.create({
   column: { paddingBottom: 16 },
+  subpageHeader: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: materialSize.touchTarget, paddingLeft: 4, paddingRight: 16 },
   groups: { gap: 12, paddingHorizontal: 16, paddingTop: 8 },
   group: { gap: MATERIAL_SEGMENT_GAP },
   segment: { overflow: "hidden" },
-  flex: { flex: 1 },
+  flex: { flex: 1, minWidth: 0 },
   titleRow: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingHorizontal: 24 },
   nav: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingHorizontal: 12, minHeight: materialSize.touchTarget + 8 },
-  iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full },
   actions: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
-  tonal: { flex: 1, height: TONAL_BUTTON_HEIGHT, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 12 },
+  tonal: { flexGrow: 1, flexShrink: 1, height: TONAL_BUTTON_HEIGHT, borderRadius: materialShape.full, overflow: "hidden", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 10 },
+  tonalLabel: { flexShrink: 1 },
   row: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.listItemOneLine, paddingLeft: 16, paddingRight: 16, paddingVertical: 8 },
   rowTwoLine: { minHeight: materialSize.listItemTwoLine },
   digits: { fontVariant: ["tabular-nums"] },
@@ -339,5 +372,5 @@ const styles = StyleSheet.create({
   zoomStacked: { paddingHorizontal: 16, paddingVertical: 8, minHeight: materialSize.listItemTwoLine },
   zoomHeading: { flexDirection: "row", alignItems: "center", gap: 16, minHeight: materialSize.touchTarget },
   zoomBelow: { flexDirection: "row", alignItems: "center", marginLeft: materialSize.icon + 16 - 12 },
-  zoomReset: { minWidth: 56, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },
+  zoomReset: { minWidth: materialSize.touchTarget, paddingHorizontal: 4, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },
 });

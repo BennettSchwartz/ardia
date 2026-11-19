@@ -133,3 +133,4 @@ export type {
   WebsiteDataKind,
 } from "./pageTypes";
 export { MATERIAL_ROLES, materialColors, type MaterialRole, type MaterialSchemeChange, type NativeMaterialScheme, type NativeMaterialSchemes } from "./material";
+export { MaterialSearchBar, materialSearchBarIsNative, type MaterialSearchAppearance, type MaterialSearchBarHandle, type MaterialSearchBarProps } from "./materialSearchBar";

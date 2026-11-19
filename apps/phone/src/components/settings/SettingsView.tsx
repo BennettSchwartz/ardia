@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
-import { Platform, StyleSheet } from "react-native";
-import Animated, { Easing, FadeInLeft, FadeInRight, FadeOutRight, SlideInLeft, SlideInRight, SlideOutRight } from "react-native-reanimated";
+import { Platform, StyleSheet, type ViewInstance } from "react-native";
+import Animated, { Easing, FadeIn, FadeInLeft, FadeInRight, FadeOut, FadeOutRight, SlideInLeft, SlideInRight, SlideOutRight } from "react-native-reanimated";
 import { refreshSettings } from "../../state/settings/actions";
 import { useSettingsNav, type SettingsRoute } from "../../state/settings/hooks";
 import { tabsMotion, useDesign } from "../ui";
 import { materialEasing, materialMotion } from "../ui/materialTokens";
+import { useCoverFocus } from "../ui/coverFocus";
 import { FilterListDetailPage, FilterListsPage, MyFiltersPage, TrustedSitesPage } from "./BlockingPages";
 import { AboutPage, ClearDataPage, LicensesPage } from "./DataPages";
 import { AppearancePage } from "./AppearancePage";
@@ -31,6 +32,8 @@ const MATERIAL_MOTION = {
   leave: FadeOutRight.duration(materialMotion.sharedAxisOut.durationMs).easing(axisOut),
 };
 const CLASSIC_MOTION = { push, reveal, leave };
+const SCREEN_IN = FadeIn.duration(materialMotion.sharedAxisIn.durationMs).easing(axisIn);
+const SCREEN_OUT = FadeOut.duration(materialMotion.sharedAxisOut.durationMs).easing(axisOut);
 
 export function SettingsPageFor({ route }: { route: SettingsRoute }) {
   switch (route.page) {
@@ -87,6 +90,16 @@ export function SettingsPageFor({ route }: { route: SettingsRoute }) {
 export function SettingsView() {
   if (Platform.OS === "ios") return <ExpoSettingsStack />;
   return <HandBuiltSettings />;
+}
+
+export function MaterialSettingsScreen() {
+  const screen = useRef<ViewInstance>(null);
+  useCoverFocus(screen);
+  return (
+    <Animated.View ref={screen} testID="materialSettingsScreen" entering={SCREEN_IN} exiting={SCREEN_OUT} style={StyleSheet.absoluteFill} accessibilityViewIsModal>
+      <HandBuiltSettings />
+    </Animated.View>
+  );
 }
 
 function HandBuiltSettings() {

@@ -1,5 +1,10 @@
 import { act } from "react-test-renderer";
 
+jest.mock("../lib/design", () => {
+  const actual = jest.requireActual<typeof import("../lib/design")>("../lib/design");
+  return { ...actual, designFor: (os: string, lab?: boolean) => (actual.designFor(os, lab) === "material" ? "original" : actual.designFor(os, lab)) };
+});
+
 const core = require("expo-modules-core") as { requireOptionalNativeModule: (name: string) => unknown; requireNativeViewManager: (name: string) => unknown };
 const realOptional = core.requireOptionalNativeModule;
 const realView = core.requireNativeViewManager;

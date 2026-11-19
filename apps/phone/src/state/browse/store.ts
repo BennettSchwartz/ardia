@@ -325,15 +325,14 @@ export async function showDeck() {
   const covered = pageCovered();
   dismissSearch();
   entranceCapture = null;
+  shrinkingEntrance = null;
+  deferredEntranceSnapshot = null;
   if (surface === "browsing" && selected) {
     const tab = findTab(currentTabs(), selected);
     if (tab?.snapshotFileName) noteSnapshotShown(tab.snapshotFileName);
     if (coverIsCapturable(loading.get(selected) === false, covered)) entranceCapture = {
       id: selected,
-      done: captureSnapshot(selected).then(() => {
-        const fresh = findTab(currentTabs(), selected)?.snapshotFileName;
-        if (fresh) noteSnapshotShown(fresh);
-      }),
+      done: captureSnapshot(selected, true),
     };
   }
   const leaving = surface === "browsing" ? selected : null;
@@ -344,8 +343,14 @@ export async function showDeck() {
 export const peekDeckEntrance = () => useBrowse.getState().deckEntrance;
 
 let entranceCapture: { id: string; done: Promise<void> } | null = null;
+let shrinkingEntrance: string | null = null;
+let deferredEntranceSnapshot: { id: string; uri: string | null } | null = null;
 
 export const deckEntranceCapture = (id: string) => (entranceCapture?.id === id ? entranceCapture.done : null);
+
+export const noteDeckShrinking = (id: string) => {
+  shrinkingEntrance = id;
+};
 
 export const consumeDeckEntrance = () => {
   const entrance = useBrowse.getState().deckEntrance;
@@ -354,7 +359,14 @@ export const consumeDeckEntrance = () => {
 };
 
 export function deckEntered(id: string) {
+  if (shrinkingEntrance === id) shrinkingEntrance = null;
   if (useBrowse.getState().leaving === id) useBrowse.setState({ leaving: null });
+  if (deferredEntranceSnapshot?.id === id) {
+    const { uri } = deferredEntranceSnapshot;
+    deferredEntranceSnapshot = null;
+    const tab = findTab(currentTabs(), id);
+    if (tab && tab.snapshotFileName !== uri) updateTabById(id, { snapshotFileName: uri });
+  }
 }
 
 export function leaveDeck() {
@@ -508,14 +520,18 @@ export function captureCurrentCover() {
   void captureSnapshot(id);
 }
 
-export async function captureSnapshot(id: string) {
+export async function captureSnapshot(id: string, markShown = false) {
   if (!snapshotAllowed(id)) return;
   const snapshot = await snapshotPage(id);
   if (snapshot?.frame) noteSnapshotPageTop(snapshot.uri, snapshot.frame.y);
   const tab = snapshot ? findTab(currentTabs(), id) : null;
   if (!snapshot || !tab) return;
   const step = pictureCaptured(tab, snapshot.uri, snapshot.durable !== false, snapshot.generation);
-  if (step && tab.snapshotFileName !== step.show) updateTabById(id, { snapshotFileName: step.show });
+  if (step?.show && markShown) noteSnapshotShown(step.show);
+  if (step && tab.snapshotFileName !== step.show) {
+    if (shrinkingEntrance === id && useBrowse.getState().leaving === id) deferredEntranceSnapshot = { id, uri: step.show };
+    else updateTabById(id, { snapshotFileName: step.show });
+  }
 }
 
 function snapshotLanded(id: string, uri: string, generation: number) {
@@ -523,8 +539,10 @@ function snapshotLanded(id: string, uri: string, generation: number) {
   if (!tab) return;
   const landed = pictureLanded(tab, uri, generation);
   if (!landed) return;
-  if (landed === "shown" && tab.snapshotFileName !== uri) updateTabById(id, { snapshotFileName: uri });
-  else rewriteTab(id);
+  if (landed === "shown" && tab.snapshotFileName !== uri) {
+    if (shrinkingEntrance === id && useBrowse.getState().leaving === id) deferredEntranceSnapshot = { id, uri };
+    else updateTabById(id, { snapshotFileName: uri });
+  } else rewriteTab(id);
 }
 
 function snapshotAllowed(id: string) {

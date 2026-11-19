@@ -1,7 +1,10 @@
+import { Platform } from "react-native";
 import Svg, { Path } from "react-native-svg";
+import { MaterialSymbol } from "./MaterialSymbol";
 import { SYMBOLS, type SymbolName } from "./symbolPaths";
 
 export function Symbol({ name, size, color }: { name: SymbolName; size: number; color: string }) {
+  if (Platform.OS === "android" && name !== "eyes") return <MaterialSymbol name={name} size={size} color={color} />;
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24">
       {SYMBOLS[name].map((layer, index) => (

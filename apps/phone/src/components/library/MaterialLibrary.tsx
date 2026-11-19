@@ -32,7 +32,7 @@ import {
 import { useSync } from "../../state/sync/store";
 import { useSelectedProfile, useSyncEnabled } from "../../state/sync/hooks";
 import { useTabs } from "../../state/tabs/store";
-import { ConfirmDialog, Favicon, FloatingMenu, Symbol, type Confirmation, type MenuItem, type SymbolName } from "../ui";
+import { ConfirmDialog, Favicon, FloatingMenu, MaterialIconButton, Symbol, type Confirmation, type MenuItem, type SymbolName } from "../ui";
 import { useReduceMotion } from "../ui/contrast";
 import { backSwipe, countMaterialBackSwipe, useMaterialRipple } from "../ui/MaterialSurfaces";
 import { useMaterialTheme } from "../ui/materialTheme";
@@ -74,7 +74,7 @@ const MENU_END_INSET = 8;
 
 type MenuState = { items: MenuItem[]; y: number; atEnd: boolean } | null;
 
-type ShowMenu = (items: MenuItem[], event: GestureResponderEvent, atEnd?: boolean) => void;
+type ShowMenu = (items: MenuItem[], event: { nativeEvent: { pageY: number } }, atEnd?: boolean) => void;
 
 export function MaterialLibrary() {
   const open = useLibrary((s) => s.open);
@@ -206,15 +206,8 @@ function MaterialLibraryView({ open, onGone }: { open: boolean; onGone: () => vo
   );
 }
 
-function IconButton({ testID, label, icon, color, onPress, flipped = false }: { testID: string; label: string; icon: SymbolName; color: string; onPress: (event: GestureResponderEvent) => void; flipped?: boolean }) {
-  const ripple = useMaterialRipple(true);
-  return (
-    <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={label} android_ripple={ripple} onPress={onPress} style={styles.iconButton}>
-      <View style={flipped ? styles.flipped : null}>
-        <Symbol name={icon} size={materialSize.icon} color={color} />
-      </View>
-    </Pressable>
-  );
+function IconButton({ testID, label, icon, color, onPress, flipped = false }: { testID: string; label: string; icon: SymbolName; color: string; onPress: (event: { nativeEvent: { pageY: number } }) => void; flipped?: boolean }) {
+  return <MaterialIconButton testID={testID} label={label} icon={icon} ink={color} flipped={flipped} onPress={onPress} />;
 }
 
 function LibraryTopBar({ section, folderKey, onBack, onSearch, onDeleteAll, showMenu }: { section: LibrarySection; folderKey: string | null; onBack: () => void; onSearch: (() => void) | null; onDeleteAll: (() => void) | null; showMenu: ShowMenu }) {
@@ -531,8 +524,6 @@ const styles = StyleSheet.create({
   bar: { height: materialSize.topAppBar, flexDirection: "row", alignItems: "center", paddingHorizontal: 4, gap: 4 },
   title: { flex: 1, paddingHorizontal: 4 },
   input: { flex: 1, paddingVertical: 0 },
-  iconButton: { width: materialSize.touchTarget, height: materialSize.touchTarget, alignItems: "center", justifyContent: "center", borderRadius: materialShape.full, overflow: "hidden" },
-  flipped: { transform: [{ scaleX: -1 }] },
   divider: { height: 1 },
   tabs: { height: materialSize.touchTarget, flexDirection: "row", borderBottomWidth: 1 },
   tab: { flex: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
