@@ -64,3 +64,36 @@ test("Clear Data asks in the drawn confirmation card, as iPhone's SwiftUI confir
   byTime.mockRestore();
   unmount(root);
 });
+
+test("a cancelled Clear Data confirmation gives TalkBack focus back to the Clear Data row that opened it once the card has gone; confirming doesn't", async () => {
+  const focus = require("../components/ui/coverFocus") as typeof import("../components/ui/coverFocus");
+  const { ButtonRow } = require("../components/settings/SettingsKit") as typeof import("../components/settings/SettingsKit");
+  const asked = jest.spyOn(focus, "focusForScreenReader").mockImplementation(() => () => undefined);
+  const byTime = jest.spyOn(pages, "clearsWebsiteDataSince").mockImplementation(() => true);
+  const opener = { clearDataRow: true };
+  const restored = () => asked.mock.calls.filter(([target]) => target() === opener).length;
+  const root = renderSurface(<ClearDataPage />);
+  const ask = () => {
+    const row = root.root.findAll((node) => node.type === ButtonRow && node.props.title === "Clear Data…")[0]!;
+    act(() => row.findAll((node) => typeof node.props.onPress === "function")[0]!.props.onPress({ currentTarget: opener, nativeEvent: {} }));
+    expect(root.root.findAll((node) => node.props.testID === "drawnActionSheet")).not.toHaveLength(0);
+  };
+  const through = () => {
+    act(() => jest.advanceTimersByTime(1000));
+    act(() => jest.advanceTimersByTime(32));
+  };
+  ask();
+  through();
+  expect(restored()).toBe(0);
+  act(() => root.root.findAll((node) => node.props.testID === "drawnConfirmationOutside" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  through();
+  expect(root.root.findAll((node) => node.props.testID === "drawnActionSheet")).toHaveLength(0);
+  expect(restored()).toBe(1);
+  asked.mockClear();
+  ask();
+  act(() => root.root.findAll((node) => node.props.accessibilityRole === "button" && node.props.accessibilityLabel === "Clear Data" && typeof node.props.onPress === "function")[0]!.props.onPress());
+  through();
+  expect(restored()).toBe(0);
+  byTime.mockRestore();
+  unmount(root);
+});

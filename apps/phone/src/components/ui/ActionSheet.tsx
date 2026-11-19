@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BackHandler, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
+import { BackHandler, findNodeHandle, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useReduceMotion } from "./contrast";
@@ -14,10 +14,13 @@ import { useTheme } from "./theme";
 
 export type SheetAction = { title: string; destructive?: boolean; onPress: () => void };
 
-type Props = { title?: string | null; message?: string | null; actions: SheetAction[]; cancel?: string; onCancel: () => void };
+type Props = { title?: string | null; message?: string | null; actions: SheetAction[]; cancel?: string; onCancel: () => void; opener?: unknown };
 
-export function ActionSheet({ onCancel, ...props }: Props) {
-  const [returnTo] = useState(() => ({ target: takeHandedFocus() }));
+export function ActionSheet({ onCancel, opener, ...props }: Props) {
+  const [returnTo] = useState(() => {
+    const handed = takeHandedFocus();
+    return { target: opener ? () => opener as Parameters<typeof findNodeHandle>[0] : handed };
+  });
   const afterClear = useOverlayAfterClear();
   const generation = useOverlayGeneration();
   const covered = useOverlayCovered();
@@ -121,6 +124,7 @@ export function ConfirmSheet({ confirmation, onClose }: { confirmation: Confirma
       title={confirmation.title}
       message={confirmation.message}
       onCancel={onClose}
+      opener={confirmation.opener}
       actions={[
         {
           title: confirmation.action,

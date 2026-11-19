@@ -59,7 +59,10 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   const reduceMotion = useReduceMotion();
   const frostAround = useMenuFrost();
   const source = frost === undefined ? frostAround : frost;
-  const [page, setPage] = useState<MenuSubmenu | null>(null);
+  const [pages, setPages] = useState<MenuSubmenu[]>([]);
+  const page = pages[pages.length - 1] ?? null;
+  const openPage = (submenu: MenuSubmenu) => setPages((now) => [...now, submenu]);
+  const backPage = () => setPages((now) => now.slice(0, -1));
   const leaving = usePortalLeaving();
   const left = usePortalLeft();
   const rows = page ? page.children : items;
@@ -87,7 +90,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
   useEffect(() => {
     if (leaving) return;
     const back = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (page) setPage(null);
+      if (page) backPage();
       else onDismiss();
       return true;
     });
@@ -165,7 +168,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
           accessibilityLabel={item.label}
           accessibilityState={{ disabled: item.disabled, expanded: false }}
           disabled={item.disabled}
-          onPress={() => setPage(item)}
+          onPress={() => openPage(item)}
           style={({ pressed: on }) => [...pressed(on, item.disabled), { paddingLeft: labelLeft(icon !== null), paddingRight: styles.chevronRoom.paddingRight }]}
         >
           {icon ? <MenuIcon name={icon} color={paint.label} left={iconLeft} /> : null}
@@ -214,7 +217,7 @@ export function Menu({ items, place, placer, onDismiss, dimmed = false, origin =
           <ScrollView testID="drawnMenuRows" keyboardShouldPersistTaps="handled" style={styles.scroll} contentContainerStyle={styles.rows} bounces={false} overScrollMode="never" onContentSizeChange={(_width, height) => setContent(height + 2 * menuLook.rim)}>
           <Animated.View style={rowsFade}>
           {page ? (
-            <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={() => setPage(null)} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
+            <Pressable ref={firstRow} accessibilityRole="button" accessibilityLabel={`Back, ${page.label}`} onPress={backPage} style={({ pressed: on }) => [...pressed(on), { paddingLeft: labelLeft(true) }]}>
               <MenuIcon name="chevronLeft" color={paint.label} left={iconLeft} />
               {label(page.label, paint.label, true)}
             </Pressable>

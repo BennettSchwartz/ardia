@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, TextInput, View, type TextInputInstance } from "react-native";
+import { type GestureResponderEvent, Pressable, StyleSheet, Text, TextInput, View, type TextInputInstance } from "react-native";
 import { acknowledgeSyncReset, changeSyncFolder, pastedText, setDeviceName, stopSyncing, syncNow } from "../../state/sync/actions";
 import { useSyncStatus, useSyncView } from "../../state/sync/hooks";
 import { haptics } from "../../state/app/haptics";
@@ -152,7 +152,7 @@ export function SyncPage() {
       setStopping(false);
     },
   };
-  const confirmStop = () => (copy().stopSyncAsActionSheet ? showActionSheet(stopConfirmation) : setConfirmation(stopConfirmation));
+  const confirmStop = (event?: GestureResponderEvent) => (copy().stopSyncAsActionSheet ? showActionSheet(stopConfirmation) : setConfirmation({ ...stopConfirmation, opener: event?.currentTarget }));
   return (
     <SettingsPage title="Sync With Mac" onBack={popSettings} onRefresh={status.isEnabled ? syncNow : undefined} heroTitle>
       <SyncHero title="Sync With Mac" subtitle={hero.text} warning={hero.isWarning}>

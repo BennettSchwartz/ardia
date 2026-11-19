@@ -415,3 +415,29 @@ drawnTest("Tab Options is dropped if its tab has gone by the time the card is me
   expect(menuitems(root)).toEqual([]);
   unmount(root);
 });
+
+drawnTest("a card's menu whose tab goes while it is open lets the deck go: the menu closes and the deck is no longer shaded or hidden; a reorder keeps it", async () => {
+  withSpaces([WORK]);
+  const overlay = require("../components/ui/Overlay") as typeof import("../components/ui/Overlay");
+  jest.spyOn(overlay, "measureAnchor").mockResolvedValue({ x: 60, y: 200, width: 280, height: 520 });
+  const { Shade } = require("../components/ui") as typeof import("../components/ui");
+  const root = deck();
+  const shaded = () => root.root.findAll((node) => node.type === Shade)[0]!.props.shaded;
+  const withMenu = () => root.root.findAll((node) => typeof node.type === "string" && Array.isArray(node.props.accessibilityActions) && node.props.accessibilityActions.some((action: { name: string }) => action.name === "menu"));
+  const asked = withMenu()[1]!;
+  const askedTab = tabStore.currentTabs().open.find((tab) => tab.title === asked.props.accessibilityLabel)!;
+  act(() => asked.props.onAccessibilityAction({ nativeEvent: { actionName: "menu" } }));
+  await act(async () => undefined);
+  expect(menuitems(root).length).toBeGreaterThan(0);
+  expect(shaded()).toBe(true);
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: [...state.open].reverse() })));
+  await act(async () => undefined);
+  expect(menuitems(root).length).toBeGreaterThan(0);
+  expect(shaded()).toBe(true);
+  act(() => tabStore.useTabs.setState((state) => ({ ...state, open: state.open.filter((tab) => tab.id !== askedTab.id) })));
+  await act(async () => undefined);
+  act(() => jest.advanceTimersByTime(1000));
+  expect(menuitems(root)).toEqual([]);
+  expect(shaded()).toBe(false);
+  unmount(root);
+});

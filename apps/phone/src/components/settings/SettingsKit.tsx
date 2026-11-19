@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View, type StyleProp, type TextStyle } from "react-native";
+import { ActivityIndicator, type GestureResponderEvent, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View, type StyleProp, type TextStyle } from "react-native";
 import Animated, { FadeIn, FadeOut, LayoutAnimationConfig, useAnimatedStyle, useSharedValue, withSpring } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { rememberSettingsScroll, settingsScroll } from "../../state/settings/nav";
@@ -194,7 +194,7 @@ export function ToggleRow({ title, icon, tint, divider, value, onChange, detail 
   );
 }
 
-export function ButtonRow({ title, onPress, destructive, enabled = true, busy, divider }: { title: string; onPress: () => void; destructive?: boolean; enabled?: boolean; busy?: boolean; divider?: boolean }) {
+export function ButtonRow({ title, onPress, destructive, enabled = true, busy, divider }: { title: string; onPress: (event?: GestureResponderEvent) => void; destructive?: boolean; enabled?: boolean; busy?: boolean; divider?: boolean }) {
   const theme = useTheme();
   const color = !enabled ? theme.tertiaryLabel : destructive ? theme.destructive : theme.formAccent;
   return (

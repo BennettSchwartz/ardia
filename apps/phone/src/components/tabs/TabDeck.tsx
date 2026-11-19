@@ -200,6 +200,7 @@ export const TabDeck = memo(function TabDeck() {
   const [chromeMenu, setChromeMenu] = useState(false);
   const [cardMenu, setCardMenu] = useState<{ id: string; x: number; y: number; control?: Rect } | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  if (cardMenu && !order.includes(cardMenu.id)) setCardMenu(null);
   const [leavingCards, setLeavingCards] = useState<LeavingCard[]>(NO_LEAVING_CARDS);
   const leavingIds = useRef(new Set<string>());
   const [anchor, setAnchor] = useState(() => focusedIndex(first.scroll, first.ids.length));

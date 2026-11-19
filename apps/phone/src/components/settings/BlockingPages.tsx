@@ -89,12 +89,13 @@ export function FilterListsPage() {
         <ButtonRow
           title="Restore Defaults…"
           destructive
-          onPress={() =>
+          onPress={(event) =>
             setConfirmation({
               title: "Restore Default Filter Lists?",
               message: resetMessage(lists.filter((list) => list.isCustom).length),
               action: "Restore Defaults",
               run: resetLists,
+              opener: event?.currentTarget,
             })
           }
         />
@@ -168,8 +169,9 @@ export function FilterListDetailPage({ id }: { id: string }) {
           <ButtonRow
             title="Remove List…"
             destructive
-            onPress={() =>
+            onPress={(event) =>
               setConfirmation({
+                opener: event?.currentTarget,
                 title: "Remove This List?",
                 message: "You can add it again later.",
                 action: "Remove List",

@@ -43,7 +43,7 @@ export function ClearDataPage() {
           destructive
           enabled={!clearIsEmpty(choice) && !clearing}
           busy={clearing}
-          onPress={() => setConfirmation({ title: clearTitle(choice, range, byTime), message: clearMessage(choice), action: "Clear Data", run: () => void clear() })}
+          onPress={(event) => setConfirmation({ title: clearTitle(choice, range, byTime), message: clearMessage(choice), action: "Clear Data", run: () => void clear(), opener: event?.currentTarget })}
         />
       </Group>
       {confirmation ? <ConfirmSheet confirmation={confirmation} onClose={() => setConfirmation(null)} /> : null}

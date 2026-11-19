@@ -37,6 +37,7 @@ import { commandBarMotion, commandPanelPlace, useCommandBar } from "../duo/Comma
 
 const LARGE_FONT_SCALE = 1.5;
 import { useTrayKeyboard } from "./useTrayKeyboard";
+import { useKeyboardTopFromBottom } from "./useKeyboardHeight";
 import type { Point } from "../../lib/menuPlace";
 
 const SHEET_ABOVE_KEYBOARD = 274;
@@ -944,6 +945,7 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
   const menuOpen = menu !== null;
   useEffect(() => (menuOpen ? coverTray() : undefined), [menuOpen]);
   const window = useWindowDimensions();
+  const keyboardTop = useKeyboardTopFromBottom();
   const showMenu = useCallback((row: TrayRow, at: Point) => {
     if (!trayRowActions(row).length) return;
     menuOpenedHaptic();
@@ -975,6 +977,7 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
     <FloatingMenu
       items={trayRowActions(menu.row).map((action) => ({ label: action.label, icon: action.icon, onPress: action.run }))}
       at={menu.at}
+      floor={keyboardTop ? window.height - keyboardTop : undefined}
       dimmed
       frost={null}
       place={{ width: Math.min(tabsLayout.menuWidth, window.width - space.xl * 2) }}

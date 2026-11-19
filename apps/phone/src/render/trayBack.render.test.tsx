@@ -105,3 +105,31 @@ test("while voice search is up over the tray, the tray's native back stays off",
   expect(mockBack.enabled.at(-1)).toBe(true);
   unmount(root);
 });
+
+test("a suggestion's long-press menu stays above the keyboard: its floor is the keyboard's top, and with no keyboard it has none", async () => {
+  const { Dimensions, Keyboard } = require("react-native") as typeof import("react-native");
+  const { FloatingMenu } = require("../components/ui") as typeof import("../components/ui");
+  const { keyboardTopFromBottom } = require("../components/search/useKeyboardHeight") as typeof import("../components/search/useKeyboardHeight");
+  const height = Dimensions.get("window").height;
+  for (const keyboard of [300, 0]) {
+    const metrics = jest.spyOn(Keyboard, "metrics").mockReturnValue(keyboard ? { height: keyboard, screenX: 0, screenY: height - keyboard, width: 393 } : undefined);
+    act(() => presentSearch("page", "otters"));
+    const root = renderSurface(<SearchTray />);
+    act(() => jest.advanceTimersByTime(600));
+    const row = root.root.findAll((node) => typeof node.props.onMenu === "function" && node.props.row !== undefined && Array.isArray(node.props.menu) && node.props.menu.length > 0)[0]!;
+    await act(async () => row.props.onMenu(row.props.row, { x: 120, y: height - keyboard - 20 }));
+    const menu = root.root.findAll((node) => node.type === FloatingMenu)[0]!;
+    if (keyboard) {
+      const top = height - keyboardTopFromBottom(keyboard, 24);
+      expect(menu.props.floor).toBe(top);
+      const { Menu } = require("../components/ui") as typeof import("../components/ui");
+      const placed = root.root.findAll((node) => node.type === Menu)[0]!.props.placer(160);
+      expect(placed.place.top + placed.maxHeight).toBeLessThanOrEqual(top);
+    } else {
+      expect(menu.props.floor).toBeUndefined();
+    }
+    metrics.mockRestore();
+    unmount(root);
+    act(() => jest.runOnlyPendingTimers());
+  }
+});

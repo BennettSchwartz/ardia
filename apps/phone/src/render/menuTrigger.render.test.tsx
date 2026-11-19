@@ -995,3 +995,31 @@ test("on Android a restore already handed to the native side is revoked the mome
   updateSurface(root, <Harness />);
   unmount(root);
 });
+
+test("a submenu inside a submenu opens over its parent, and Back, by the key or the Back row, goes up one level at a time before the menu closes", () => {
+  const back = pressBack();
+  const dismissed = jest.fn();
+  const nested: MenuItem[] = [
+    { label: "Copy Link", onPress: run("copy") },
+    { label: "Share", children: [{ label: "Mail", onPress: run("mail") }, { label: "More Apps", children: [{ label: "Notes", onPress: run("notes") }, { label: "Files", onPress: run("files") }] }] },
+  ];
+  const root = renderSurface(<Menu items={nested} place={{ top: 100, left: 20, width: 250 }} onDismiss={dismissed} />);
+  const backRow = () => root.root.findAll((node) => node.props.accessibilityRole === "button" && typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Back, ") && typeof node.props.onPress === "function")[0];
+  pickMenu(root, "Share");
+  pickMenu(root, "More Apps");
+  expect(menuLabels(root)).toEqual(["Notes", "Files"]);
+  expect(backRow()!.props.accessibilityLabel).toBe("Back, More Apps");
+  back();
+  expect(menuLabels(root)).toEqual(["Mail", "More Apps"]);
+  expect(backRow()!.props.accessibilityLabel).toBe("Back, Share");
+  pickMenu(root, "More Apps");
+  act(() => backRow()!.props.onPress());
+  expect(menuLabels(root)).toEqual(["Mail", "More Apps"]);
+  back();
+  expect(menuLabels(root)).toEqual(["Copy Link", "Share"]);
+  expect(backRow()).toBeUndefined();
+  expect(dismissed).not.toHaveBeenCalled();
+  back();
+  expect(dismissed).toHaveBeenCalledTimes(1);
+  unmount(root);
+});

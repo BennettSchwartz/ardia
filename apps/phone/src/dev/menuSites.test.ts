@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { test } from "node:test";
 import { MENU_OPENERS, OPENER_DEFINITIONS } from "../components/ui/menuOpeners.ts";
 
@@ -82,7 +82,7 @@ const sitesIn = (file: string) => menuSites(readFileSync(join(COMPONENTS, file),
 test("every place that opens a menu, each element in each file, is listed with what it floats over, so a new one has to choose its material", () => {
   const found = Object.fromEntries(
     sources(COMPONENTS)
-      .map((file) => relative(COMPONENTS, file))
+      .map((file) => relative(COMPONENTS, file).split(sep).join("/"))
       .filter((file) => !DEFINITIONS.includes(file))
       .map((file) => [file, sitesIn(file).length] as const)
       .filter(([, count]) => count > 0)
