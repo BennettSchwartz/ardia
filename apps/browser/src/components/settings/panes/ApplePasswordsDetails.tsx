@@ -32,7 +32,7 @@ export function PasswordManagerRow({ profileId }: { profileId: string }) {
 }
 
 export const OFFER_TO_SAVE_HANDED_OVER: Record<Exclude<PasswordManager, "ardia">, string> = {
-  apple: "Apple Passwords fills and saves logins in this profile, so Ardia doesn't offer to save them.",
+  apple: "Apple Passwords fills logins in this profile, so Ardia doesn't offer to save them. Add new ones in the Passwords app.",
   none: "Your password manager extension handles logins in this profile, so Ardia doesn't offer to save them.",
 };
 
