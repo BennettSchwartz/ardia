@@ -84,8 +84,9 @@ For the architecture and the test tooling, read `docs/agent-brief.md`.
   code. AI ships as a first-party plugin on the plugin host (#2462, #2463), off until the user enables it, and
   whatever it needs from the browser becomes a public extension point any plugin can use, never a private hook.
   Dia's AI rows in `docs/dia-feature-parity.md` stay ⏸ until the plugin ships them.
-  The one exception is the iPhone's Browse for Me (`docs/phone.md`), which runs on Apple's on-device model, or on
-  the user's own ChatGPT plan when they connect it, with no account and no server of ours.
+  The phone app has two exceptions, documented in `docs/phone.md`. Browse for Me uses the phone's model, cited
+  excerpts, or the user's connected ChatGPT plan. Pinch to Summarize on iPhone reads the open page and keeps
+  its text on the device, where Apple Intelligence or the excerpt fallback writes the summary.
 
 ## Platforms
 One browser UI (`apps/browser/src` and `packages/*/src`) runs on three platforms, each with its own native layer and
@@ -203,6 +204,10 @@ rules are for the owner's Mac.
 
   The owner has authorized releases to go all the way through. After an update, the app opens the
   release notes on ardia.dev.
+- **iPhone builds.** Upload to TestFlight only when the owner asks, at the version pinned in iOS Release. Let App Store
+  Connect pick the build number. "Get a build on my phone" means installing a development-signed build on the owner's
+  iPhone over USB or through Xcode's paired wireless connection. Use a local Xcode build or an iOS Release `device`
+  IPA. See `docs/phone.md` for both paths.
 - **No tweet drafts.** Don't write announcement drafts or make tweet images for a release.
 - **Other public actions** (a site deploy outside a release, posting anywhere) need the owner's OK first.
 

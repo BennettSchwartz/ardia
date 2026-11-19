@@ -31,7 +31,7 @@ const stackOf = (root: Root) => hosts(root, (props) => Array.isArray(props.path)
 const titlesIn = (node: ReactTestInstance) => node.findAll((inner) => typeof inner.type === "string" && typeof inner.props.title === "string" && typeof inner.props.systemImage === "string").map((inner) => inner.props.title as string);
 const toggleFor = (root: Root, title: string) => hosts(root, (props) => typeof props.isOn === "boolean").find((node) => titlesIn(node).includes(title))!;
 
-onIos("on iPhone Settings groups its rows as General, Search, Tabs, Privacy, Experimental and About, keeping every row, with Default Browser when it's offered", () => {
+onIos("on iPhone Settings groups its rows as General, Search, Tabs, Privacy, Experimental and About, keeping every row, with Default Browser when it's offered, and Privacy has no footer under What's Sent", () => {
   openSettings();
   const root = renderSurface(<SettingsView />);
   const rows = titlesIn(stackOf(root));
@@ -56,6 +56,7 @@ onIos("on iPhone Settings groups its rows as General, Search, Tabs, Privacy, Exp
   expect(titled.map((node) => node.props.title)).toEqual(["General", "Search", "Tabs", "Privacy", "About"]);
   const links = hosts(root, (props) => typeof props.value === "string" && !("path" in props)).map((node) => node.props.value);
   expect(links).toEqual(["sync", "appearance", "siteSettings", "defaultBrowser", "searchEngine", "clearData", "whatsSent", "about"]);
+  expect(hosts(root, (props) => props.text === PHONE_SHARING_COPY.summary || props.children === PHONE_SHARING_COPY.summary)).toHaveLength(0);
   unmount(root);
 });
 
