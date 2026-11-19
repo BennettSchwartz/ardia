@@ -61,7 +61,17 @@ public class MenusModule: Module {
 
     AsyncFunction("openSurfaces") { () -> [[String: Any]] in OpenSurfaces.shared.list() }.runOnQueue(.main)
     AsyncFunction("capturePageMenus") { (captures: Bool) in OpenSurfaces.shared.capturesPageMenus = captures }.runOnQueue(.main)
-    AsyncFunction("chooseSurfaceItem") { (id: String, path: [Int]) throws -> String in try MenusModule.surfaceCall { try OpenSurfaces.shared.choose(id, path: path) } }.runOnQueue(.main)
+    AsyncFunction("chooseSurfaceItem") { (id: String, path: [Int], promise: Promise) in
+      OpenSurfaces.shared.choose(id, path: path) { result in
+        do {
+          promise.resolve(try MenusModule.surfaceCall { try result.get() })
+        } catch let exception as Exception {
+          promise.reject(exception)
+        } catch {
+          promise.reject("failed", error.localizedDescription)
+        }
+      }
+    }.runOnQueue(.main)
     AsyncFunction("dismissSurface") { (id: String) throws in try MenusModule.surfaceCall { try OpenSurfaces.shared.dismiss(id) } }.runOnQueue(.main)
     AsyncFunction("menuBar") { () -> [[String: Any]] in NSApp.mainMenu.map { OpenSurfaces.rows($0, path: [], validate: true) } ?? [] }.runOnQueue(.main)
     AsyncFunction("performMenuBarItem") { (path: [Int], ref: String, windowId: String) throws -> String in

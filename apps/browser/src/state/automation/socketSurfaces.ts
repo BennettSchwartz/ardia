@@ -9,6 +9,27 @@ import { OpError } from "./workspaceTargets";
 import { runMethod } from "./controlSocket";
 
 const PAGE_KINDS: ReadonlySet<string> = new Set(["select", "page"]);
+const APP_WIDE_ACTIONS: ReadonlySet<string> = new Set(["miniaturizeAll:", "arrangeWindowsInFront:", "arrangeInFront:"]);
+
+const privateOpen = (s: BrowserState) => Object.values(s.windows).some((w) => w.kind === "private");
+
+export function shownItems(s: BrowserState, items: SurfaceItem[]): SurfaceItem[] {
+  return items.flatMap((item) => {
+    if (item.boundWindow !== undefined && !(item.boundWindow && eligibleKind(s, item.boundWindow))) return [];
+    return [item.submenu ? { ...item, submenu: shownItems(s, item.submenu) } : item];
+  });
+}
+
+function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
+  for (const item of items) {
+    if (item.path.length === path.length && item.path.every((step, i) => step === path[i])) return item;
+    if (item.submenu && item.path.every((step, i) => step === path[i])) {
+      const found = itemAt(item.submenu, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
 
 export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<OpenSurface, "window" | "tab"> & { window: string; tab: string | null }) | null {
   const window = surface.window ?? (surface.kind === "menuBar" && surface.keyless ? lastFocusedEligibleWindow(s) : null);
@@ -16,7 +37,7 @@ export function visibleSurface(s: BrowserState, surface: OpenSurface): (Omit<Ope
   if (surface.tab) {
     if (!isEligibleTab(s, surface.tab) || s.tabs[surface.tab]?.windowId !== window) return null;
   } else if (PAGE_KINDS.has(surface.kind)) return null;
-  return { ...surface, window, tab: surface.tab ?? null };
+  return { ...surface, window, tab: surface.tab ?? null, ...(surface.items ? { items: shownItems(s, surface.items) } : {}) };
 }
 
 async function nativeCall<T>(run: () => Promise<T>): Promise<T> {
@@ -43,7 +64,15 @@ async function choose(params: Record<string, unknown>, call: SocketCall) {
   const path = params.path as number[];
   if (surface.kind === "menuBar") {
     if (typeof params.ref !== "string") throw new OpError("bad_request", "A menu bar item is chosen by its ref as well as its path; menus.open and menus.bar give both.");
-    const ran = await runBarEntry(path, params.ref, surface.window, call);
+    const own = itemAt(surface.items ?? [], path);
+    if (!own || own.separator || own.submenu) throw new OpError("no_window", `There's no item at that path in menu ${surface.id}; menus.open lists its items.`);
+    if (own.ref !== params.ref) throw new OpError("refused", "That ref isn't the item at that path in this menu.");
+    const stillOpen = async () => {
+      call.stillServing();
+      await surfaceOf(surface.id);
+      call.stillServing();
+    };
+    const ran = await runBarEntry(path, params.ref, surface.window, call, stillOpen);
     await dismissSurface(surface.id).catch(() => undefined);
     return { ok: true, menu: surface.id, kind: surface.kind, ...ran };
   }
@@ -60,26 +89,21 @@ async function dismiss(params: Record<string, unknown>, call: SocketCall) {
   return { ok: true };
 }
 
-function itemAt(items: SurfaceItem[], path: number[]): SurfaceItem | undefined {
-  let level: SurfaceItem[] | undefined = items;
-  let found: SurfaceItem | undefined;
-  for (const step of path) {
-    found = level?.find((item) => item.path[item.path.length - 1] === step);
-    level = found?.submenu;
-  }
-  return found && found.path.length === path.length ? found : undefined;
-}
-
-async function runBarEntry(path: number[], ref: string, window: string | null, call: SocketCall) {
-  const item = itemAt(await menuBar(), path);
+async function runBarEntry(path: number[], ref: string, window: string | null, call: SocketCall, stillOpen: () => Promise<void> = async () => call.stillServing()) {
+  const bar = await menuBar();
+  await stillOpen();
+  const s = now();
+  const item = itemAt(shownItems(s, bar), path);
   if (!item || item.separator || item.submenu) throw new OpError("no_window", "There's no menu bar item at that path; menus.bar lists them.");
   if (item.ref !== ref) throw new OpError("refused", "The menu bar changed since it was read; read it again with menus.bar.");
   if (!item.enabled) throw new OpError("refused", `${item.title} is turned off.`);
-  const s = now();
   if (window !== null && !eligibleKind(s, window)) throw new OpError("refused", "That window isn't one the ardia command may use.");
-  call.stillServing();
+  if (item.action && APP_WIDE_ACTIONS.has(item.action) && privateOpen(s)) {
+    throw new OpError("refused", `${item.title} acts on every window, and a private window is open.`);
+  }
   if (typeof item.command === "string") {
     await nativeCall(() => checkMenuBarItem(path, ref));
+    await stillOpen();
     const ran = runMethod({ command: item.command, arg: item.arg ?? null, window, tab: null });
     if ("error" in ran) {
       const { code, message } = ran.error as { code: OpError["code"]; message: string };
@@ -89,6 +113,7 @@ async function runBarEntry(path: number[], ref: string, window: string | null, c
   }
   const target = window ?? lastFocusedEligibleWindow(s);
   if (!target) throw new OpError("no_window", "No window the ardia command may use is focused.");
+  await stillOpen();
   const title = await nativeCall(() => performMenuBarItem(path, ref, target));
   return { title, action: item.action ?? null };
 }
@@ -135,13 +160,13 @@ export const SURFACE_METHODS: MethodSpec[] = [
     description: "The menu bar as Ardia shows it now: every menu and item with its path, enabled and checked state, shortcut, and its command when run takes it",
     params: obj({}),
     result: "[{path, ref, title, enabled, checked, key?, command?, arg?, action?, submenu?}]",
-    run: () => menuBar(),
+    run: async () => shownItems(now(), await menuBar()),
   },
   {
     name: "menus.runBar",
     mutates: true,
     description: "Run a menu bar item: an Ardia command goes through run, an editing or window item (Copy, Paste, Undo, Minimize) through the menu itself; Quit, Hide, Close Window and updates are refused",
-    params: obj({ path: PATH, ref: REF, window: text("The window to run it in; the focused one when left out. Editing and window items act only when it is the focused window") }, ["path", "ref"]),
+    params: obj({ path: PATH, ref: REF, window: text("The window to run it in; the last focused one when left out. Editing and window items act on it only when it is the key window or no window is key; Minimize All and Arrange in Front are refused while a private window is open") }, ["path", "ref"]),
     result: "{ok, title, command? | action?}",
     run: runBarItem,
   },

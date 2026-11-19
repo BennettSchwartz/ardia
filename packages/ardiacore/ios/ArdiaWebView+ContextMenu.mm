@@ -201,9 +201,18 @@ NSArray *CapturedItems(NSArray *items) {
   return out;
 }
 
+NSString *const kMainFrameFocused =
+    @"(() => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; "
+    @"return !(a && /^(IFRAME|FRAME|OBJECT|EMBED|FENCEDFRAME|PORTAL)$/.test(a.tagName)); })()";
+
+void WhenMainFrameFocused(ArdiaCoreTab *tab, void (^answer)(BOOL focused)) {
+  [tab evaluate:kMainFrameFocused completion:^(NSString *json) { answer([json isEqualToString:@"true"]); }];
+}
+
 void CaptureForChoice(ArdiaWebView *view, ArdiaCoreTab *tab, NSDictionary *menu, NSArray *items) {
   NSString *tabId = ardia_host::AppTabIdOf(tab);
   if (!tabId.length || !view.window) return;
+  NSMutableDictionary *frame = [NSMutableDictionary dictionary];
   [NSNotificationCenter.defaultCenter postNotificationName:@"ArdiaPageMenuCaptured"
                                                     object:@{
                                                       @"tab" : tabId,
@@ -212,7 +221,9 @@ void CaptureForChoice(ArdiaWebView *view, ArdiaCoreTab *tab, NSDictionary *menu,
                                                       @"url" : tab.url ?: @"",
                                                       @"link" : Field<NSString>(menu, @"link") ?: @"",
                                                       @"items" : CapturedItems(items),
+                                                      @"frame" : frame,
                                                     }];
+  WhenMainFrameFocused(tab, ^(BOOL focused) { frame[@"mainFrame"] = @(focused); });
 }
 
 NSDictionary<NSNumber *, NSString *> *CapturedEditActions() {
@@ -348,18 +359,34 @@ NSDictionary *FindMenuItem(NSArray *items, NSString *label) {
   return @{@"command" : found[@"command"], @"path" : found[@"path"], @"flags" : @(parts.count > 1 ? parts[1].intValue : 0)};
 }
 
-+ (NSString *)runCapturedMenuCommand:(NSInteger)command tab:(NSString *)tabId documents:(NSInteger)documents url:(NSString *)url {
++ (void)runCapturedMenuCommand:(NSInteger)command
+                           tab:(NSString *)tabId
+                     documents:(NSInteger)documents
+                           url:(NSString *)url
+                     mainFrame:(NSNumber *)mainFrame
+                    completion:(void (^)(NSString *problem))completion {
+  NSString * (^unchanged)(ArdiaCoreTab *) = ^NSString *(ArdiaCoreTab *tab) {
+    if (!tab || tab.closed) return @"The tab that showed this menu has closed.";
+    if (tab.committedDocumentCount != documents || ![tab.url isEqualToString:url ?: @""])
+      return @"The page changed since this menu opened; open it again.";
+    return nil;
+  };
   ArdiaCoreTab *tab = ardia_host::TabWithAppTabId(tabId);
-  if (!tab || tab.closed) return @"The tab that showed this menu has closed.";
-  if (tab.committedDocumentCount != documents || ![tab.url isEqualToString:url ?: @""])
-    return @"The page changed since this menu opened; open it again.";
+  if (NSString *problem = unchanged(tab)) return completion(problem);
   NSString *action = CapturedEditActions()[@(command)];
-  if (!action) return @"Only the editing items (Undo, Redo, Cut, Copy, Paste, Delete, Select All) of a page's menu can be chosen in a hidden window until the engine runs the others itself.";
-  NSView *widget = PageWidgetView(tab.view);
-  SEL selector = NSSelectorFromString(action);
-  if (!widget || ![widget respondsToSelector:selector]) return @"The page can't take that command now.";
-  [NSApp sendAction:selector to:widget from:nil];
-  return nil;
+  if (!action) return completion(@"Only the editing items (Undo, Redo, Cut, Copy, Paste, Delete, Select All) of a page's menu can be chosen in a hidden window until the engine runs the others itself.");
+  if (![mainFrame isKindOfClass:NSNumber.class] || !mainFrame.boolValue)
+    return completion(@"That menu came from a frame inside the page; editing a subframe from a captured menu needs engine support.");
+  WhenMainFrameFocused(tab, ^(BOOL focused) {
+    ArdiaCoreTab *now = ardia_host::TabWithAppTabId(tabId);
+    if (NSString *problem = unchanged(now)) return completion(problem);
+    if (!focused) return completion(@"Focus moved into a frame inside the page since this menu opened; editing a subframe from a captured menu needs engine support.");
+    NSView *widget = PageWidgetView(now.view);
+    SEL selector = NSSelectorFromString(action);
+    if (!widget || ![widget respondsToSelector:selector]) return completion(@"The page can't take that command now.");
+    [NSApp sendAction:selector to:widget from:nil];
+    completion(nil);
+  });
 }
 
 @end

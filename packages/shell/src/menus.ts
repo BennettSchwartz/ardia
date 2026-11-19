@@ -64,6 +64,7 @@ export type SurfaceItem = {
   arg?: string;
   action?: string;
   ref?: string;
+  boundWindow?: string;
   submenu?: SurfaceItem[];
 };
 
