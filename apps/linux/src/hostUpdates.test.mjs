@@ -44,7 +44,7 @@ function fakeEngine({ kind = "deb", fail = null, failWhile = "downloading" } = {
   engine.update = (version) => {
     engine.updates.push(version);
     if (engine.phase === "downloading" || engine.phase === "installing") return status();
-    if (engine.phase === "ready" && compareVersions(engine.version, version) >= 0) return status();
+    if (engine.phase === "ready") return status();
     Object.assign(engine, { phase: "downloading", version, reason: null, run: engine.run + 1 });
     return status();
   };
@@ -334,6 +334,21 @@ test("Settings left open never claims a finished update, so a browser window say
   assert.deepEqual(leader.seen.ready.map((r) => r.version), ["0.2.46"]);
   assert.deepEqual(engine.claims, [1]);
   assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_deb: 1 });
+});
+
+test("restarting from Settings before a browser window claims the update still counts it, and checking while ready says so without restarting", async () => {
+  takeUpdateCounts();
+  const engine = fakeEngine({ kind: "tarball" });
+  const settings = harness({ engine, showsToasts: false });
+  await settings.updater.methods.checkForUpdates();
+  await settled(() => engine.phase === "ready");
+  const browser = harness({ engine });
+  await browser.updater.check(true);
+  assert.deepEqual([browser.seen.ready.map((r) => r.version), engine.restarts], [["0.2.46"], 0], "Check for Updates while ready says it's ready and never restarts");
+  await settings.updater.methods.checkForUpdates();
+  assert.equal(engine.restarts, 1);
+  assert.deepEqual(engine.claims, [1]);
+  assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_tarball: 1, update_restarts: 1 });
 });
 
 test("the app menu reads the engine fresh, so it offers Restart to Update after another window's install, and a later check never starts another run", async () => {

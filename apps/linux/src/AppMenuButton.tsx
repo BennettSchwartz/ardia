@@ -13,7 +13,7 @@ import { linuxCapabilities, unavailableCommands } from "./hostCapabilities";
 import { videoTourUrl } from "../../browser/src/state/onboarding/tour";
 import { showToast } from "../../browser/src/state/app/toasts";
 import { checkForUpdates, engineInfo, systemInfo } from "../../browser/src/platform/app";
-import { updateMenuItem } from "./linuxUpdates";
+import { linuxUpdaterFor, updateMenuItem } from "./linuxUpdates";
 import "./linkShareSurface";
 
 const hiddenCommands = () => {
@@ -47,7 +47,7 @@ export async function openAppMenu(windowId: string, button: HTMLElement) {
   const choice = id ? appMenuChoice(id) : null;
   if (!choice) return;
   if (choice.kind === "about") return showAbout(windowId);
-  if (choice.kind === "updates") return void checkForUpdates().catch(reportHostError);
+  if (choice.kind === "updates") return void (ardiaHost && !choice.restart ? linuxUpdaterFor(ardiaHost).check(true) : checkForUpdates()).catch(reportHostError);
   if (choice.kind === "edit") return runEdit(windowId, choice.action, editTarget).catch(reportHostError);
   if (choice.kind === "command") return emitCommand({ command: choice.command, arg: choice.arg, windowId });
   if (choice.action === "close") return void closeWindow(windowId).catch(reportHostError);

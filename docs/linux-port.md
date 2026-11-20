@@ -704,8 +704,8 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   `openssl pkeyutl -verify -rawin` against `lib/ardia/linux-update.pem`, parses the manifest strictly (it must
   re-serialize byte for byte, and each package name must be exactly `Ardia-<V>-linux-x64.<deb|tar.xz|AppImage>`),
   requires `<V>` to be newer than `lib/ardia/VERSION` (a nightly sorts before its stable), then copies its package
-  (at most the manifest's size, the same way) and checks size and sha256. Copying the package and installing it get 8
-  minutes together, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. A `.deb` goes through `apt-get install --no-remove`, a
+  (at most the manifest's size, the same way) and checks size and sha256. Everything from the manifest copy to the install shares
+  one 9-minute deadline, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. A `.deb` goes through `apt-get install --no-remove`, a
   tarball through its own `install.sh --prefix <the helper's prefix>`, and an AppImage is staged as
   `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it. PATH is its own and the prefix comes from its own
   location, never from the caller. The last line on stdout is `installed <V>` or `failed <reason>` (`usage`,

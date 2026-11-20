@@ -141,6 +141,11 @@ export function linuxUpdater(deps: UpdateDeps) {
   }
 
   async function restart(consent: ConsentToken | null) {
+    const status = await engineStatus();
+    if (status?.phase === "ready" && status.run > settledRun) {
+      settledRun = status.run;
+      if ((await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).catch(() => false)) === true) countOutcome(status, consent);
+    }
     noteUpdateRestart(consent);
     await invokeHost(RESTART_METHOD, { args: [] }, deps.host).catch((error: unknown) => console.info(`[ardia linux] Ardia couldn't restart: ${String(error)}`));
   }
@@ -231,7 +236,10 @@ export function linuxUpdater(deps: UpdateDeps) {
       return;
     }
     if (status && installs(status.kind)) {
-      if (status.phase === "ready") return;
+      if (status.phase === "ready") {
+        if (asked && status.version) deps.ready(status.version, restartToUpdate);
+        return;
+      }
       if (!asked && saved.failed === release.version) return;
       if (asked || saved.automaticDownloads) return startRun(release, asked ? "asked" : "automatic", consent);
       if (await offeredOnce(release)) deps.offerInstall(release, () => installOffered(release));

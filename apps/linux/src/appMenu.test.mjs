@@ -151,6 +151,6 @@ test("the Ardia menu checks for updates, or restarts to finish one, only where u
   assert.deepEqual(ardia({}).slice(0, 2), ["About Ardia", "—"]);
   assert.deepEqual(ardia({ updates: "check" }).slice(0, 2), ["About Ardia", "Check for Updates…"]);
   assert.deepEqual(ardia({ updates: "restart" }).slice(0, 2), ["About Ardia", "Restart to Update"]);
-  assert.deepEqual(appMenuChoice("checkForUpdates"), { kind: "updates" });
-  assert.deepEqual(find(appMenuItems(state(), new Map(), new Set(), { updates: "restart" }), "checkForUpdates").title, "Restart to Update", "one handler checks or restarts");
+  assert.deepEqual(appMenuChoice("checkForUpdates"), { kind: "updates", restart: false });
+  assert.deepEqual(appMenuChoice("restartToUpdate"), { kind: "updates", restart: true }, "the item picked decides whether Ardia restarts, not what finished while the menu was open");
 });
