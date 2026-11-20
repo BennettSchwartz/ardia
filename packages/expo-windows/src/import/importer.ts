@@ -35,6 +35,9 @@ function secretWarnings(result: Result, kind: ImportKind, outcome: Secrets, noun
     result.warnings.push({ kind, code: "undecryptable", message: `${plural(outcome.appBound, noun)} use ${browser.name}'s app-bound encryption, which only ${browser.name} can read` });
 }
 
+const appBoundCookiesToo = (appBound: number, browser: Browser) =>
+  appBound > 0 ? `, and ${appBound} more ${appBound === 1 ? "is" : "are"} locked by ${browser.name}'s app-bound encryption, which only ${browser.name} can read: sites that used ${appBound === 1 ? "it" : "them"} will ask you to sign in again` : "";
+
 async function cookieFile(host: ImportHost, dir: string): Promise<string> {
   const network = join(dir, "Network");
   if ((await entries(host, network)).some((e) => e.name === "Cookies")) return join(network, "Cookies");
@@ -176,7 +179,7 @@ export async function importProfile(
         if (outcome.token) result.vaultToken = outcome.token;
         count = outcome.count;
         secretWarnings(result, kind, outcome, "cookie", browser);
-        if (!count && outcome.undecryptable > 0) throw new ImportFailure("locked", `The ${browser.name} key didn't decrypt any cookies`);
+        if (!count && outcome.undecryptable > 0) throw new ImportFailure("locked", `The ${browser.name} key didn't decrypt any cookies${appBoundCookiesToo(outcome.appBound, browser)}`);
       } else {
         throw new ImportFailure("unsupported", `${browser.name} has no ${kind} to import on Windows`);
       }

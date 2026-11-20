@@ -486,10 +486,10 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     first child at the padding box (an absolute child's offsets already start inside the border), with each corner's
     radius less the borders that meet there and the lowest `zIndex`, so later children land above it. Its background
     has to come through `style`: one set with `setNativeProps` or an animated `backgroundColor` reaches the outer view
-    and brings the fault back. Corners assume left-to-right. It's registered as `ArdiaBackedView`; nothing uses it yet.
-    A shared view would adopt it through the shell, like `ClipView`: a `packages/shell/src/backedView.ts` exporting
-    React Native's `View`, a `backedView.windows.ts` exporting `requireNativeViewManager("ArdiaBackedView")`, and an
-    export from `index.tsx`.
+    and brings the fault back. Corners assume left-to-right. It's registered as `ArdiaBackedView`, and the shell
+    exports it like `ClipView`: `packages/shell/src/backedView.ts` is React Native's `View` on the Mac, Linux and the
+    web, and `backedView.windows.ts` is `requireNativeViewManager("ArdiaBackedView")`. Onboarding's `ChoiceCard` renders
+    through it, so a card's checkbox, mounted once the card is selected, draws above the card's fill.
   - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
     child mounted into a `BackedView` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
     round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
