@@ -315,27 +315,33 @@ export function stripOverflow(entries: StripEntry[], activeId: string, pageWidth
   return { hidden: first(count), selectedMin: tight, titledMin: TITLED_CHIP, compactMin: COMPACT_CHIP };
 }
 
-type OverflowCandidate = { id: string; at: number; group: StripGroupEntry | null };
+type OverflowCandidate = { id: string; at: number; group: StripGroupEntry | null; last: number };
 
 function overflowCandidates(entries: StripEntry[], activeId: string, wideId: string, needsTitle: (tabId: string) => boolean): OverflowCandidate[] {
   const order = new Map<string, number>();
   const candidates: OverflowCandidate[] = [];
+  const emptiable: [number, number][] = [];
   const visit = (m: StripMember, group: StripGroupEntry | null) => {
-    if (m.kind === "tab" && m.id !== activeId && m.id !== wideId && needsTitle(m.id)) candidates.push({ id: m.id, at: order.size, group });
+    if (m.kind === "tab" && m.id !== activeId && m.id !== wideId && needsTitle(m.id)) candidates.push({ id: m.id, at: order.size, group, last: 0 });
     for (const id of tabsOf(m)) order.set(id, order.size);
   };
   for (const e of entries) {
     if (e.kind === "dock") continue;
     if (e.kind !== "group") visit(e, null);
-    else if (!e.collapsed) for (const m of e.members) visit(m, e);
+    else if (!e.collapsed) {
+      const from = candidates.length;
+      for (const m of e.members) visit(m, e);
+      if (e.members.length && candidates.length - from === e.members.length) emptiable.push([from, candidates.length]);
+    }
   }
   const anchor = order.get(wideId) ?? 0;
-  candidates.sort((a, b) => Math.abs(b.at - anchor) - Math.abs(a.at - anchor) || b.at - a.at);
-  const hideable = new Set(candidates.map((c) => c.id));
-  const lastMember = new Map<string, string>();
-  for (const c of candidates) if (c.group && c.group.members.every((m) => m.kind === "tab" && hideable.has(m.id))) lastMember.set(c.group.id, c.id);
-  const kept = new Set(lastMember.values());
-  return [...candidates.filter((c) => !kept.has(c.id)), ...candidates.filter((c) => kept.has(c.id))];
+  const distance = (c: OverflowCandidate) => Math.abs(c.at - anchor);
+  for (const [from, to] of emptiable) {
+    let nearest = candidates[from]!;
+    for (let i = from + 1; i < to; i++) if (distance(candidates[i]!) < distance(nearest)) nearest = candidates[i]!;
+    nearest.last = 1;
+  }
+  return candidates.sort((a, b) => a.last - b.last || distance(b) - distance(a) || b.at - a.at);
 }
 
 export function overflowCountRoom(count: number): number {
