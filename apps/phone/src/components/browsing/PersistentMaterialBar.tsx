@@ -178,7 +178,7 @@ function MaterialBarHost({ store, enabled }: { store: ReturnType<typeof makeStor
           pointerEvents={folded ? "box-none" : "none"}
           importantForAccessibility={folded ? "auto" : "no-hide-descendants"}
           accessibilityElementsHidden={!folded}
-          style={[styles.pillPlace, { bottom: insets.bottom + materialBottomBar.inset, left: Math.max(insets.left, insets.right) + materialBottomBar.edge, right: Math.max(insets.left, insets.right) + materialBottomBar.edge }, pillStyle]}
+          style={[styles.pillPlace, { bottom: insets.bottom + materialBottomBar.inset - materialBarPill.shadowRoom, left: Math.max(insets.left, insets.right) + materialBottomBar.edge, right: Math.max(insets.left, insets.right) + materialBottomBar.edge }, pillStyle]}
         >
           <MaterialBarPill tab={bar.tab} scheme={scheme} onExpand={fold.expand} />
         </Animated.View>
@@ -243,7 +243,7 @@ export function MaterialBarPill({ tab, scheme, onExpand }: { tab: BrowserTab; sc
 
 const styles = StyleSheet.create({
   place: { position: "absolute" },
-  pillPlace: { position: "absolute", height: materialBarPill.height, alignItems: "center", justifyContent: "flex-end" },
+  pillPlace: { position: "absolute", height: materialBarPill.height + materialBarPill.shadowRoom * 2, paddingVertical: materialBarPill.shadowRoom, alignItems: "center", justifyContent: "flex-end" },
   pill: { flexDirection: "row", alignItems: "center", gap: materialBarPill.spacing, maxWidth: materialBarPill.maxWidth, height: materialBarPill.height, paddingHorizontal: materialBarPill.sideInset, borderRadius: materialShape.full, overflow: "hidden", elevation: 3 },
   pillHost: { flexShrink: 1 },
   hidden: { opacity: 0, elevation: 0 },

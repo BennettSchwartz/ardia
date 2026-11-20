@@ -396,7 +396,8 @@ onAndroid("scrolling a page down folds the Material bottom bar into a host pill 
   expect(node(root, "materialBarFold")!.props.accessibilityElementsHidden).toBe(true);
   expect(node(root, "materialBarPillPlace")!).toHaveAnimatedStyle({ opacity: 1, transform: [{ translateY: 0 }, { scale: 1 }] });
   expect(node(root, "materialBarPillPlace")!.props.pointerEvents).toBe("box-none");
-  expect(flat(node(root, "materialBarPill"))).toMatchObject({ height: 36, borderRadius: 9999 });
+  expect(flat(node(root, "materialBarPill"))).toMatchObject({ height: 36, borderRadius: 9999, elevation: 3 });
+  expect(flat(node(root, "materialBarPillPlace"))).toMatchObject({ height: 60, paddingVertical: 12 });
   scrolled("up");
   settle();
   expect(node(root, "materialBarFold")!).toHaveAnimatedStyle({ opacity: 1 });
