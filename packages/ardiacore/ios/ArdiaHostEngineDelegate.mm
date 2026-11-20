@@ -30,6 +30,12 @@ static void EndFailedPageDragsAtMouseUp() {
   if (!installed) NSLog(@"[ardiacore] page drag session override not installed: WebContentsViewCocoa has no %@", NSStringFromSelector(begin));
 }
 
+static NSString *ArdiaPageScriptWithPasskeys(NSString *pageScript, NSString *passkeys) {
+  NSCharacterSet *trim = NSCharacterSet.whitespaceAndNewlineCharacterSet;
+  return [NSString stringWithFormat:@"(function (post) {\n  const receive = (%@)(post);\n  const passkeys = (%@)(post, \"chromium\");\n  return function (kind, json) {\n    if (passkeys(kind, json)) return;\n    return receive(kind, json);\n  };\n})",
+                                    [pageScript stringByTrimmingCharactersInSet:trim], [passkeys stringByTrimmingCharactersInSet:trim]];
+}
+
 @implementation ArdiaHostEngineDelegate
 
 - (void)engineDidStart {
@@ -52,6 +58,9 @@ static void EndFailedPageDragsAtMouseUp() {
   NSBundle *bundle = [NSBundle bundleForClass:ArdiaHostEngineDelegate.class];
   NSString *path = [bundle pathForResource:@"page_script" ofType:@"js"];
   NSString *script = path ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] : nil;
+  NSString *passkeyPath = [bundle pathForResource:@"passkey_wrapper" ofType:@"js"];
+  NSString *passkeys = passkeyPath ? [NSString stringWithContentsOfFile:passkeyPath encoding:NSUTF8StringEncoding error:nil] : nil;
+  if (script && passkeys) script = ArdiaPageScriptWithPasskeys(script, passkeys);
   if (script) engine.pageScript = script;
   [ArdiaLaunchSequence.shared reach:ArdiaLaunchEngineStarted];
 

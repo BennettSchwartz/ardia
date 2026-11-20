@@ -501,6 +501,7 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
 
   func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
     fieldProviderCommitted()
+    passkeyCommitted(webView)
     if !showingError { errorURL = nil }
     committedAt = Date().timeIntervalSince1970 * 1000
     committedStatus = respondedStatus

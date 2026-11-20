@@ -15,7 +15,16 @@ import type {
 import type { ExternalAppAllowance, PermissionRequest, PermissionResult } from "../permissions";
 import type { BrowsingDataType } from "../profiles";
 import type { ChromeWindowState } from "../windows";
-import type { FieldProviderProfile, PasswordExportStatus, SavedPassword, SystemPanelResult, VerificationCodeSetupResult } from "../passwords";
+import type {
+  FieldProviderProfile,
+  PasskeyAction,
+  PasskeyProviderProfile,
+  PasswordExportStatus,
+  SavedPassword,
+  StoredPasskey,
+  SystemPanelResult,
+  VerificationCodeSetupResult,
+} from "../passwords";
 import type { ClearSiteDataResult, SiteSettings, SiteSettingType, SiteSettingValue } from "../siteSettings";
 import type { LinkRoute, TabStripCommand, TabStripTransaction, WindowRequest } from "../tabs";
 import type { PageCookie, PageEngine, PasskeyAccess } from "../webkit";
@@ -107,6 +116,11 @@ export type EngineCalls = {
   "passwords.showSystemPanel": [{ tab: string; generation?: number }, SystemPanelResult];
   "passwords.showPanelHint": [{ tab: string; label: string; side: "above" | "below" }, { shown: boolean }];
   "passwords.systemPanelAvailable": [{}, { chromium: boolean; webkit: boolean }];
+  "passwords.setPasskeyProviders": [{ generation: number; providers: PasskeyProviderProfile[] }, { applied: boolean }];
+  "passwords.resolvePasskey": [{ id: string; action: PasskeyAction; account?: number }, null];
+  "passwords.passkeys": [{ group: string }, { passkeys: StoredPasskey[] }];
+  "passwords.deletePasskey": [{ group: string; rpId: string; credentialId: string }, { deleted: boolean }];
+  "passwords.deleteAllPasskeys": [{ group: string }, { deleted: number }];
   "passwords.otpauthHandler": [{}, { app: string | null }];
   "passwords.setUpVerificationCode": [{ tab: string; token: string; generation?: number }, VerificationCodeSetupResult];
 

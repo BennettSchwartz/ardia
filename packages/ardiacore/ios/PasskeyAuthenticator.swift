@@ -90,6 +90,7 @@ struct PasskeyPolicy: Equatable {
   let groupId: String
   let create: Bool
   let privateWindow: Bool
+  var profile: String = ""
 }
 
 final class PasskeyAuthenticator {

@@ -139,6 +139,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)setFieldProviders:(NSArray<NSDictionary *> *)profiles
                generation:(double)generation
                   session:(NSString *)session NS_SWIFT_NAME(setFieldProviders(_:generation:session:));
++ (void)pushPasskeyConfigEverywhere;
 + (nullable NSDictionary *)fieldProviderForProfile:(NSString *)profile NS_SWIFT_NAME(fieldProvider(profile:));
 + (void)noteFieldFocus:(nullable NSString *)field
               sequence:(double)sequence

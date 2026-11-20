@@ -65,6 +65,25 @@ public class PasswordsModule: Module {
       reply.ok(["shown": ArdiaWebView.showFieldProviderHint(label, side: side, tab: tab)])
     },
     "systemPanelAvailable": { _, reply in reply.ok(ArdiaWebView.systemPanelAvailability) },
+    "setPasskeyProviders": { args, reply in
+      let generation = try args.int("generation")
+      let providers = try args.dicts("providers").compactMap { entry -> PasskeyProviderEntry? in
+        guard let profile = entry["profile"] as? String, let group = entry["group"] as? String else { return nil }
+        return PasskeyProviderEntry(profile: profile, groupId: group, create: entry["create"] as? Bool ?? true)
+      }
+      PasskeyCoordinator.shared.setProviders(providers, generation: generation)
+      ArdiaWebView.pushPasskeyConfigEverywhere()
+      reply.ok(["applied": true])
+    },
+    "resolvePasskey": { args, reply in
+      PasskeyCoordinator.shared.resolve(try args.text("id"), action: try args.text("action"), account: try args.optionalDouble("account").map { Int($0) } ?? -1)
+      reply.ok(nil)
+    },
+    "passkeys": { args, reply in reply.ok(["passkeys": PasskeyCoordinator.shared.list(group: try args.text("group"))]) },
+    "deletePasskey": { args, reply in
+      reply.ok(["deleted": PasskeyCoordinator.shared.delete(group: try args.text("group"), rpId: try args.text("rpId"), credentialId: try args.text("credentialId"))])
+    },
+    "deleteAllPasskeys": { args, reply in reply.ok(["deleted": PasskeyCoordinator.shared.deleteAll(group: try args.text("group"))]) },
     "otpauthHandler": { _, reply in reply.ok(["app": ArdiaWebView.otpauthHandlerName as Any? ?? NSNull()]) },
     "setUpVerificationCode": { args, reply in
       let tab = try args.text("tab")

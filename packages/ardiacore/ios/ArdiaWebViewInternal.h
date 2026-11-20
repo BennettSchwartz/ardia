@@ -320,6 +320,12 @@ typedef NS_ENUM(NSInteger, ArdiaTransfer) {
 - (void)resetPageMedia;
 @end
 
+@interface ArdiaWebView (Passkeys)
+- (BOOL)handlePasskeyMessage:(NSString *)kind dict:(NSDictionary *)dict main:(BOOL)main origin:(NSString *)verifiedOrigin;
+- (void)pushPasskeyConfig;
+- (void)passkeyDocumentChanged;
+@end
+
 @interface ArdiaWebView (PeekInternal)
 - (void)pushPeekModifier;
 - (BOOL)peeksLinksToOtherSites;

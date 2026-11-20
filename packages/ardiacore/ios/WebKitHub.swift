@@ -69,6 +69,15 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     })();
     """
 
+  static let hidePasskeysInSubframes = "if (window !== window.top) " + hidePasskeys
+
+  static let passkeyWrapper: String? = {
+    guard let url = Bundle(for: WebKitHub.self).url(forResource: "passkey_wrapper", withExtension: "js") else { return nil }
+    return (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+  }()
+
+  let passkeyHandler = WebKitPasskeyHandler()
+
   func configuration(profile: String) -> WKWebViewConfiguration {
     let config = WKWebViewConfiguration()
     config.websiteDataStore = stores.dataStore(for: profile)
@@ -77,7 +86,13 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
     controller.add(self, contentWorld: Self.world, name: "ardia")
     controller.addUserScript(WKUserScript(source: WebKitPageScript.mediaBridge, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
     if !Self.passkeysEntitled {
-      controller.addUserScript(WKUserScript(source: Self.hidePasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+      if PasskeyCoordinator.shared.providesForProfile(profile), let wrapper = Self.passkeyWrapper {
+        controller.addScriptMessageHandler(passkeyHandler, contentWorld: .page, name: "ardiaPasskeys")
+        controller.addUserScript(WKUserScript(source: "(\(wrapper))(null, \"webkit\");", injectionTime: .atDocumentStart, forMainFrameOnly: true, in: .page))
+        controller.addUserScript(WKUserScript(source: Self.hidePasskeysInSubframes, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+      } else {
+        controller.addUserScript(WKUserScript(source: Self.hidePasskeys, injectionTime: .atDocumentStart, forMainFrameOnly: false, in: .page))
+      }
     }
     config.userContentController = controller
     WebKitContentBlocker.shared.attach(controller)
@@ -191,5 +206,14 @@ final class WebKitHub: NSObject, WKScriptMessageHandler {
       guard let cookie else { return done(touched) }
       cookies.setCookie(cookie) { done(touched) }
     }
+  }
+}
+
+final class WebKitPasskeyHandler: NSObject, WKScriptMessageHandlerWithReply {
+  func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage, replyHandler: @escaping (Any?, String?) -> Void) {
+    guard let webView = message.webView, let tab = WebKitHub.shared.transfers.owner(of: webView), let body = message.body as? [String: Any] else {
+      return replyHandler(["fallThrough": true], nil)
+    }
+    tab.passkeyMessage(body, frameInfo: message.frameInfo, answer: replyHandler)
   }
 }

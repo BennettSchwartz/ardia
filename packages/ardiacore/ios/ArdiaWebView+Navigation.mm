@@ -161,6 +161,7 @@ NSString *PNGDataURL(NSImage *image) {
 - (void)tabDidCommitDocument:(ArdiaCoreTab *)tab {
   [ArdiaWebView resetFieldProviderPage:tab];
   [self noteDocumentCommits];
+  [self passkeyDocumentChanged];
   _firstPaint.scripted = NO;
   ArdiaFieldMarkNow(_transferKey, @"commit");
   [ArdiaEarlyWindow pageCommitted:tab shownURL:_shownURL];
