@@ -198,6 +198,11 @@ export async function activateExtension(
   useExtensions.setState({ popup: { windowId, pageProfile: pageProfile(useBrowser.getState(), windowId), extensionId: ext.id, url, anchor } });
 }
 
+export function activateMeasured(windowId: string, ext: InstalledExtension, measure: () => Promise<Anchor>, state?: ActionState | null, tabId?: string) {
+  const consent = consentToken();
+  return measure().then((anchor) => activateExtension(windowId, ext, anchor, state, tabId, consent));
+}
+
 export const closeExtensionPopup = () => useExtensions.setState({ popup: null });
 
 let popupRequests = 0;
