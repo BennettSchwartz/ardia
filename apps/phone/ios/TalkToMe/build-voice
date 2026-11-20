@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Build Talk to Me's Apple-hosted asset pack: Phonon 31M (English) as compiled Core ML models and six voices.
+# Build Talk to Me's voice download: Phonon 31M (English) as compiled Core ML models and six voices.
 #
-#   apps/phone/ios/AssetPacks/talk-to-me-phonon-31m-en/build-pack [--out DIR] [--models-only]
-#   apps/phone/ios/AssetPacks/talk-to-me-phonon-31m-en/build-pack -h | --help
+#   apps/phone/ios/TalkToMe/build-voice [--out DIR] [--models-only]
+#   apps/phone/ios/TalkToMe/build-voice -h | --help
 #
 # Downloads phonon-31m-en-coreml.zip from the pinned xn-ptts release, checks its SHA-256, checks every kept file
 # against the bundle.json inside it and each voice against voices.tsv, compiles the three .mlpackage models to
 # .mlmodelc with coremlcompiler (so the phone never compiles or writes beside them), keeps the voices in voices.tsv,
-# and packs DIR/stage/TalkToMe with xcrun ba-package into DIR/talk-to-me-phonon-31m-en.aar (Manifest.json: on demand, iOS).
+# and packs DIR/stage/TalkToMe into DIR/phonon-31m-en.aar, an LZFSE Apple Archive, then prints its size and SHA-256.
 # --models-only stops after DIR/stage/TalkToMe, the folder the test build's -ArdiaTalkToMeModels takes.
-# DIR defaults to /private/tmp/ardia-talk-to-me-pack. Upload the .aar with each App Store or TestFlight build
-# (docs/phone.md, Talk to Me): xcrun altool --upload-asset-pack DIR/talk-to-me-phonon-31m-en.aar --apple-id <app id>.
+# DIR defaults to /private/tmp/ardia-talk-to-me-pack. To ship a new voice, upload the .aar to a new release in
+# ardia-browser/ardia-voices and update url, bytes and sha256 in VoiceDownload (packages/phone/ios/TalkToMe.swift).
 set -euo pipefail
 
 release=v0.7.1
@@ -97,8 +97,10 @@ PY
 echo "models: $models ($(du -sh "$models" | cut -f1))"
 [ "$modelsOnly" = no ] || exit 0
 
-archive="$out/talk-to-me-phonon-31m-en.aar"
+archive="$out/phonon-31m-en.aar"
 rm -f "$archive"
-(cd "$stage" && xcrun ba-package package "$here/Manifest.json" --output-path "$archive")
-[ -f "$archive" ] || die "ba-package wrote no archive"
-echo "asset pack: $archive ($(du -h "$archive" | cut -f1), sha256 $(sha "$archive"))"
+aa archive -d "$stage" -subdir TalkToMe -o "$archive" -a lzfse
+[ -f "$archive" ] || die "aa wrote no archive"
+echo "voice: $archive"
+echo "  bytes  $(stat -f %z "$archive")"
+echo "  sha256 $(sha "$archive")"
