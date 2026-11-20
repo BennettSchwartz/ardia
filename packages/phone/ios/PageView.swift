@@ -225,6 +225,7 @@ final class PageView: ExpoView {
 
   @MainActor
   private func scrollMoved() {
+    keepOffsetWithinContent()
     lastScroll = CACurrentMediaTime()
     guard toneTask == nil else { return }
     toneTask = Task { @MainActor [weak self] in
@@ -336,7 +337,7 @@ final class PageView: ExpoView {
   }
 
   private func keepOffsetWithinContent() {
-    guard pinsSafeArea, let scrollView = hostedWebView?.scrollView, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming else { return }
+    guard let scrollView = hostedWebView?.scrollView, !scrollView.isDragging, !scrollView.isDecelerating, !scrollView.isZooming else { return }
     let insets = scrollView.adjustedContentInset
     let farthest = max(scrollView.contentSize.width - scrollView.bounds.width + insets.right, -insets.left)
     if scrollView.contentOffset.x > farthest + 0.5 { scrollView.contentOffset.x = farthest }
