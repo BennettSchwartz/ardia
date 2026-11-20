@@ -1428,8 +1428,9 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
   the `packages/phone/ios/ArdiaTalk` package's `Package.swift` and `Package.resolved`, wrapped by its `ArdiaTalk`
   target (`TalkSpeaker`), which the Podfile links into `ArdiaPhoneNative` beside ArdiaBrowser and ArdiaDesign. It is a
   package of its own, not part of ArdiaKit, so the app project, which loads ArdiaKit for its extensions, never resolves
-  Phonon. The Podfile also sets `ENABLE_SIGNATURE_AGGREGATION = NO` on `ArdiaPhoneNative`: otherwise both that pod
-  target and the package collect `PhononCore.xcframework-ios.signature` and the archive fails copying it twice. Its compiled core is a static arm64
+  Phonon. The app target sets `ENABLE_SIGNATURE_AGGREGATION = NO`: both the
+  package and `ArdiaPhoneNative` collect `PhononCore.xcframework-ios.signature`, and gathering both into the archive's
+  Signatures folder fails the archive. Phonon's is the only xcframework signature the app has. Its compiled core is a static arm64
   library; it adds about 13 MB to the app binary uncompressed (13.3 MB against 0.05 MB for an empty iOS dylib,
   stripped, Release), about 4 MB compressed. `TalkSpeaker` keeps one `Phonon` and its own `AVAudioEngine`: a player
   node through `AVAudioUnitTimePitch`, whose `rate` is the speed (pitch kept). Voices are the `.safetensors` files in
