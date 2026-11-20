@@ -75,7 +75,7 @@ const LIGHT: typeof DARK = {
   quietFaintText: 0.2,
 };
 
-type SidebarTokens = typeof DARK;
+export type SidebarTokens = typeof DARK;
 
 const HIGH_CONTRAST_DARK: SidebarTokens = { ...DARK, groupTitle: "#FFFFFF", newTabLabel: "#FFFFFFD1", newTabIcon: "#FFFFFFB3", badge: "#FFFFFF" };
 const HIGH_CONTRAST_LIGHT: SidebarTokens = { ...LIGHT, groupTitle: "#000000", newTabLabel: "#000000D1", newTabIcon: "#000000B3", badge: "#000000" };
@@ -262,4 +262,4 @@ export const SELECTED_ROW_PILL_MOTION = {
   exit: { duration: 60, easing: Easing.linear },
 } as const;
 export const SELECTED_ROW_REVEAL_SETTLE_MS = 400;
-export const REVEAL_GLIDE = { duration: 300, easing: Easing.inOut(Easing.quad), margin: space.s } as const;
+export const REVEAL_ROW_MARGIN = space.s;

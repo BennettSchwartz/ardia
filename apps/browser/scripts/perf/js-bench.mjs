@@ -175,7 +175,7 @@ const TONE = (() => {
 })();
 
 export function startServer(port) {
-  const server = createServer((req, res) => {
+  const serve = (req, res) => {
     const url = new URL(req.url, "http://localhost");
     if (url.pathname.startsWith("/img/") || url.pathname === "/favicon.ico") {
       const delay = Number(url.searchParams.get("d") ?? 0);
@@ -213,11 +213,14 @@ export function startServer(port) {
     const name = url.pathname.split("/").pop();
     res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" });
     res.end(`<!doctype html><html><head><title>Page ${name}</title></head><body><p>${name}</p></body></html>`);
-  });
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => resolve(server));
-  });
+  };
+  const listen = (host) =>
+    new Promise((resolve, reject) => {
+      const server = createServer(serve);
+      server.once("error", reject);
+      server.listen(port, host, () => resolve(server));
+    });
+  return Promise.all([listen("127.0.0.1"), listen("::1")]).then((servers) => ({ close: () => servers.forEach((s) => s.close()) }));
 }
 
 function pidsOf(binary) {
@@ -326,7 +329,7 @@ async function run() {
     for (let r = 0; r < Number(runs); r++) {
       const dataDir = join(out, "data", `${label}-${flags.append ? `${Date.now()}-` : ""}${r}`);
       rmSync(dataDir, { recursive: true, force: true });
-      writeSeed(dataDir, origin, version);
+      writeSeed(dataDir, origin, version, `http://[::1]:${port}`);
       if (flags.seed === "small") smallSession(dataDir);
       if (flags.probe) writeFileSync(join(dataDir, "perf-probe"), flags.probe);
       const { pid, launchedAt } = await launch(clone, dataDir, 9500 + r + (label.length % 50) * 10);
