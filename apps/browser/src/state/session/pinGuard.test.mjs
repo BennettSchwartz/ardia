@@ -467,3 +467,50 @@ test("a pins-backup.json that can't be read is kept, and the new backup goes bes
   assert.deepEqual(parsePinBackups(stub.docs.get(beside[0]))[0].pins[profileId].tabs.map((t) => t.url), ["https://pin.com"]);
   assert.ok(!sessionUrls().includes("https://pin.com"));
 });
+
+test("two backups beside an unreadable pins-backup.json never share a file name, even in the same millisecond", async () => {
+  mock.timers.enable({ apis: ["Date"], now: 1_800_000_000_000 });
+  const { stop, w, pin } = onePin();
+  stub.docs.set(PINS_BACKUP_DOCUMENT, "{ not json");
+  try {
+    dropPins([pin]);
+    await settle();
+    const again = S().newTab(w, { url: "https://pin-two.com", background: true });
+    S().pinTabs([again], true);
+    flushPersistence();
+    dropPins([again]);
+    await settle();
+  } finally {
+    stop();
+    mock.timers.reset();
+  }
+  const beside = [...stub.docs.keys()].filter((name) => name.startsWith("pins-backup-"));
+  assert.equal(beside.length, 2, "one file per backup");
+  assert.deepEqual(beside.map((name) => parsePinBackups(stub.docs.get(name))[0].pins).flatMap((pins) => Object.values(pins).flatMap((p) => p.tabs.map((t) => t.url))).sort(), ["https://pin-two.com", "https://pin.com"]);
+});
+
+test("a backup that lands after its profile was deleted still counts the pins it carried", async () => {
+  const { stop, pinA, pinB, personal } = twoProfilePins();
+  sharing(true);
+  takeSessionWrites();
+  try {
+    stub.heldSaves.on = true;
+    dropPins([pinA]);
+    flushPersistence();
+    dropPins([pinB]);
+    S().deleteProfile(personal);
+    flushPersistence();
+    stub.heldSaves.on = false;
+    for (let i = 0; i < 4; i++) {
+      for (const land of stub.heldSaves.queue.splice(0)) land();
+      await turn();
+    }
+    const counts = takeSessionWrites();
+    assert.equal(counts.session_pin_backups, 2);
+    assert.equal(counts.session_pins_backed_up, 2, "the deleted profile's landed pin is counted, not 0");
+  } finally {
+    stub.heldSaves.on = false;
+    sharing(false);
+    stop();
+  }
+});

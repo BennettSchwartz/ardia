@@ -100,8 +100,10 @@ type Cover = { baseline: PinState; base: PinBackup[]; document: string; at: numb
 
 const NOTHING: PinCheck = { hold: false, commit: () => {} };
 
+let besideCount = 0;
+
 function savedBackups(): { base: PinBackup[]; document: string } {
-  const beside = `pins-backup-${Date.now()}.json`;
+  const beside = `pins-backup-${Date.now()}-${++besideCount}.json`;
   try {
     const json = readDocument(PINS_BACKUP_DOCUMENT);
     if (!json) return { base: [], document: PINS_BACKUP_DOCUMENT };
@@ -128,7 +130,8 @@ export function pinGuard(initial: PinState, saveAgain: (delay: number) => void):
   let againAt = 0;
 
   const stage = (staged: Cover) => {
-    const profiles = [...staged.dropped.keys()];
+    const counts = new Map(staged.dropped);
+    const profiles = [...counts.keys()];
     const consent = consentToken();
     let attempt: Promise<void>;
     try {
@@ -144,7 +147,7 @@ export function pinGuard(initial: PinState, saveAgain: (delay: number) => void):
         if (cover === staged) {
           const fresh = profiles.filter((p) => !landed.has(p));
           for (const p of fresh) landed.add(p);
-          if (fresh.length) noteSessionPinBackup(fresh.reduce((a, p) => a + (staged.dropped.get(p) ?? 0), 0), consent);
+          if (fresh.length) noteSessionPinBackup(fresh.reduce((a, p) => a + (counts.get(p) ?? 0), 0), consent);
         }
         saveAgain(0);
       },
