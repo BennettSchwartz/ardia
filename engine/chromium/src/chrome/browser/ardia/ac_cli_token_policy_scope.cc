@@ -31,8 +31,7 @@ namespace {
 
 std::string OutOfScopeReply(int id, const std::string& session) {
   return ErrorReply(id, session, kRefused,
-                    base::StrCat({kOutOfScope,
-                                  ": the tab left the plugin's window"}));
+                    refusal::kOutOfScope);
 }
 
 bool IsBrowserHost(content::DevToolsAgentHost* host) {
@@ -201,8 +200,8 @@ bool TokenClient::PluginCommandAllowed(int id,
   }
   ++PluginTotalsSoFar().refused;
   *reply = ErrorReply(id, session, kMethodNotAllowed,
-                      base::StrCat({"ardia: ", method, " ", refusal,
-                                    " isn't allowed for a plugin"}));
+                      base::StrCat({refusal::kPrefix, method, " ", refusal,
+                                    refusal::kNotAllowedForPluginSuffix}));
   return false;
 }
 

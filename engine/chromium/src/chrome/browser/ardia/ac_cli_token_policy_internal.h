@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "ardia/core/ac_plugin_refusals.h"
 #include "base/callback_list.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
@@ -40,8 +41,6 @@ inline constexpr size_t kMaxPending = 4096;
 inline constexpr int kMaxIoReadBytes = 16 * 1024 * 1024;
 inline constexpr char kAnswerFilePicker[] = "Ardia.answerFilePicker";
 inline constexpr char kDispatchClick[] = "Ardia.dispatchClick";
-inline constexpr char kOutOfScope[] = "ardia: tab_out_of_scope";
-inline constexpr char kPluginBusy[] = "ardia: busy";
 inline constexpr char kInternalCommand[] = "ardia.internal";
 
 enum class CommandDomain {

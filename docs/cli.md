@@ -117,7 +117,7 @@ TypeScript browse client), not to #2808. It must:
   input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
   and releases in place, so a plugin can never drag). Clicks, moves and wheels go only to the page target's own
   session. A click succeeds when the renderer has acknowledged every event, which isn't proof the page handled it; a
-  click whose press Chromium suppressed before dispatch answers `wasn't delivered`. A wheel answers once it's
+  click whose press Chromium suppressed before dispatch answers `ardia: not delivered`. A wheel answers once it's
   submitted, so read `DOM.getBoxModel` again to see whether it scrolled; a wheel to a page that isn't taking input
   (its renderer is blocked, or a dialog holds it) is refused (`the page isn't taking input right now`), and so is a
   wheel to a hidden page (`page hidden`). A wheel to a tab the person scrolled, touched or typed in (in any frame of
@@ -132,7 +132,7 @@ TypeScript browse client), not to #2808. It must:
   reach that window. When its tab leaves the window, its session is detached, commands in flight answer
   `ardia: tab_out_of_scope`, and input it queued before the move never lands.
 - **The owner's clicks too.** `Ardia.dispatchClick` works on the `ardia` command's token connection as well, with the
-  same page-session rule, outcome reporting (done, `wasn't delivered`, `failed (outcome unknown)`) and gated recovery
+  same page-session rule, outcome reporting (done, `ardia: not delivered`, `ardia: outcome unknown`) and gated recovery
   release; the owner keeps Chromium's raw `Input.dispatchMouseEvent` alongside it.
 - **Showing a background tab while acting.** A plugin's attach doesn't make its tab visible, so a background tab stays
   hidden (`document.visibilityState` is `hidden`, and its wheels are refused) and costs nothing while the plugin is
@@ -147,6 +147,44 @@ TypeScript browse client), not to #2808. It must:
   by itself the moment the tab leaves the credential's window (before its sessions finish detaching, and a session
   that left can't authorize a new hold even if the tab comes back), when the credential's last session on the tab
   detaches, when the credential is revoked and when the tab closes. The `ardia` command's own token still keeps a tab visible for as long as it's attached.
+- **Refusals.** Every refusal a plugin can get has a stable message, one constant each in
+  `engine/ardiacore/src/ardia/core/ac_plugin_refusals.h` (`ardia::refusal`). Match on the exact message (or, for the
+  three patterns, on the fixed prefix and suffix); the wording changes only together with the plugins that match it.
+  CDP refusals arrive as the command's `error.message`; hold refusals as the engine call's error.
+
+  | Refusal | Exact message |
+  | --- | --- |
+  | Busy: the person used that tab in the last 500 ms (wheel) | `ardia: busy` |
+  | Page hidden (wheel) | `ardia: page hidden` |
+  | Not delivered: no press (or event) was sent | `ardia: not delivered` |
+  | Outcome unknown: something was sent, not all of it acknowledged | `ardia: outcome unknown` |
+  | Page changed: a navigation committed after admission | `ardia: the page changed after the input was sent` |
+  | Not the page session (clicks, moves, wheels) | `ardia: pointer input and clicks go only to the page target's own session` |
+  | Page not taking input (wheel) | `ardia: the page isn't taking input right now` |
+  | No page to send input to | `ardia: there's no page to send input to` |
+  | Point outside the page's view | `ardia: that point is outside the page` |
+  | Nothing to send input to at that point | `ardia: there's nothing there to send input to` |
+  | Input can't be built from those values | `ardia: that input can't be made` |
+  | Session can't send input | `ardia: that session can't send input` |
+  | Input refused at delivery (session departed, scope, lease, touch emulation) | `ardia: input isn't allowed for this session` |
+  | Out of scope: the tab left the plugin's window | `ardia: tab_out_of_scope: the tab left the plugin's window` |
+  | No attached session with that `sessionId` | `ardia: no attached session has that sessionId` |
+  | nodeId not in this page | `ardia: that nodeId isn't in this page` |
+  | backendNodeId not in this page | `ardia: that backendNodeId isn't in this page` |
+  | Node left the page during an accessibility query | `ardia: that node left this page while the query was pending` |
+  | Not a JSON object | `ardia: a command must be a JSON object` |
+  | No id or method | `ardia: a command needs an id and a method` |
+  | params not an object | `ardia: params must be an object` |
+  | Connection closing | `ardia: this connection is closing` |
+  | Duplicate id still waiting | `ardia: a command with that id is still waiting for its reply` |
+  | Too many waiting commands (the socket closes) | `ardia: too many commands are waiting for replies; closing the connection` |
+  | Method or parameter off the allowlist (pattern) | `ardia: <method> <what> isn't allowed for a plugin` |
+  | Click or mouse values refused by the validator (pattern) | `ardia: <method> <what> can't be sent` |
+  | File picker answer refused (pattern, owner only) | `ardia: Ardia.answerFilePicker <what> can't be answered` |
+  | Hold: unknown, revoked or dead credential | `no such credential` |
+  | Hold: no such tab | `no such tab` |
+  | Hold: tab out of scope | `tab out of scope` |
+  | Hold: no attached session on that tab | `no attached session` |
 - **Handing it to the CLI child.** The app creates a pipe, writes the credential to it and closes its write end, and
   passes the read end to the child as an inherited fd (`posix_spawn_file_actions_adddup2`; with
   `POSIX_SPAWN_CLOEXEC_DEFAULT` nothing else leaks). It sets `ARDIA_PLUGIN_CREDENTIAL_FD=<n>`, the fd number only, and

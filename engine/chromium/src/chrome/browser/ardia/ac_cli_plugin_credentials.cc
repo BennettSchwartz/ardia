@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "ardia/core/ac_plugin_refusals.h"
 #include "base/base64url.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -178,21 +179,21 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
   if (std::optional<bool> visible = args.FindBool("visible")) {
     const std::string* id = args.FindString("id");
     if (!id) {
-      return out.Error("no such credential");
+      return out.Error(ardia::refusal::kHoldNoCredential);
     }
     if (!contents) {
-      return *visible ? out.Error("no such tab")
+      return *visible ? out.Error(ardia::refusal::kNoSuchTab)
                       : out.Send(base::DictValue().Set("visible", false));
     }
     switch (ardia::SetPluginTabVisibleHold(*id, contents, *visible)) {
       case ardia::PluginTabHold::kOk:
         return out.Send(base::DictValue().Set("visible", *visible));
       case ardia::PluginTabHold::kNoCredential:
-        return out.Error("no such credential");
+        return out.Error(ardia::refusal::kHoldNoCredential);
       case ardia::PluginTabHold::kOutOfScope:
-        return out.Error("tab out of scope");
+        return out.Error(ardia::refusal::kHoldOutOfScope);
       case ardia::PluginTabHold::kNoSession:
-        return out.Error("no attached session");
+        return out.Error(ardia::refusal::kHoldNoAttachedSession);
     }
   }
   BrowserWindowInterface* browser =
@@ -201,7 +202,7 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
           : nullptr;
   Profile* profile = browser ? browser->GetProfile() : nullptr;
   if (!profile) {
-    return out.Error("no such tab");
+    return out.Error(ardia::refusal::kNoSuchTab);
   }
   ardia::PluginScope scope;
   scope.window = browser->GetSessionID().id();

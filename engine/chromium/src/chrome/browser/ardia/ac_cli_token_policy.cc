@@ -202,7 +202,7 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
       base::JSONReader::Read(message, base::JSON_PARSE_RFC);
   if (!parsed || !parsed->is_dict()) {
     *reply = ErrorReply(0, std::string(), kParseError,
-                        "ardia: a command must be a JSON object");
+                        refusal::kNotJsonObject);
     return false;
   }
   base::DictValue& command = parsed->GetDict();
@@ -212,41 +212,39 @@ bool TokenClient::FilterCommand(std::string& message, std::string* reply) {
   const std::string* method = command.FindString("method");
   if (!id || !method || (command.Find("sessionId") && !session_id)) {
     *reply = ErrorReply(id.value_or(0), session, kInvalidRequest,
-                        "ardia: a command needs an id and a method");
+                        refusal::kNeedsIdAndMethod);
     return false;
   }
   if (session_id && !targets_.contains(session)) {
     *reply = ErrorReply(*id, std::string(), kInvalidRequest,
-                        "ardia: no attached session has that sessionId");
+                        refusal::kNoAttachedSession);
     return false;
   }
   if (command.Find("params") && !command.FindDict("params")) {
     *reply = ErrorReply(*id, session, kInvalidRequest,
-                        "ardia: params must be an object");
+                        refusal::kParamsNotObject);
     return false;
   }
   if (wedged_ || revoked_) {
     *reply = ErrorReply(*id, session, kRefused,
-                        "ardia: this connection is closing");
+                        refusal::kClosing);
     return false;
   }
   if (draining_) {
     *reply = ErrorReply(
         *id, session, kRefused,
-        base::StrCat({kOutOfScope, ": the tab left the plugin's window"}));
+        std::string(refusal::kOutOfScope));
     return false;
   }
   const std::pair<std::string, int> key(session, *id);
   if (outstanding_.contains(key)) {
     *reply = ErrorReply(*id, session, kInvalidRequest,
-                        "ardia: a command with that id is still waiting for "
-                        "its reply");
+                        refusal::kDuplicateId);
     return false;
   }
   if (outstanding_.size() >= kMaxPending) {
     *reply = ErrorReply(*id, session, kRefused,
-                        "ardia: too many commands are waiting for replies; "
-                        "closing the connection");
+                        refusal::kTooManyPending);
     wedged_ = true;
     return false;
   }
@@ -290,8 +288,8 @@ bool TokenClient::AnswerFilePickerCommand(int id,
       host ? host->GetWebContents() : nullptr, params ? *params : empty, this);
   if (!refusal.empty()) {
     *reply = ErrorReply(id, session, kInvalidRequest,
-                        base::StrCat({"ardia: ", kAnswerFilePicker, " ",
-                                      refusal, " can't be answered"}));
+                        base::StrCat({refusal::kPrefix, kAnswerFilePicker, " ",
+                                      refusal, refusal::kCantBeAnsweredSuffix}));
     return false;
   }
   base::DictValue answer;
@@ -338,10 +336,10 @@ bool TokenClient::DispatchPointerCommand(int id,
     outstanding_.erase({session, id});
     *reply = ErrorReply(
         id, session, kInvalidRequest,
-        base::StrCat({"ardia: ", method, " ",
+        base::StrCat({refusal::kPrefix, method, " ",
                       refusal.empty() ? std::string("without a page")
                                       : refusal,
-                      " can't be sent"}));
+                      refusal::kCantBeSentSuffix}));
     return false;
   }
   pointer.epoch = content::ArdiaPageEpoch(host);
@@ -374,7 +372,7 @@ void TokenClient::FinishPointer(int id,
     return;
   }
   if (!error.empty()) {
-    if (error == kPluginBusy) {
+    if (error == refusal::kBusy) {
       ++PluginTotalsSoFar().busy;
     }
     to_client_.Run(ErrorReply(id, session, kRefused, error));
@@ -453,7 +451,7 @@ bool TokenClient::FilterResponse(const std::string& method,
       if (!PluginMayAttachToTargetId(*scope_, target_id)) {
         message = ErrorReply(
             parsed->GetDict().FindInt("id").value_or(0), session, kRefused,
-            base::StrCat({kOutOfScope, ": the tab left the plugin's window"}));
+            std::string(refusal::kOutOfScope));
         return true;
       }
       told_targets_.insert(*target_id);

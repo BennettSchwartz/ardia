@@ -43,7 +43,15 @@ diff --git a/third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.c
 diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 --- a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
 +++ b/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc
-@@ -76,6 +76,7 @@
+@@ -32,6 +32,7 @@
+ 
+ #include <memory>
+ 
++#include "ardia/core/ac_plugin_refusals.h"  // nogncheck
+ #include "base/notreached.h"
+ #include "third_party/blink/public/common/dom/dom_node_id.h"
+ #include "third_party/blink/public/common/features.h"
+@@ -76,6 +77,7 @@
  #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
  #include "third_party/blink/renderer/core/fileapi/file.h"
  #include "third_party/blink/renderer/core/frame/frame.h"
@@ -51,7 +59,7 @@ diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/
  #include "third_party/blink/renderer/core/frame/local_frame.h"
  #include "third_party/blink/renderer/core/frame/location.h"
  #include "third_party/blink/renderer/core/frame/remote_frame.h"
-@@ -626,10 +627,29 @@ void InspectorDOMAgent::Unbind(Node* node) {
+@@ -626,10 +628,29 @@ void InspectorDOMAgent::Unbind(Node* node) {
    cached_child_count_.erase(id);
  }
  
@@ -76,30 +84,30 @@ diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc b/
 +  if (!ArdiaOwnsNode(node)) {
 +    node = nullptr;
 +    return protocol::Response::ServerError(
-+        "ardia: that nodeId isn't in this page");
++        ardia::refusal::kNodeNotInPage);
 +  }
    return protocol::Response::Success();
  }
  
-@@ -644,6 +664,11 @@ protocol::Response InspectorDOMAgent::AssertNode(
+@@ -644,6 +665,11 @@ protocol::Response InspectorDOMAgent::AssertNode(
  
    if (backend_node_id.has_value()) {
      node = DOMNodeIds::NodeForId(backend_node_id.value());
 +    if (node && !ArdiaOwnsNode(node)) {
 +      node = nullptr;
 +      return protocol::Response::ServerError(
-+          "ardia: that backendNodeId isn't in this page");
++          ardia::refusal::kBackendNodeNotInPage);
 +    }
      return !node ? protocol::Response::ServerError(
                         "No node found for given backend id")
                   : protocol::Response::Success();
-@@ -1933,6 +1958,10 @@ protocol::Response InspectorDOMAgent::resolveNode(
+@@ -1933,6 +1959,10 @@ protocol::Response InspectorDOMAgent::resolveNode(
      node = NodeForId(node_id.value());
    } else {
      node = DOMNodeIds::NodeForId(backend_node_id.value());
 +    if (node && !ArdiaOwnsNode(node)) {
 +      return protocol::Response::ServerError(
-+          "ardia: that backendNodeId isn't in this page");
++          ardia::refusal::kBackendNodeNotInPage);
 +    }
    }
  
@@ -127,13 +135,21 @@ diff --git a/third_party/blink/renderer/core/inspector/inspector_dom_agent.h b/t
 diff --git a/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc b/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
 --- a/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
 +++ b/third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.cc
-@@ -447,6 +447,11 @@ void InspectorAccessibilityAgent::CompleteQuery(
+@@ -7,6 +7,7 @@
+ #include <memory>
+ #include <ranges>
+ 
++#include "ardia/core/ac_plugin_refusals.h"  // nogncheck
+ #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+ #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
+ #include "third_party/blink/renderer/core/dom/element.h"
+@@ -447,6 +448,11 @@ void InspectorAccessibilityAgent::CompleteQuery(
          protocol::Response::InvalidParams("Root DOM node could not be found"));
      return;
    }
 +  if (!dom_agent_->ArdiaOwnsNode(root_dom_node)) {
 +    callback->sendFailure(protocol::Response::ServerError(
-+        "ardia: that node left this page while the query was pending"));
++        ardia::refusal::kNodeLeftPage));
 +    return;
 +  }
    Document& document = root_dom_node->GetDocument();
