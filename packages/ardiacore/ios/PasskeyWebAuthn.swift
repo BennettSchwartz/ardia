@@ -105,6 +105,10 @@ enum PasskeyWebAuthn {
     return data
   }
 
+  static func subjectPublicKeyInfo(x963 publicKey: Data) -> Data {
+    (try? P256.Signing.PublicKey(x963Representation: publicKey).derRepresentation) ?? Data()
+  }
+
   static func attestationObject(authenticatorData: Data) -> Data {
     PasskeyCBOR.map([
       (.text("fmt"), .text("none")),

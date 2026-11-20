@@ -9,17 +9,15 @@ import { test } from "node:test";
 const path = (name) => fileURLToPath(new URL(name, import.meta.url));
 const swiftc = process.env.SWIFTC || "swiftc";
 
-test("passkey encoding, key import and relying-party rules", { skip: process.platform !== "darwin" }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "ardia-passkey-webauthn-"));
+const passkeySources = ["PasskeyWebAuthn.swift", "PasskeyRelyingParty.swift", "PasskeyStore.swift", "PasskeyAuthenticator.swift"].map((f) => path(`../ios/${f}`));
+
+function runSwiftChecks(name) {
+  const dir = mkdtempSync(join(tmpdir(), `ardia-${name}-`));
   try {
-    const binary = join(dir, "passkey-webauthn");
+    const binary = join(dir, name);
     const main = join(dir, "main.swift");
-    copyFileSync(path("./passkey-webauthn.test.swift"), main);
-    const build = spawnSync(
-      swiftc,
-      ["-O", "-o", binary, path("../ios/PasskeyWebAuthn.swift"), path("../ios/PasskeyRelyingParty.swift"), main],
-      { encoding: "utf8" },
-    );
+    copyFileSync(path(`./${name}.test.swift`), main);
+    const build = spawnSync(swiftc, ["-O", "-o", binary, ...passkeySources, main], { encoding: "utf8" });
     assert.equal(build.status, 0, build.stderr);
     const run = spawnSync(binary, [path("../ios/public_suffix_list.dat")], { encoding: "utf8" });
     assert.equal(run.status, 0, run.stdout + run.stderr);
@@ -27,4 +25,8 @@ test("passkey encoding, key import and relying-party rules", { skip: process.pla
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+}
+
+const darwinOnly = { skip: process.platform !== "darwin" };
+test("passkey encoding, key import and relying-party rules", darwinOnly, () => runSwiftChecks("passkey-webauthn"));
+test("passkey store and authenticator: plans, assertions, registration, scoping", darwinOnly, () => runSwiftChecks("passkey-authenticator"));
