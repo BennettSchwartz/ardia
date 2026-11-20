@@ -80,6 +80,7 @@ final class TalkToMe {
   @ObservationIgnored private var answer = ""
   @ObservationIgnored private var startedAtEar = false
   @ObservationIgnored private var countedRead = false
+  @ObservationIgnored private var speechRequest = 0
   @ObservationIgnored private var overrideRemoved = false
   @ObservationIgnored private var sessionActive = false
   @ObservationIgnored private var observers: [NSObjectProtocol] = []
@@ -228,6 +229,7 @@ final class TalkToMe {
   func answerChanged(_ session: ResearchSession) {
     guard listeningSessionID == session.id else { return }
     if session.answer != answer, !answer.isEmpty {
+      speechRequest += 1
       speaker?.stop()
       listening.reset()
       startedAtEar = false
@@ -255,6 +257,7 @@ final class TalkToMe {
   }
 
   func close() {
+    speechRequest += 1
     proximity.stop()
     listeningSessionID = nil
     listening = EarListening()
@@ -315,11 +318,13 @@ final class TalkToMe {
       }
     case .pause:
       speaker?.pause()
+      deactivateAudio()
     }
   }
 
   private func speak(from index: Int) {
     let id = listeningSessionID
+    let request = speechRequest
     let texts = blocks
     isPreparing = speaker == nil
     Task {
@@ -327,7 +332,7 @@ final class TalkToMe {
         let speaker = try await loadSpeaker()
         try await speaker.setVoice(voice)
         isPreparing = false
-        guard listeningSessionID == id, listening.isPlaying, let current = listening.output else { return }
+        guard speechRequest == request, listeningSessionID == id, listening.isPlaying, let current = listening.output else { return }
         guard route(current) else { return listening.routeFailed() }
         speaker.play(texts, from: index)
       } catch {

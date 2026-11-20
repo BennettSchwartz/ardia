@@ -117,16 +117,18 @@ public final class TalkSpeaker {
     guard isSpeaking, !isPaused else { return }
     isPaused = true
     node.pause()
+    engine.pause()
   }
 
   public func resume() {
     guard isSpeaking, isPaused else { return }
     isPaused = false
-    if needsRestart || !engine.isRunning {
+    if needsRestart {
       play(blocks, from: currentBlock)
       return
     }
     do {
+      if !engine.isRunning { try engine.start() }
       try node.playAudio()
     } catch {
       play(blocks, from: currentBlock)
@@ -185,6 +187,7 @@ public final class TalkSpeaker {
   }
 
   private func startEngine() throws {
+    guard !isPaused else { return }
     if !engine.isRunning {
       engine.prepare()
       try engine.start()

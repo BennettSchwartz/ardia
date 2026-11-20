@@ -63,8 +63,8 @@ struct ResearchView: View {
     }
     .overlay { simulatedScreenOff }
     .onAppear { talk.watch(session) }
-    .onChange(of: session.answer) { talk.answerChanged(session) }
-    .onChange(of: session.phase) { talk.answerChanged(session) }
+    .onChange(of: session.answer) { talk.watch(session) }
+    .onChange(of: session.phase) { talk.watch(session) }
     .onChange(of: talk.isReady) { talk.watch(session) }
     .onChange(of: talk.isOn) { talk.watch(session) }
     .onDisappear { host.closed(session) }
