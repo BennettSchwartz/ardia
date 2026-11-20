@@ -133,7 +133,7 @@ public static class ArdiaBackedCheck {
     bool lit = false;
     long shotDue = -1;
     IntPtr shotMemory = CreateCompatibleDC(screen);
-    Point probe = new Point();
+    Point probe = new Point(), firstTile = new Point(), lastTile = new Point();
     try {
       while (clock.ElapsedMilliseconds < milliseconds && (run.WindowMs < 0 || clock.ElapsedMilliseconds - run.WindowMs < afterWindowMs) && !run.Process.HasExited) {
         if (window == IntPtr.Zero) {
@@ -149,6 +149,10 @@ public static class ArdiaBackedCheck {
           for (int i = 0; i < tiles; i++) xs[i] = (int)((i * slot + tile / 2) * run.Scale);
           probe.X = x0 + width / 2;
           probe.Y = (ys[0] + ys[ys.Length - 1]) / 2;
+          firstTile.X = x0 + xs[0];
+          firstTile.Y = probe.Y;
+          lastTile.X = x0 + xs[tiles - 1];
+          lastTile.Y = probe.Y;
           BitmapInfoHeader header = new BitmapInfoHeader();
           header.Size = (uint)Marshal.SizeOf(typeof(BitmapInfoHeader));
           header.Width = width;
@@ -171,7 +175,7 @@ public static class ArdiaBackedCheck {
         GdiFlush();
         byte[] rows = new byte[width * band * 4];
         Marshal.Copy(bits, rows, 0, rows.Length);
-        sample.Ours = OursAt(probe, (uint)run.Process.Id);
+        sample.Ours = OursAt(probe, (uint)run.Process.Id) && OursAt(firstTile, (uint)run.Process.Id) && OursAt(lastTile, (uint)run.Process.Id);
         for (int r = 0; r < ys.Length; r++) {
           int offset = (ys[r] - ys[0]) * width * 4;
           for (int i = 0; i < tiles; i++) {
@@ -189,7 +193,7 @@ public static class ArdiaBackedCheck {
         Thread.Sleep(2);
       }
     } catch {
-      try { if (!run.Process.HasExited) run.Process.Kill(); } catch { }
+      try { if (!run.Process.HasExited) { run.Process.Kill(); run.Process.WaitForExit(10000); } } catch { }
       throw;
     } finally {
       if (section != IntPtr.Zero) { SelectObject(memory, previous); DeleteObject(section); }
@@ -221,11 +225,11 @@ $env:ARDIA_TEST = "backedLab=1"
 try {
   $run = [ArdiaBackedCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $labMs, $probes.Count, $lab.Left, $lab.Slot, $lab.Tile, [int[]]@($lab.Top), $shotAfterSecondMarkMs, $whiteAt, $darkBelow)
 } finally {
-  foreach ($name in $kept.Keys) { [Environment]::SetEnvironmentVariable($name, $kept[$name]) }
+  foreach ($name in $kept.Keys) { if ($null -eq $kept[$name]) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue } else { [Environment]::SetEnvironmentVariable($name, $kept[$name]) } }
 }
 if ($run.Process -and -not $run.Process.HasExited) {
   Stop-Process -Id $run.Process.Id -Force -ErrorAction SilentlyContinue
-  $run.Process.WaitForExit(10000) | Out-Null
+  if (-not $run.Process.WaitForExit(10000)) { Write-Host "backed check: the lab's app hadn't exited 10 s after it was stopped" }
 }
 
 Add-Type -AssemblyName System.Drawing
@@ -256,7 +260,7 @@ foreach ($sample in $samples) {
 $problems = @()
 if ($intervals.Count -lt $lab.Rounds) { $problems += "backed check: the marker showed $($intervals.Count) rounds, not $($lab.Rounds)" }
 if ($intervals.Count) {
-  $covered = @($samples | Where-Object { -not $_.Ours -and $_.Ms -ge $intervals[0][0] -and $_.Ms -le $intervals[-1][1] }).Count
+  $covered = @($samples | Where-Object { $sample = $_; -not $sample.Ours -and @($intervals | Where-Object { $sample.Ms -ge $_[0] - 100 -and $sample.Ms -le $_[1] + 100 }).Count }).Count
   if ($covered) { return @("backed check: another window covered the lab in $covered samples during the rounds, so they can't be judged") }
 }
 

@@ -480,21 +480,22 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     2 and 3, a child mounted with the round is drawn within 100 ms and still drawn at the round's end in a plain
     `View` with a background and `zIndex`, one with only a background, and one with only a background and a child at
     `zIndex: -1`, and unless a plain `View` turned white with `setNativeProps({ style: { backgroundColor } })` is
-    white within 100 ms. It fails when another window covers the lab during the rounds or fewer than 100 samples see
-    ours, and saves `backed-check.png` 400 ms into round 2. The `background+zIndex` and `zIndex: -1` cases fail
+    white within 100 ms. It fails when another window covers the lab during a round (checked at the marker, the middle and the last
+    tile) or fewer than 100 samples see ours, and saves `backed-check.png` 400 ms into round 2. The `background+zIndex` and `zIndex: -1` cases fail
     if the resolver stops backing views; the `setNativeProps` case fails if paint stops reaching the fill. It logs how many rounds React Native Windows' own `View` with a background
     and `zIndex` hides the child; when that reads 0 after an upgrade, the resolver and `BackedView` can go. ARM64
     runners skip it and say so, since Windows' first-run screen covers their desktop (#2280).
   - **Tour:** the `url-field` part (`Tour the address field` in `windows.yml`, required) launches twice with tabs on
-    top, once with `ARDIA_TEST rawBackgrounds=1` and once as shipped, rests the pointer on the page, moves it onto the
-    address field and opens a page the tour's own server answers after 3 s, so the load glow mounts inside the hovered
-    field after its first mount. It saves the window at rest, hovered, loading and loaded, and reads two rows just
-    inside the field's top and bottom edges (or just outside the address text, if that's the element UI Automation
-    names), away from the text, the lock and the rounded ends. The shipped launch fails unless both rows change when
-    the field is hovered and the top one stays changed while it loads (the pill), and the bottom row changes when the
-    load begins (the glow, brightest along the field's bottom edge). The pill is 5 to 7% opaque, so a glow drawn under it, as
-    React Native Windows' own `View` drew it, looks nearly the same: the pictures show the two side by side, and the
-    backed check above proves the order.
+    top, once with `ARDIA_TEST rawBackgrounds=1` and once as shipped. It finds the address field from example.com,
+    opens a page the tour's own server answers after 3 s and lets it load, rests the pointer on the page, moves it onto
+    the field and presses F5, so the load glow mounts inside the hovered field after the pill. It saves the window at
+    rest, hovered, 600 ms into the reload and after it, and reads two rows just outside the address text (or just
+    inside the field's edges, if UI Automation names the whole field), 12 points in from each end, away from the
+    text, the lock and the rounded ends. The shipped launch fails unless both rows change when the field is hovered
+    and are still changed after the reload, when the glow has gone (the pill), and the bottom row, where the glow is
+    brightest, changes during the reload. The pill is 5 to 7% opaque, so a glow drawn under it, as React Native
+    Windows' own `View` drew it, looks nearly the same: the pictures show the two side by side, and the backed check
+    above proves the order.
 - Animations run in JavaScript on Windows (`packages/expo-windows/src/animation`). React Native for Windows' native
   animation driver adds what it animates to the view's own style instead of replacing it, turns a scale around the
   top-left corner, never reports where an animation ended, and drops scroll and gesture events, so anything but a

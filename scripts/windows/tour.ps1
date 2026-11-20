@@ -2231,8 +2231,8 @@ function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [swit
   $stop = Invoke-Stop $session $Name $title {
     param($stop)
     $slow = "127.0.0.1:$($script:TourPagesPort)/slow"
-    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com, rested the pointer on the page, moved it onto the address field, opened $slow (the tour's page server answers it after 3 s) from the command bar, waited for the bar to close and moved onto the field again. Pictures: at rest, hovered, 900 ms into the slow load, and loaded."
-    $stop.Expected = $(if ($Judged) { "the hover pill draws along the rows just above and below the address text, and the load glow, which mounts inside the hovered field after its first mount, draws over the pill on the row below (#2197)." } else { "pictures only: how React Native Windows' own View draws the field, to compare with the default." })
+    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com to find the address field, then opened $slow (the tour's page server answers it after 3 s) and let it load. Rested the pointer on the page, moved it onto the address field, and pressed F5 with the field hovered, so the load glow mounts inside the field after the hover pill. Pictures: at rest, hovered, 600 ms into the reload, and after it."
+    $stop.Expected = $(if ($Judged) { "the hover pill draws along the rows just above and below the address text, the load glow draws over it on the row below while the page reloads, and the pill is still there after the glow has gone (#2197)." } else { "pictures only: how React Native Windows' own View draws the field, to compare with the default." })
     if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
     $loaded = Open-Page $session $stop "example.com" "example\.com"
     $named = @(Find-Named $session.Main "example.com")
@@ -2241,8 +2241,17 @@ function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [swit
     $stop.Facts.Add("page loaded: $loaded; address field found: $([bool]$field) among $($named.Count) elements named example.com")
     if (-not $loaded -or -not $field) { $stop.Seen = "no"; return }
     Focus-Window $session $session.Main $stop | Out-Null
+    Send-Chord @(0x11) 0x4C
+    Start-Sleep -Milliseconds 600
+    Send-Address $slow
+    Send-Key 0x0D 0
+    Send-Key 0x0D 2
+    $first = Wait-Title $session "tour slow" 12000
+    Start-Sleep -Milliseconds 1200
+    $stop.Facts.Add("the slow page loaded: $first")
+    if (-not $first) { $stop.Seen = "no"; return }
     $frame = Get-Frame $session.Main
-    $scale = [Math]::Max(1, [ArdiaTour]::GetDpiForWindow($session.Main) / 96.0)
+    $scale = [Math]::Max(1.0, [ArdiaTour]::GetDpiForWindow($session.Main) / 96.0)
     $pictures = [ordered]@{}
     $paths = @{}
     foreach ($key in @("rest", "hovered", "loading", "loaded")) { $paths[$key] = $stop.Shot -replace '\.png$', "-$key.png" }
@@ -2252,36 +2261,29 @@ function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [swit
     Send-Hover $field.X $field.Y
     Start-Sleep -Milliseconds 600
     $pictures.hovered = Measure-Screen $paths.hovered $session.Main
-    Send-Chord @(0x11) 0x4C
+    Send-Key 0x74 0
+    Send-Key 0x74 2
     Start-Sleep -Milliseconds 600
-    Send-Address $slow
-    Send-Key 0x0D 0
-    Send-Key 0x0D 2
-    Start-Sleep -Milliseconds 350
-    Send-Hover $field.X $field.Y
-    Start-Sleep -Milliseconds 550
     $pictures.loading = Measure-Screen $paths.loading $session.Main
-    $titled = Wait-Title $session "tour slow" 10000
-    Start-Sleep -Milliseconds 800
+    Start-Sleep -Milliseconds 4200
     $pictures.loaded = Measure-Screen $paths.loaded $session.Main
     foreach ($entry in $pictures.GetEnumerator()) { $stop.Facts.Add("$($entry.Key): saved $([bool]$entry.Value.Saved)$(if ($entry.Value.Problem) { ", $($entry.Value.Problem)" })") }
-    $spansField = $field.Height -ge 20 * $scale
-    $above = if ($spansField) { $field.Top + [int](2 * $scale) } else { $field.Top - [int](2 * $scale) }
-    $below = if ($spansField) { $field.Top + $field.Height - 1 - [int](2 * $scale) } else { $field.Top + $field.Height + [int](1 * $scale) }
-    $left = $field.Left + [int](12 * $scale)
-    $right = $field.Left + $field.Width - [int](12 * $scale)
+    $px = { param($points) [int][Math]::Round($points * $scale) }
+    $spansField = $field.Height -ge (& $px 20)
+    $above = if ($spansField) { $field.Top + (& $px 2) } else { $field.Top - (& $px 2) }
+    $below = if ($spansField) { $field.Top + $field.Height - 1 - (& $px 2) } else { $field.Top + $field.Height + (& $px 1) }
+    $left = $field.Left + (& $px 12)
+    $right = $field.Left + $field.Width - (& $px 12)
     $stop.Facts.Add("the element used sits at $($field.Left),$($field.Top) $($field.Width)x$($field.Height), scale $scale, so it's taken as $(if ($spansField) { "the whole field" } else { "the address text" })")
     $pill = Compare-Rows $paths.rest $paths.hovered $left $right @($above, $below) 4
-    $stillHovered = Compare-Rows $paths.rest $paths.loading $left $right @($above) 4
     $glow = Compare-Rows $paths.hovered $paths.loading $left $right @($below) 12
-    $stop.Facts.Add("rows $above and $below from x $left to $right, against the picture at rest: hovered changed $(Format-Rows $pill) pixels by 4 levels or more; loading changed $(Format-Rows $stillHovered) on the row above")
-    $stop.Facts.Add("the row below, loading against hovered: $(Format-Rows $glow) pixels changed by 12 levels or more")
-    $stop.Facts.Add("the slow page loaded: $titled")
+    $kept = Compare-Rows $paths.rest $paths.loaded $left $right @($above, $below) 4
+    $stop.Facts.Add("rows $above and $below from x $left to $($right): hovered against at rest changed $(Format-Rows $pill) pixels by 4 levels or more, and after the reload $(Format-Rows $kept); the row below, reloading against hovered, $(Format-Rows $glow) by 12 or more")
     Send-Escape
     $saved = @($pictures.Values | Where-Object { -not $_.Saved }).Count -eq 0
     $mostly = { param($compared, $share) $compared.Total -gt 0 -and $compared.Changed -ge $compared.Total * $share }
-    $drawn = (& $mostly $pill 0.8) -and (& $mostly $stillHovered 0.8) -and (& $mostly $glow 0.1)
-    Set-Seen $stop ($saved -and $titled -and (-not $Judged -or $drawn))
+    $drawn = (& $mostly $pill 0.8) -and (& $mostly $kept 0.8) -and (& $mostly $glow 0.1)
+    Set-Seen $stop ($saved -and (-not $Judged -or $drawn))
   }
   if ($stop.Seen -ne "yes") { $script:Required.Add("$($stop.Number) $title") }
   Stop-Ardia $session
