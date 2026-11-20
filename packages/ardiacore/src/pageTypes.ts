@@ -19,6 +19,8 @@ export type NavigationState = {
 };
 
 export type AppBadge = { origin: string; count: number | null; flag: boolean };
+export type FieldProviderOpened = { via: "badge" | "menu"; shown: boolean };
+export type VerificationCodeFound = { token: string; app: string; main: boolean };
 
 export type MediaState = { playing: boolean; muted: boolean };
 
@@ -134,7 +136,7 @@ export type DisplayMediaSource = {
   height: number;
 };
 export type DisplayMediaAudio = { tab: boolean; screen: boolean; window: "application" | "system" | null };
-export type DisplayMediaRequest = { id: string; origin: string; frameOrigin?: string; audio: DisplayMediaAudio | null; sources: DisplayMediaSource[] };
+export type DisplayMediaRequest = { id: string; origin: string; frameOrigin?: string; audio: DisplayMediaAudio | null; sources: DisplayMediaSource[]; controller?: boolean };
 
 export type ZoomState = { zoom: number; host: string; isDefault: boolean; pinchScale: number; user: boolean };
 export type ContentBlockedState = { count: number; url: string };
@@ -236,6 +238,8 @@ export type WebViewProps = ViewProps & {
   onPreferredSize?: (size: { width: number; height: number }) => void;
   onTransferRefused?: (fromWindowId: string) => void;
   onAppBadge?: (badge: AppBadge) => void;
+  onFieldProviderOpened?: (opened: FieldProviderOpened) => void;
+  onVerificationCodeFound?: (found: VerificationCodeFound) => void;
 };
 
 export type WebViewHandle = {
