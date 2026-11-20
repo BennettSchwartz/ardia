@@ -35,7 +35,7 @@ import { useBaseSystemBars, useSystemBars } from "./state/app/systemBars";
 import { useSearchOpen } from "./state/search/hooks";
 import { useLeavingTab, useOpeningTab, useSheet, useSurface } from "./state/browse/hooks";
 import { appBecameActive, appWillResignActive, closeArchive, deckPullInFlight, goBackToStartIfEmpty, startBrowser, type Surface } from "./state/browse/store";
-import { refreshHiddenDeck } from "./state/browse/deckHold";
+import { refreshHiddenDeck, resizeRoot } from "./state/browse/deckHold";
 import { useDeckStandbyWanted } from "./state/browse/deckStandby";
 import { deckPullGrowing } from "./state/browse/deckPull";
 import { noteScreenLayout, noteWindowShape } from "./state/app/landscapeCount";
@@ -52,7 +52,6 @@ import { frontSheet } from "./state/settings/settingsRules";
 import { inkLayer, lightStatusIcons } from "./lib/statusInk";
 import { countUsage, reportLaunch, startTelemetry } from "./state/telemetry/telemetry";
 import { useIncognito, useSelectedTab } from "./state/tabs/hooks";
-import { setRootSize } from "./state/app/rootSize";
 import { syncOffered } from "./state/sync/offer";
 import { countDrawnMenu, countNativeMenu } from "./state/browse/menuCounts";
 import { browseForMeOffered } from "./state/browseForMe/offer";
@@ -100,7 +99,7 @@ export default function App() {
     };
   }, []);
   return (
-    <GestureHandlerRootView style={styles.root} onLayout={(event) => setRootSize(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}>
+    <GestureHandlerRootView style={styles.root} onLayout={(event) => resizeRoot(event.nativeEvent.layout.width, event.nativeEvent.layout.height)}>
       <SafeAreaProvider>
         <ScreenLayoutProbe onLayoutChange={reportScreenLayout} />
         <ProfileLookContext.Provider value={look}>

@@ -84,9 +84,9 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     "worklet";
     return Math.min(Math.max(value, 0), 1);
   };
-  const centreSqueeze = useAnimatedStyle(() => (squeeze ? { marginLeft: squeeze.marginLeft * shut(progress.value), marginRight: squeeze.marginRight * shut(progress.value) } : {}), [squeeze]);
-  const addressFade = useAnimatedStyle(() => (squeeze ? { opacity: 1 - shut(progress.value) } : {}), [squeeze]);
-  const dotsFade = useAnimatedStyle(() => (squeeze && address.insecure ? { opacity: 1 - shut(progress.value) } : {}), [squeeze, address.insecure]);
+  const centreSqueeze = useAnimatedStyle(() => (squeeze ? { marginLeft: squeeze.marginLeft * shut(progress.value), marginRight: squeeze.marginRight * shut(progress.value) } : { marginLeft: 0, marginRight: 0 }), [squeeze]);
+  const addressFade = useAnimatedStyle(() => (squeeze ? { opacity: 1 - shut(progress.value) } : { opacity: 1 }), [squeeze]);
+  const dotsFade = useAnimatedStyle(() => (squeeze && address.insecure ? { opacity: 1 - shut(progress.value) } : { opacity: 1 }), [squeeze, address.insecure]);
   const lockFade = useAnimatedStyle(() => ({ opacity: shut(progress.value) }));
   const leading = (
     <Animated.View testID="floatingBarLeading" collapsable={false} style={back.leading} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>

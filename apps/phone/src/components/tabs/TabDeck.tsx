@@ -98,6 +98,7 @@ import { tabGridMotion } from "./tabGridLayout";
 import { useDeckGrid } from "../../state/browse/deckGrid";
 import { deckPullGrowing, endDeckPull, growDeckPull, peekDeckPullEntrance, publishDeckStandby, showGrowingPage, takeDeckPullEntrance } from "../../state/browse/deckPull";
 import { DECK_PULL, pullTarget, stackPullTarget } from "../../lib/deckPull";
+import { barSpanCenter } from "../../lib/bottomBarSpan";
 import { useBarGlyphFade, useDeckPulled } from "./deckPulled";
 
 type Phase = { kind: "opening" | "settled" | "closing"; id: string | null };
@@ -1263,7 +1264,7 @@ export const TabDeck = memo(function TabDeck() {
       {menu === "plus" && !redesigned ? (
         <Menu
           items={plusItems}
-          place={{ bottom: deckHeight - g.barCenterY + tabsLayout.barPlus.height, left: (width - tabsLayout.menuWidth) / 2, width: tabsLayout.menuWidth }}
+          place={{ bottom: deckHeight - g.barCenterY + tabsLayout.barPlus.height, left: Math.min(Math.max(barSpanCenter(width, deckBarSpan) - tabsLayout.menuWidth / 2, space.l), width - tabsLayout.menuWidth - space.l), width: tabsLayout.menuWidth }}
           onDismiss={() => setMenu(null)}
         />
       ) : null}

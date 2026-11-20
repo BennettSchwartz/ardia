@@ -10,16 +10,16 @@ export const DUO_BAR = { openFrom: 600, openWidth: 400, stripGap: 12, button: 48
 
 export const DUO_PLUS_ABOVE = DUO_BAR.button + DUO_BAR.buttonGap;
 
-export const isOpenDuo = (width: number, hinge: ScreenHinge) => hinge !== "none" && width >= DUO_BAR.openFrom;
+export const isOpenDuo = (width: number, hinge: ScreenHinge) => (hinge === "fullyOpen" || hinge === "partiallyOpen") && width >= DUO_BAR.openFrom;
 
 export function bottomBarLayout(width: number, insets: { left: number; right: number }, hinge: ScreenHinge, side: number): BottomBarLayout {
-  if (hinge === "none") {
-    const safe = Math.max(insets.left, insets.right) + side;
-    return { span: { left: safe, right: safe }, strip: null };
-  }
   const stripLeft = insets.left > insets.right;
   const inset = stripLeft ? insets.left : insets.right;
-  const fromEdge = Math.max(DUO_BAR.button / 2, Math.min(DUO_BAR.axis, inset - DUO_BAR.button / 2));
+  if (hinge === "none" || inset < DUO_BAR.button) {
+    const safe = inset + side;
+    return { span: { left: safe, right: safe }, strip: null };
+  }
+  const fromEdge = Math.min(DUO_BAR.axis, inset - DUO_BAR.button / 2);
   const open = isOpenDuo(width, hinge);
   const near = open ? fromEdge - DUO_BAR.button / 2 : inset + DUO_BAR.stripGap;
   const far = open ? Math.max(side, width - near - DUO_BAR.openWidth) : side;

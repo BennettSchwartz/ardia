@@ -65,9 +65,36 @@ test("on the open Duo the deck's Search Tabs field rests in the bottom slot, ope
   assert.equal(duoFieldReach(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), 24), null);
 });
 
-test("the open Duo is a hinge at 600 wide or more, which is where closing search lands in one move", () => {
+test("the open Duo is an open hinge at 600 wide or more, which is where closing search lands in one move; a closed Duo turned on its side stays closed", () => {
   assert.equal(isOpenDuo(951, "fullyOpen"), true);
   assert.equal(isOpenDuo(600, "partiallyOpen"), true);
   assert.equal(isOpenDuo(466, "closed"), false);
+  assert.equal(isOpenDuo(678, "closed"), false);
   assert.equal(isOpenDuo(1032, "none"), false);
+});
+
+test("a closed Duo turned on its side with its strip at a side keeps the closed sizing: Tabs on the bar's line, the capsule from 24 to 12 short of the strip", () => {
+  const { span, strip } = bottomBarLayout(678, { left: 0, right: 84 }, "closed", 24);
+  assert.deepEqual(span, { left: 24, right: 96 });
+  assert.deepEqual(strip, { ...CLOSED_STRIP, centerX: 630 });
+  assert.equal(duoSqueeze(678, bottomBarLayout(678, { left: 0, right: 84 }, "closed", 24)), null);
+});
+
+test("a hinge whose strip-side inset can't hold a 48 circle gets the plain centred bar, so the capsule never runs under a strip button, whatever the inset", () => {
+  for (const hinge of ["closed", "partiallyOpen", "fullyOpen"] as const) {
+    for (const width of [466, 669, 951]) {
+      assert.deepEqual(bottomBarLayout(width, { left: 0, right: 0 }, hinge, 24), { span: { left: 24, right: 24 }, strip: null });
+      assert.deepEqual(bottomBarLayout(width, { left: 30, right: 0 }, hinge, 24), { span: { left: 54, right: 54 }, strip: null });
+      assert.deepEqual(bottomBarLayout(width, { left: 0, right: 47 }, hinge, 24), { span: { left: 71, right: 71 }, strip: null });
+    }
+  }
+});
+
+test("wherever a strip is kept, its buttons sit inside the inset and a closed capsule ends at least 12 short of them", () => {
+  for (const inset of [48, 50, 60, 72, 84, 120]) {
+    const { span, strip } = bottomBarLayout(466, { left: 0, right: inset }, "closed", 24);
+    const buttonLeft = strip!.centerX - 24;
+    assert.ok(466 - buttonLeft <= inset, `inset ${inset}`);
+    assert.ok(buttonLeft - (466 - span.right) >= 12, `inset ${inset}`);
+  }
 });
