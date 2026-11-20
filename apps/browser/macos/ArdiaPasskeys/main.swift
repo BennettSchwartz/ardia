@@ -56,6 +56,7 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
       finish("Turn on Apple Passwords in Ardia first.", "Open Ardia › Settings › Plugins › Apple Passwords, turn it on, then export again from Passwords. Nothing was copied.")
       return true
     }
+    Self.writeState("received", directory: directory)
     ask(groups: groups, directory: directory, token: token)
     return true
   }
@@ -72,15 +73,19 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
     alert.addButton(withTitle: "Copy Passkeys")
     alert.addButton(withTitle: "Cancel")
     guard alert.runModal() == .alertFirstButtonReturn else {
+      Self.writeState("cancelled", directory: directory)
       return finish(nil, nil)
     }
     let group = groups.groups[max(0, picker.indexOfSelectedItem)]
+    Self.writeState("copying", directory: directory, group: group.name)
     Task { @MainActor in
       let counts = await Self.copy(token: token, groupId: group.id, generation: groups.generation, directory: directory)
       guard let counts else {
+        Self.writeState("failed", directory: directory)
         return self.finish("Couldn't copy passkeys.", "Passwords cancelled the export, it expired, or Ardia's settings changed. Start it again in Passwords.")
       }
       Self.writeResult(counts, directory: directory)
+      Self.writeState("done", directory: directory, group: group.name, counts: counts)
       let already = counts.existing > 0 ? " \(counts.existing) were already in Ardia." : ""
       self.finish("Copied \(counts.kept) passkeys to \(group.name).", "\(already) Nothing else from the export was kept.".trimmingCharacters(in: .whitespaces))
     }
@@ -95,6 +100,15 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
       return PasskeyImport.keep(export, groupId: groupId, store: store, suffixes: suffixes)
     } catch {
       return nil
+    }
+  }
+
+  static func writeState(_ phase: String, directory: URL, group: String? = nil, counts: PasskeyImportCounts? = nil) {
+    var state: [String: Any] = ["phase": phase, "at": Date().timeIntervalSince1970 * 1000]
+    if let group { state["group"] = group }
+    if let counts { state["kept"] = counts.kept; state["existing"] = counts.existing; state["skipped"] = counts.skippedRelyingParty + counts.skippedAlgorithm + counts.failed }
+    if let data = try? JSONSerialization.data(withJSONObject: state) {
+      try? data.write(to: directory.appendingPathComponent("passkey-import-state.json"), options: .atomic)
     }
   }
 
@@ -118,6 +132,46 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
     }
     NSApp.terminate(nil)
   }
+}
+
+enum HelperCommand {
+  static func run(_ arguments: [String]) -> Bool {
+    if arguments.contains("--autofill-state") {
+      let done = DispatchSemaphore(value: 0)
+      var enabled = false
+      ASCredentialIdentityStore.shared.getState { state in
+        enabled = state.isEnabled
+        done.signal()
+      }
+      _ = done.wait(timeout: .now() + 5)
+      print("{\"enabled\":\(enabled)}")
+      return true
+    }
+    return false
+  }
+}
+
+if HelperCommand.run(CommandLine.arguments) { exit(0) }
+
+final class SettingsDelegate: NSObject, NSApplicationDelegate {
+  let openSettings: Bool
+  init(openSettings: Bool) { self.openSettings = openSettings }
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    if openSettings {
+      ASSettingsHelper.openCredentialProviderAppSettings { _ in DispatchQueue.main.async { NSApp.terminate(nil) } }
+    } else {
+      ASSettingsHelper.requestToTurnOnCredentialProviderExtension { _ in DispatchQueue.main.async { NSApp.terminate(nil) } }
+    }
+  }
+}
+
+if CommandLine.arguments.contains("--turn-on") || CommandLine.arguments.contains("--open-settings") {
+  let settingsApp = NSApplication.shared
+  let settingsDelegate = SettingsDelegate(openSettings: CommandLine.arguments.contains("--open-settings"))
+  settingsApp.delegate = settingsDelegate
+  settingsApp.setActivationPolicy(.accessory)
+  settingsApp.run()
+  exit(0)
 }
 
 let app = NSApplication.shared

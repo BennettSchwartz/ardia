@@ -86,6 +86,15 @@ public class PasswordsModule: Module {
       reply.ok(["deleted": PasskeyCoordinator.shared.delete(group: try args.text("group"), rpId: try args.text("rpId"), credentialId: try args.text("credentialId"))])
     },
     "deleteAllPasskeys": { args, reply in reply.ok(["deleted": PasskeyCoordinator.shared.deleteAll(group: try args.text("group"))]) },
+    "passkeySetupState": { _, reply in PasskeyCoordinator.setupState { reply.ok($0) } },
+    "passkeyImportState": { _, reply in reply.ok(PasskeyCoordinator.importState()) },
+    "startPasskeyImport": { _, reply in
+      PasskeyCoordinator.clearImportState()
+      reply.ok(["opened": PasskeyCoordinator.openPasswordsApp()])
+    },
+    "turnOnPasskeyAutofill": { args, reply in
+      reply.ok(["opened": PasskeyCoordinator.openHelper(try args.optionalBool("settings") == true ? "--open-settings" : "--turn-on")])
+    },
     "otpauthHandler": { _, reply in reply.ok(["app": ArdiaWebView.otpauthHandlerName as Any? ?? NSNull()]) },
     "setUpVerificationCode": { args, reply in
       let tab = try args.text("tab")

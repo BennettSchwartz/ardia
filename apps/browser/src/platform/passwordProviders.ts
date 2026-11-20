@@ -1,6 +1,6 @@
-import { call, type FieldProviderHint, type FieldProviderOpened, type FieldProviderProfile, type PasskeyRequestEvent, type VerificationCodeFound } from "@ardia/ardiacore";
+import { call, type FieldProviderHint, type FieldProviderOpened, type FieldProviderProfile, type PasskeyImportState, type PasskeyRequestEvent, type VerificationCodeFound } from "@ardia/ardiacore";
 
-export type { FieldProviderHint, FieldProviderOpened, PasskeyRequestEvent, VerificationCodeFound };
+export type { FieldProviderHint, FieldProviderOpened, PasskeyImportState, PasskeyRequestEvent, VerificationCodeFound };
 export type FieldProvider = FieldProviderProfile;
 
 const PROVIDER_SESSION = Array.from({ length: 4 }, () => Math.floor(Math.random() * 0x100000000).toString(16).padStart(8, "0")).join("");
@@ -13,6 +13,12 @@ export const setPasskeyProviders = (generation: number, providers: { profile: st
   call("passwords.setPasskeyProviders", { generation, providers });
 export const resolvePasskey = (id: string, action: "use" | "save" | "excludedOk" | "other" | "cancel", account?: number) =>
   call("passwords.resolvePasskey", account === undefined ? { id, action } : { id, action, account });
+export const storedPasskeys = (group: string) => call("passwords.passkeys", { group });
+export const deleteAllPasskeys = (group: string) => call("passwords.deleteAllPasskeys", { group });
+export const passkeySetupState = () => call("passwords.passkeySetupState", {});
+export const passkeyImportState = () => call("passwords.passkeyImportState", {});
+export const startPasskeyImport = () => call("passwords.startPasskeyImport", {});
+export const turnOnPasskeyAutofill = (settings = false) => call("passwords.turnOnPasskeyAutofill", { settings });
 export const showSystemPanel = (tab: string, generation: number) => call("passwords.showSystemPanel", { tab, generation });
 export const showPanelHint = (tab: string, label: string, side: "above" | "below") => call("passwords.showPanelHint", { tab, label, side });
 export const systemPanelAvailable = () => call("passwords.systemPanelAvailable", {});

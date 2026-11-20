@@ -18,6 +18,7 @@ import type { ChromeWindowState } from "../windows";
 import type {
   FieldProviderProfile,
   PasskeyAction,
+  PasskeyImportState,
   PasskeyProviderProfile,
   PasswordExportStatus,
   SavedPassword,
@@ -121,6 +122,10 @@ export type EngineCalls = {
   "passwords.passkeys": [{ group: string }, { passkeys: StoredPasskey[] }];
   "passwords.deletePasskey": [{ group: string; rpId: string; credentialId: string }, { deleted: boolean }];
   "passwords.deleteAllPasskeys": [{ group: string }, { deleted: number }];
+  "passwords.passkeySetupState": [{}, { available: boolean; reason?: "macOS" | "helper"; autofillEnabled?: boolean | null }];
+  "passwords.passkeyImportState": [{}, PasskeyImportState];
+  "passwords.startPasskeyImport": [{}, { opened: boolean }];
+  "passwords.turnOnPasskeyAutofill": [{ settings?: boolean }, { opened: boolean }];
   "passwords.otpauthHandler": [{}, { app: string | null }];
   "passwords.setUpVerificationCode": [{ tab: string; token: string; generation?: number }, VerificationCodeSetupResult];
 

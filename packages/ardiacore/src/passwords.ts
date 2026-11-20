@@ -6,6 +6,7 @@ export type PasswordExportStatus = "succeeded" | "cancelled" | "writeFailed" | "
 export type FieldProviderField = "login" | "oneTimeCode";
 export type FieldProviderProfile = { profile: string; fields: FieldProviderField[]; codeSetup: boolean };
 export type PasskeyProviderProfile = { profile: string; group: string; create: boolean };
+export type PasskeyImportState = { phase?: "received" | "copying" | "done" | "failed" | "cancelled"; at?: number; group?: string; kept?: number; existing?: number; skipped?: number };
 export type PasskeyAction = "use" | "save" | "excludedOk" | "other" | "cancel";
 export type StoredPasskey = { rpId: string; credentialId: string; userName: string; userDisplayName: string; created: number; source: "apple" | "ardia" };
 export type PasskeyRequestEvent = {

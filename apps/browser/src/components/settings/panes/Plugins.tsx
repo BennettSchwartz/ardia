@@ -202,7 +202,7 @@ function PluginPage({ name }: { name: string }) {
           </Group>
         </>
       ) : null}
-      {m?.passwordManager && active ? <PasswordManagerDetails name={name} spec={m.passwordManager} /> : null}
+      {m?.passwordManager && (active || review) ? <PasswordManagerDetails name={name} spec={m.passwordManager} review={!active && review} /> : null}
       {m ? (
         <>
           <SectionHeader title="What it gets" />
