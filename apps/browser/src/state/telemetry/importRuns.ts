@@ -1,4 +1,4 @@
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
 let runs = 0;
@@ -62,7 +62,7 @@ export function noteFirefoxFavicons(icons: number, consent?: ConsentToken | null
 }
 
 export function noteSearchEngineOfferTaken() {
-  searchEngineOffersTaken += 1;
+  if (isSharing()) searchEngineOffersTaken += 1;
 }
 
 export function noteHistoryImport(batches: number, failed: number, consent?: ConsentToken | null) {
@@ -152,7 +152,7 @@ function countExtensionListing(listed: number, skipped: ExtensionSkipCounts) {
 }
 
 export function noteImportExtensionStorePages(opened: number) {
-  extensionCounts.import_extension_store_pages_opened += opened;
+  if (isSharing()) extensionCounts.import_extension_store_pages_opened += opened;
 }
 
 function takeImportExtensionCounts() {
@@ -175,3 +175,5 @@ export function takeArcImportCounts() {
   for (const key of Object.keys(arcCounts) as (keyof typeof arcCounts)[]) arcCounts[key] = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeImportRuns());

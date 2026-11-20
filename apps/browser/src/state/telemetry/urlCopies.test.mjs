@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { noteSelectedTabUrlsCopied, noteUrlCopied, takeUrlCopyCounts } from "./urlCopies.ts";
+import { after, test } from "node:test";
+
+globalThis.__DEV__ = false;
+await import("../../test-native/index.ts");
+globalThis.fetch = async () => ({ status: 503 });
+const client = await import("./client.ts");
+client.loadChoice();
+client.setSharing(true, "settings");
+after(() => client.setSharing(false, "settings"));
+const { noteSelectedTabUrlsCopied, noteUrlCopied, takeUrlCopyCounts } = await import("./urlCopies.ts");
 
 test("address copies are counted, those taken before the first page apart, and taking them starts over", () => {
   noteUrlCopied(false);

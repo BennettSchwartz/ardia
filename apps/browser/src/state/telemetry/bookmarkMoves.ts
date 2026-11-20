@@ -1,14 +1,17 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let moves = 0;
 let moved = 0;
 let slowestSyncMs = 0;
 
 export function noteBookmarksMoved(count: number) {
+  if (!isSharing()) return;
   moves++;
   moved += count;
 }
 
 export function noteBookmarkSyncDiff(ms: number) {
-  if (ms > slowestSyncMs) slowestSyncMs = ms;
+  if (isSharing() && ms > slowestSyncMs) slowestSyncMs = ms;
 }
 
 export function takeBookmarkMoveCounts() {
@@ -18,3 +21,5 @@ export function takeBookmarkMoveCounts() {
   slowestSyncMs = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeBookmarkMoveCounts());

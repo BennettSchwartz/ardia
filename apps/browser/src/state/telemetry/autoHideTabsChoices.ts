@@ -1,7 +1,9 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let chosen = 0;
 
 export function noteAutoHideTabsChosen() {
-  chosen++;
+  if (isSharing()) chosen++;
 }
 
 export function takeAutoHideTabsChoices(): number {
@@ -13,7 +15,7 @@ export function takeAutoHideTabsChoices(): number {
 let tornOffKept = 0;
 
 export function noteTornOffWindowKeptAutoHide() {
-  tornOffKept++;
+  if (isSharing()) tornOffKept++;
 }
 
 export function takeTornOffWindowsKeptAutoHide(): number {
@@ -21,3 +23,7 @@ export function takeTornOffWindowsKeptAutoHide(): number {
   tornOffKept = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeAutoHideTabsChoices());
+
+onConsentPeriodChange(() => void takeTornOffWindowsKeptAutoHide());

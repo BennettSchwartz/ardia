@@ -1,3 +1,5 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 export type PeekEntranceKind = "genie" | "affine" | "fade";
 
 const none = () => ({ genie: 0, affine: 0, fade: 0, fallbacks: 0, readyTimeouts: 0, interrupts: 0, promotes: 0, closes: 0 });
@@ -5,14 +7,15 @@ const none = () => ({ genie: 0, affine: 0, fade: 0, fallbacks: 0, readyTimeouts:
 let counts = none();
 
 export function notePeekEntrance(entrance: PeekEntranceKind, fellBack: boolean, readyTimedOut: boolean) {
+  if (!isSharing()) return;
   counts[entrance]++;
   if (fellBack) counts.fallbacks++;
   if (readyTimedOut) counts.readyTimeouts++;
 }
 
-export const notePeekInterrupt = () => void counts.interrupts++;
+export const notePeekInterrupt = () => void (isSharing() && counts.interrupts++);
 
-export const notePeekDone = (outcome: "closed" | "promoted") => void counts[outcome === "promoted" ? "promotes" : "closes"]++;
+export const notePeekDone = (outcome: "closed" | "promoted") => void (isSharing() && counts[outcome === "promoted" ? "promotes" : "closes"]++);
 
 export function takePeekMotionCounts() {
   const taken = counts;
@@ -28,3 +31,5 @@ export function takePeekMotionCounts() {
     peek_closes: taken.closes,
   };
 }
+
+onConsentPeriodChange(() => void takePeekMotionCounts());

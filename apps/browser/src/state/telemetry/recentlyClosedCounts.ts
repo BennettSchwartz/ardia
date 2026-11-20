@@ -1,7 +1,10 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let clears = 0;
 let entriesCleared = 0;
 
 export function noteRecentlyClosedCleared(entries: number) {
+  if (!isSharing()) return;
   clears++;
   entriesCleared += entries;
 }
@@ -12,3 +15,5 @@ export function takeRecentlyClosedCounts() {
   entriesCleared = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeRecentlyClosedCounts());

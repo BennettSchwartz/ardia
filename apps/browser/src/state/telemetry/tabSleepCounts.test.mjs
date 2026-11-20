@@ -10,6 +10,8 @@ const usage = await import("./usage.ts");
 const { noteCaptureIndicatorCleared, noteTabSlept, takeTabSleepCounts } = await import("./tabSleepCounts.ts");
 const takePinnedTabsSleptByMemorySaver = () => takeTabSleepCounts().pinned_tabs_slept_by_memory_saver;
 after(() => client.setSharing(false, "settings"));
+client.loadChoice();
+client.setSharing(true, "onboarding");
 
 async function usageCounts() {
   await client.saveQueueNow();

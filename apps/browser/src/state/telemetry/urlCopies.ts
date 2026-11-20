@@ -1,13 +1,17 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let copies = 0;
 let whilePending = 0;
 let selectedTabs = 0;
 
 export function noteSelectedTabUrlsCopied() {
+  if (!isSharing()) return;
   copies++;
   selectedTabs++;
 }
 
 export function noteUrlCopied(firstPagePending: boolean) {
+  if (!isSharing()) return;
   copies++;
   if (firstPagePending) whilePending++;
 }
@@ -19,3 +23,5 @@ export function takeUrlCopyCounts() {
   selectedTabs = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeUrlCopyCounts());

@@ -1,5 +1,5 @@
 import { takeCleanUpCounts } from "./cleanUpCounts";
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
 const none = () => ({ captureIndicatorsCleared: 0, mediaCardsCleared: 0, pinnedTabsSleptByMemorySaver: 0, tabsSleptOverBudget: 0, tabsSleptOverBudgetReopened: 0, tabsOverBudgetSkippedLoading: 0, tabsOverBudgetAsksPassedOn: 0, topAppsKeptRunning: 0, topAppWindowsClosedFromNewTab: 0, topAppsUnloadedFromMenu: 0, tabsSleptFromMenu: 0, groupsSleptFromMenu: 0, menuSleepsKeptAwake: 0 });
@@ -7,15 +7,15 @@ const none = () => ({ captureIndicatorsCleared: 0, mediaCardsCleared: 0, pinnedT
 let pending = none();
 
 export function noteCaptureIndicatorCleared() {
-  pending.captureIndicatorsCleared++;
+  if (isSharing()) pending.captureIndicatorsCleared++;
 }
 
 export function noteMediaCardCleared() {
-  pending.mediaCardsCleared++;
+  if (isSharing()) pending.mediaCardsCleared++;
 }
 
 export function noteTabSlept(pinned: boolean, reason: string | null) {
-  if (pinned && reason === "proactive") pending.pinnedTabsSleptByMemorySaver++;
+  if (isSharing() && pinned && reason === "proactive") pending.pinnedTabsSleptByMemorySaver++;
 }
 
 export function noteTabSleptOverBudget(consent?: ConsentToken | null) {
@@ -23,10 +23,11 @@ export function noteTabSleptOverBudget(consent?: ConsentToken | null) {
 }
 
 export function noteTabSleptOverBudgetReopened() {
-  pending.tabsSleptOverBudgetReopened++;
+  if (isSharing()) pending.tabsSleptOverBudgetReopened++;
 }
 
 export function noteBudgetSweep(skippedLoading: number, asksPassedOn: number) {
+  if (!isSharing()) return;
   pending.tabsOverBudgetSkippedLoading += skippedLoading;
   pending.tabsOverBudgetAsksPassedOn += asksPassedOn;
 }
@@ -35,11 +36,11 @@ let profilesUnloaded = 0;
 let unloadedProfilesReopened = 0;
 let unloadedProfileReloadMs = 0;
 
-export const noteProfileUnloaded = () => void profilesUnloaded++;
+export const noteProfileUnloaded = () => void (isSharing() && profilesUnloaded++);
 
-export const noteUnloadedProfileReopened = () => void unloadedProfilesReopened++;
+export const noteUnloadedProfileReopened = () => void (isSharing() && unloadedProfilesReopened++);
 
-export const noteUnloadedProfileReloaded = (ms: number) => void (unloadedProfileReloadMs += Math.max(0, Math.round(ms)));
+export const noteUnloadedProfileReloaded = (ms: number) => void (isSharing() && (unloadedProfileReloadMs += Math.max(0, Math.round(ms))));
 
 function takeProfileUnloadCounts() {
   const taken = { profiles_unloaded: profilesUnloaded, unloaded_profiles_reopened: unloadedProfilesReopened, unloaded_profile_reload_ms: unloadedProfileReloadMs };
@@ -50,7 +51,7 @@ function takeProfileUnloadCounts() {
 }
 
 export function noteTopAppsKeptRunning(count: number) {
-  pending.topAppsKeptRunning += count;
+  if (isSharing()) pending.topAppsKeptRunning += count;
 }
 
 export function noteTopAppWindowClosedFromNewTab(consent?: ConsentToken | null) {
@@ -58,7 +59,7 @@ export function noteTopAppWindowClosedFromNewTab(consent?: ConsentToken | null) 
 }
 
 export function noteTopAppUnloadedFromMenu() {
-  pending.topAppsUnloadedFromMenu++;
+  if (isSharing()) pending.topAppsUnloadedFromMenu++;
 }
 
 export function noteTabsSleptFromMenu(from: "tab" | "group", keptAwake: number, consent?: ConsentToken | null) {
@@ -86,3 +87,5 @@ export function takeTabSleepCounts() {
     tabs_over_budget_asks_passed_on: taken.tabsOverBudgetAsksPassedOn,
   };
 }
+
+onConsentPeriodChange(() => void takeTabSleepCounts());

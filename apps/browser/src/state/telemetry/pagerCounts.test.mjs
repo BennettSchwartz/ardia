@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { noteProfileDotReorder, notePagerSettle, takePagerCounts } from "./pagerCounts.ts";
+import { after, test } from "node:test";
+
+globalThis.__DEV__ = false;
+await import("../../test-native/index.ts");
+globalThis.fetch = async () => ({ status: 503 });
+const client = await import("./client.ts");
+client.loadChoice();
+client.setSharing(true, "settings");
+after(() => client.setSharing(false, "settings"));
+const { noteProfileDotReorder, notePagerSettle, takePagerCounts } = await import("./pagerCounts.ts");
 
 test("pager settles are counted, those that kept the profile apart, switcher reorders too, and taking them starts over", () => {
   notePagerSettle(true);

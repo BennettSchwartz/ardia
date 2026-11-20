@@ -1,8 +1,11 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let writes = 0;
 let cosmeticWrites = 0;
 let characters = 0;
 
 export function noteSessionWrite(length: number, cosmeticOnly: boolean) {
+  if (!isSharing()) return;
   writes++;
   if (cosmeticOnly) cosmeticWrites++;
   characters += length;
@@ -15,3 +18,5 @@ export function takeSessionWrites() {
   characters = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeSessionWrites());

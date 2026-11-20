@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
 
+globalThis.__DEV__ = false;
+await import("../../test-native/index.ts");
+globalThis.fetch = async () => ({ status: 503 });
+const client = await import("./client.ts");
+client.loadChoice();
+client.setSharing(true, "settings");
+after(() => client.setSharing(false, "settings"));
 const { noteWindowlessPages, takeCliCounts } = await import("./cliCounts.ts");
 
 const windowless = (counts) => [counts.windowless_pages_given_geometry, counts.windowless_pages_missing_geometry];

@@ -9,6 +9,8 @@ const client = await import("./client.ts");
 const usage = await import("./usage.ts");
 const { sidebarPlayerOpenCounter, takeMediaCardCounts } = await import("./mediaCardCounts.ts");
 after(() => client.setSharing(false, "settings"));
+client.loadChoice();
+client.setSharing(true, "onboarding");
 
 const sidebarCounts = () => {
   const { sidebar_player_expands, sidebar_player_reopens } = takeMediaCardCounts();

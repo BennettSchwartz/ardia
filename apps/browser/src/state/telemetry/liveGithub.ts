@@ -1,14 +1,15 @@
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
 const NONE = { sent: 0, held: 0, rateLimited: 0, detailsFetched: 0, detailsReused: 0, blockedListings: 0 };
 let counts = { ...NONE };
 
-export const noteLiveGithubRequest = (outcome: "sent" | "held" | "rateLimited") => void counts[outcome]++;
+export const noteLiveGithubRequest = (outcome: "sent" | "held" | "rateLimited") => void (isSharing() && counts[outcome]++);
 
 export const noteLiveGithubBlocked = (consent?: ConsentToken | null) => countFor(consent, () => void counts.blockedListings++, { live_github_blocked_listings: 1 });
 
 export function noteLiveGithubDetails(fetched: number, reused: number) {
+  if (!isSharing()) return;
   counts.detailsFetched += fetched;
   counts.detailsReused += reused;
 }
@@ -25,3 +26,5 @@ export function takeLiveGithubCounts() {
   counts = { ...NONE };
   return taken;
 }
+
+onConsentPeriodChange(() => void takeLiveGithubCounts());

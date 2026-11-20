@@ -1,10 +1,13 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let progressUpdates = 0;
 let historyWrites = 0;
 let historyCharacters = 0;
 
-export const noteDownloadProgressUpdate = () => progressUpdates++;
+export const noteDownloadProgressUpdate = () => void (isSharing() && progressUpdates++);
 
 export function noteDownloadHistoryWrite(characters: number) {
+  if (!isSharing()) return;
   historyWrites++;
   historyCharacters += characters;
 }
@@ -20,3 +23,5 @@ export function takeDownloadWork() {
   historyCharacters = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeDownloadWork());

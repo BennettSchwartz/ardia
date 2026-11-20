@@ -1,4 +1,4 @@
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
 let bookmarkExports = 0;
@@ -20,6 +20,7 @@ export const noteBookmarkExportFailure = (consent?: ConsentToken | null) => coun
 export const notePasswordExportFailure = (consent?: ConsentToken | null) => countFor(consent, () => void (passwordExportFailures += 1), { password_export_failures: 1 });
 
 export function notePasswordListShown(logins: number, ms: number) {
+  if (!isSharing()) return;
   passwordListShows += 1;
   if (logins >= LARGE_PASSWORD_LIST) passwordListLargeShows += 1;
   if (ms >= SLOW_PASSWORD_LIST_MS) passwordListSlowShows += 1;
@@ -46,3 +47,5 @@ export function takeExportCounts() {
   passwordListSlowShows = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeExportCounts());

@@ -1,4 +1,5 @@
 import { hermesCollections } from "../../lib/hermesHeap";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 let trims = 0;
 let failures = 0;
@@ -7,11 +8,12 @@ let slowCollections = 0;
 let longestCollectionMs = 0;
 let collectionsTaken = hermesCollections();
 
-export const noteMemoryTrim = () => void (trims += 1);
-export const noteMemoryTrimFailure = () => void (failures += 1);
-export const noteMemoryTrimGivenUp = () => void (givenUp += 1);
+export const noteMemoryTrim = () => void (isSharing() && (trims += 1));
+export const noteMemoryTrimFailure = () => void (isSharing() && (failures += 1));
+export const noteMemoryTrimGivenUp = () => void (isSharing() && (givenUp += 1));
 
 export function noteHeapCollection(ms: number, slow: boolean) {
+  if (!isSharing()) return;
   if (slow) slowCollections += 1;
   longestCollectionMs = Math.max(longestCollectionMs, ms);
 }
@@ -40,3 +42,5 @@ export function takeMemoryTrimCounts() {
   longestCollectionMs = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeMemoryTrimCounts());

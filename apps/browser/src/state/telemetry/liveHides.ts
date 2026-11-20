@@ -1,5 +1,5 @@
 import { takeLiveGithubCounts } from "./liveGithub";
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 
 let rowHides = 0;
@@ -9,14 +9,15 @@ let repoHideAlls = 0;
 let newReposHiddenTurnedOn = 0;
 
 export function noteLiveRowHide() {
-  rowHides++;
+  if (isSharing()) rowHides++;
 }
 
 export function noteLiveStackHide() {
-  stackHides++;
+  if (isSharing()) stackHides++;
 }
 
 export function noteLiveRepoMenuPick(choice: string, showNewRepos: boolean) {
+  if (!isSharing()) return;
   repoMenuPicks++;
   if (choice === "repos:none") repoHideAlls++;
   if (choice === "repos:new" && !showNewRepos) newReposHiddenTurnedOn++;
@@ -46,3 +47,5 @@ export function takeLiveHideCounts() {
   folderColorPicks = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeLiveHideCounts());

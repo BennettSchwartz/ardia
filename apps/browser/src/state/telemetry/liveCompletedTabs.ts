@@ -1,7 +1,9 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let closed = 0;
 
 export function noteLiveCompletedTabsClosed(n: number) {
-  closed += n;
+  if (isSharing()) closed += n;
 }
 
 export function takeLiveCompletedTabsClosed() {
@@ -9,3 +11,5 @@ export function takeLiveCompletedTabsClosed() {
   closed = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeLiveCompletedTabsClosed());

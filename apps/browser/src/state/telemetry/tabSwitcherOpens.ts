@@ -4,7 +4,7 @@ import { countFor } from "./countFor";
 let inWebKit = 0;
 
 export function noteTabSwitcherOpenedInWebKit() {
-  inWebKit++;
+  if (isSharing()) inWebKit++;
 }
 
 export function takeTabSwitcherOpensInWebKit(): number {
@@ -42,15 +42,15 @@ export function takeTabSwitcherMenuReleases(): number {
 const scrollCounts = { overflowOpens: 0, overflowClicks: 0, wheelScrolls: 0 };
 
 export function noteTabSwitcherOverflowOpened() {
-  scrollCounts.overflowOpens++;
+  if (isSharing()) scrollCounts.overflowOpens++;
 }
 
 export function noteTabSwitcherOverflowClick() {
-  scrollCounts.overflowClicks++;
+  if (isSharing()) scrollCounts.overflowClicks++;
 }
 
 export function noteTabSwitcherWheelScrolled() {
-  scrollCounts.wheelScrolls++;
+  if (isSharing()) scrollCounts.wheelScrolls++;
 }
 
 export function takeTabSwitcherScrollCounts() {
@@ -62,3 +62,9 @@ export function takeTabSwitcherScrollCounts() {
   scrollCounts.overflowOpens = scrollCounts.overflowClicks = scrollCounts.wheelScrolls = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeTabSwitcherOpensInWebKit());
+
+onConsentPeriodChange(() => void takeTabSwitcherRowCloses());
+
+onConsentPeriodChange(() => void takeTabSwitcherScrollCounts());

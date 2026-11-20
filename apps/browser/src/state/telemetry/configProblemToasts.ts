@@ -1,12 +1,14 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let shown = 0;
 let dismissed = 0;
 
 export function noteConfigProblemToastShown() {
-  shown++;
+  if (isSharing()) shown++;
 }
 
 export function noteConfigProblemToastDismissed() {
-  dismissed++;
+  if (isSharing()) dismissed++;
 }
 
 export function takeConfigProblemToastCounts() {
@@ -15,3 +17,5 @@ export function takeConfigProblemToastCounts() {
   dismissed = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeConfigProblemToastCounts());

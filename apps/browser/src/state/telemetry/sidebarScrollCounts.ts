@@ -1,3 +1,5 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 const NEW_SCROLL_GAP_MS = 250;
 const STALL_GAP_MS = 34;
 
@@ -11,15 +13,17 @@ let lastScrollAt = -Infinity;
 export function noteSidebarScrolled(at: number) {
   const gap = at - lastScrollAt;
   lastScrollAt = at;
+  if (!isSharing()) return;
   if (gap > NEW_SCROLL_GAP_MS) scrolls++;
   else if (gap > STALL_GAP_MS) stalls++;
 }
 
 export function noteSidebarHoverHeld() {
-  heldHovers++;
+  if (isSharing()) heldHovers++;
 }
 
 export function noteNewTabDocked(docked: boolean) {
+  if (!isSharing()) return;
   if (docked) newTabDocks++;
   else newTabUndocks++;
 }
@@ -33,3 +37,5 @@ export function takeSidebarScrollCounts() {
   newTabUndocks = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeSidebarScrollCounts());

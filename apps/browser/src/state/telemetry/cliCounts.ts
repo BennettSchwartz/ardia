@@ -1,4 +1,4 @@
-import type { ConsentToken } from "./choice";
+import { isSharing, onConsentPeriodChange, type ConsentToken } from "./choice";
 import { countFor } from "./countFor";
 import { SOCKET_FAMILIES, type SocketFamily } from "../automation/socketCatalog";
 
@@ -33,6 +33,7 @@ let windowlessSeen = { given: 0, missed: 0 };
 
 export const noteCliInstall = (reason: CliInstallReason, ok: boolean, consent?: ConsentToken | null) => countFor(consent, () => void counts[FIELDS[reason][ok ? 0 : 1]]++, { [FIELDS[reason][ok ? 0 : 1]]: 1 });
 export function noteCliPillShown(compact: boolean) {
+  if (!isSharing()) return;
   counts.cli_pill_shows++;
   if (compact) counts.cli_pill_compact_shows++;
 }
@@ -44,13 +45,15 @@ export function noteSocketCall(family: SocketFamily, failed: boolean, consent?: 
 export const noteSocketLineShrunk = (consent: ConsentToken | null) => countFor(consent, () => void counts.cli_socket_lines_shrunk++, { cli_socket_lines_shrunk: 1 });
 export const noteSocketPasswordManagerRefused = (consent: ConsentToken | null) =>
   countFor(consent, () => void counts.cli_socket_password_manager_refusals++, { cli_socket_password_manager_refusals: 1 });
-export const noteCliAutoEnabled = () => void counts.cli_auto_enables++;
+export const noteCliAutoEnabled = () => void (isSharing() && counts.cli_auto_enables++);
 
 export function noteWindowlessPages(totals: { given: number; missed: number } | undefined) {
   if (!totals) return;
   const given = Number(totals.given) || 0, missed = Number(totals.missed) || 0;
-  counts.windowless_pages_given_geometry += Math.max(0, given - windowlessSeen.given);
-  counts.windowless_pages_missing_geometry += Math.max(0, missed - windowlessSeen.missed);
+  if (isSharing()) {
+    counts.windowless_pages_given_geometry += Math.max(0, given - windowlessSeen.given);
+    counts.windowless_pages_missing_geometry += Math.max(0, missed - windowlessSeen.missed);
+  }
   windowlessSeen = { given: Math.max(given, windowlessSeen.given), missed: Math.max(missed, windowlessSeen.missed) };
 }
 
@@ -59,3 +62,5 @@ export function takeCliCounts() {
   counts = { ...NONE };
   return taken;
 }
+
+onConsentPeriodChange(() => void takeCliCounts());

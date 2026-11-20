@@ -1,4 +1,5 @@
 import type { NowPlaying } from "../../platform/media";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 const REWIND_SECONDS = 1;
 const PAST_END_SECONDS = 2;
@@ -18,8 +19,10 @@ export function sidebarPlayerOpenCounter() {
   return {
     motionStarted(open: boolean) {
       if (open) {
-        sidebarPlayerExpands++;
-        if (closing) sidebarPlayerReopens++;
+        if (isSharing()) {
+          sidebarPlayerExpands++;
+          if (closing) sidebarPlayerReopens++;
+        }
         shownOpen = true;
       }
       closing = !open && shownOpen;
@@ -30,12 +33,12 @@ export function sidebarPlayerOpenCounter() {
   };
 }
 
-export const noteSidebarPlayerFromOtherProfile = () => void sidebarPlayerFromOtherProfile++;
+export const noteSidebarPlayerFromOtherProfile = () => void (isSharing() && sidebarPlayerFromOtherProfile++);
 
-export const noteNowPlayingLoopRestart = () => void loopRestarts++;
+export const noteNowPlayingLoopRestart = () => void (isSharing() && loopRestarts++);
 
 export function noteMediaPositionReport(before: PositionReport | undefined, report: PositionReport) {
-  if (before?.playbackState !== "playing") return;
+  if (before?.playbackState !== "playing" || !isSharing()) return;
   const extrapolated = before.position + ((report.timestamp - before.timestamp) / 1000) * (before.playbackRate || 1);
   if (report.position < extrapolated - REWIND_SECONDS) rewinds++;
   if (before.duration && !before.loop && extrapolated > before.duration + PAST_END_SECONDS) pastEnd++;
@@ -51,3 +54,5 @@ export function takeMediaCardCounts() {
   pastEnd = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeMediaCardCounts());

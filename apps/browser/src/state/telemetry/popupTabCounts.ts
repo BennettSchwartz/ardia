@@ -1,12 +1,14 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let popupsOpenedAsTabs = 0;
 let shiftClickWindowPeeks = 0;
 
 export function notePopupOpenedAsTab() {
-  popupsOpenedAsTabs++;
+  if (isSharing()) popupsOpenedAsTabs++;
 }
 
 export function notePeekFromShiftWindow() {
-  shiftClickWindowPeeks++;
+  if (isSharing()) shiftClickWindowPeeks++;
 }
 
 export function takePopupTabCounts() {
@@ -15,3 +17,5 @@ export function takePopupTabCounts() {
   shiftClickWindowPeeks = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takePopupTabCounts());

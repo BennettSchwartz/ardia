@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import { noteIntroEnded, noteIntroShown, noteIntroSkipped, takeIntroCounts } from "./introCounts.ts";
+import { after, test } from "node:test";
+
+globalThis.__DEV__ = false;
+await import("../../test-native/index.ts");
+globalThis.fetch = async () => ({ status: 503 });
+const client = await import("./client.ts");
+client.loadChoice();
+client.setSharing(true, "settings");
+after(() => client.setSharing(false, "settings"));
+const { noteIntroEnded, noteIntroShown, noteIntroSkipped, takeIntroCounts } = await import("./introCounts.ts");
 
 test("the intro counts say which scene ran, how soon the meadow drew, and whether the intro was skipped or finished", () => {
   takeIntroCounts();

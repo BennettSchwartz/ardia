@@ -2,6 +2,7 @@ import type { PictureInPictureDrag, PictureInPictureResize, PictureInPictureSkip
 import type { PageEngine } from "../engines/engines";
 import { capture, counted } from "./client";
 import { nativeConsent } from "./nativeConsent";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 let nothingPlaying = 0;
 const backToTab: Record<PageEngine, number> = { chromium: 0, webkit: 0 };
@@ -16,7 +17,7 @@ export function noteAutoPictureInPictureNothingPlaying() {
 }
 
 export function notePictureInPictureBackToTab(engine: PageEngine) {
-  backToTab[engine]++;
+  if (isSharing()) backToTab[engine]++;
 }
 
 export function notePictureInPictureDragged(drag: PictureInPictureDrag) {
@@ -65,3 +66,5 @@ export function takePictureInPictureCounts() {
   clickSkips.ahead = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takePictureInPictureCounts());

@@ -1,3 +1,5 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 export type DeveloperBarAction = "siteControls" | "address" | "copyLink" | "console" | "network" | "inspect" | "extensions" | "split";
 
 const BAR_FIELDS: Record<DeveloperBarAction, string> = {
@@ -17,6 +19,7 @@ let turnedOffOnLocal = 0;
 let barPresses: Record<string, number> = {};
 
 export function noteDeveloperModeToggled(on: boolean, localSite: boolean) {
+  if (!isSharing()) return;
   if (on) turnedOn++;
   else {
     turnedOff++;
@@ -25,6 +28,7 @@ export function noteDeveloperModeToggled(on: boolean, localSite: boolean) {
 }
 
 export function noteDeveloperBarPress(action: DeveloperBarAction) {
+  if (!isSharing()) return;
   const field = BAR_FIELDS[action];
   barPresses[field] = (barPresses[field] ?? 0) + 1;
 }
@@ -42,3 +46,5 @@ export function takeDeveloperModeCounts() {
   barPresses = {};
   return taken;
 }
+
+onConsentPeriodChange(() => void takeDeveloperModeCounts());

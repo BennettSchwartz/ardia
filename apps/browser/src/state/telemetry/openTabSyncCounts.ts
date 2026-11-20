@@ -1,3 +1,5 @@
+import { isSharing, onConsentPeriodChange } from "./choice";
+
 let published = 0;
 let opened = 0;
 let closed = 0;
@@ -8,11 +10,12 @@ let largestCycle = 0;
 
 const MASS_CLOSE = 5;
 
-export const noteOpenTabsPublished = (n: number) => void (published += n);
+export const noteOpenTabsPublished = (n: number) => void (isSharing() && (published += n));
 
-export const noteOpenTabsWoke = () => void wakes++;
+export const noteOpenTabsWoke = () => void (isSharing() && wakes++);
 
 export function noteOpenTabsApplied(counts: { opened: number; closed: number; updated: number }) {
+  if (!isSharing()) return;
   opened += counts.opened;
   closed += counts.closed;
   updated += counts.updated;
@@ -33,3 +36,5 @@ export function takeOpenTabSyncCounts() {
   published = opened = closed = updated = wakes = massCloses = largestCycle = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeOpenTabSyncCounts());

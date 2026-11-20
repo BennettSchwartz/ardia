@@ -1,9 +1,10 @@
 import { takeSidebarScrollCounts } from "./sidebarScrollCounts";
+import { isSharing, onConsentPeriodChange } from "./choice";
 
 let resizes = 0;
 
 export function noteSidebarResize() {
-  resizes++;
+  if (isSharing()) resizes++;
 }
 
 export function takeSidebarResizeCounts() {
@@ -11,3 +12,5 @@ export function takeSidebarResizeCounts() {
   resizes = 0;
   return taken;
 }
+
+onConsentPeriodChange(() => void takeSidebarResizeCounts());
