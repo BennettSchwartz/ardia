@@ -252,7 +252,8 @@ install_deb() {
     -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 -- "$work/$package_name" \
     </dev/null >&2 || status=$?
   settle "$status" install "apt-get couldn't install $package_name"
-  installed=$(dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
+  # shellcheck disable=SC2016
+  installed=$(limited 30 dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
   [[ "$installed" == "$expected" ]] || fail install "dpkg reports ardia $installed after the install, not $expected"
 }
 

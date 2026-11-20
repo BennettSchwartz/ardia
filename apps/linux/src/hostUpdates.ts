@@ -241,7 +241,7 @@ export function linuxUpdater(deps: UpdateDeps) {
         return;
       }
       if (!asked && saved.failed === release.version) return;
-      if (asked || saved.automaticDownloads) return startRun(release, asked ? "asked" : "automatic", consent);
+      if (asked || (await preferences()).automaticDownloads) return startRun(release, asked ? "asked" : "automatic", consent);
       if (await offeredOnce(release)) deps.offerInstall(release, () => installOffered(release));
       return;
     }

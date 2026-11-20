@@ -82,6 +82,10 @@ for leftover in "$target"/lib/ardia.new-* "$target"/lib/ardia.old-*; do
   [[ -e "$leftover" || -L "$leftover" ]] || continue
   owner_pid=${leftover##*-}
   if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+    if [[ "$leftover" == */ardia.old-* && ! -e "$installed" && ! -L "$installed" ]]; then
+      mv -T -- "$leftover" "$installed"
+      continue
+    fi
     rm -rf -- "$leftover"
   fi
 done

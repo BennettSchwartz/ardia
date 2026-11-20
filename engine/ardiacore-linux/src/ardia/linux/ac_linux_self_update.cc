@@ -128,7 +128,7 @@ struct ChildRun {
 };
 
 ChildRun RunChild(const std::vector<std::string>& arguments, base::EnvironmentMap environment,
-                  base::TimeDelta limit) {
+                  base::TimeDelta limit, bool lets_pkexec_gain_root = false) {
   ChildRun run;
   int output[2];
   if (pipe2(output, O_CLOEXEC) != 0) return run;
@@ -144,6 +144,7 @@ ChildRun RunChild(const std::vector<std::string>& arguments, base::EnvironmentMa
   options.fds_to_remap.emplace_back(output_write.get(), STDOUT_FILENO);
   options.fds_to_remap.emplace_back(null_device.get(), STDERR_FILENO);
   options.new_process_group = true;
+  options.allow_new_privs = lets_pkexec_gain_root;
   base::Process process = base::LaunchProcess(arguments, options);
   output_write.reset();
   null_device.reset();
@@ -262,7 +263,7 @@ policy::InstallOutcome RunInstall(base::FilePath helper, Kind kind, base::FilePa
   arguments.push_back("install");
   arguments.push_back(directory.value());
   const ChildRun run = RunChild(arguments, HelperEnvironment(through_pkexec ? std::nullopt : appimage),
-                                base::Seconds(policy::kInstallDeadlineSeconds));
+                                base::Seconds(policy::kInstallDeadlineSeconds), through_pkexec);
   if (!run.launched) return {false, Text(policy::kInstallReason)};
   policy::InstallOutcome outcome = policy::InstallOutcomeFor(version, run.timed_out, run.exit_code,
                                                              policy::LastLine(run.output), through_pkexec);
@@ -482,8 +483,10 @@ class PackageDownload {
   void Succeed() { Complete(std::string()); }
 
   void Fail(std::string_view reason) {
-    base::ThreadPool::PostTask(FROM_HERE, kFileTraits, base::BindOnce(&RemoveDirectory, directory_));
-    Complete(Text(reason));
+    weak_factory_.InvalidateWeakPtrs();
+    if (!finish_) return;
+    base::ThreadPool::PostTaskAndReply(FROM_HERE, kFileTraits, base::BindOnce(&RemoveDirectory, directory_),
+                                       base::BindOnce(std::move(finish_), Text(reason)));
   }
 
   void Complete(std::string result) {
