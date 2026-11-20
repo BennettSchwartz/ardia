@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/functional/callback_forward.h"
+#include "base/memory/ref_counted.h"
 #include "extensions/common/extension_id.h"
 
 class GURL;
@@ -35,6 +36,17 @@ bool ArdiaMainFrameHandlesEnterPictureInPicture(WebContents* contents);
 
 DevToolsAgentHost* ArdiaDevToolsAgentHostForId(const std::string& id);
 
+class ArdiaWheelTicket : public base::RefCounted<ArdiaWheelTicket> {
+ public:
+  virtual bool Forward() = 0;
+  virtual void Acked(bool phase_end) = 0;
+  virtual void WidgetGone() = 0;
+
+ protected:
+  friend class base::RefCounted<ArdiaWheelTicket>;
+  virtual ~ArdiaWheelTicket() = default;
+};
+
 struct ArdiaPointer {
   enum class Kind { kClick, kMove, kWheel };
   Kind kind = Kind::kClick;
@@ -46,6 +58,7 @@ struct ArdiaPointer {
   double delta_x = 0;
   double delta_y = 0;
   uint64_t epoch = 0;
+  scoped_refptr<ArdiaWheelTicket> wheel_ticket;
 };
 
 uint64_t ArdiaPageEpoch(DevToolsAgentHost* host);

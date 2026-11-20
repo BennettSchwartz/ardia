@@ -13,15 +13,18 @@
 #include <vector>
 
 #include "ardia/core/ac_plugin_refusals.h"
+#include "ardia/core/ac_pointer_outcome.h"
 #include "base/callback_list.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_plugin_input.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class GURL;
 
@@ -94,6 +97,31 @@ std::string ErrorReply(int id,
 
 class TokenClient;
 
+using WheelSlot = std::pair<std::string, const void*>;
+
+inline constexpr base::TimeDelta kPluginWheelDeadline = base::Seconds(5);
+
+class PluginWheelTicket : public content::ArdiaWheelTicket,
+                          public content::WebContentsObserver {
+ public:
+  PluginWheelTicket(content::WebContents* contents, WheelSlot slot);
+
+  bool Forward() override;
+  void Acked(bool phase_end) override;
+  void WidgetGone() override;
+  bool Expire();
+  void Abandon();
+
+ private:
+  ~PluginWheelTicket() override;
+  void WebContentsDestroyed() override;
+  void Free();
+
+  ardia::WheelSlotState state_;
+  WheelSlot slot_;
+  bool freed_ = false;
+};
+
 std::map<content::DevToolsAgentHostClient*, TokenClient*>& Registry();
 
 class TokenClient : public ArdiaDevToolsTokenClient {
@@ -140,6 +168,8 @@ class TokenClient : public ArdiaDevToolsTokenClient {
                             base::DictValue& params,
                             std::string* reply);
   void ForgetSession(const std::string& session);
+  void AbandonWheels(const std::string& session);
+  void ForgetWheel(const std::string& session, const PluginWheelTicket* ticket);
   void ForgetSessionOf(const std::string& message);
   std::vector<std::string> Subtree(const std::string& session) const;
   void DropSubtree(const std::string& session);
@@ -184,6 +214,8 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   std::map<std::string, TabWatch> tab_watches_;
   TabWatch root_tab_watch_;
   std::map<std::pair<std::string, int>, std::string> outstanding_;
+  std::map<std::string, std::vector<scoped_refptr<PluginWheelTicket>>>
+      wheel_tickets_;
   base::RepeatingCallback<void(bool drop_queued)> closer_;
   base::RepeatingCallback<void(std::string)> to_browser_;
   base::RepeatingCallback<void(std::string)> to_client_;

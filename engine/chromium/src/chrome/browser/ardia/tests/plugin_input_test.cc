@@ -433,6 +433,48 @@ int main() {
   Expect(slots.Take({"plugin-a", &tab_a}),
          "slots: once released, the next wheel takes it again", "");
 
+  {
+    ardia::WheelSlotState slot;
+    Expect(slot.Forward(), "wheel slot: a waiting wheel forwards", "");
+    Expect(!slot.Expire(),
+           "wheel slot: a deadline after forwarding doesn't free the slot", "");
+    Expect(!slot.freed() && slot.forwarded(),
+           "wheel slot: after that deadline the slot is still held", "");
+    Expect(!slot.Acked(false),
+           "wheel slot: the wheel's ack alone doesn't free it", "");
+    Expect(slot.Acked(true) && slot.freed(),
+           "wheel slot: the phase-end's ack frees it", "");
+  }
+  {
+    ardia::WheelSlotState slot;
+    Expect(slot.Expire() && slot.freed(),
+           "wheel slot: a deadline before forwarding frees the slot", "");
+    Expect(!slot.Forward(),
+           "wheel slot: a late visual-state callback forwards nothing", "");
+    Expect(!slot.Acked(false) && !slot.Acked(true) && !slot.Gone(),
+           "wheel slot: nothing frees it twice", "");
+  }
+  {
+    ardia::WheelSlotState waiting;
+    Expect(waiting.Gone() && waiting.freed(),
+           "wheel slot: widget destruction frees a waiting slot", "");
+    Expect(!waiting.Forward(), "wheel slot: and nothing forwards after it", "");
+    ardia::WheelSlotState forwarded;
+    forwarded.Forward();
+    forwarded.Acked(false);
+    Expect(forwarded.Gone() && forwarded.freed(),
+           "wheel slot: widget destruction frees a forwarded slot", "");
+  }
+  {
+    ardia::WheelSlotState slot;
+    Expect(slot.Abandon() && slot.freed(),
+           "wheel slot: an answer before forwarding (refusal, detach) frees it", "");
+    ardia::WheelSlotState sent;
+    sent.Forward();
+    Expect(!sent.Abandon() && !sent.freed(),
+           "wheel slot: an answer after forwarding keeps it until the ack", "");
+  }
+
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;
 }

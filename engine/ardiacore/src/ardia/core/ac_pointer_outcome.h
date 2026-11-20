@@ -71,6 +71,56 @@ class OutstandingSlots {
   std::set<Key> held_;
 };
 
+class WheelSlotState {
+ public:
+  bool Forward() {
+    if (phase_ != Phase::kWaiting) {
+      return false;
+    }
+    phase_ = Phase::kForwarded;
+    return true;
+  }
+
+  bool Abandon() {
+    if (phase_ != Phase::kWaiting) {
+      return false;
+    }
+    phase_ = Phase::kFreed;
+    return true;
+  }
+
+  bool Expire() { return Abandon(); }
+
+  bool Acked(bool phase_end) {
+    if (phase_ != Phase::kForwarded) {
+      return false;
+    }
+    (phase_end ? phase_end_acked_ : wheel_acked_) = true;
+    if (!wheel_acked_ || !phase_end_acked_) {
+      return false;
+    }
+    phase_ = Phase::kFreed;
+    return true;
+  }
+
+  bool Gone() {
+    if (phase_ == Phase::kFreed) {
+      return false;
+    }
+    phase_ = Phase::kFreed;
+    return true;
+  }
+
+  bool forwarded() const { return phase_ == Phase::kForwarded; }
+  bool freed() const { return phase_ == Phase::kFreed; }
+
+ private:
+  enum class Phase { kWaiting, kForwarded, kFreed };
+  Phase phase_ = Phase::kWaiting;
+  bool wheel_acked_ = false;
+  bool phase_end_acked_ = false;
+};
+
 inline bool RefusesHiddenTarget(bool wheel, bool hidden) {
   return wheel && hidden;
 }

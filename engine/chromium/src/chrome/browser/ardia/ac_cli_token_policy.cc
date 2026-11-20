@@ -36,6 +36,7 @@
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "url/gurl.h"
 
 namespace ardia {
@@ -74,8 +75,6 @@ bool NeedsResponse(const std::string& method) {
          method == "Target.createTarget";
 }
 
-using WheelSlot = std::pair<std::string, const void*>;
-
 ardia::OutstandingSlots<WheelSlot>& PluginWheelSlots() {
   static base::NoDestructor<ardia::OutstandingSlots<WheelSlot>> slots;
   return *slots;
@@ -97,6 +96,82 @@ void MarkOffscreen(base::DictValue* info) {
   }
 }
 
+}
+
+PluginWheelTicket::PluginWheelTicket(content::WebContents* contents,
+                                     WheelSlot slot)
+    : content::WebContentsObserver(contents), slot_(std::move(slot)) {}
+
+PluginWheelTicket::~PluginWheelTicket() {
+  Free();
+}
+
+bool PluginWheelTicket::Forward() {
+  return state_.Forward();
+}
+
+void PluginWheelTicket::Acked(bool phase_end) {
+  if (state_.Acked(phase_end)) {
+    Free();
+  }
+}
+
+void PluginWheelTicket::WidgetGone() {
+  if (state_.Gone()) {
+    Free();
+  }
+}
+
+bool PluginWheelTicket::Expire() {
+  if (!state_.Expire()) {
+    return false;
+  }
+  Free();
+  return true;
+}
+
+void PluginWheelTicket::Abandon() {
+  if (state_.Abandon()) {
+    Free();
+  }
+}
+
+void PluginWheelTicket::WebContentsDestroyed() {
+  Observe(nullptr);
+  if (state_.Gone()) {
+    Free();
+  }
+}
+
+void PluginWheelTicket::Free() {
+  if (!freed_) {
+    freed_ = true;
+    PluginWheelSlots().Release(slot_);
+  }
+}
+
+void TokenClient::AbandonWheels(const std::string& session) {
+  auto node = wheel_tickets_.extract(session);
+  if (node.empty()) {
+    return;
+  }
+  for (const scoped_refptr<PluginWheelTicket>& ticket : node.mapped()) {
+    ticket->Abandon();
+  }
+}
+
+void TokenClient::ForgetWheel(const std::string& session,
+                              const PluginWheelTicket* ticket) {
+  auto it = wheel_tickets_.find(session);
+  if (it == wheel_tickets_.end()) {
+    return;
+  }
+  std::erase_if(it->second, [&](const scoped_refptr<PluginWheelTicket>& held) {
+    return held.get() == ticket;
+  });
+  if (it->second.empty()) {
+    wheel_tickets_.erase(it);
+  }
 }
 
 CommandDomain DomainOf(std::string_view method) {
@@ -201,6 +276,11 @@ bool TokenClient::MayWriteLocalFiles() {
 }
 
 TokenClient::~TokenClient() {
+  for (auto& [session, tickets] : wheel_tickets_) {
+    for (const scoped_refptr<PluginWheelTicket>& ticket : tickets) {
+      ticket->Abandon();
+    }
+  }
   Registry().erase(client_);
   ForgetFilePickerAnswers(this);
   ReleaseCliOwnedTargets(this);
@@ -352,42 +432,66 @@ bool TokenClient::DispatchPointerCommand(int id,
     return false;
   }
   pointer.epoch = content::ArdiaPageEpoch(host);
-  base::ScopedClosureRunner wheel_slot;
+  scoped_refptr<PluginWheelTicket> ticket;
   if (kind_ == TokenKind::kPlugin &&
       pointer.kind == content::ArdiaPointer::Kind::kWheel) {
-    const WheelSlot slot{scope_->credential_id, host->GetWebContents()};
+    content::WebContents* contents = host->GetWebContents();
+    WheelSlot slot{scope_->credential_id, contents};
     if (!PluginWheelSlots().Take(slot)) {
       outstanding_.erase({session, id});
       ++PluginTotalsSoFar().busy;
       *reply = ErrorReply(id, session, kRefused, refusal::kBusy);
       return false;
     }
-    wheel_slot = base::ScopedClosureRunner(base::BindOnce(
-        [](WheelSlot slot) { PluginWheelSlots().Release(slot); }, slot));
+    ticket = base::MakeRefCounted<PluginWheelTicket>(contents, std::move(slot));
+    pointer.wheel_ticket = ticket;
+    wheel_tickets_[session].push_back(ticket);
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(
+            [](base::WeakPtr<TokenClient> self,
+               scoped_refptr<PluginWheelTicket> ticket, std::string session,
+               int id) {
+              if (ticket->Expire() && self) {
+                self->ForgetWheel(session, ticket.get());
+                self->FinishPointer(id, session, refusal::kNotDelivered);
+              }
+            },
+            weak_factory_.GetWeakPtr(), ticket, session, id),
+        kPluginWheelDeadline);
   }
   auto dispatch = base::BindOnce(
       [](base::WeakPtr<TokenClient> self,
          scoped_refptr<content::DevToolsAgentHost> host, std::string session,
          int id, content::ArdiaPointer pointer,
-         base::ScopedClosureRunner wheel_slot) {
+         scoped_refptr<PluginWheelTicket> ticket) {
         if (!self || self->revoked_) {
+          if (ticket) {
+            ticket->Abandon();
+          }
           return;
         }
         content::ArdiaDispatchPointer(
             host.get(), self->client_, session, pointer,
             base::BindOnce(
-                [](base::ScopedClosureRunner wheel_slot,
-                   base::OnceCallback<void(std::string)> finish,
-                   std::string error) {
-                  wheel_slot.RunAndReset();
-                  std::move(finish).Run(std::move(error));
+                [](base::WeakPtr<TokenClient> self,
+                   scoped_refptr<PluginWheelTicket> ticket, std::string session,
+                   int id, std::string error) {
+                  if (ticket) {
+                    ticket->Abandon();
+                  }
+                  if (!self) {
+                    return;
+                  }
+                  if (ticket) {
+                    self->ForgetWheel(session, ticket.get());
+                  }
+                  self->FinishPointer(id, session, std::move(error));
                 },
-                std::move(wheel_slot),
-                base::BindOnce(&TokenClient::FinishPointer, self, id,
-                               session)));
+                self, ticket, session, id));
       },
       weak_factory_.GetWeakPtr(), base::WrapRefCounted(host), session, id,
-      pointer, std::move(wheel_slot));
+      pointer, ticket);
   if (kind_ == TokenKind::kPlugin && CliPluginInputHold()) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, std::move(dispatch), kHeldPluginInput);

@@ -885,7 +885,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    while (!injectors_.empty())
      (*injectors_.begin())->Cleanup();
    // TODO(dgozman): cleanup touch callbacks as well?
-@@ -2346,4 +2490,498 @@
+@@ -2346,4 +2490,535 @@
    return view->GetRootView();
  }
  
@@ -943,20 +943,17 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +class ArdiaWheelAcks : public RenderWidgetHost::InputEventObserver,
 +                       public RenderWidgetHostObserver {
 + public:
-+  ArdiaWheelAcks(RenderWidgetHostImpl* widget,
-+                 base::TimeTicks wheel,
-+                 base::TimeTicks ended,
-+                 size_t first,
-+                 base::RepeatingCallback<void(size_t, int)> resolve)
-+      : widget_(widget),
-+        wheel_(wheel),
-+        ended_(ended),
-+        first_(first),
-+        resolve_(std::move(resolve)) {
-+    widget_->AddInputEventObserver(this);
-+    widget_->AddObserver(this);
++  static void Watch(RenderWidgetHostImpl* widget,
++                    base::TimeTicks wheel,
++                    base::TimeTicks ended,
++                    size_t first,
++                    base::RepeatingCallback<void(size_t, int)> resolve,
++                    scoped_refptr<ArdiaWheelTicket> ticket) {
++    new ArdiaWheelAcks(widget, wheel, ended, first, std::move(resolve),
++                       std::move(ticket));
 +  }
-+  ~ArdiaWheelAcks() override { Stop(); }
++
++  ~ArdiaWheelAcks() override = default;
 +
 +  void OnInputEventAck(const RenderWidgetHost& host,
 +                       blink::mojom::InputEventResultSource source,
@@ -965,29 +962,62 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    if (event.GetType() != blink::WebInputEvent::Type::kMouseWheel) {
 +      return;
 +    }
-+    if (event.TimeStamp() == wheel_) {
++    if (event.TimeStamp() == wheel_ && !wheel_acked_) {
++      wheel_acked_ = true;
 +      resolve_.Run(first_,
 +                   source != blink::mojom::InputEventResultSource::kBrowser
 +                       ? 2
 +                       : 1);
-+    } else if (event.TimeStamp() == ended_) {
++      if (ticket_) {
++        ticket_->Acked(false);
++      }
++    } else if (event.TimeStamp() == ended_ && !ended_acked_) {
++      ended_acked_ = true;
 +      resolve_.Run(first_ + 1, 2);
++      if (ticket_) {
++        ticket_->Acked(true);
++      }
++    }
++    if (wheel_acked_ && ended_acked_) {
++      Finish();
 +    }
 +  }
 +
 +  void RenderWidgetHostDestroyed(RenderWidgetHost* host) override {
-+    Stop();
 +    resolve_.Run(first_, 1);
 +    resolve_.Run(first_ + 1, 1);
++    if (ticket_) {
++      ticket_->WidgetGone();
++    }
++    Finish();
 +  }
 +
 + private:
-+  void Stop() {
-+    if (widget_) {
-+      widget_->RemoveInputEventObserver(this);
-+      widget_->RemoveObserver(this);
-+      widget_ = nullptr;
++  ArdiaWheelAcks(RenderWidgetHostImpl* widget,
++                 base::TimeTicks wheel,
++                 base::TimeTicks ended,
++                 size_t first,
++                 base::RepeatingCallback<void(size_t, int)> resolve,
++                 scoped_refptr<ArdiaWheelTicket> ticket)
++      : widget_(widget),
++        wheel_(wheel),
++        ended_(ended),
++        first_(first),
++        resolve_(std::move(resolve)),
++        ticket_(std::move(ticket)) {
++    widget_->AddInputEventObserver(this);
++    widget_->AddObserver(this);
++  }
++
++  void Finish() {
++    if (!widget_) {
++      return;
 +    }
++    widget_->RemoveInputEventObserver(this);
++    widget_->RemoveObserver(this);
++    widget_ = nullptr;
++    base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(FROM_HERE,
++                                                               this);
 +  }
 +
 +  raw_ptr<RenderWidgetHostImpl> widget_;
@@ -995,6 +1025,9 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +  const base::TimeTicks ended_;
 +  const size_t first_;
 +  base::RepeatingCallback<void(size_t, int)> resolve_;
++  scoped_refptr<ArdiaWheelTicket> ticket_;
++  bool wheel_acked_ = false;
++  bool ended_acked_ = false;
 +};
 +
 +}  // namespace
@@ -1006,12 +1039,18 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +                  uint64_t epoch,
 +                  base::WeakPtr<WebContents> contents,
 +                  base::WeakPtr<InputHandler> handler,
++                  scoped_refptr<ArdiaWheelTicket> wheel_ticket,
 +                  base::OnceCallback<void(std::string)> done)
 +      : kind_(kind),
 +        epoch_(epoch),
 +        contents_(std::move(contents)),
 +        handler_(std::move(handler)),
++        wheel_ticket_(std::move(wheel_ticket)),
 +        done_(std::move(done)) {}
++
++  const scoped_refptr<ArdiaWheelTicket>& wheel_ticket() const {
++    return wheel_ticket_;
++  }
 +
 +  bool click() const {
 +    return kind_ == static_cast<int>(ArdiaPointer::Kind::kClick);
@@ -1052,14 +1091,9 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +
 +  void Expire(size_t index) { Resolve(index, 1); }
 +
-+  void WatchWheelAcks(RenderWidgetHostImpl* widget,
-+                      base::TimeTicks wheel,
-+                      base::TimeTicks ended,
-+                      size_t first) {
-+    wheel_acks_ = std::make_unique<ArdiaWheelAcks>(
-+        widget, wheel, ended, first,
-+        base::BindRepeating(&ArdiaPointerRun::Resolve,
-+                            weak_factory_.GetWeakPtr()));
++  base::RepeatingCallback<void(size_t, int)> Resolver() {
++    return base::BindRepeating(&ArdiaPointerRun::Resolve,
++                               weak_factory_.GetWeakPtr());
 +  }
 +
 + private:
@@ -1092,10 +1126,6 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    if (outcome == ardia::PointerOutcome::kPending) {
 +      return;
 +    }
-+    if (wheel_acks_) {
-+      base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(
-+          FROM_HERE, std::move(wheel_acks_));
-+    }
 +    if (ardia::NeedsRecoveryRelease(events_, outcome) && recovery_release_ &&
 +        MayRecover()) {
 +      widget_->ForwardMouseEventWithLatencyInfo(*recovery_release_,
@@ -1118,11 +1148,11 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +  const uint64_t epoch_;
 +  base::WeakPtr<WebContents> contents_;
 +  base::WeakPtr<InputHandler> handler_;
++  scoped_refptr<ArdiaWheelTicket> wheel_ticket_;
 +  base::OnceCallback<void(std::string)> done_;
 +  std::vector<ardia::PointerEvent> events_;
 +  base::WeakPtr<RenderWidgetHostImpl> widget_;
 +  std::optional<blink::WebMouseEvent> recovery_release_;
-+  std::unique_ptr<ArdiaWheelAcks> wheel_acks_;
 +  base::WeakPtrFactory<ArdiaPointerRun> weak_factory_{this};
 +};
 +
@@ -1142,6 +1172,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    double delta_x,
 +    double delta_y,
 +    uint64_t epoch,
++    scoped_refptr<ArdiaWheelTicket> wheel_ticket,
 +    base::OnceCallback<void(std::string)> done) {
 +  const bool click = kind == static_cast<int>(ArdiaPointer::Kind::kClick);
 +  const bool wheel = kind == static_cast<int>(ArdiaPointer::Kind::kWheel);
@@ -1223,7 +1254,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +  }
 +  auto run = base::MakeRefCounted<ArdiaPointerRun>(
 +      kind, epoch, contents->GetWeakPtr(), weak_factory_.GetWeakPtr(),
-+      std::move(done));
++      std::move(wheel_ticket), std::move(done));
 +  auto find_widget = base::BindOnce(
 +      [](base::WeakPtr<InputHandler> self,
 +         base::WeakPtr<RenderWidgetHostImpl> widget, gfx::PointF position,
@@ -1329,7 +1360,12 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +      ended.phase = blink::WebMouseWheelEvent::kPhaseEnded;
 +      ended.dispatch_type = blink::WebInputEvent::DispatchType::kEventNonBlocking;
 +      ended.SetTimeStamp(stamp + base::Microseconds(1));
-+      run->WatchWheelAcks(widget.get(), stamp, ended.TimeStamp(), index);
++      if (run->wheel_ticket() && !run->wheel_ticket()->Forward()) {
++        run->Fail(ardia::refusal::kNotDelivered);
++        return;
++      }
++      ArdiaWheelAcks::Watch(widget.get(), stamp, ended.TimeStamp(), index,
++                            run->Resolver(), run->wheel_ticket());
 +      widget->ForwardWheelEventWithLatencyInfo(wheel, latency);
 +      if (widget) {
 +        widget->ForwardWheelEventWithLatencyInfo(ended, ui::LatencyInfo());
@@ -1375,7 +1411,8 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +        handler->ArdiaDispatchPointer(
 +            static_cast<int>(pointer.kind), pointer.x, pointer.y,
 +            pointer.button, pointer.click_count, pointer.modifiers,
-+            pointer.delta_x, pointer.delta_y, pointer.epoch, std::move(done));
++            pointer.delta_x, pointer.delta_y, pointer.epoch,
++            pointer.wheel_ticket, std::move(done));
 +        return;
 +      }
 +    }
@@ -1415,7 +1452,7 @@ diff --git a/content/browser/devtools/render_frame_devtools_agent_host.cc b/cont
 diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser/devtools/protocol/input_handler.h
 --- a/content/browser/devtools/protocol/input_handler.h
 +++ b/content/browser/devtools/protocol/input_handler.h
-@@ -52,6 +52,24 @@
+@@ -52,6 +52,25 @@
  
    static std::vector<InputHandler*> ForAgentHost(DevToolsAgentHostImpl* host);
  
@@ -1430,6 +1467,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
 +                            double delta_x,
 +                            double delta_y,
 +                            uint64_t epoch,
++                            scoped_refptr<ArdiaWheelTicket> wheel_ticket,
 +                            base::OnceCallback<void(std::string)> done);
 +  void ArdiaInjectPointer(
 +      std::vector<std::unique_ptr<blink::WebMouseEvent>> events,
@@ -1440,7 +1478,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
    void Wire(UberDispatcher* dispatcher) override;
    void SetRenderer(int process_host_id,
                     RenderFrameHostImpl* frame_host) override;
-@@ -5,9 +23,12 @@
+@@ -5,9 +24,12 @@
  #ifndef CONTENT_BROWSER_DEVTOOLS_PROTOCOL_INPUT_HANDLER_H_
  #define CONTENT_BROWSER_DEVTOOLS_PROTOCOL_INPUT_HANDLER_H_
  
@@ -1453,7 +1491,14 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
  #include <vector>
  
  #include "base/containers/flat_map.h"
-@@ -62,6 +83,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -32,5 +54,6 @@
+ namespace content {
+ class DevToolsAgentHostImpl;
++class ArdiaWheelTicket;
+ class RenderFrameHostImpl;
+ class RenderWidgetHostImpl;
+ class SyntheticPointerDriver;
+@@ -62,6 +85,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
    void StartDragging(const DropData& drop_data,
                       const blink::mojom::DragData& drag_data,
                       blink::DragOperationsMask drag_operations_mask,
@@ -1462,7 +1507,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
                       bool* intercepted);
    // DragEnded is used to inform CDP's InputHandler when a drag has ended. This
    // gets called whenever the Drag n' Drop APIs that end dragging get called
-@@ -220,6 +243,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -220,6 +245,8 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
          const DropData& drop_data,
          const blink::mojom::DragData& drag_data,
          blink::DragOperationsMask drag_operations_mask,
@@ -1471,7 +1516,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.h b/content/browser
          bool* intercepted);
      friend void InputHandler::DragEnded();
  
-@@ -359,6 +384,7 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
+@@ -359,6 +386,7 @@ class InputHandler : public DevToolsDomainHandler, public Input::Backend {
    std::optional<content::WebContents::ScopedIgnoreInputEvents>
        scoped_ignore_input_events_;
    bool intercept_drags_ = false;

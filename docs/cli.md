@@ -121,7 +121,11 @@ TypeScript browse client), not to #2808. It must:
   `ardia: not delivered` at once. A wheel succeeds once the renderer has acknowledged it and Chromium has acknowledged
   its phase-end (an acknowledgement, not proof it scrolled: read `DOM.getBoxModel` again); a browser acknowledgement
   or the 5 s deadline answers `ardia: outcome unknown`. A plugin has at most one wheel outstanding per tab: another
-  wheel from the same credential to that tab before the first is answered gets `ardia: busy` and isn't queued. A
+  wheel from the same credential to that tab gets `ardia: busy` and isn't queued until the first one is done. Done
+  means, before it reached Chromium, any answer or the 5 s deadline (which answers `ardia: not delivered`); after
+  it reached Chromium, only its acknowledgement (and its phase-end's) or the end of the frame or tab it went to. A
+  wheel whose frame stalls answers `ardia: outcome unknown` after 5 s but keeps that tab busy for the plugin until
+  the frame acknowledges it or goes away. A
   wheel to a page that isn't taking input (its renderer is blocked, or a dialog holds it) is refused (`the page isn't
   taking input right now`), and so is a wheel to a hidden page (`page hidden`). A wheel to a tab the person scrolled,
   touched or typed in (in any frame of the page) during the last 500 ms also answers `busy` without being queued (try
