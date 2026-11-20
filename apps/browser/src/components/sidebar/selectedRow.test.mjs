@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 const { rowAway, visibleSpan } = await import("./selectedRow.ts");
 const { GLOW_ROOM } = await import("./pageLayout.ts");
@@ -28,4 +29,13 @@ test("the pill points up once the selected row is wholly above the list's visibl
 test("no pill without a selected row in the list, or before the list is laid out", () => {
   assert.equal(rowAway(null, 0, 500), null);
   assert.equal(rowAway(row(900), 0, 0), null);
+});
+
+test("the pill's shown state lives in the pill, so its showing never re-renders the sidebar page", () => {
+  const pill = readFileSync(new URL("./SelectedRowPill.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("./SidebarPage.tsx", import.meta.url), "utf8");
+  const tracker = pill.slice(pill.indexOf("export function useSelectedRowAway"), pill.indexOf("export function SelectedRowPill"));
+  assert.doesNotMatch(tracker, /useState<RowAway>/);
+  assert.match(pill, /const away = useSyncExternalStore\(source\.subscribe, source\.read, source\.read\);/);
+  assert.match(page, /<SelectedRowPill windowId=\{windowId\} away=\{selectedRow\.away\}/);
 });

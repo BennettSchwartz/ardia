@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { Animated, Pressable, View, type ScrollView } from "react-native";
 import { useActiveTabId, useTab } from "../../state/browser/hooks";
 import { revealTab, selectedTabIn, watchRowsMoved } from "../../state/sidebar/reveal";
@@ -24,10 +24,23 @@ function settle(progress: Animated.Value, phase: keyof typeof SELECTED_ROW_PILL_
 }
 
 export function useSelectedRowAway(windowId: string, geometry: RefObject<SidebarGeometry> | undefined, scroll: RefObject<ScrollView | null>, scrollY: () => number) {
-  const [away, setAway] = useState<RowAway>(null);
   const live = useRef({ geometry, scrollY });
   live.current = { geometry, scrollY };
   const [tracker] = useState(() => {
+    let away: RowAway = null;
+    const listeners = new Set<() => void>();
+    const setAway = (next: RowAway) => {
+      if (next === away) return;
+      away = next;
+      for (const listener of listeners) listener();
+    };
+    const source: AwaySource = {
+      read: () => away,
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
     let row: RowSpot | null = null;
     let ticket = 0;
     let frame = 0;
@@ -65,6 +78,7 @@ export function useSelectedRowAway(windowId: string, geometry: RefObject<Sidebar
       judge();
     };
     return {
+      source,
       judge,
       relocate: () => {
         if (!frame) frame = requestAnimationFrame(locate);
@@ -85,10 +99,13 @@ export function useSelectedRowAway(windowId: string, geometry: RefObject<Sidebar
       tracker.stop();
     };
   }, [windowId, geometry]);
-  return { away, judge: tracker.judge, relocate: tracker.relocate };
+  return { away: tracker.source, judge: tracker.judge, relocate: tracker.relocate };
 }
 
-export function SelectedRowPill({ windowId, away, bottomShift }: { windowId: string; away: RowAway; bottomShift?: Animated.AnimatedInterpolation<number> }) {
+export type AwaySource = { read: () => RowAway; subscribe: (listener: () => void) => () => void };
+
+export function SelectedRowPill({ windowId, away: source, bottomShift }: { windowId: string; away: AwaySource; bottomShift?: Animated.AnimatedInterpolation<number> }) {
+  const away = useSyncExternalStore(source.subscribe, source.read, source.read);
   const [shown, setShown] = useState<RowAway>(away);
   const [leaving, setLeaving] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
