@@ -78,9 +78,9 @@ onIos("a taller button at a large text size keeps its 16-point corners instead o
   unmount(root);
 });
 
-onIos("the welcome step: the icon 32 points above the words, a 17-point subtitle 12 under the title, the words 32 in, and the button 24 under the space in 24-point margins with 12 below", () => {
+onIos("the welcome step: the icon 24 points above the words, a 17-point subtitle 12 under the title, the words 32 in, and the button 24 under the space in 24-point margins with 12 below", () => {
   const root = showStep("welcome");
-  expect(styleOf(root, "welcomeIcon").marginBottom).toBe(32);
+  expect(styleOf(root, "welcomeIcon").marginBottom).toBe(24);
   const words = styleOf(root, "welcomeWords");
   expect(words).toMatchObject({ paddingHorizontal: 32, gap: 12 });
   const subtitle = hosts(root, "welcomeWords")[0]!.findAll((node) => typeof node.type === "string" && textIn(node) === "Get what you want twice as fast.")[0]!;
@@ -251,13 +251,13 @@ test("the welcome step rises on main's Motion.rise on both phones: 360 ms of (0.
   unmount(root);
 });
 
-test("with Reduce Motion the welcome step fades in at once without the scale or lift, on SwiftUI's 300 ms ease-out on both phones", () => {
+test("with Reduce Motion the welcome step fades in at once without the tilt, scale or lift, on SwiftUI's 300 ms ease-out on both phones", () => {
   mockMotion.reduced = true;
   const delay = jest.spyOn(Reanimated, "withDelay");
   const root = showStep("welcome");
   expect(delay).not.toHaveBeenCalled();
   expect(onboardingMotion.riseReduced).toEqual({ timing: { duration: 300, easing: expect.anything() } });
-  expect(styleOf(root, "welcomeIcon").transform).toEqual([{ scale: 1 }]);
+  expect(styleOf(root, "welcomeIcon").transform).toEqual([{ rotate: "-6deg" }, { scale: 1 }]);
   expect(styleOf(root, "welcomeWords").transform).toEqual([{ translateY: 0 }]);
   unmount(root);
 });

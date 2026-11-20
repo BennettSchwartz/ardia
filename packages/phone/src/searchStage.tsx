@@ -6,7 +6,7 @@ export type SearchStageExit = "morph" | "depart" | "drop";
 
 export type SearchStageMorphLook = { usesGlass: boolean; panelTint: ColorValue; panelDark: boolean; classicPanel: ColorValue };
 
-export type SearchStageCorners = { anchor: number; panel: number; field: number };
+export type SearchStageCorners = { anchor?: number; panel: number; field?: number };
 
 export type SearchStageHandle = {
   present(): Promise<void>;

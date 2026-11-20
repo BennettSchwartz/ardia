@@ -432,7 +432,6 @@ export const floatingPanelLayout = {
   fieldEdge: 0.5,
   fieldLight: { fill: "rgba(118,118,128,0.12)", edge: "rgba(0,0,0,0)" },
   fieldDark: { fill: "rgba(118,118,128,0.24)", edge: "rgba(255,255,255,0)" },
-  fieldRadius: shape.field,
   panelRadius: shape.panel,
   panelLight: "#FFFFFF",
   panelDark: "#1C1C1E",

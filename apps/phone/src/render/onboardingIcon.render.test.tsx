@@ -22,23 +22,22 @@ const textOfNode = (node: Root["root"]) => textOf({ root: node } as Root);
 
 const hostWithTestId = (root: Root, testID: string) => root.root.findAll((node) => node.props.testID === testID && typeof node.type === "string")[0]!;
 
-test("the welcome step shows Ardia's own app icon large and upright, fixed at any text size, with no white photo frame, its own corner and the native apps' shadow", () => {
+test("the welcome step shows the 104-point app icon, fixed at any text size, in a white frame 5 points wide with the frame's corner and the native apps' shadow", () => {
   showOnboarding();
   const root = renderSurface(<OnboardingView />);
   const frame = hostWithTestId(root, "welcomeIcon");
   const framed = StyleSheet.flatten(frame.props.style);
-  const side = Platform.OS === "ios" ? 132 : 104;
-  expect(framed.padding).toBeUndefined();
-  expect(framed.backgroundColor).toBeUndefined();
-  expect(framed.borderRadius).toBeCloseTo(side * 0.225);
+  expect(framed.padding).toBe(5);
+  expect(framed.backgroundColor).toBe("#FFFFFF");
+  expect(framed.borderRadius).toBeCloseTo(104 * 0.225 + 5);
   expect(framed.boxShadow).toBe("0px 12px 48px rgba(0, 0, 0, 0.18)");
   const icon = frame.findAll((node) => node.type === AppIcon)[0]!;
-  expect(icon.props.side).toBe(side);
+  expect(icon.props.side).toBe(104);
   expect(icon.props.scalesWithText).toBe(false);
-  expect(StyleSheet.flatten(hostWithTestId(root, "appIcon").props.style).width).toBe(side);
+  expect(StyleSheet.flatten(hostWithTestId(root, "appIcon").props.style).width).toBe(104);
   expect(frame.findAll((node) => node.props.source !== undefined && typeof node.type === "string").length).toBeGreaterThan(0);
   expect(framed.opacity).toBe(0);
-  expect(framed.transform).toEqual([{ scale: 0.86 }]);
+  expect(framed.transform).toEqual([{ rotate: "-18deg" }, { scale: 0.7 }]);
   unmount(root);
 });
 

@@ -7,7 +7,7 @@ import { haptics } from "../../state/app/haptics";
 import { TabsMenuTrigger } from "./tabsMenu";
 import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, shape, smoothCorners, Symbol, type ColorRoles } from "../ui";
+import { capsule, chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, shape, smoothCorners, Symbol, type ColorRoles } from "../ui";
 import { TabStack } from "./BottomBar";
 import { barReturnedToPage } from "../../state/browse/deckPull";
 import { useDeckOwnsBar } from "../../state/browse/hooks";
@@ -102,7 +102,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     <View testID="floatingBar" style={styles.row} pointerEvents="box-none">
       {inStrip ? null : leading}
       <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={[styles.addressSlot, centreSqueeze]} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-      <ChromeSurface testID="floatingBarAddress" shape="rounded" cornerRadius={shape.field} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
+      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(floatingBarLayout.control)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
         <Animated.View testID="floatingBarCentreGlyphs" nativeID={ids?.face} collapsable={false} style={[styles.addressRow, back.centreGlyphs]}>
         <PullGlyphs style={styles.addressRow}>
         <Animated.View testID="floatingBarAddressFade" collapsable={false} style={[styles.addressFade, addressFade]} pointerEvents={squeezed ? "none" : "box-none"} importantForAccessibility={squeezed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={squeezed}>
@@ -238,7 +238,7 @@ const styles = StyleSheet.create({
   menuLock: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0 },
   circle: { ...smoothCorners, width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
   addressSlot: { flex: 1, height: floatingBarLayout.control },
-  address: { ...smoothCorners, flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },
+  address: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },
   addressRow: { flex: 1, alignSelf: "stretch", flexDirection: "row", alignItems: "center" },
   addressHit: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center", gap: floatingBarLayout.addressSpacing, paddingLeft: floatingBarLayout.addressLead },
   host: { flexShrink: 1, fontSize: floatingBarLayout.hostText },

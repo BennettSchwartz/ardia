@@ -58,7 +58,7 @@ const INCOGNITO_CAPTION_ROWS = 2;
 
 const ROWS_FALLBACK = 5;
 
-const TRAY_MORPH_CORNERS = { anchor: shape.field, panel: floatingPanelLayout.panelRadius, field: floatingPanelLayout.fieldRadius } as const;
+const TRAY_MORPH_CORNERS = { panel: floatingPanelLayout.panelRadius } as const;
 
 const trayPanelFill = (incognito: boolean, dark: boolean) => (incognito ? floatingPanelLayout.incognitoFill : dark ? floatingPanelLayout.panelDark : floatingPanelLayout.panelLight);
 
@@ -1213,8 +1213,7 @@ const styles = StyleSheet.create({
   },
   field: {
     minHeight: browseLayout.searchFieldHeight,
-    borderRadius: floatingPanelLayout.fieldRadius,
-    ...smoothCorners,
+    borderRadius: capsule(browseLayout.searchFieldHeight),
     borderWidth: 1,
     flexDirection: "row",
     alignItems: "center",

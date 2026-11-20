@@ -3,9 +3,9 @@ import { Platform, Pressable, StyleSheet, Text } from "react-native";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { haptics } from "../../state/app/haptics";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, smoothCorners, Symbol, tabsMotion, usePresence } from "../ui";
+import { capsule, chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, Symbol, tabsMotion, usePresence } from "../ui";
 import { barAddress, spokenAddress } from "./FloatingBar";
-import { hostPillCorner, hostPillLayout } from "./hostPillTokens";
+import { hostPillLayout } from "./hostPillTokens";
 import { NotSecureLock } from "./NotSecureLock";
 import { useBarReturn } from "./barReturn";
 
@@ -23,7 +23,7 @@ export function HostPill({ tab, dark, shown, anchors = false, contentStyle, onEx
   }, [back.centreGlass.shown]);
   return (
     <Animated.View testID="hostPillCentre" nativeID={ids?.anchor} collapsable={false} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-    <ChromeSurface testID="hostPill" shape="rounded" cornerRadius={hostPillCorner} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={(Platform.OS === "android" || shown) && back.centreGlass.shown} shownMs={Platform.OS === "android" ? 0 : centreFlips ? back.centreGlass.shownMs : hostPillLayout.glassMs} style={styles.pill}>
+    <ChromeSurface testID="hostPill" shape="capsule" cornerRadius={capsule(hostPillLayout.height)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={(Platform.OS === "android" || shown) && back.centreGlass.shown} shownMs={Platform.OS === "android" ? 0 : centreFlips ? back.centreGlass.shownMs : hostPillLayout.glassMs} style={styles.pill}>
       <Animated.View testID="hostPillCentreGlyphs" collapsable={false} style={back.centreGlyphs}>
       <Animated.View testID="hostPillContent" nativeID={ids?.face} collapsable={false} style={[styles.content, contentStyle]}>
       <Pressable accessibilityRole="button" accessibilityLabel="Show Toolbar" accessibilityValue={{ text: spokenAddress(address) }} onPress={onExpand} onPressIn={haptics.barPress} style={styles.hit}>
@@ -71,7 +71,7 @@ export function useBarFold(collapsed: boolean, reduceMotion: boolean) {
 }
 
 const styles = StyleSheet.create({
-  pill: { ...smoothCorners, maxWidth: hostPillLayout.maxWidth, height: hostPillLayout.height },
+  pill: { maxWidth: hostPillLayout.maxWidth, height: hostPillLayout.height },
   content: { flex: 1 },
   hit: { height: hostPillLayout.height, flexDirection: "row", alignItems: "center", gap: hostPillLayout.spacing, paddingHorizontal: hostPillLayout.sideInset },
   host: { flexShrink: 1, fontSize: hostPillLayout.hostText, fontWeight: hostPillLayout.hostWeight },

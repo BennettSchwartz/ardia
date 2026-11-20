@@ -226,7 +226,7 @@ function Welcome() {
   const logo = useAnimatedStyle(
     () => ({
       opacity: Math.min(Math.max(appear.value, 0), 1),
-      transform: [{ scale: reduceMotion ? 1 : onboardingLayout.welcomeIconFrom + (1 - onboardingLayout.welcomeIconFrom) * appear.value }],
+      transform: [{ rotate: `${reduceMotion ? -6 : -18 + 12 * appear.value}deg` }, { scale: reduceMotion ? 1 : 0.7 + 0.3 * appear.value }],
     }),
     [reduceMotion],
   );
@@ -239,7 +239,7 @@ function Welcome() {
     <View style={[styles.fill, { gap: onboardingLayout.welcomeGap }]}>
       <View style={styles.fill} />
       <Animated.View testID="welcomeIcon" style={[styles.logo, logo]}>
-        <AppIcon side={onboardingLayout.welcomeIcon} scalesWithText={false} />
+        <AppIcon side={appIconLayout.welcome} scalesWithText={false} />
       </Animated.View>
       <Animated.View testID="welcomeWords" style={[styles.welcomeWords, words]}>
         <Text accessibilityRole="header" style={material ? [materialType.displaySmall, styles.centeredText, { color: theme.label }] : [onboardingLayout.welcomeTitle, styles.heavy, { color: theme.label }]}>
@@ -423,7 +423,9 @@ const styles = StyleSheet.create({
   logo: {
     alignSelf: "center",
     marginBottom: onboardingLayout.welcomeIconBottom,
-    borderRadius: onboardingLayout.welcomeIcon * appIconLayout.corner,
+    padding: appIconLayout.welcomeFrame,
+    borderRadius: appIconLayout.welcome * appIconLayout.corner + appIconLayout.welcomeFrame,
+    backgroundColor: appIconLayout.fill,
     ...smoothCorners,
     boxShadow: appIconLayout.welcomeShadow,
   },

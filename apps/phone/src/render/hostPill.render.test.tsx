@@ -74,13 +74,13 @@ const expectPill = (root: Root, shown: boolean) => {
 
 const showToolbar = (root: Root) => root.root.findAll((node) => node.props.accessibilityLabel === "Show Toolbar" && typeof node.props.onPress === "function")[0];
 
-test("on iPhone's design, scrolling down with Collapse Bottom Bar on shrinks the bar into a 30 point rounded rectangle with the page's host, its corner the address's 12 at the fold's scale, centred on the bar's bottom", () => {
+test("on iPhone's design, scrolling down with Collapse Bottom Bar on shrinks the bar into a 30 point pill with the page's host, centred on the bar's bottom", () => {
   const root = page("redesigned");
   expectPill(root, false);
   scrolled("down");
   settle();
   expect(host(root, "hostPillHost")!.props.children).toBe("site0.example");
-  expect(StyleSheet.flatten(host(root, "hostPill")!.props.style)).toMatchObject({ height: 30, maxWidth: 240, borderRadius: 12 * 0.62, borderCurve: "continuous" });
+  expect(StyleSheet.flatten(host(root, "hostPill")!.props.style)).toMatchObject({ height: 30, maxWidth: 240, borderRadius: 15 });
   expect(StyleSheet.flatten(host(root, "hostPillHost")!.props.style)).toMatchObject({ fontSize: 13.5, fontWeight: "500" });
   expect(StyleSheet.flatten(host(root, "hostPillFold")!.props.style)).toMatchObject({ bottom: 0, height: 30, alignItems: "center" });
   expect(moved(host(root, "hostPillFold")!)).toEqual({ opacity: 1, translateY: 0, scale: 1 });
