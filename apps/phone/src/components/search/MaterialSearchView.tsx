@@ -64,7 +64,9 @@ export function useMaterialSheetSearch(searching: boolean): MaterialSheetSearch 
   const sheetHeight = useDerivedValue(() => {
     const dock = Math.max(keyboard.height.value, keyboardPeak.value, insets.bottom);
     const available = Math.max(insets.bottom, height - insets.top - materialSize.topAppBar);
-    return Math.min(bodyMaxHeight + dock, Math.max(available, keyboard.height.value));
+    const resting = Math.min(bodyMaxHeight + dock, Math.max(available, keyboard.height.value));
+    const fieldClearOfKeyboard = keyboard.height.value + materialSize.touchTarget + materialBottomBar.field + materialBottomBar.inset;
+    return Math.min(height - insets.top, Math.max(resting, fieldClearOfKeyboard));
   });
   const voice = useVoice((state) => state.presented);
   const covered = useTrayCovers((state) => state.covers > 0);

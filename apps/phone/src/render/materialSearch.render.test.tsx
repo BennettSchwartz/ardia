@@ -134,6 +134,23 @@ onAndroid("hiding or shortening the keyboard leaves the search field and sheet i
   unmount(root);
 });
 
+onAndroid("in landscape the sheet grows past its top bar room so the search field sits wholly above the keyboard", () => {
+  const portrait = Dimensions.get("window");
+  const landscape = { width: 873, height: 393 };
+  Dimensions.set({ window: { ...portrait, ...landscape }, screen: { ...portrait, ...landscape } });
+  const keyboard = { height: makeMutable(0), state: makeMutable(KeyboardState.CLOSED) };
+  jest.spyOn(Reanimated, "useAnimatedKeyboard").mockReturnValue(keyboard);
+  act(() => presentSearch("start", ""));
+  const root = tray();
+  const sheet = node(root, "materialSheet")!;
+  act(() => { keyboard.height.value = 248; });
+  act(() => jest.advanceTimersByTime(400));
+  expect(getAnimatedStyle(sheet).height).toBeGreaterThanOrEqual(248 + 48 + 48 + 8);
+  expect(getAnimatedStyle(sheet).height).toBeLessThanOrEqual(393);
+  unmount(root);
+  Dimensions.set({ window: portrait, screen: portrait });
+});
+
 onAndroid.each([["start", 24], ["browsing", 80], ["deck", 80]] as const)("search returns to the %s bar with the menu's timing and morphs into the resting contents before removal", (surface, side) => {
   act(() => {
     browse.useBrowse.setState({ surface });

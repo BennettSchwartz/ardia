@@ -62,6 +62,7 @@ import { browseForMeOffered } from "./state/browseForMe/offer";
 import { pageSummaryChoiceOffered } from "./state/pageSummary/store";
 import { listenForBrowseForMe } from "./state/browseForMe/events";
 import { followDynamicScheme } from "./state/app/dynamicScheme";
+import { useMaterialTheme } from "./components/ui/materialTheme";
 import type { Design } from "./lib/design";
 import { onMaterialBackSwiped } from "./components/ui/MaterialSurfaces";
 import { useTabs } from "./state/tabs/store";
@@ -160,7 +161,9 @@ export function Surfaces() {
   countRender("Surfaces");
   const incognito = useIncognito();
   const layer = inkLayer({ onboarding, voice, sheet: sheetCovers, searching: searching || libraryCovers, surface });
-  const lightIcons = settingsScreen && layer === "sheet" ? theme.dark : lightStatusIcons(layer, { cover: theme.backdrop[0], surface: theme.surface, deck: theme.backdrop[0], incognito: incognito && !libraryCovers });
+  const incognitoScheme = useMaterialTheme(true).scheme;
+  const behind = material && incognito ? incognitoScheme.surface : theme.backdrop[0];
+  const lightIcons = settingsScreen && layer === "sheet" ? theme.dark : lightStatusIcons(layer, { cover: behind, surface: theme.surface, deck: behind, incognito: incognito && !libraryCovers });
   useEffect(goBackToStartIfEmpty, [tab, surface]);
   const duo = useScreenLayout((s) => s.layout.name === "wide" || s.layout.name === "split");
   const deckMounted = useDeckStandby(surface, surface === "browsing" && tab !== null && opening === null && leaving === null && !searching && !voice && !onboarding && front === null && !settingsScreen, tab?.id ?? null);
