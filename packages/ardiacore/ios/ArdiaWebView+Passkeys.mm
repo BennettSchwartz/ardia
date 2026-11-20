@@ -22,6 +22,7 @@ NS_ASSUME_NONNULL_BEGIN
 NS_ASSUME_NONNULL_END
 
 static char kPasskeyConfirmsKey;
+static char kPasskeyFramesKey;
 
 static NSString *PasskeyJSON(NSDictionary *object) {
   NSData *data = [NSJSONSerialization dataWithJSONObject:object options:0 error:nil];
@@ -46,6 +47,21 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
   return confirms;
 }
 
+- (NSMutableDictionary<NSString *, NSDictionary *> *)passkeyFrames {
+  NSMutableDictionary *frames = objc_getAssociatedObject(self, &kPasskeyFramesKey);
+  if (!frames) {
+    frames = [NSMutableDictionary dictionary];
+    objc_setAssociatedObject(self, &kPasskeyFramesKey, frames, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+  }
+  return frames;
+}
+
+- (NSString *)passkeyFrameFor:(NSString *)key {
+  NSDictionary *bound = self.passkeyFrames[key];
+  if (!bound || [bound[@"document"] integerValue] != self.passkeyDocument) return nil;
+  return bound[@"frame"];
+}
+
 - (NSString *)passkeyProfile {
   return _profile ?: @"";
 }
@@ -68,8 +84,10 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
 
 - (void)passkeyConfirm:(NSString *)nonce pageId:(NSInteger)pageId done:(void (^)(BOOL))done {
   NSString *key = ConfirmKey(nonce, pageId);
+  NSString *frame = [self passkeyFrameFor:key];
+  if (!frame) return done(NO);
   self.passkeyConfirms[key] = [done copy];
-  [self callFrame:@"" kind:@"passkeyAck" json:PasskeyJSON(@{@"nonce" : nonce, @"id" : @(pageId)})];
+  [self callFrame:frame kind:@"passkeyAck" json:PasskeyJSON(@{@"nonce" : nonce, @"id" : @(pageId)})];
   __weak ArdiaWebView *weakSelf = self;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     void (^late)(BOOL) = weakSelf.passkeyConfirms[key];
@@ -80,8 +98,12 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
 }
 
 - (void)passkeyReply:(NSString *)nonce pageId:(NSInteger)pageId reply:(NSDictionary<NSString *, id> *)reply {
-  [self.passkeyConfirms removeObjectForKey:ConfirmKey(nonce, pageId)];
-  [self callFrame:@"" kind:@"passkeyReply" json:PasskeyJSON(@{@"nonce" : nonce, @"id" : @(pageId), @"reply" : reply ?: @{}})];
+  NSString *key = ConfirmKey(nonce, pageId);
+  [self.passkeyConfirms removeObjectForKey:key];
+  NSString *frame = [self passkeyFrameFor:key];
+  [self.passkeyFrames removeObjectForKey:key];
+  if (!frame) return;
+  [self callFrame:frame kind:@"passkeyReply" json:PasskeyJSON(@{@"nonce" : nonce, @"id" : @(pageId), @"reply" : reply ?: @{}})];
 }
 
 - (void)passkeyEmit:(NSString *)name payload:(NSDictionary<NSString *, id> *)payload {
@@ -96,25 +118,31 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
   for (ArdiaWebView *view in ardia_web_view::LiveViews().allObjects) [view pushPasskeyConfig];
 }
 
-- (BOOL)handlePasskeyMessage:(NSString *)kind dict:(NSDictionary *)dict main:(BOOL)main origin:(NSString *)verifiedOrigin {
+- (BOOL)handlePasskeyMessage:(NSString *)kind dict:(NSDictionary *)dict frame:(NSString *)frameId main:(BOOL)main origin:(NSString *)verifiedOrigin {
   if (![kind hasPrefix:@"passkey"]) return NO;
   NSString *nonce = [dict[@"nonce"] isKindOfClass:NSString.class] ? dict[@"nonce"] : nil;
   NSNumber *number = [dict[@"id"] isKindOfClass:NSNumber.class] ? dict[@"id"] : nil;
   const NSInteger pageId = number.integerValue;
   if (!nonce.length || nonce.length > 64 || pageId < 1 || pageId > INT_MAX) return YES;
+  NSString *key = ConfirmKey(nonce, pageId);
+  const BOOL sameDocument = main && [self passkeyFrameFor:key] && [[self passkeyFrameFor:key] isEqualToString:frameId ?: @""] &&
+                            [verifiedOrigin isEqualToString:self.passkeyTopOrigin ?: @""];
   if ([kind isEqualToString:@"passkeyRequest"]) {
+    if (self.passkeyFrames[key] || self.passkeyFrames.count >= 8) return YES;
+    if (main && frameId.length) self.passkeyFrames[key] = @{@"frame" : frameId, @"document" : @(self.passkeyDocument)};
     NSString *op = [dict[@"op"] isKindOfClass:NSString.class] ? dict[@"op"] : @"";
     NSDictionary *options = [dict[@"options"] isKindOfClass:NSDictionary.class] ? dict[@"options"] : @{};
     NSString *origin = verifiedOrigin.length && ![verifiedOrigin isEqualToString:@"null"] ? verifiedOrigin : nil;
     [ArdiaPasskeyCoordinator.shared request:op options:PasskeyJSON(options) nonce:nonce pageId:pageId origin:origin main:main page:self];
   } else if ([kind isEqualToString:@"passkeyAckOk"]) {
-    if (!main) return YES;
-    NSString *key = ConfirmKey(nonce, pageId);
+    if (!sameDocument) return YES;
     void (^done)(BOOL) = self.passkeyConfirms[key];
     if (!done) return YES;
     [self.passkeyConfirms removeObjectForKey:key];
     done([dict[@"pending"] isEqual:@YES]);
   } else if ([kind isEqualToString:@"passkeyCancel"]) {
+    if (!sameDocument) return YES;
+    [self.passkeyFrames removeObjectForKey:key];
     [ArdiaPasskeyCoordinator.shared cancel:nonce pageId:pageId page:self];
   }
   return YES;
@@ -128,6 +156,8 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
 
 - (void)passkeyDocumentChanged {
   [ArdiaPasskeyCoordinator.shared pageChanged:self];
+  for (NSString *key in self.passkeyFrames.allKeys)
+    if ([self.passkeyFrames[key][@"document"] integerValue] != self.passkeyDocument) [self.passkeyFrames removeObjectForKey:key];
 }
 
 @end

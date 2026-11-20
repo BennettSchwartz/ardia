@@ -27,7 +27,7 @@ function page({ engine = "chromium", top = true, protocol = "https:" } = {}) {
   };
   class AuthenticatorAssertionResponse {}
   class AuthenticatorAttestationResponse {}
-  const window = {
+  const window = Object.assign(new EventTarget(), {
     CredentialsContainer,
     PublicKeyCredential,
     AuthenticatorAssertionResponse,
@@ -41,7 +41,7 @@ function page({ engine = "chromium", top = true, protocol = "https:" } = {}) {
     btoa: (s) => Buffer.from(s, "binary").toString("base64"),
     atob: (s) => Buffer.from(s, "base64").toString("binary"),
     webkit: engine === "webkit" ? { messageHandlers: { ardiaPasskeys: { postMessage: (m) => (webkitPosts.push(m), Promise.resolve(webkitAnswer(m))) } } } : undefined,
-  };
+  });
   window.window = window;
   window.top = top ? window : {};
   const context = {
@@ -62,12 +62,15 @@ function page({ engine = "chromium", top = true, protocol = "https:" } = {}) {
     Math,
     Date,
     setTimeout,
+    clearTimeout,
+    EventTarget,
     navigator: {},
   };
   const install = runInNewContext(source, context);
   const receive = install((kind, json) => posted.push({ kind, data: JSON.parse(json) }), engine);
   const credentials = Object.create(CredentialsContainer.prototype);
-  return { window, receive, credentials, calls, posted, webkitPosts, answerWebKit: (fn) => (webkitAnswer = fn) };
+  const PageObject = runInNewContext("Object", context);
+  return { window, receive, credentials, calls, posted, webkitPosts, PageObject, answerWebKit: (fn) => (webkitAnswer = fn) };
 }
 
 const getOptions = () => ({ publicKey: { challenge: new Uint8Array([1, 2, 3]), rpId: "github.com", allowCredentials: [{ type: "public-key", id: new Uint8Array([9]) }] } });
@@ -152,6 +155,36 @@ test("a request native never confirms falls through after three seconds", async 
   const started = Date.now();
   assert.equal(await p.credentials.get(getOptions()), "native-get");
   assert.ok(Date.now() - started >= 2900);
+});
+
+test("leaving the page settles an open request once and tells native", async () => {
+  const p = page();
+  p.receive("passkeyConfig", JSON.stringify({ on: true }));
+  const open = p.credentials.get(getOptions());
+  const request = p.posted.at(-1).data;
+  p.receive("passkeyAck", JSON.stringify({ nonce: request.nonce, id: request.id }));
+  p.window.dispatchEvent(new Event("pagehide"));
+  await assert.rejects(open, (e) => e.name === "AbortError");
+  assert.deepEqual(p.posted.at(-1), { kind: "passkeyCancel", data: { nonce: request.nonce, id: request.id } });
+  p.receive("passkeyReply", JSON.stringify({ nonce: request.nonce, id: request.id, reply: { handled: assertionReply } }));
+  assert.equal(p.calls.get, 0);
+});
+
+test("a page's Object.prototype.toJSON never sees the nonce", async () => {
+  const p = page();
+  p.receive("passkeyConfig", JSON.stringify({ on: true }));
+  const seen = [];
+  p.PageObject.defineProperty(p.PageObject.prototype, "toJSON", { configurable: true, value() { seen.push(this.nonce); return this; } });
+  try {
+    const open = p.credentials.get(getOptions());
+    const request = p.posted.at(-1).data;
+    p.receive("passkeyReply", `{"nonce":"${request.nonce}","id":${request.id},"reply":{"error":"NotAllowedError"}}`);
+    await assert.rejects(open);
+  } finally {
+    delete p.PageObject.prototype.toJSON;
+  }
+  assert.ok(seen.length > 0, "the page hook ran on the page's own objects");
+  assert.ok(seen.every((n) => n === undefined), "but never on an envelope carrying the nonce");
 });
 
 test("in WebKit the reply handler answers, and fall-through is NotAllowedError, never the native call", async () => {

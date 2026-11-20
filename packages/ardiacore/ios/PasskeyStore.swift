@@ -19,6 +19,7 @@ struct PasskeyCredential: Codable, Equatable {
   let source: PasskeySource
   let backupEligible: Bool
   var ready: Bool
+  var publicKeyLabel: Data? = nil
 
   var locator: Data { PasskeyStoreLocator.of(groupId: groupId, rpId: rpId, credentialId: credentialId) }
 }
@@ -34,6 +35,14 @@ enum PasskeyStoreLocator {
   }
 
   static func hex(_ locator: Data) -> String { locator.map { String(format: "%02x", $0) }.joined() }
+
+  static func publicKeyLabel(x963: Data) -> Data { Data(Insecure.SHA1.hash(data: x963)) }
+}
+
+enum PasskeyKeyPresence: Equatable {
+  case present(label: Data?)
+  case missing
+  case unknown
 }
 
 enum PasskeyStoreError: Error, Equatable {
@@ -42,6 +51,7 @@ enum PasskeyStoreError: Error, Equatable {
   case missingKey
   case cancelled
   case badKey
+  case keyMismatch
 }
 
 enum PasskeyAddResult: Equatable {
@@ -136,14 +146,20 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     return items.compactMap { try? JSONDecoder().decode(PasskeyCredential.self, from: $0) }
   }
 
-  private func keyExists(_ locator: Data) -> Bool {
+  private func keyPresence(_ locator: Data) -> PasskeyKeyPresence {
     var query = keyQuery(locator)
+    query[kSecReturnAttributes] = true
     query[kSecUseAuthenticationUI] = kSecUseAuthenticationUISkip
-    let status = SecItemCopyMatching(base(query), nil)
-    return status == errSecSuccess || status == errSecInteractionNotAllowed
+    var result: CFTypeRef?
+    let status = SecItemCopyMatching(base(query), &result)
+    switch status {
+    case errSecSuccess: return .present(label: (result as? [CFString: Any])?[kSecAttrApplicationLabel] as? Data)
+    case errSecItemNotFound: return .missing
+    default: return .unknown
+    }
   }
 
-  private func addKey(locator: Data, privateX963: Data) throws {
+  private func addKey(locator: Data, privateX963: Data, label: Data) throws {
     let attributes: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: kSecAttrKeyClassPrivate, kSecAttrKeySizeInBits: 256]
     var error: Unmanaged<CFError>?
     guard let key = SecKeyCreateWithData(privateX963 as CFData, attributes as CFDictionary, &error) else { throw PasskeyStoreError.badKey }
@@ -152,7 +168,11 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     add[kSecAttrAccessControl] = try accessControl()
     add[kSecAttrLabel] = "Ardia passkey"
     let status = SecItemAdd(base(add), nil)
-    guard status == errSecSuccess || status == errSecDuplicateItem else { throw PasskeyStoreError.keychain(status) }
+    if status == errSecDuplicateItem {
+      guard keyPresence(locator) == .present(label: label) else { throw PasskeyStoreError.keyMismatch }
+      return
+    }
+    guard status == errSecSuccess else { throw PasskeyStoreError.keychain(status) }
   }
 
   func credentials(groupId: String, rpId: String?) throws -> [PasskeyCredential] {
@@ -160,18 +180,23 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
   }
 
   func add(_ credential: PasskeyCredential, privateX963: Data) throws -> PasskeyAddResult {
-    try lock.withLock {
+    let publicX963 = Data(privateX963.prefix(65))
+    let label = PasskeyStoreLocator.publicKeyLabel(x963: publicX963)
+    return try lock.withLock {
       let locator = credential.locator
       let existing = try allMetadata().first { $0.locator == locator }
-      let hasKey = keyExists(locator)
-      if let existing, existing.ready, hasKey { return .existing }
+      let presence = keyPresence(locator)
+      if presence == .unknown { throw PasskeyStoreError.locked }
+      if case .present(let found) = presence, found != label { throw PasskeyStoreError.keyMismatch }
+      if let existing, existing.ready, existing.publicKeyLabel == label, presence != .missing { return .existing }
       var pending = credential
       pending.ready = false
+      pending.publicKeyLabel = label
       try writeMetadata(pending)
-      if !hasKey { try addKey(locator: locator, privateX963: privateX963) }
+      if presence == .missing { try addKey(locator: locator, privateX963: privateX963, label: label) }
       pending.ready = true
       try writeMetadata(pending)
-      return existing == nil && !hasKey ? .added : .repaired
+      return existing == nil && presence == .missing ? .added : .repaired
     }
   }
 
@@ -195,6 +220,7 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
         let publicX963 = SecKeyCopyExternalRepresentation(publicKey, &error) as Data?
       else { throw PasskeyStoreError.badKey }
       pending.ready = true
+      pending.publicKeyLabel = PasskeyStoreLocator.publicKeyLabel(x963: publicX963)
       try writeMetadata(pending)
       return publicX963
     }
@@ -245,13 +271,25 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
 
   func recover() throws {
     try lock.withLock {
-      for credential in try allMetadata() where !credential.ready || !keyExists(credential.locator) {
-        if keyExists(credential.locator) {
-          var ready = credential
-          ready.ready = true
-          try writeMetadata(ready)
-        } else {
+      let rows = try allMetadata()
+      for credential in rows {
+        let presence = keyPresence(credential.locator)
+        switch presence {
+        case .unknown:
+          continue
+        case .missing:
           try removeItem(metadataQuery(credential.locator))
+        case .present(let label):
+          if let expected = credential.publicKeyLabel, label == expected {
+            if !credential.ready {
+              var ready = credential
+              ready.ready = true
+              try writeMetadata(ready)
+            }
+          } else {
+            try removeItem(keyQuery(credential.locator))
+            try removeItem(metadataQuery(credential.locator))
+          }
         }
       }
       var query = keyQuery(Data())
@@ -273,47 +311,64 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
 
 final class PasskeyTestStore: PasskeyKeyStore {
   private var entries: [Data: (credential: PasskeyCredential, key: P256.Signing.PrivateKey?)] = [:]
-  var signCalls = 0
+  private let guardLock = NSLock()
+  private var signs = 0
+  var signCalls: Int { guardLock.withLock { signs } }
 
   func credentials(groupId: String, rpId: String?) throws -> [PasskeyCredential] {
-    entries.values.map(\.credential).filter { $0.ready && $0.groupId == groupId && (rpId == nil || $0.rpId == rpId) }
-      .sorted { $0.created < $1.created }
+    guardLock.withLock {
+      entries.values.map(\.credential).filter { $0.ready && $0.groupId == groupId && (rpId == nil || $0.rpId == rpId) }
+        .sorted { $0.created < $1.created }
+    }
   }
 
   func add(_ credential: PasskeyCredential, privateX963: Data) throws -> PasskeyAddResult {
-    let locator = credential.locator
-    if let existing = entries[locator], existing.credential.ready, existing.key != nil { return .existing }
     guard let key = try? P256.Signing.PrivateKey(x963Representation: privateX963) else { throw PasskeyStoreError.badKey }
-    let repaired = entries[locator] != nil
-    var ready = credential
-    ready.ready = true
-    entries[locator] = (ready, key)
-    return repaired ? .repaired : .added
+    let label = PasskeyStoreLocator.publicKeyLabel(x963: key.publicKey.x963Representation)
+    return try guardLock.withLock {
+      let locator = credential.locator
+      if let existing = entries[locator], let stored = existing.key {
+        guard PasskeyStoreLocator.publicKeyLabel(x963: stored.publicKey.x963Representation) == label else { throw PasskeyStoreError.keyMismatch }
+        if existing.credential.ready { return .existing }
+      }
+      let repaired = entries[locator] != nil
+      var ready = credential
+      ready.ready = true
+      ready.publicKeyLabel = label
+      entries[locator] = (ready, key)
+      return repaired ? .repaired : .added
+    }
   }
 
   func generate(_ credential: PasskeyCredential) throws -> Data {
     let key = P256.Signing.PrivateKey()
     var ready = credential
     ready.ready = true
-    entries[credential.locator] = (ready, key)
+    ready.publicKeyLabel = PasskeyStoreLocator.publicKeyLabel(x963: key.publicKey.x963Representation)
+    guardLock.withLock { entries[credential.locator] = (ready, key) }
     return key.publicKey.x963Representation
   }
 
   func sign(_ credential: PasskeyCredential, payload: Data, context: LAContext?) throws -> Data {
-    signCalls += 1
-    guard let key = entries[credential.locator]?.key else { throw PasskeyStoreError.missingKey }
+    let key: P256.Signing.PrivateKey? = guardLock.withLock {
+      signs += 1
+      return entries[credential.locator]?.key
+    }
+    guard let key else { throw PasskeyStoreError.missingKey }
     return try key.signature(for: payload).derRepresentation
   }
 
-  func delete(_ credential: PasskeyCredential) throws { entries.removeValue(forKey: credential.locator) }
+  func delete(_ credential: PasskeyCredential) throws { _ = guardLock.withLock { entries.removeValue(forKey: credential.locator) } }
 
   func deleteAll(groupId: String) throws -> Int {
-    let mine = entries.filter { $0.value.credential.groupId == groupId }
-    for key in mine.keys { entries.removeValue(forKey: key) }
-    return mine.count
+    guardLock.withLock {
+      let mine = entries.filter { $0.value.credential.groupId == groupId }
+      for key in mine.keys { entries.removeValue(forKey: key) }
+      return mine.count
+    }
   }
 
   func recover() throws {}
 
-  func publicKey(_ credential: PasskeyCredential) -> P256.Signing.PublicKey? { entries[credential.locator]?.key?.publicKey }
+  func publicKey(_ credential: PasskeyCredential) -> P256.Signing.PublicKey? { guardLock.withLock { entries[credential.locator]?.key?.publicKey } }
 }

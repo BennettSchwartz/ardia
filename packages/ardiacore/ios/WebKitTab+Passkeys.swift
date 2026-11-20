@@ -55,7 +55,8 @@ extension WebKitTab: ArdiaPasskeyPage {
     let origin = frameInfo.securityOrigin
     let serialized = origin.host.isEmpty ? nil : "\(origin.protocol)://\(origin.host)" + (origin.port > 0 ? ":\(origin.port)" : "")
     if kind == "cancel" {
-      passkeyState.replies.removeValue(forKey: Self.passkeyKey(nonce, pageId))
+      guard frameInfo.isMainFrame, serialized != nil, serialized == passkeyState.topOrigin else { return answer(["fallThrough": true], nil) }
+      if let open = passkeyState.replies.removeValue(forKey: Self.passkeyKey(nonce, pageId)) { open(["aborted": true], nil) }
       PasskeyCoordinator.shared.cancel(nonce, pageId: pageId, page: self)
       return answer(["aborted": true], nil)
     }

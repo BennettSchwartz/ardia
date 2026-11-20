@@ -125,7 +125,7 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
   id data = JSONObject(json);
   NSDictionary *dict = [data isKindOfClass:NSDictionary.class] ? data : nil;
   frameId = frameId ?: @"";
-  if ([self handlePasskeyMessage:kind dict:dict main:main origin:verifiedOrigin]) return;
+  if ([self handlePasskeyMessage:kind dict:dict frame:frameId main:main origin:verifiedOrigin]) return;
   if ([kind isEqualToString:@"hello"]) {
     PeekTrace(@{@"event" : @"hello", @"main" : @(main), @"frame" : frameId ?: @"", @"url" : Text(dict, @"url", 8192) ?: @""});
     if (main && !tab.discarded) [self resetPageMedia];

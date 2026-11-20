@@ -12,6 +12,8 @@ public final class PasskeyCoordinator: NSObject {
   @objc(shared) public static let shared = PasskeyCoordinator()
 
   static let requestLifetime: TimeInterval = 120
+  static let shortestLifetime: TimeInterval = 30
+  static let longestLifetime: TimeInterval = 300
   static let promptSpacing: TimeInterval = 2
 
   private struct Pending {
@@ -28,6 +30,9 @@ public final class PasskeyCoordinator: NSObject {
     let rpId: String
     weak var page: ArdiaPasskeyPage?
     let started: Date
+    let entry: PasskeyProviderEntry
+    let generation: Int
+    var resolving = false
   }
 
   var makeAuthenticator: () -> PasskeyAuthenticator? = {
@@ -59,8 +64,8 @@ public final class PasskeyCoordinator: NSObject {
   static func defaultStore() -> PasskeyKeyStore {
     if let testStore { return testStore }
     let group = (Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String ?? "U5L5T3NGVV.") + "com.ardia.browser.passkeys"
-    let lock = FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys.lock").path
-    return PasskeyKeychainStore(accessGroup: group, lockPath: PasskeyCoordinator.lockPath ?? lock)
+    let lock = PasskeyCoordinator.lockPath ?? FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys.lock").path
+    return PasskeyKeychainStore(accessGroup: group, lockPath: lock)
   }
 
   static var lockPath: String?
@@ -69,7 +74,7 @@ public final class PasskeyCoordinator: NSObject {
     guard next >= generation else { return }
     generation = next
     providers = Dictionary(entries.map { ($0.profile, $0) }, uniquingKeysWith: { first, _ in first })
-    for (id, request) in pending where providers[request.policy.profile] == nil {
+    for (id, request) in pending where providers[request.policy.profile] != request.entry {
       finish(id, reply: ["fallThrough": true], reason: "withdrawn")
     }
   }
@@ -89,7 +94,7 @@ public final class PasskeyCoordinator: NSObject {
   public func request(_ op: String, options json: String, nonce: String, pageId: Int, origin: String?, main: Bool, page: ArdiaPasskeyPage) {
     let fallThrough: ([String: Any]) -> Void = { [weak page] body in if let page { self.reply(page, nonce, pageId, body) } }
     guard main, let origin, origin == page.passkeyTopOrigin, nonce.count <= 64, pageId > 0 else { return fallThrough(["fallThrough": true]) }
-    guard let policy = policy(for: page), let authenticator else { return fallThrough(["fallThrough": true]) }
+    guard let policy = policy(for: page), let entry = providers[page.passkeyProfile], let authenticator else { return fallThrough(["fallThrough": true]) }
     if op == "uvpaa" {
       let available = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
       return fallThrough(available ? ["handled": true] : ["fallThrough": true])
@@ -110,7 +115,7 @@ public final class PasskeyCoordinator: NSObject {
     var promptKind = op
     switch op {
     case "get":
-      guard let options = PasskeyGetOptions.parse(object) else { return fallThrough(["fallThrough": true]) }
+      guard let options = PasskeyGetOptions.parse(object), options.supported else { return fallThrough(["fallThrough": true]) }
       guard case .choose(let chosenRp, let offered) = authenticator.planGet(options, origin: origin, policy: policy) else {
         record("passkey_get_fell_through")
         return fallThrough(["fallThrough": true])
@@ -119,7 +124,7 @@ public final class PasskeyCoordinator: NSObject {
       credentials = offered
       rpId = chosenRp
     case "create":
-      guard let options = PasskeyCreateOptions.parse(object) else { return fallThrough(["fallThrough": true]) }
+      guard let options = PasskeyCreateOptions.parse(object), options.supported else { return fallThrough(["fallThrough": true]) }
       switch authenticator.planCreate(options, origin: origin, policy: policy) {
       case .fallThrough: return fallThrough(["fallThrough": true])
       case .excluded(let chosenRp): rpId = chosenRp; promptKind = "excluded"
@@ -133,7 +138,7 @@ public final class PasskeyCoordinator: NSObject {
     let id = UUID().uuidString
     pending[id] = Pending(
       id: id, op: op, nonce: nonce, pageId: pageId, origin: origin, document: document, policy: policy, get: getOptions, create: createOptions,
-      credentials: credentials, rpId: rpId, page: page, started: Date())
+      credentials: credentials, rpId: rpId, page: page, started: Date(), entry: entry, generation: generation)
     page.passkeyConfirm(nonce, pageId: pageId) { [weak self, weak page] stillPending in
       guard let self, let page, let request = self.pending[id] else { return }
       guard stillPending, self.isCurrent(request, page) else { return self.finish(id, reply: ["fallThrough": true], reason: "stale") }
@@ -144,7 +149,9 @@ public final class PasskeyCoordinator: NSObject {
         DispatchQueue.main.async { self.resolve(id, action: answer == "accept" ? accepted : answer, account: 0) }
       }
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestLifetime) { [weak self] in
+    let requested = (getOptions?.timeoutMs ?? createOptions?.timeoutMs).map { $0 / 1000 } ?? Self.requestLifetime
+    let lifetime = min(max(requested, Self.shortestLifetime), Self.longestLifetime)
+    DispatchQueue.main.asyncAfter(deadline: .now() + lifetime) { [weak self] in
       self?.finish(id, reply: ["error": "NotAllowedError", "message": "The operation timed out."], reason: "expired")
     }
   }
@@ -164,7 +171,8 @@ public final class PasskeyCoordinator: NSObject {
   }
 
   private func isCurrent(_ request: Pending, _ page: ArdiaPasskeyPage) -> Bool {
-    page.passkeyDocument == request.document && page.passkeyTopOrigin == request.origin && providers[page.passkeyProfile] != nil
+    page.passkeyDocument == request.document && page.passkeyTopOrigin == request.origin && page.passkeyProfile == request.policy.profile
+      && providers[page.passkeyProfile] == request.entry && (page.passkeyVisible || !requiresVisiblePage)
   }
 
   private func finish(_ id: String, reply body: [String: Any], reason: String) {
@@ -176,8 +184,9 @@ public final class PasskeyCoordinator: NSObject {
 
   @objc(resolve:action:account:)
   public func resolve(_ id: String, action: String, account: Int) {
-    guard let request = pending[id], let page = request.page, let authenticator else { return }
+    guard let request = pending[id], !request.resolving, let page = request.page, let authenticator else { return }
     guard isCurrent(request, page) else { return finish(id, reply: ["fallThrough": true], reason: "stale") }
+    pending[id]?.resolving = true
     let host = (try? PasskeyOrigin.parse(request.origin).host) ?? request.rpId
     switch action {
     case "other":

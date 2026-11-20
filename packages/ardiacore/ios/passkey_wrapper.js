@@ -31,6 +31,16 @@
       : apply(original, self, args);
   let seq = 0;
   const pending = new Map();
+  const mapGet = Map.prototype.get;
+  const mapSet = Map.prototype.set;
+  const mapHas = Map.prototype.has;
+  const mapDelete = Map.prototype.delete;
+  const pendingGet = (id) => apply(mapGet, pending, [id]);
+  const pendingHas = (id) => apply(mapHas, pending, [id]);
+  const bare = (fields) => Object.assign(create(null), fields);
+  const clamp = (ms) => (typeof ms === "number" && ms > 0 ? Math.min(Math.max(ms, 30000), 300000) : 120000);
+  const addListener = EventTarget.prototype.addEventListener;
+  const removeListener = EventTarget.prototype.removeEventListener;
 
   const encode = (value) => {
     const bytes = value instanceof ArrayBufferCtor ? new Uint8(value) : isView(value) ? new Uint8(value.buffer, value.byteOffset, value.byteLength) : null;
@@ -115,29 +125,37 @@
   const ask = (op, payload, signal) =>
     new NativePromise((resolve) => {
       const id = ++seq;
-      const entry = { resolve, acked: false };
-      pending.set(id, entry);
-      const settle = (reply) => {
-        if (!pending.has(id)) return;
-        pending.delete(id);
+      const entry = bare({ acked: false, settle: null });
+      apply(mapSet, pending, [id, entry]);
+      let deadline = 0;
+      let onAbort = null;
+      const onHide = () => settle(bare({ aborted: true }), true);
+      const settle = (reply, tellNative) => {
+        if (!pendingHas(id)) return;
+        apply(mapDelete, pending, [id]);
+        clearTimeout(deadline);
+        if (onAbort) apply(removeListener, signal, ["abort", onAbort]);
+        apply(removeListener, window, ["pagehide", onHide]);
+        if (tellNative) {
+          if (postToWebKit) postToWebKit(bare({ kind: "cancel", id, nonce }));
+          else post("passkeyCancel", toJSON(bare({ nonce, id })));
+        }
         resolve(reply);
       };
       entry.settle = settle;
       if (signal) {
-        if (signal.aborted) return settle({ aborted: true });
-        signal.addEventListener("abort", () => {
-          if (!pending.has(id)) return;
-          if (postToWebKit) postToWebKit({ kind: "cancel", id, nonce });
-          else post("passkeyCancel", toJSON({ nonce, id }));
-          settle({ aborted: true });
-        }, { once: true });
+        if (signal.aborted) return settle(bare({ aborted: true }), false);
+        onAbort = () => settle(bare({ aborted: true }), true);
+        apply(addListener, signal, ["abort", onAbort, { once: true }]);
       }
+      apply(addListener, window, ["pagehide", onHide, { once: true }]);
+      deadline = setTimeout(() => settle(bare({ error: "NotAllowedError", message: "The operation timed out." }), true), clamp(payload.publicKey && payload.publicKey.timeout));
       if (postToWebKit) {
-        postToWebKit({ kind: op, id, nonce, options: toJSON(payload) }).then((reply) => settle(reply || { fallThrough: true }), () => settle({ fallThrough: true }));
+        postToWebKit(bare({ kind: op, id, nonce, options: toJSON(payload) })).then((reply) => settle(reply || bare({ fallThrough: true }), false), () => settle(bare({ fallThrough: true }), false));
       } else {
-        post("passkeyRequest", toJSON({ nonce, id, op, options: payload }));
+        post("passkeyRequest", toJSON(bare({ nonce, id, op, options: payload })));
         setTimeout(() => {
-          if (pending.has(id) && !entry.acked) settle({ fallThrough: true });
+          if (pendingHas(id) && !entry.acked) settle(bare({ fallThrough: true }), false);
         }, 3000);
       }
     });
@@ -206,21 +224,21 @@
     },
     passkeyAck: (message) => {
       if (!message || message.nonce !== nonce) return;
-      const entry = pending.get(message.id);
+      const entry = pendingGet(message.id);
       if (entry) entry.acked = true;
-      post("passkeyAckOk", toJSON({ nonce, id: message.id, pending: !!entry }));
+      post("passkeyAckOk", toJSON(bare({ nonce, id: message.id, pending: !!entry })));
     },
     passkeyReply: (message) => {
       if (!message || message.nonce !== nonce) return;
-      const entry = pending.get(message.id);
-      if (entry) entry.settle(message.reply || { fallThrough: true });
+      const entry = pendingGet(message.id);
+      if (entry) entry.settle(message.reply || bare({ fallThrough: true }), false);
     },
   };
   return (kind, json) => {
     const handler = handlers[kind];
     if (!handler) return false;
     try {
-      handler(typeof json === "string" ? fromJSON(json) : json);
+      handler(typeof json === "string" ? fromJSON(json, (key, value) => (value && typeof value === "object" && !Array.isArray(value) ? Object.assign(create(null), value) : value)) : json);
     } catch (e) {}
     return true;
   };

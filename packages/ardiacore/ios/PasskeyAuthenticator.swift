@@ -26,6 +26,8 @@ struct PasskeyGetOptions {
   let rpId: String?
   let allowCredentials: [Data]
   let mediation: String?
+  var timeoutMs: Double? = nil
+  var supported = true
 
   static func parse(_ json: [String: Any]) -> PasskeyGetOptions? {
     guard let publicKey = json["publicKey"] as? [String: Any], let challenge = (publicKey["challenge"] as? String).flatMap(PasskeyBase64URL.decode),
@@ -35,7 +37,11 @@ struct PasskeyGetOptions {
     guard allow.count <= PasskeyLimits.descriptors else { return nil }
     let ids = allow.compactMap { ($0["id"] as? String).flatMap(PasskeyBase64URL.decode) }.filter { $0.count <= PasskeyLimits.credentialIdBytes }
     guard ids.count == allow.count else { return nil }
-    return PasskeyGetOptions(challenge: challenge, rpId: publicKey["rpId"] as? String, allowCredentials: ids, mediation: json["mediation"] as? String)
+    let mediation = json["mediation"] as? String
+    let typed = allow.allSatisfy { $0["type"] as? String == "public-key" }
+    return PasskeyGetOptions(
+      challenge: challenge, rpId: publicKey["rpId"] as? String, allowCredentials: ids, mediation: mediation,
+      timeoutMs: (publicKey["timeout"] as? NSNumber)?.doubleValue, supported: typed && (mediation == nil || mediation == "optional" || mediation == "required"))
   }
 }
 
@@ -50,6 +56,8 @@ struct PasskeyCreateOptions {
   let attachment: String?
   let credProps: Bool
   let mediation: String?
+  var timeoutMs: Double? = nil
+  var supported = true
 
   static func parse(_ json: [String: Any]) -> PasskeyCreateOptions? {
     guard let publicKey = json["publicKey"] as? [String: Any], let challenge = (publicKey["challenge"] as? String).flatMap(PasskeyBase64URL.decode),
@@ -65,13 +73,17 @@ struct PasskeyCreateOptions {
     guard exclude.count <= PasskeyLimits.descriptors else { return nil }
     let excluded = exclude.compactMap { ($0["id"] as? String).flatMap(PasskeyBase64URL.decode) }
     guard excluded.count == exclude.count else { return nil }
+    let mediation = json["mediation"] as? String
+    let typed = exclude.allSatisfy { $0["type"] as? String == "public-key" }
+      && params.allSatisfy { $0["type"] as? String == "public-key" }
+    let supported = typed && publicKey["pubKeyCredParams"] is [[String: Any]] && (mediation == nil || mediation == "optional" || mediation == "required")
     let selection = publicKey["authenticatorSelection"] as? [String: Any]
     let extensions = publicKey["extensions"] as? [String: Any]
     return PasskeyCreateOptions(
       challenge: challenge, rpId: rp?["id"] as? String, userId: userId, userName: name, userDisplayName: displayName,
       algorithms: params.compactMap { ($0["alg"] as? NSNumber)?.intValue }, excludeCredentials: excluded,
       attachment: selection?["authenticatorAttachment"] as? String, credProps: extensions?["credProps"] as? Bool == true,
-      mediation: json["mediation"] as? String)
+      mediation: mediation, timeoutMs: (publicKey["timeout"] as? NSNumber)?.doubleValue, supported: supported)
   }
 }
 
