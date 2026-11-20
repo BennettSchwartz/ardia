@@ -219,7 +219,13 @@ function importHistoryRows(profile: string, { rows }: { rows: { u: string; t: st
   return {};
 }
 
+export const historyDeletes = { failNext: false };
+
 function deleteHistoryUrls(profile: string, { urls }: { urls: string[] }) {
+  if (historyDeletes.failNext) {
+    historyDeletes.failNext = false;
+    throw new Error("the history database couldn't be written");
+  }
   for (const url of urls) chromeHistory(profile).delete(url);
   chromeHistoryEvent({ kind: "deleted", profile, all: false, urls });
   return {};
