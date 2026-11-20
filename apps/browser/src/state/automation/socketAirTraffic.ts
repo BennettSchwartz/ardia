@@ -126,6 +126,9 @@ function moveRule(params: Record<string, unknown>) {
 function setFallback(params: Record<string, unknown>) {
   const target = params.open === null ? null : targetOf(params, { profileId: null, open: "tab" });
   if (params.open === null && (params.profile !== undefined || params.group !== undefined)) throw new OpError("bad_request", "open: null clears the fallback and takes nothing else.");
+  if (target?.groupKey && target.profileId && groupKeyInSharedFolder(target.profileId, target.groupKey)) {
+    throw new OpError("refused", `Group ${target.groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here.`);
+  }
   setAirTrafficFallback(target);
   expect(!!currentAirTraffic().fallbackChosen && sameTarget(currentAirTraffic().fallback, target && cleanTarget(target)), "air-traffic.json couldn't be saved.");
   return { fallback: currentAirTraffic().fallback };

@@ -151,3 +151,11 @@ test("offscreen keeps the store in step with a move that already happened, even 
     delete globalThis.acTestCliMoveOffscreen;
   }
 });
+
+test("the Air Traffic fallback can't be pointed into a shared folder", async () => {
+  const f = await fixture();
+  const before = currentAirTraffic().fallback;
+  const reply = await send("airTraffic.setFallback", { profile: f.profileId, group: f.shared, open: "tab" });
+  assert.equal(errorOf(reply)?.code, "refused", JSON.stringify(reply));
+  assert.deepEqual(currentAirTraffic().fallback, before);
+});
