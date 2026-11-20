@@ -1464,7 +1464,7 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
 - **Nothing reads on its own.** Reading starts only from the speaker button or from raising the phone to the ear.
 - **The listen bar and hold to your ear** (the SwiftUI app's design from #1724, now with Phonon). While the answer
   page is open, Talk to Me is on and its voice is in, the proximity sensor is on (`ProximityFeed`). Once the answer is
-  done and English (`NLLanguageRecognizer`; a short answer counts as English), a glass bar sits at the bottom of the
+  done and English (`NLLanguageRecognizer`; an answer under 40 letters counts as English when every letter is Latin), a glass bar sits at the bottom of the
   page: an ear, a line ("Hold your iPhone to your ear to listen", "Reading at your ear", "Reading out loud", "Paused.
   Hold it to your ear to keep listening", "Paused", "Hold it to your ear to hear it again"), the speaker button
   (Play Out Loud, then Pause) and a fill showing how far it has read. Raising the phone to the ear reads the answer
