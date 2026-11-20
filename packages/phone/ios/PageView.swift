@@ -293,7 +293,12 @@ final class PageView: ExpoView {
       view = parent
     }
     let safe = window.safeAreaInsets
-    return UIEdgeInsets(top: max(safe.top - origin.y, 0), left: 0, bottom: max(origin.y + bounds.height - window.bounds.height + safe.bottom, 0), right: 0)
+    return UIEdgeInsets(
+      top: max(safe.top - origin.y, 0),
+      left: max(safe.left - origin.x, 0),
+      bottom: max(origin.y + bounds.height - window.bounds.height + safe.bottom, 0),
+      right: max(origin.x + bounds.width - window.bounds.width + safe.right, 0)
+    )
   }
 
   var effectiveObscuredInsets: UIEdgeInsets {
@@ -303,11 +308,14 @@ final class PageView: ExpoView {
 
   private func applyObscuredInsets() {
     guard let hostedWebView, hostedWebView.superview === self else { return }
-    let insets = effectiveObscuredInsets
+    let pins = pinsSafeArea && window != nil
+    let pinned = pins ? restingSafeArea : .zero
+    var insets = effectiveObscuredInsets
+    insets.left = pinned.left
+    insets.right = pinned.right
     if hostedWebView.obscuredContentInsets != insets { hostedWebView.obscuredContentInsets = insets }
     let scrollView = hostedWebView.scrollView
-    let pinned = pinsSafeArea ? restingSafeArea : .zero
-    let adjustment: UIScrollView.ContentInsetAdjustmentBehavior = pinsSafeArea && window != nil ? .never : .automatic
+    let adjustment: UIScrollView.ContentInsetAdjustmentBehavior = pins ? .never : .always
     let top = topClearance + pinned.top
     if scrollView.contentInset.top != top || scrollView.contentInset.bottom != pinned.bottom || scrollView.contentInsetAdjustmentBehavior != adjustment {
       let restsAtTop = scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 0.5
