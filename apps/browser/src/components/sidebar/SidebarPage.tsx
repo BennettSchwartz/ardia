@@ -3,8 +3,7 @@ import { Animated, ScrollView, View, type LayoutChangeEvent, type NativeScrollEv
 import { switchOn } from "../../state/app/switches";
 import { ContextMenuArea, space, WindowDragRegion } from "../ui";
 import { layout } from "../ui/theme";
-import { TintInk } from "../ui/TintInk";
-import { SidebarTextScope } from "./SidebarTextScope";
+import { SidebarInk } from "./SidebarTextScope";
 import { ThemeScope } from "../window/ThemeScope";
 import { PageProfileContext, useSettings, useWindowId } from "../../state/browser/hooks";
 import { newTab } from "../../state/tabs/actions";
@@ -177,8 +176,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
     >
       <PageProfileContext.Provider value={profileId}>
         <ThemeScope page>
-          <TintInk>
-            <SidebarTextScope>
+          <SidebarInk>
             <DragPage live={current}>
               <View style={{ paddingTop: GLOW_ROOM, paddingBottom: edgeGap + SCROLL_EDGE.line, zIndex: fixedTiles.length ? 1 : 0 }}>
                 {dockFixed ? (
@@ -251,8 +249,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                 </View>
               ) : null}
             </DragPage>
-            </SidebarTextScope>
-          </TintInk>
+          </SidebarInk>
         </ThemeScope>
       </PageProfileContext.Provider>
     </Animated.View>
