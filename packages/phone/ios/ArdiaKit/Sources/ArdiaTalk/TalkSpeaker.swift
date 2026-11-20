@@ -31,6 +31,8 @@ public final class TalkSpeaker {
   private var recording: AVAudioFile?
   private var configurationObserver: NSObjectProtocol?
   private var needsRestart = false
+  private var requestedVoice: String?
+  private var voiceChange: Task<Void, Error>?
 
   public static func load(models: URL, voice: String?) async throws -> TalkSpeaker {
     let tts = try await Phonon.load(models: models, language: .english)
@@ -68,8 +70,13 @@ public final class TalkSpeaker {
   }
 
   public func setVoice(_ name: String) async throws {
-    guard name != voice else { return }
-    try await tts.setVoice(name)
+    requestedVoice = name
+    while let pending = voiceChange { _ = try? await pending.value }
+    guard requestedVoice == name, name != voice else { return }
+    let change = Task { try await tts.setVoice(name) }
+    voiceChange = change
+    defer { voiceChange = nil }
+    try await change.value
     voice = name
   }
 

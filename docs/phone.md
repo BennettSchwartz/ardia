@@ -3815,7 +3815,9 @@ This was `docs/ios.md`'s, for main's SwiftUI app; since the clean-up the workflo
   ```
 
   The app id is the record's numeric id (`node apps/phone/scripts/asc.mjs status`). Wait for `READY`, then upload the
-  build as usual; TestFlight testers get the pack when they turn Talk to Me on. An unchanged pack needs no new upload.
+  build as usual; internal TestFlight testers get the pack when they turn Talk to Me on. Public testers need one more
+  step: after the build is submitted for TestFlight review, submit the pack's version under TestFlight › Asset Packs
+  and wait for its own external-testing approval. An unchanged pack needs no new upload.
 - **The workflow** (`.github/workflows/ios-release.yml`). What each mode touches in App Store Connect:
   - `mode=status` only reads: the app record, App IDs, devices, certificates, profiles, builds, build uploads and
     tester groups.

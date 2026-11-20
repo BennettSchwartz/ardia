@@ -7,8 +7,8 @@
 # Downloads phonon-31m-en-coreml.zip from the pinned xn-ptts release, checks its SHA-256, checks every kept file
 # against the bundle.json inside it and each voice against voices.tsv, compiles the three .mlpackage models to
 # .mlmodelc with coremlcompiler (so the phone never compiles or writes beside them), keeps the voices in voices.tsv,
-# and packs DIR/TalkToMe with xcrun ba-package into DIR/talk-to-me-phonon-31m-en.aar (Manifest.json: on demand, iOS).
-# --models-only stops after DIR/TalkToMe, the folder the test build's -ArdiaTalkToMeModels takes.
+# and packs DIR/stage/TalkToMe with xcrun ba-package into DIR/talk-to-me-phonon-31m-en.aar (Manifest.json: on demand, iOS).
+# --models-only stops after DIR/stage/TalkToMe, the folder the test build's -ArdiaTalkToMeModels takes.
 # DIR defaults to /private/tmp/ardia-talk-to-me-pack. Upload the .aar with each App Store or TestFlight build
 # (docs/phone.md, Talk to Me): xcrun altool --upload-asset-pack DIR/talk-to-me-phonon-31m-en.aar --apple-id <app id>.
 set -euo pipefail

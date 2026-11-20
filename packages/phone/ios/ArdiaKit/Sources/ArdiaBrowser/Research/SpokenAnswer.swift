@@ -11,7 +11,7 @@ public enum SpokenAnswer {
   public static let decidingLetters = 40
 
   public static func text(_ answer: String) -> String {
-    ready(answer, finished: true)
+    answer.components(separatedBy: .newlines).compactMap(block).map(closed).joined(separator: "\n")
   }
 
   public static func blocks(_ answer: String) -> [String] {
@@ -21,19 +21,15 @@ public enum SpokenAnswer {
   public static func isReadable(_ answer: String) -> Bool {
     let spoken = text(answer)
     guard !spoken.isEmpty else { return false }
-    if case .other = language(of: spoken) { return false }
-    return true
+    switch language(of: spoken) {
+    case .english: return true
+    case .other: return false
+    case .undecided: return !spoken.unicodeScalars.contains(where: isNonLatinLetter)
+    }
   }
 
-  public static func ready(_ answer: String, finished: Bool) -> String {
-    var lines = answer.components(separatedBy: .newlines)
-    let open = finished ? nil : lines.popLast()
-    var parts = lines.compactMap(block).map(closed)
-    if let open, let line = block(open) {
-      let done = finishedSentences(open.last?.isWhitespace == true ? line + " " : line)
-      if !done.isEmpty { parts.append(done) }
-    }
-    return parts.joined(separator: "\n")
+  static func isNonLatinLetter(_ scalar: Unicode.Scalar) -> Bool {
+    CharacterSet.letters.contains(scalar) && scalar.value > 0x24F && !(0x1E00...0x1EFF).contains(scalar.value)
   }
 
   public static func language(of text: String) -> Language {
@@ -70,35 +66,7 @@ public enum SpokenAnswer {
     return ".!?:;…".contains(last) || closers.contains(last) ? text : text + "."
   }
 
-  static func finishedSentences(_ text: String) -> String {
-    var end: String.Index?
-    var index = text.startIndex
-    while index < text.endIndex {
-      let character = text[index]
-      if ".!?…".contains(character) {
-        var after = text.index(after: index)
-        while after < text.endIndex, closers.contains(text[after]) { after = text.index(after: after) }
-        if after < text.endIndex, text[after].isWhitespace, !endsInAbbreviation(text[..<index]) {
-          end = text.index(before: after)
-        }
-        index = after
-      } else {
-        index = text.index(after: index)
-      }
-    }
-    guard let end else { return "" }
-    return String(text[...end]).trimmingCharacters(in: .whitespaces)
-  }
-
-  static func endsInAbbreviation(_ head: Substring) -> Bool {
-    let word = head.split(whereSeparator: { $0.isWhitespace || $0 == "(" }).last.map(String.init) ?? ""
-    if word.count == 1, word.first?.isLetter == true { return true }
-    if word.contains("."), word.count <= 4 { return true }
-    return abbreviations.contains(word.lowercased())
-  }
-
   static let closers: Set<Character> = ["\"", "'", "”", "’", ")", "]"]
-  static let abbreviations: Set<String> = ["mr", "mrs", "ms", "dr", "st", "vs", "etc", "e.g", "i.e", "approx", "no", "jr", "sr", "inc", "ltd", "co", "mt", "ft", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec"]
   nonisolated(unsafe) static let listNumberPattern = /\d{1,3}[.)]\s+/
   nonisolated(unsafe) static let linkPattern = /\[([^\]\[]+)\]\([^)\s]*\)/
   nonisolated(unsafe) static let spacesPattern = /[ \t]{2,}/

@@ -22,17 +22,10 @@ struct SpokenAnswerTests {
       """)
   }
 
-  @Test func readyHoldsBackThePartialLastSentence() {
-    #expect(SpokenAnswer.ready("Everest is tall [1]. It was first climb", finished: false) == "Everest is tall.")
-    #expect(SpokenAnswer.ready("Everest is tall [1]. It was first climbed in 1953.", finished: false) == "Everest is tall.")
-    #expect(SpokenAnswer.ready("Everest is tall [1]. It was first climbed in 1953. ", finished: false) == "Everest is tall. It was first climbed in 1953.")
-    #expect(SpokenAnswer.ready("Everest is tall [1]. It was first climbed in 1953.", finished: true) == "Everest is tall. It was first climbed in 1953.")
-    #expect(SpokenAnswer.ready("A partial line with no end", finished: true) == "A partial line with no end.")
-  }
-
-  @Test func abbreviationsAndDecimalsDoNotEndASentence() {
-    #expect(SpokenAnswer.ready("Dr. Smith paid 3.5 million vs. the plan, e.g. a lot. Then", finished: false) == "Dr. Smith paid 3.5 million vs. the plan, e.g. a lot.")
-    #expect(SpokenAnswer.ready("It was built by J. Strauss in the U.S. over four years. Next", finished: false) == "It was built by J. Strauss in the U.S. over four years.")
+  @Test func aLineWithNoEndGetsAFullStop() {
+    #expect(SpokenAnswer.text("Everest is tall [1]. It was first climbed in 1953.") == "Everest is tall. It was first climbed in 1953.")
+    #expect(SpokenAnswer.text("A partial line with no end") == "A partial line with no end.")
+    #expect(SpokenAnswer.text("Dr. Smith paid 3.5 million vs. the plan") == "Dr. Smith paid 3.5 million vs. the plan.")
   }
 
   @Test func blocksAreTheCleanedLinesInOrder() {
@@ -47,6 +40,9 @@ struct SpokenAnswerTests {
     #expect(!SpokenAnswer.isReadable("Der Eiffelturm wurde 1889 für die Weltausstellung in Paris gebaut. Er ist hoch."))
     #expect(SpokenAnswer.isReadable("The Golden Gate Bridge opened in 1937 [1]. It is painted orange."))
     #expect(SpokenAnswer.isReadable("Yes [1]."))
+    #expect(SpokenAnswer.isReadable("Café au lait, naïve résumé."))
+    #expect(!SpokenAnswer.isReadable("東京は日本の首都です。"))
+    #expect(!SpokenAnswer.isReadable("Москва — столица."))
     #expect(!SpokenAnswer.isReadable("[1]"))
   }
 

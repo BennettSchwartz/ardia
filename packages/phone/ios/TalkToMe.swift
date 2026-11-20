@@ -55,8 +55,6 @@ final class TalkToMe {
   var voice: String {
     didSet {
       UserDefaults.standard.set(voice, forKey: Self.voiceKey)
-      let chosen = voice
-      Task { try? await speaker?.setVoice(chosen) }
     }
   }
 
@@ -118,6 +116,7 @@ final class TalkToMe {
 
   func refresh() {
     guard downloadTask == nil else { return }
+    if case .failed = download, overrideDirectory() == nil { return }
     if let override = overrideDirectory() {
       download = .ready(bytes: Self.folderSize(override))
       return
@@ -340,6 +339,7 @@ final class TalkToMe {
     Task {
       do {
         let speaker = try await loadSpeaker()
+        try await speaker.setVoice(voice)
         isPreparing = false
         guard listeningSessionID == id, listening.isPlaying, let current = listening.output else { return }
         guard route(current) else { return listening.routeFailed() }
@@ -461,8 +461,10 @@ final class TalkToMe {
 
   private func watchAudio() {
     let center = NotificationCenter.default
-    observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated { self?.interrupted() }
+    observers.append(center.addObserver(forName: AVAudioSession.didBecomeInactiveNotification, object: nil, queue: .main) { [weak self] note in
+      let context = note.userInfo?[AVAudioSession.deactivationContextKey] as? AVAudioSession.DeactivationContext
+      let bySystem = context?.source != .app
+      MainActor.assumeIsolated { if bySystem { self?.interrupted() } }
     })
     observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
       let lost = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init) == .oldDeviceUnavailable
@@ -489,9 +491,23 @@ final class TalkToMe {
   }
 
   private func overrideDirectory() -> URL? {
-    guard PhoneTestBuild.isOn, !overrideRemoved, let path = UserDefaults.standard.string(forKey: Self.modelsOverrideKey), !path.isEmpty else { return nil }
-    let url = URL(fileURLWithPath: path, isDirectory: true)
-    return FileManager.default.fileExists(atPath: url.appending(path: "bundle.json").path) ? url : nil
+    guard !overrideRemoved else { return nil }
+    return Self.testBuildModels() ?? Self.sideloadedModels()
+  }
+
+  static func testBuildModels() -> URL? {
+    guard PhoneTestBuild.isOn, let path = UserDefaults.standard.string(forKey: modelsOverrideKey), !path.isEmpty else { return nil }
+    return holdingModels(URL(fileURLWithPath: path, isDirectory: true))
+  }
+
+  static func sideloadedModels() -> URL? {
+    guard Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil,
+          let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+    return holdingModels(support.appending(path: "TalkToMe", directoryHint: .isDirectory))
+  }
+
+  static func holdingModels(_ url: URL) -> URL? {
+    FileManager.default.fileExists(atPath: url.appending(path: "bundle.json").path) ? url : nil
   }
 
   private func modelsDirectory() -> URL? {
