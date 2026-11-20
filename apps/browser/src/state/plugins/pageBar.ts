@@ -12,6 +12,7 @@ export type PageBarPane = {
   mounted: boolean;
   live: boolean;
   frozen: boolean;
+  newTabShown: boolean;
   peek: boolean;
   otherProfile: boolean;
   privatePage: boolean;
@@ -25,7 +26,7 @@ export type PageBarMatch = { plugin: string; official: boolean; spec: PageBarSpe
 export type PageBarState = { plugins: Pick<PluginsStore, "listings" | "records" | "order">; documents: Record<string, PageDocument> };
 
 export function pageBarPaneEligible(p: PageBarPane): boolean {
-  if (!p.visible || p.lingering || p.warm || p.covered || !p.mounted || !p.live || p.frozen) return false;
+  if (!p.visible || p.lingering || p.warm || p.covered || !p.mounted || !p.live || p.frozen || p.newTabShown) return false;
   if (p.peek || p.otherProfile || p.privatePage || p.small) return false;
   return !p.documentFullscreen && !p.windowFullscreen;
 }

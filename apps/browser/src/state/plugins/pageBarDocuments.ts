@@ -8,7 +8,10 @@ export type PageDocument = { url: string; at: number; agrees: boolean; settled: 
 
 export const usePageDocuments = create<Record<string, PageDocument>>()(() => ({}));
 
+export type DocumentReporter = object;
+
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const reporters = new Map<string, DocumentReporter>();
 
 function cancelTimer(tabId: string) {
   const timer = timers.get(tabId);
@@ -35,13 +38,20 @@ function settleLater(tabId: string, at: number, wait: number) {
   );
 }
 
-export function notePageDocument(tabId: string, shownUrl: string, committedUrl: string | undefined, committedAt: number | undefined, privatePage: boolean, now = Date.now()) {
-  if (committedUrl === undefined) return;
+function drop(tabId: string) {
+  cancelTimer(tabId);
+  if (Object.hasOwn(usePageDocuments.getState(), tabId)) patch(tabId, null);
+}
+
+export function notePageDocument(tabId: string, shownUrl: string, committedUrl: string | undefined, committedAt: number | undefined, privatePage: boolean, reporter: DocumentReporter, now = Date.now()) {
+  reporters.set(tabId, reporter);
+  if (committedUrl === undefined) return drop(tabId);
   const before = Object.hasOwn(usePageDocuments.getState(), tabId) ? usePageDocuments.getState()[tabId] : undefined;
   const at = typeof committedAt === "number" && committedAt > 0 ? committedAt : 0;
   const agrees = committedUrl !== "" && committedUrl === shownUrl;
   const sameDocument = before && (at > 0 ? at === before.at : before.at === 0 && committedUrl === before.url);
   if (sameDocument) {
+    if (before.url !== committedUrl) dropTypedAddress(tabId);
     if (before.url !== committedUrl || before.agrees !== agrees) patch(tabId, { ...before, url: committedUrl, agrees });
     return;
   }
@@ -53,10 +63,10 @@ export function notePageDocument(tabId: string, shownUrl: string, committedUrl: 
   if (!settled) settleLater(tabId, at, Math.min(wait, DOCUMENT_SETTLE_MS));
 }
 
-export function forgetPageDocument(tabId: string) {
-  cancelTimer(tabId);
-  dropTypedAddress(tabId);
-  if (Object.hasOwn(usePageDocuments.getState(), tabId)) patch(tabId, null);
+export function forgetPageDocument(tabId: string, reporter: DocumentReporter) {
+  if (reporters.has(tabId) && reporters.get(tabId) !== reporter) return;
+  reporters.delete(tabId);
+  drop(tabId);
 }
 
 export const confirmedDocument = (docs: Record<string, PageDocument>, tabId: string): PageDocument | null => {

@@ -8,6 +8,7 @@ import { notePageBarShown, notePageBarSuperseded } from "../telemetry/pageBarCou
 import { pageBarFor, sameMatch, type PageBarMatch, type PageBarPane } from "./pageBar";
 import { usePageDocuments } from "./pageBarDocuments";
 import { usePlugins } from "./store";
+import { usePages } from "../tabs/pageState";
 
 export type PageBars = Record<string, PageBarMatch>;
 
@@ -64,17 +65,18 @@ export function usePageBars(windowId: string, panes: PaneLayoutFacts[], window: 
   const ids = panes.map((p) => p.tabId);
   const facts = useBrowser(useShallow(tabFacts(windowId, ids)));
   const plugins = usePlugins(useShallow((s) => ({ listings: s.listings, records: s.records, order: s.order })));
+  const newTab = usePages(useShallow((p) => ids.map((id) => !!p.pages[id]?.newTabShown)));
   const docs = usePageDocuments(useShallow((d) => ids.map((id) => (Object.hasOwn(d, id) ? d[id] : undefined))));
   const bars = useMemo(() => {
     const out: PageBars = {};
     const documents = Object.fromEntries(ids.flatMap((id, i) => (docs[i] ? [[id, docs[i]!]] : [])));
     panes.forEach((p, i) => {
       const [live, frozen, peek, otherProfile, privatePage] = facts.slice(i * 5, i * 5 + 5) as boolean[];
-      const match = pageBarFor({ plugins, documents }, { ...p, live: !!live, frozen: !!frozen, peek: !!peek, otherProfile: !!otherProfile, privatePage: !!privatePage, small: window.small, windowFullscreen: window.fullscreen });
+      const match = pageBarFor({ plugins, documents }, { ...p, live: !!live, frozen: !!frozen, peek: !!peek, otherProfile: !!otherProfile, privatePage: !!privatePage, newTabShown: newTab[i]!, small: window.small, windowFullscreen: window.fullscreen });
       if (match) out[p.tabId] = match;
     });
     return out;
-  }, [JSON.stringify(panes), facts, plugins, docs, window.small, window.fullscreen]);
+  }, [JSON.stringify(panes), facts, newTab, plugins, docs, window.small, window.fullscreen]);
   useLayoutEffect(() => publishPageBars(windowId, bars), [windowId, bars]);
   useLayoutEffect(() => () => withdrawPageBars(windowId), [windowId]);
   return bars;

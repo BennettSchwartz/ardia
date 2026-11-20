@@ -27,6 +27,7 @@ test("a page bar's references must point at what the plugin declares", () => {
   assert.ok(problems(bar({ siteSwitch: "on" }, { buttons: ["devtools.console"] })).some((p) => p.includes("pageBar.buttons[0] must be |")));
   assert.ok(problems(bar({ siteSwitch: "on" }, { buttons: ["copyLink", "copyLink"] })).includes("plugin.json: pageBar.buttons has copyLink twice"));
   assert.ok(problems(bar({ siteSwitch: "on" }, { buttons: Array(17).fill("|") })).includes("plugin.json: pageBar.buttons must be a list of 1 to 16"));
+  assert.ok(problems(bar({ siteSwitch: "on" }, { buttons: ["|"] })).includes("plugin.json: pageBar.buttons needs at least one action besides |"));
   assert.ok(problems(bar({ siteSwitch: "on" }, { look: "plain" })).includes("plugin.json: pageBar.look must be stripes"));
   assert.ok(problems({ ...base(), siteSwitches: undefined }).includes("plugin.json: pageBar.when.siteSwitch must name one of this plugin's siteSwitches"));
   const five = Array.from({ length: 5 }, (_, i) => ({ key: `s${i}`, title: "S" }));

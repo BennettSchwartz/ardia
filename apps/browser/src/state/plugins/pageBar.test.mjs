@@ -23,6 +23,7 @@ const P = () => usePlugins.getState();
 const host = stub.pluginHost;
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const LOCAL = "http://127.0.0.1:18318/management.html";
+const R = {};
 
 async function enable(names = ["developer-mode"]) {
   useBrowser.getState().hydrate({});
@@ -42,6 +43,7 @@ const pane = (tabId, over = {}) => ({
   mounted: true,
   live: true,
   frozen: false,
+  newTabShown: false,
   peek: false,
   otherProfile: false,
   privatePage: false,
@@ -51,7 +53,7 @@ const pane = (tabId, over = {}) => ({
   ...over,
 });
 
-const settledDoc = (tabId, url, at = Date.now() - 5000) => notePageDocument(tabId, url, url, at, false);
+const settledDoc = (tabId, url, at = Date.now() - 5000) => notePageDocument(tabId, url, url, at, false, R);
 const state = () => ({ plugins: P(), documents: usePageDocuments.getState() });
 
 test("only a visible, live pane of its own document can draw a bar: the nightly.8 leak can't happen", async () => {
@@ -62,31 +64,31 @@ test("only a visible, live pane of its own document can draw a bar: the nightly.
   assert.equal(pageBarFor(state(), pane("local", { visible: false, warm: true })), null, "a hidden kept-alive loopback pane draws nothing over the card");
   assert.equal(pageBarFor(state(), pane("ordinary")), null, "the visible ordinary tab above or below it gets no bar");
   assert.equal(pageBarFor(state(), pane("local")).url, LOCAL);
-  for (const hidden of [{ visible: false }, { lingering: true }, { warm: true }, { covered: true }, { mounted: false }, { live: false }, { frozen: true }, { peek: true }, { otherProfile: true }, { privatePage: true }, { small: true }, { documentFullscreen: true }, { windowFullscreen: true }]) {
+  for (const hidden of [{ visible: false }, { lingering: true }, { warm: true }, { covered: true }, { mounted: false }, { live: false }, { frozen: true }, { newTabShown: true }, { peek: true }, { otherProfile: true }, { privatePage: true }, { small: true }, { documentFullscreen: true }, { windowFullscreen: true }]) {
     assert.equal(pageBarPaneEligible(pane("local", hidden)), false, JSON.stringify(hidden));
     assert.equal(pageBarFor(state(), pane("local", hidden)), null, JSON.stringify(hidden));
   }
-  forgetPageDocument("local");
-  forgetPageDocument("ordinary");
+  forgetPageDocument("local", R);
+  forgetPageDocument("ordinary", R);
 });
 
 test("a new document shows its bar after 300 ms committed; a same-document change keeps the decision; a disagreeing address shows none", async () => {
   await enable();
   setSiteSwitch("developer-mode", "on", LOCAL, true);
-  notePageDocument("t", LOCAL, LOCAL, Date.now(), false);
+  notePageDocument("t", LOCAL, LOCAL, Date.now(), false, R);
   assert.equal(pageBarFor(state(), pane("t")), null, "not yet settled");
   await wait(330);
   assert.equal(pageBarFor(state(), pane("t")).url, LOCAL);
   const at = usePageDocuments.getState().t.at;
-  notePageDocument("t", `${LOCAL}#section`, `${LOCAL}#section`, at, false);
+  notePageDocument("t", `${LOCAL}#section`, `${LOCAL}#section`, at, false, R);
   assert.equal(pageBarFor(state(), pane("t")).url, `${LOCAL}#section`, "same document: the decision stays, the address follows");
-  notePageDocument("t", "http://127.0.0.1:18318/next", `${LOCAL}#section`, at, false);
+  notePageDocument("t", "http://127.0.0.1:18318/next", `${LOCAL}#section`, at, false, R);
   assert.equal(pageBarFor(state(), pane("t")), null, "while the shown and committed addresses disagree");
-  notePageDocument("t", "https://example.com/", "https://example.com/", Date.now(), false);
+  notePageDocument("t", "https://example.com/", "https://example.com/", Date.now(), false, R);
   assert.equal(confirmedDocument(usePageDocuments.getState(), "t"), null, "a client redirect that leaves within 300 ms never settles");
-  notePageDocument("t", LOCAL, LOCAL, Date.now() - 1000, false);
+  notePageDocument("t", LOCAL, LOCAL, Date.now() - 1000, false, R);
   assert.equal(pageBarFor(state(), pane("t")).url, LOCAL, "a document committed long ago shows at once");
-  forgetPageDocument("t");
+  forgetPageDocument("t", R);
   assert.equal(usePageDocuments.getState().t, undefined);
 });
 
@@ -95,31 +97,31 @@ test("typing a local address turns the switch on only with the toggle row on, on
   takePageBarCounts();
   const origin = "http://localhost:18318";
   noteTypedAddress("a", `${origin}/management.html`);
-  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now(), false);
+  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now(), false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), undefined, "the row is off by default");
   lifecycle.setPluginValue("developer-mode", "localAddresses", true);
   noteTypedAddress("a", `${origin}/management.html`);
-  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now() + 1, false);
+  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now() + 1, false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), true);
   assert.equal(takePageBarCounts().plugin_site_switch_auto_on_typed, 1);
   setSiteSwitch("developer-mode", "on", `${origin}/`, false);
   noteTypedAddress("a", `${origin}/`);
-  notePageDocument("a", `${origin}/`, `${origin}/`, Date.now() + 2, false);
+  notePageDocument("a", `${origin}/`, `${origin}/`, Date.now() + 2, false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), false, "an explicit off wins");
   const callback = "http://127.0.0.1:18455/callback?code=1";
-  notePageDocument("b", callback, callback, Date.now(), false);
+  notePageDocument("b", callback, callback, Date.now(), false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://127.0.0.1:18455"), undefined, "a redirect or link to a local address turns nothing on");
   noteTypedAddress("c", "http://192.168.1.20:18318/");
-  notePageDocument("c", callback, callback, Date.now(), false);
+  notePageDocument("c", callback, callback, Date.now(), false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://127.0.0.1:18455"), undefined, "a typed LAN address that redirects to a local callback turns nothing on");
   noteTypedAddress("d", "http://localhost:5173/");
-  notePageDocument("d", "http://localhost:5173/", "http://localhost:5173/", Date.now(), true);
+  notePageDocument("d", "http://localhost:5173/", "http://localhost:5173/", Date.now(), true, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5173"), undefined, "never in a private window");
   noteTypedAddress("e", "http://localhost:5174/");
-  notePageDocument("e", "http://localhost:9999/", "http://localhost:9999/", Date.now(), false);
-  notePageDocument("e", "http://localhost:5174/", "http://localhost:5174/", Date.now() + 5, false);
+  notePageDocument("e", "http://localhost:9999/", "http://localhost:9999/", Date.now(), false, R);
+  notePageDocument("e", "http://localhost:5174/", "http://localhost:5174/", Date.now() + 5, false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5174"), undefined, "the intent is spent on the next document, whatever it is");
-  for (const id of ["a", "b", "c", "d", "e"]) forgetPageDocument(id);
+  for (const id of ["a", "b", "c", "d", "e"]) forgetPageDocument(id, R);
 });
 
 test("site switch values live beside the record, keyed by origin, and stay out of the helper's values", async () => {
@@ -153,7 +155,7 @@ test("several plugins matching one page: the first by name draws, the rest count
   assert.equal(counts.plugin_page_bar_shown_other, 1, "once per tab per document");
   assert.equal(counts.plugin_page_bar_superseded, 1);
   withdrawPageBars("w");
-  forgetPageDocument("s");
+  forgetPageDocument("s", R);
 });
 
 test("page bars ask native for commit reports as their own reader, apart from automation", async () => {
@@ -179,5 +181,31 @@ test("a host action runs only for the tab whose bar shows it", async () => {
   runHostAction("copyLink", windowId, tabId);
   assert.equal(takePageBarCounts().plugin_page_bar_press_copy_link, 1);
   withdrawPageBars(windowId);
-  forgetPageDocument(tabId);
+  forgetPageDocument(tabId, R);
+});
+
+test("review fixes: stale commits, same-document moves, missing reports and another view's cleanup", async () => {
+  await enable();
+  lifecycle.setPluginValue("developer-mode", "localAddresses", true);
+  const url = "http://localhost:7001/";
+  const origin = "http://localhost:7001";
+  noteTypedAddress("f", url);
+  notePageDocument("f", "http://localhost:7001/old", "http://localhost:7001/old", Date.now() - 10_000, false, R);
+  notePageDocument("f", url, url, Date.now(), false, R);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), true, "an older commit reported late leaves the newer intent alone");
+  const fragment = "http://localhost:7002/a";
+  notePageDocument("g", fragment, fragment, Date.now() - 5000, false, R);
+  noteTypedAddress("g", `${fragment}#x`);
+  notePageDocument("g", `${fragment}#x`, `${fragment}#x`, usePageDocuments.getState().g.at, false, R);
+  notePageDocument("g", fragment, fragment, Date.now(), false, R);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:7002"), undefined, "a typed fragment change spends nothing later");
+  setSiteSwitch("developer-mode", "on", LOCAL, true);
+  settledDoc("h", LOCAL);
+  notePageDocument("h", LOCAL, LOCAL, usePageDocuments.getState().h.at, false, R);
+  const other = {};
+  forgetPageDocument("h", other);
+  assert.ok(confirmedDocument(usePageDocuments.getState(), "h"), "a departing view can't erase what its replacement reported");
+  notePageDocument("h", LOCAL, undefined, undefined, false, R);
+  assert.equal(usePageDocuments.getState().h, undefined, "a report without commit data clears the document");
+  for (const id of ["f", "g", "h"]) forgetPageDocument(id, R);
 });

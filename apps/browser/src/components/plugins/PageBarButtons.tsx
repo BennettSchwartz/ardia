@@ -10,7 +10,7 @@ import { useShortcutHint, withShortcut } from "../../state/commands/commandShort
 import { usePageEngine } from "../../state/engines/hooks";
 import { splitViewAvailable } from "../../state/splits/splits";
 import { DEVELOPER_BAR_ANCHOR } from "../../state/extensions/toolbarAnchors";
-import { runHostAction } from "../../state/plugins/hostActions";
+import { hostActionTarget, runHostAction } from "../../state/plugins/hostActions";
 
 export const PAGE_BAR_ROW = { flexDirection: "row", alignItems: "center" } as const;
 
@@ -55,7 +55,7 @@ export function PageBarButtons({ windowId, tabId, buttons, palette, look, active
         if (b === "|") return <Divider key={`divider-${i}`} vertical length={DEVELOPER_BAR.dividerLength} color={palette.divider} style={{ marginHorizontal: DEVELOPER_BAR.groupGap }} />;
         if (b === "address") return null;
         if (b === "extensions")
-          return <OverflowButton key={b} windowId={windowId} tabId={tabId} hidden={[]} palette={palette} slot={DEVELOPER_BAR_ANCHOR} asset={DEVELOPER_ICONS.extensions} glyph={DEVELOPER_BAR.extensionsGlyph} onActivate={() => runHostAction("extensions", windowId, tabId)} />;
+          return <OverflowButton key={b} windowId={windowId} tabId={tabId} hidden={[]} palette={palette} slot={DEVELOPER_BAR_ANCHOR} asset={DEVELOPER_ICONS.extensions} glyph={DEVELOPER_BAR.extensionsGlyph} mayActivate={() => hostActionTarget("extensions", windowId, tabId)} onActivate={() => runHostAction("extensions", windowId, tabId)} />;
         return (
           <Button
             key={b}

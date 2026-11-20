@@ -453,7 +453,7 @@ const fakeModules = {
       stripCommand: async ({ id, command }) => (await tabStripHost().command(command, id), null),
       strips: () => tabStripHost().snapshot(),
       lastTabPolicy: () => ({ closesWindow: true }),
-      reportCommits: ({ reader, on }) => void commitReaders.push([reader, on]),
+      reportCommits: ({ reader, on }) => (commitReaders.push([reader, on]), null),
     },
     {
       prepareTransfer: () => {},

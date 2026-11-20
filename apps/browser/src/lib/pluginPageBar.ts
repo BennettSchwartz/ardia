@@ -60,6 +60,7 @@ function buttonsOf(problems: string[], value: unknown): PageBarButton[] {
     if (out.includes(b)) return void problems.push(`pageBar.buttons has ${b} twice`);
     out.push(b);
   });
+  if (out.length && !out.some(isHostAction)) problems.push("pageBar.buttons needs at least one action besides |");
   return out;
 }
 
@@ -78,7 +79,7 @@ export function pageBarOf(problems: string[], value: unknown, switches: SiteSwit
     else problems.push("pageBar.when.localAddresses must name one of this plugin's toggle rows");
   }
   const buttons = buttonsOf(problems, value.buttons);
-  return look && siteSwitch && buttons.length ? { look, when: { siteSwitch, localAddresses }, buttons } : null;
+  return look && siteSwitch && buttons.some(isHostAction) ? { look, when: { siteSwitch, localAddresses }, buttons } : null;
 }
 
 export function switchOrigin(url: string): string | null {

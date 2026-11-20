@@ -114,10 +114,11 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
     void webviews.get(tabId)?.loadUrl(navigation.url, { userInitiated: !!navigation.userInitiated });
   }, [seq]);
   const fromNewTab = useRef(pageOf(tabId).wasNewTab && !adoptId);
+  const documentReporter = useRef({}).current;
   useEffect(() => {
     persistEngine(tabId, engine);
     return () => {
-      forgetPageDocument(tabId);
+      forgetPageDocument(tabId, documentReporter);
       if (handedToTab()) return forgetPeekHandover(tabId);
       noteGone(tabId);
       verificationCodeTabGone(tabId);
@@ -180,7 +181,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onNavigationChange={({ url: reported, title: reportedPageTitle, canGoBack, canGoForward, isLoading, themeColor, themeColorSource, initialDocumentAccessed, committedInitial, committedUrl, committedAt, httpStatus }) => {
         noteCommit(tabId, committedUrl, committedAt, httpStatus);
         verificationCodeDocument(tabId, committedAt);
-        notePageDocument(tabId, reported, committedUrl, committedAt, isIncognitoProfile(profileId));
+        notePageDocument(tabId, reported, committedUrl, committedAt, isIncognitoProfile(profileId), documentReporter);
         if (reopening.current && reported && !isBlankAddress(reported)) {
           reopening.current = false;
           noteReopenedPage(canGoBack);
