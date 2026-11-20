@@ -4,7 +4,7 @@ import type { ClosedGroup, ClosedTab, ClosedWindow } from "../browser/types";
 import { groupOf } from "../pins/tabGrouping";
 import { splitOf } from "../splits/splits";
 import { withLivePage } from "../tabs/livePage";
-import { goBackAsking, goForward } from "../tabs/navigation";
+import { goBackAsking, goForwardAsking } from "../tabs/navigation";
 import { liveOf } from "../tabs/tabLive";
 import { recentlyClosedIn } from "../windows/recentlyClosedList";
 import { eligibleKind, isEligibleTab, shownPage, windowTabIds } from "./automationWindows";
@@ -59,12 +59,6 @@ function navigate(params: Record<string, unknown>) {
   return tabRow(now(), t.id);
 }
 
-function livePage(params: Record<string, unknown>, act: (tabId: string) => void) {
-  const t = tabOf(params.tab);
-  act(t.id);
-  return { ok: true };
-}
-
 async function reload(params: Record<string, unknown>, call: SocketCall) {
   const t = tabOf(params.tab);
   if (await withLivePage(t.id, (page) => (params.bypassCache ? page.forceReload() : page.reload()), call.serving)) return { ok: true };
@@ -72,11 +66,18 @@ async function reload(params: Record<string, unknown>, call: SocketCall) {
   throw new OpError("failed", `Tab ${t.id} didn't reload: it has no page to reload, or its shared page couldn't be brought to it.`);
 }
 
+async function forward(params: Record<string, unknown>, call: SocketCall) {
+  const t = tabOf(params.tab);
+  if (await goForwardAsking(t.id, call.serving)) return { ok: true };
+  call.stillServing();
+  throw new OpError("failed", `Tab ${t.id} didn't go forward: it has no page, or its shared page couldn't be brought to it.`);
+}
+
 async function back(params: Record<string, unknown>, call: SocketCall) {
   const t = tabOf(params.tab);
   if (await goBackAsking(t.id, call.serving, askWhereSeen(`Tab ${t.id} stayed on its page`, call))) return { ok: true };
   call.stillServing();
-  throw new OpError("refused", `Tab ${t.id} stayed on its page: the page has changes that going back may lose, and the user chose to stay (or the page moved on meanwhile).`);
+  throw new OpError("refused", `Tab ${t.id} stayed on its page: the page has changes that going back may lose and the user chose to stay, the page moved on meanwhile, or its shared page couldn't be brought to it.`);
 }
 
 function setPinnedUrl(params: Record<string, unknown>) {
@@ -136,7 +137,7 @@ export const TAB_METHODS: MethodSpec[] = [
   { name: "tabs.navigate", mutates: true, description: "Load a URL in a tab, as typing it in the address bar does", params: obj({ tab: TAB, url: text("http, https or file URL, about:blank or ardia://history, bookmarks, downloads, newtab") }, ["tab", "url"]), result: "tab", run: navigate },
   { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: reload },
   { name: "tabs.back", mutates: true, description: "Go back in a tab's history; when that leaves a page with unsaved changes, the reply waits for the user's answer", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: back },
-  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => goForward(t, call.serving)) },
+  { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: forward },
   {
     name: "tabs.duplicate",
     mutates: true,
