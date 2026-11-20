@@ -27,7 +27,7 @@ const noSelfUpdates = () => Object.fromEntries(SELF_UPDATE_FIELDS.map((field) =>
 let checks = { asked: 0, automatic: 0, failed: 0, found: 0, pageOpens: 0, switchRefreshes: 0, switchRefreshFailures: 0, unsandboxed: 0, passwordGranted: 0, passwordDenied: 0, passwordCancelled: 0 };
 let selfUpdates = noSelfUpdates();
 
-const countSelfUpdate = (field: string, consent: ConsentToken | null | undefined) => countFor(consent, () => void (selfUpdates[field] = (selfUpdates[field] ?? 0) + 1), { [field]: 1 });
+const countSelfUpdate = (field: string, consent: ConsentToken | null | undefined) => countFor(consentOrNow(consent), () => void (selfUpdates[field] = (selfUpdates[field] ?? 0) + 1));
 
 export function noteUpdateCheck(asked: boolean, outcome: "found" | "upToDate" | "failed", consent?: ConsentToken | null) {
   const fields = { update_checks_asked: +asked, update_checks_automatic: +!asked, update_check_failures: +(outcome === "failed"), update_checks_found: +(outcome === "found") };
