@@ -3,17 +3,16 @@ import { createRequire } from "node:module";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-const { backedStyles, fillPointerEvents, processedColorDraws, routedNativeStyle, touchesFill } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
+const { backedStyles, FILL_Z_INDEX, nativePaint, processedColorDraws } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
 const { backedOnWindows, backedView, rawView } = createRequire(import.meta.url)("../../../../packages/expo-windows/metroResolution.js");
 
-const at = (offsets, extra = {}) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, ...offsets, backgroundColor: "red", ...extra });
+const at = (offsets, extra = {}) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, ...offsets, zIndex: FILL_Z_INDEX, backgroundColor: "red", ...extra });
 
-test("no fill without a meaningful background or with a shadow, so the view is left as it is", () => {
+test("no fill without a background that draws, so the view is left as it is", () => {
   assert.equal(backedStyles({}), null);
   assert.equal(backedStyles({ backgroundColor: "transparent", borderRadius: 8 }), null);
-  assert.equal(backedStyles({ backgroundColor: "red", shadowColor: "black", shadowOpacity: 0.2 }), null);
-  assert.equal(backedStyles({ backgroundColor: "red", boxShadow: "0 1px 2px black" }), null);
   assert.equal(backedStyles({ backgroundColor: "rgba(0,0,0,0)" }, (color) => color !== "rgba(0,0,0,0)"), null);
 });
 
@@ -26,25 +25,14 @@ test("a colour draws when its alpha byte isn't zero, as React Native Windows dec
   assert.equal(processedColorDraws({ windowsbrush: ["SystemAccentColor"] }), true);
 });
 
-test("a view the fill can't match keeps its own background: static, right to left, or with an outline", () => {
-  assert.equal(backedStyles({ backgroundColor: "red", position: "static" }), null);
-  assert.equal(backedStyles({ backgroundColor: "red", direction: "rtl" }), null);
-  assert.equal(backedStyles({ backgroundColor: "red", outlineWidth: 2, outlineColor: "blue" }), null);
-  assert.ok(backedStyles({ backgroundColor: "red", position: "relative", direction: "ltr" }));
-});
-
-test("the fill takes the view's presses, unless the view lets presses through its own area", () => {
-  assert.equal(fillPointerEvents(undefined), undefined);
-  assert.equal(fillPointerEvents("auto"), undefined);
-  assert.equal(fillPointerEvents("box-only"), undefined);
-  assert.equal(fillPointerEvents("box-none"), "none");
-  assert.equal(fillPointerEvents("none"), "none");
-});
-
-test("the fill takes the background off the view and keeps everything else on it", () => {
-  const backed = backedStyles({ backgroundColor: "red", opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4 });
+test("the fill takes the background off the view and keeps everything else on it, the shadow included", () => {
+  const backed = backedStyles({ backgroundColor: "red", opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4, shadowColor: "black", shadowOpacity: 0.2 });
   assert.deepEqual(backed.fill, at({}));
-  assert.deepEqual(backed.own, { opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4 });
+  assert.deepEqual(backed.own, { opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4, shadowColor: "black", shadowOpacity: 0.2 });
+});
+
+test("the fill has the lowest zIndex, so Fabric mounts it before a static child or one with a negative zIndex", () => {
+  assert.ok(backedStyles({ backgroundColor: "red" }).fill.zIndex < -1000000);
 });
 
 test("the fill covers the border box and draws the border, as React Native Windows paints a background under the border", () => {
@@ -61,24 +49,17 @@ test("each side reaches out by its own border width, start and end winning over 
   assert.equal(backed.own.borderColor, "transparent");
 });
 
-test("a percentage radius passes through, and the fill has no zIndex, so a view that forms no stacking context keeps it in its place", () => {
+test("a percentage radius passes through, and a borderless view gets no clear border colour", () => {
   const backed = backedStyles({ backgroundColor: "red", borderRadius: "50%" });
   assert.equal(backed.fill.borderRadius, "50%");
-  assert.equal("zIndex" in backed.fill, false);
   assert.equal(backed.own.borderColor, undefined);
 });
 
-test("setNativeProps that change the background or border go to the fill, and the rest stays on the view", () => {
-  assert.equal(touchesFill({ opacity: 0.3 }), false);
-  assert.equal(touchesFill({ backgroundColor: "blue" }), true);
-  assert.equal(touchesFill({ borderRadius: 4 }), true);
-  const routed = routedNativeStyle({ backgroundColor: "red", borderWidth: 1, borderColor: "black", opacity: 1 }, { backgroundColor: "blue", opacity: 0.4 });
-  assert.deepEqual(routed.fill, at({ top: -1, bottom: -1, left: -1, right: -1 }, { backgroundColor: "blue", borderWidth: 1, borderColor: "black" }));
-  assert.deepEqual(routed.own, { opacity: 0.4, borderColor: "transparent" });
-  assert.equal(routed.latest.backgroundColor, "blue");
-  const cleared = routedNativeStyle({ backgroundColor: "red", borderRadius: 4 }, { backgroundColor: "transparent" });
-  assert.deepEqual(cleared.fill, at({}, { backgroundColor: "transparent", borderRadius: 4 }));
-  assert.deepEqual(cleared.own, {});
+test("setNativeProps paint goes to the fill: background and border colours only there, radius, curve and style to both", () => {
+  assert.equal(nativePaint({ opacity: 0.3, transform: [{ scale: 2 }] }), null);
+  assert.deepEqual(nativePaint({ backgroundColor: "blue", opacity: 0.4 }), { fill: { backgroundColor: "blue" }, own: { opacity: 0.4 } });
+  assert.deepEqual(nativePaint({ backgroundColor: "transparent" }), { fill: { backgroundColor: "transparent" }, own: {} });
+  assert.deepEqual(nativePaint({ borderRadius: 12, borderTopColor: "red", borderStyle: "dotted", borderWidth: 2 }), { fill: { borderRadius: 12, borderTopColor: "red", borderStyle: "dotted" }, own: { borderRadius: 12, borderStyle: "dotted", borderWidth: 2 } });
 });
 
 test("Metro hands every importer of React Native Windows' View the backed view, except the raw view's own module", () => {
@@ -91,7 +72,7 @@ test("Metro hands every importer of React Native Windows' View the backed view, 
   assert.deepEqual(backedOnWindows({ type: "empty" }, "/repo/x.js"), { type: "empty" });
 });
 
-const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const packageSources = readdirSync(path.join(repo, "packages"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(repo, "packages", entry.name, "src"));
 
 function* sources(dir) {
@@ -109,11 +90,11 @@ function* sources(dir) {
   }
 }
 
-test("no shared view is static or has a negative zIndex, since Fabric mounts either before a background's fill", () => {
+test("no shared view is static, right to left or outlined, which an absolute fill at the border box can't match", () => {
   const offending = [];
   for (const dir of [path.join(repo, "apps/browser/src"), ...packageSources]) {
     for (const file of sources(dir)) {
-      if (/position:\s*["']static["']|zIndex:\s*-\s*\d|zIndex=\{\s*-/.test(readFileSync(file, "utf8"))) offending.push(path.relative(repo, file));
+      if (/position:\s*["']static["']|direction:\s*["']rtl["']|forceRTL|outline(Width|Offset|Color|Style)\s*:/.test(readFileSync(file, "utf8"))) offending.push(path.relative(repo, file));
     }
   }
   assert.deepEqual(offending, []);
