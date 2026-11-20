@@ -19,7 +19,7 @@ export function noteIntroShown(musicMuted: boolean) {
 }
 
 export const noteIntroSkipped = () => void (skipped += 1);
-export const noteIntroMusicFailed = () => void (musicFailed += 1);
+export const noteIntroMusicFailed = (consent?: ConsentToken | null) => countFor(consentOrNow(consent), () => void (musicFailed += 1));
 
 export function noteIntroEnded(ended: { skipped: boolean; shown: IntroScene | null; firstFrameMs: number | null }, consent?: ConsentToken | null) {
   countFor(consentOrNow(consent), () => {
