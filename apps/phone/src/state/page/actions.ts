@@ -8,7 +8,9 @@ import { copyText, openExternal, preferredLanguage, pressHaptic, shareLink, succ
 import { cancelSearch, closeArchive, deckPullCommitted, openTab, showDeck, takeSheetFromSettings, useBrowse } from "../browse/store";
 import { display } from "../search/omnibox";
 import { presentSearch, searchState } from "../search/store";
-import { setPreference } from "../settings/store";
+import { currentPreferences, setPreference } from "../settings/store";
+import { designFor } from "../../lib/design";
+import { Platform } from "react-native";
 import { listenToPages, openPageInBackground, pageHandle, pageIsFullscreen, pageRequest, settled, storeFind, storeFullscreen, storeRequest, usePages } from "../pages/store";
 import { closeTabById, currentTabs, openNewTab, useTabs } from "../tabs/store";
 import { isSyncableUrl } from "../tabs/tabModels";
@@ -67,7 +69,7 @@ async function showPageMenu(menuDocked: boolean) {
     settled(async () => pages.capabilities(), null),
     settled(() => pages.translation(), null),
   ]);
-  if (selectedId() !== tab.id) return;
+  if (materialDesign() && selectedId() !== tab.id) return;
   usePageUi.setState({
     menuSite: { host, nightShade: shade?.mode ?? "disabled", blockersEnabled: blockers },
     menuTranslation: translation ? { languageName: translation.languageName, confirmed: translation.confirmed } : pageUi().menuTranslation,
@@ -152,8 +154,10 @@ export function sendCurrentTab(device: SyncedDevice) {
 
 export function openSiteSettings() {
   usePageUi.setState({ menuPage: "siteSettings" });
-  void refreshSettings();
+  if (materialDesign()) void refreshSettings();
 }
+
+const materialDesign = () => designFor(Platform.OS, false, currentPreferences().materialYou) === "material";
 
 export const openDockedSiteSettings = () => showPageMenu(true);
 
