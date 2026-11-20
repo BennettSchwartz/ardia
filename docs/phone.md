@@ -1425,8 +1425,10 @@ Browse for Me's answers read aloud on iPhone (#2845), by Phonon 31M (Gradium, Ap
 phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must not grow the app's download.
 
 - **Engine.** `ptts` 0.7.1 from `https://github.com/gradium-ai/xn-ptts.git` (module `PhononTTS`), pinned exactly in
-  ArdiaKit's `Package.swift` and `Package.resolved`, wrapped by ArdiaKit's `ArdiaTalk` target (`TalkSpeaker`), which
-  the Podfile links into `ArdiaPhoneNative` beside ArdiaBrowser and ArdiaDesign. Its compiled core is a static arm64
+  the `packages/phone/ios/ArdiaTalk` package's `Package.swift` and `Package.resolved`, wrapped by its `ArdiaTalk`
+  target (`TalkSpeaker`), which the Podfile links into `ArdiaPhoneNative` beside ArdiaBrowser and ArdiaDesign. It is a
+  package of its own, not part of ArdiaKit, because the app project also loads ArdiaKit for its extensions, and two
+  projects resolving Phonon's xcframework make the archive copy its signature twice and fail. Its compiled core is a static arm64
   library; it adds about 13 MB to the app binary uncompressed (13.3 MB against 0.05 MB for an empty iOS dylib,
   stripped, Release), about 4 MB compressed. `TalkSpeaker` keeps one `Phonon` and its own `AVAudioEngine`: a player
   node through `AVAudioUnitTimePitch`, whose `rate` is the speed (pitch kept). Voices are the `.safetensors` files in
