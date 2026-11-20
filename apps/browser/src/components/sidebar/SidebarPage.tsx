@@ -109,6 +109,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
     if (geometry) geometry.current.tilesFixed = dockFixed;
   }, [geometry, dockFixed]);
   const scrollEdge = useScrollEdge();
+  const edgeGap = fixedTiles.length ? SCROLL_EDGE.gap : topGap - SCROLL_EDGE.inset - SCROLL_EDGE.line;
   const edgeLift = useToolbarEdgeLift(fixedTiles.length === 0 && topGap === listTopGap(false));
   useLayoutEffect(() => {
     if (geometry) geometry.current.edgeLift = edgeLift;
@@ -178,7 +179,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
           <TintInk>
             <SidebarTextScope>
             <DragPage live={current}>
-              <View style={{ paddingTop: GLOW_ROOM, paddingBottom: edgeLift, zIndex: fixedTiles.length ? 1 : 0 }}>
+              <View style={{ paddingTop: GLOW_ROOM, paddingBottom: edgeGap + SCROLL_EDGE.line, zIndex: fixedTiles.length ? 1 : 0 }}>
                 {dockFixed ? (
                   <Animated.View style={[{ paddingHorizontal: layout.sidebarInset }, capped ? { maxHeight: topGap + dockRoom, overflow: "hidden" } : null, sharedTiles]}>
                     <DragScope enabled={current}>
@@ -186,7 +187,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                     </DragScope>
                   </Animated.View>
                 ) : null}
-                <ScrollEdgeLine opacity={scrollEdge.opacity} style={{ marginTop: (fixedTiles.length ? SCROLL_EDGE.gap : topGap - SCROLL_EDGE.inset - SCROLL_EDGE.line) - edgeLift }} />
+                <ScrollEdgeLine edge={scrollEdge} opacity={scrollEdge.opacity} style={{ position: "absolute", left: 0, right: 0, bottom: edgeLift }} />
               </View>
               <Animated.View
                 style={{ flex: 1, marginTop: -GLOW_ROOM, overflow: "hidden", transform: [{ translateY: edge }] }}
@@ -241,7 +242,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                   {geometry ? <SelectedRowPill windowId={windowId} tracker={selectedRow} lift={edgeLift} bottomShift={playerMotion.listClip} /> : null}
                 </Animated.View>
               </Animated.View>
-              <ScrollEdgeLine opacity={scrollEdgeBelow.opacity} style={{ marginTop: -SCROLL_EDGE.line, zIndex: 1, transform: [{ translateY: playerMotion.listClip }] }} />
+              <ScrollEdgeLine edge={scrollEdgeBelow} opacity={scrollEdgeBelow.opacity} style={{ marginTop: -SCROLL_EDGE.line, zIndex: 1, transform: [{ translateY: playerMotion.listClip }] }} />
               {playerTab ? (
                 <View style={{ paddingHorizontal: layout.sidebarInset, paddingTop: docked ? space.m : 0, paddingBottom: docked ? 0 : space.m }}>
                   <SidebarPlayer tabId={playerTab} motion={playerMotion} docked={docked} />
