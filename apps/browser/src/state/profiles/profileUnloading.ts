@@ -19,7 +19,7 @@ type Unload = Awaited<ReturnType<typeof unloadIdleProfile>>;
 const store = () => useBrowser.getState();
 const readyToUnload = idleProfiles();
 const unloadedHere = new Set<string>();
-const reopenedAt = new Map<string, number>();
+const reopenedAt = new Map<string, { at: number; consent: ConsentToken | null }>();
 const unloadingNow = new Set<string>();
 const sleptByUnload = new Set<string>();
 let checking = false;
@@ -109,15 +109,16 @@ function watchProfiles(): () => void {
   const opened = onProfilesOpened((engines) => {
     for (const engine of engines) {
       if (!unloadedHere.delete(engine)) continue;
-      noteUnloadedProfileReopened();
-      reopenedAt.set(engine, Date.now());
+      const consent = consentToken();
+      noteUnloadedProfileReopened(consent);
+      reopenedAt.set(engine, { at: Date.now(), consent });
     }
   });
   const loaded = onProfileLoaded((engine) => {
-    const at = reopenedAt.get(engine);
-    if (at === undefined) return;
+    const reopened = reopenedAt.get(engine);
+    if (reopened === undefined) return;
     reopenedAt.delete(engine);
-    noteUnloadedProfileReloaded(Date.now() - at);
+    noteUnloadedProfileReloaded(Date.now() - reopened.at, reopened.consent);
   });
   const timer = everySlowly({ every: CHECK_MS, run: () => void checkIdleProfiles() });
   return () => {

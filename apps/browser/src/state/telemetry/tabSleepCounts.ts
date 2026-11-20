@@ -38,9 +38,9 @@ let unloadedProfileReloadMs = 0;
 
 export const noteProfileUnloaded = (consent?: ConsentToken | null) => countFor(consentOrNow(consent), () => void profilesUnloaded++);
 
-export const noteUnloadedProfileReopened = () => void unloadedProfilesReopened++;
+export const noteUnloadedProfileReopened = (consent?: ConsentToken | null) => countFor(consentOrNow(consent), () => void unloadedProfilesReopened++);
 
-export const noteUnloadedProfileReloaded = (ms: number) => void (unloadedProfileReloadMs += Math.max(0, Math.round(ms)));
+export const noteUnloadedProfileReloaded = (ms: number, consent?: ConsentToken | null) => countFor(consentOrNow(consent), () => void (unloadedProfileReloadMs += Math.max(0, Math.round(ms))));
 
 function takeProfileUnloadCounts() {
   const taken = { profiles_unloaded: profilesUnloaded, unloaded_profiles_reopened: unloadedProfilesReopened, unloaded_profile_reload_ms: unloadedProfileReloadMs };
