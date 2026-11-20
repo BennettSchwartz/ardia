@@ -294,13 +294,17 @@ final class PluginSandboxEscapeTests: XCTestCase {
     return bundle
   }
 
+  struct SocketPathTooLong: Error {
+    let path: String
+  }
+
   func listen(at path: String) throws {
-    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    XCTAssertGreaterThanOrEqual(fd, 0)
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)
     let bytes = Array(path.utf8CString)
-    XCTAssertLessThan(bytes.count, MemoryLayout.size(ofValue: address.sun_path), "\(path) is too long for a socket")
+    guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { throw SocketPathTooLong(path: path) }
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    XCTAssertGreaterThanOrEqual(fd, 0)
     withUnsafeMutableBytes(of: &address.sun_path) { raw in bytes.withUnsafeBytes { raw.copyMemory(from: $0) } }
     let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
     XCTAssertEqual(bound, 0, "bind \(path): \(String(cString: strerror(errno)))")
@@ -366,8 +370,8 @@ final class PluginSandboxEscapeTests: XCTestCase {
     let tempAgent = "/private/tmp/ardia-agent-\(id)"
     scratch += [launchdLayout, tempAgent]
     for folder in [launchdLayout, tempAgent] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
-    let refused = ["\(launchdLayout)/Listeners", "\(tempAgent)/agent.sock", "\(outside)/agent.sock"]
-    let ownFolder = "\(pluginData)/own.sock"
+    let refused = ["\(launchdLayout)/Listeners", "\(tempAgent)/agent.sock", "\(outside)/a"]
+    let ownFolder = "\(pluginData)/s"
     for path in refused + [ownFolder] { try listen(at: path) }
     for path in refused {
       let spellings = [path, path.replacingOccurrences(of: "/private/", with: "/", options: .anchored)]
@@ -655,32 +659,52 @@ final class PluginSandboxEscapeTests: XCTestCase {
     }
   }
 
-  func testPreparationsForTheSameSettingsShareOneLoad() throws {
+  func testPreparationsForTheSameSettingsShareOneLoadAndATimedOutStartLeavesIt() throws {
     let a = try makeCertificate("Ardia Share A")
     let b = try makeCertificate("Ardia Share B")
     let system = "\(root)/system.pem"
     try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
-    let corporate = "\(root)/many.pem"
-    try String(repeating: b.pem, count: (PluginSandbox.certificateSourceLimit / b.pem.utf8.count) - 1).write(toFile: corporate, atomically: true, encoding: .utf8)
+    let corporate = "\(root)/corp.pem"
+    try b.pem.write(toFile: corporate, atomically: true, encoding: .utf8)
+    let given = ["NODE_EXTRA_CA_CERTS": corporate]
     let cache = PluginCertificateCache(system: system)
+    let started = DispatchSemaphore(value: 0)
+    let release = DispatchSemaphore(value: 0)
+    cache.willLoad = {
+      started.signal()
+      release.wait()
+    }
     let target = DispatchQueue(label: "test.share")
     let all = DispatchGroup()
-    var answers: [PluginSandbox.PreparedCertificates] = []
+    let answers = NSMutableArray()
     for _ in 0..<5 {
       all.enter()
-      cache.prepare(for: ["NODE_EXTRA_CA_CERTS": corporate], within: 10, deliverOn: target) {
-        answers.append($0)
+      cache.prepare(for: given, within: 20, deliverOn: target) {
+        answers.add($0 == .timedOut ? "timedOut" : "ready")
         all.leave()
       }
     }
-    XCTAssertEqual(all.wait(timeout: .now() + 20), .success)
-    XCTAssertEqual(cache.loadsStarted, 1, "five starts waiting together share one read")
-    XCTAssertEqual(Set(answers.map { answer -> [String] in
-      guard case .ready(let ready) = answer else { return [] }
-      return names(ready.extra)
-    }), [["Ardia Share B"]])
-    _ = prepared(cache, ["NODE_EXTRA_CA_CERTS": corporate])
-    XCTAssertEqual(cache.loadsStarted, 2, "a later start reads again (and reuses the cache when nothing changed)")
+    XCTAssertEqual(started.wait(timeout: .now() + 10), .success, "the first load started")
+    XCTAssertEqual(cache.loadsStarted, 1, "five starts waiting together share one load")
+    XCTAssertEqual(cache.waiting(for: given), 5)
+    let late = DispatchSemaphore(value: 0)
+    var lateAnswer: PluginSandbox.PreparedCertificates?
+    cache.prepare(for: given, within: 0.2, deliverOn: target) {
+      lateAnswer = $0
+      late.signal()
+    }
+    XCTAssertEqual(late.wait(timeout: .now() + 10), .success)
+    XCTAssertEqual(lateAnswer, .timedOut)
+    XCTAssertEqual(target.sync { cache.waiting(for: given) }, 5, "a start that timed out leaves the shared load and the others' waits alone")
+    XCTAssertEqual(cache.loadsStarted, 1)
+    release.signal()
+    XCTAssertEqual(all.wait(timeout: .now() + 10), .success)
+    XCTAssertEqual(target.sync { answers as? [String] }, Array(repeating: "ready", count: 5))
+    XCTAssertEqual(cache.waiting(for: given), 0)
+    cache.willLoad = nil
+    guard case .ready(let after) = prepared(cache, given) else { return XCTFail("not ready") }
+    XCTAssertEqual(names(after.extra), ["Ardia Share B"])
+    XCTAssertEqual(cache.loadsStarted, 2, "a start after the shared load finished starts its own")
   }
 
   func testTheCertificateCacheRereadsChangedSourcesForgetsRemovedRootsAndNeverCachesAFailure() throws {
