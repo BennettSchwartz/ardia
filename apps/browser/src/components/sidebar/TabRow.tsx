@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Pressable, TextInput, View, type GestureResponderEvent, type TextStyle } from "react-native";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Animated, Pressable, TextInput, View, type GestureResponderEvent, type Insets, type TextStyle } from "react-native";
 import { toggleMute } from "../../state/browser/actions";
 import { hex, layout, useTheme } from "../ui/theme";
 import { useIsActiveTab, usePageProfileId, useTab, useWindow, useWindowId } from "../../state/browser/hooks";
@@ -33,7 +33,7 @@ import { useTabUnread } from "../../state/tabs/unread";
 import { titleWithoutUnread } from "../../lib/unread";
 import { ROW_GLYPH, SIDEBAR_TYPE, SLEEPING_TITLE_OPACITY, TAB_ROW, useSidebarTokens } from "./tokens";
 import { useSidebarRowLook } from "./rowLook";
-import { rowTitleFrame, SidebarRowLabel, SidebarRowSurface } from "./SidebarRow";
+import { rowSurfaceFrame, rowTitleFrame, SidebarRowLabel, SidebarRowSurface, useRowSurfaceLayer } from "./SidebarRow";
 import { AwayTitleLabel } from "./AwayTitle";
 import { withShortcut } from "../../state/commands/commandShortcuts";
 import { TabPressArea, tabPressView } from "./TabPressArea";
@@ -94,17 +94,63 @@ export const TabRow = memo(function TabRow({
   const resettable = !!tab && (isPinnedRow(tab) || !tab.pin) && awayFromPin(tab);
   const struck = !!(flags & STRUCK);
   const preview = useSplitPreview(splitSide, 1);
-  if (!tab) return null;
+  const [pressed, setPressed] = useState(false);
+  const fill = active ? (quiet ? tokens.quietWash : theme.tabSelected) : selected ? tokens.multiSelected : ink.clear;
+  const plain = !active && !selected;
+  const pressedFill = quiet ? tokens.quietPressed : theme.tabPressed;
+  cell.plain = plain;
+  useLayoutEffect(() => {
+    if (cell.hovered) cell.refresh();
+  }, [cell, plain]);
+  const surface = useRowSurfaceLayer({
+    fill: selected && !active && pressed ? pressedFill : fill,
+    selected: active && !quiet,
+    border: (active && !quiet) || selected ? 0.5 : 0,
+    stroke: selected && !active ? tokens.multiSelectedStroke : undefined,
+  });
   const resetting = resettable && backToPin.hovered && !renaming;
+  const textOnly = hidesRowIcon(tab, badged);
+  const iconMarks = flags & (ICON_MARKS | SLEEPING);
+  const resetInk = resetting && active ? theme.rowSelectedText : theme.textTab;
+  const iconSlot = useMemo(() => {
+    const shown = tab;
+    if (!shown) return null;
+    return (
+            <View {...(shown.pinnedUrl ? backToPin.hoverProps : null)} style={textOnly ? NO_SLOT : undefined}>
+              {resettable ? (
+                <Pressable
+                  onPress={() => returnToPinnedUrl(shown.id)}
+                  tooltip={withShortcut("Back to Pinned URL", backToPinHint)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to Pinned URL"
+                >
+                  <View pointerEvents="none">
+                    {resetting ? (
+                      <View style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box, alignItems: "center", justifyContent: "center" }}>
+                        <Symbol name="arrow.uturn.backward" size={ROW_GLYPH.small} weight="semibold" color={resetInk} style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box }} />
+                      </View>
+                    ) : (
+                      <View>
+                        <RowTabIcon tabId={shown.id} url={shown.url} favicon={shown.favicon} icon={shown.customIcon} profileId={shown.profileId} marks={iconMarks & ICON_MARKS} sleeping={!!(iconMarks & SLEEPING)} compact={quiet} />
+                        <TabBadges tabId={shown.id} />
+                      </View>
+                    )}
+                  </View>
+                </Pressable>
+              ) : (
+                <>
+                  <RowTabIcon tabId={shown.id} url={shown.url} favicon={shown.favicon} icon={shown.customIcon} profileId={shown.profileId} marks={iconMarks & ICON_MARKS} sleeping={!!(iconMarks & SLEEPING)} compact={quiet} />
+                  <TabBadges tabId={shown.id} />
+                </>
+              )}
+            </View>
+    );
+  }, [tab, iconMarks, quiet, resettable, resetting, textOnly, backToPinHint, resetInk, backToPin.hoverProps]);
+  if (!tab) return null;
   const title = resetting ? "Back to Pinned URL" : tab.customTitle ? tabTitle(tab) : titleWithoutUnread(tabTitle(tab), unread);
   const away = resettable && !resetting ? rowAwayTitle(tab) : null;
-  const textOnly = hidesRowIcon(tab, badged);
-  const fill = active ? (quiet ? tokens.quietWash : theme.tabSelected) : selected ? tokens.multiSelected : ink.clear;
   const hoverFill = quiet ? tokens.quietHover : theme.tabHover;
-  const plain = !active && !selected;
-  const border = (active && !quiet) || selected ? 0.5 : 0;
   const titleColor = quiet ? hex(withAlpha(theme.textTab, active ? tokens.quietActiveText : tokens.quietText)) : active ? theme.rowSelectedText : theme.textTab;
-  const pressedFill = quiet ? tokens.quietPressed : theme.tabPressed;
 
   return (
     <View
@@ -114,45 +160,13 @@ export const TabRow = memo(function TabRow({
       style={moved.style as object}
       onDoubleClick={() => void startRename(windowId, { kind: "tab", id: tabId })}
     >
-      {tabPressView({ windowId, tab, hitSlop: rowGapSlop(0), selected, press, inSplit: !!(flags & IN_SPLIT), plainTooltip, children: ({ pressed }) => (
+      {tabPressView({ windowId, tab, hitSlop: rowGapSlop(0), selected, press, inSplit: !!(flags & IN_SPLIT), plainTooltip, onPressChange: setPressed, children: (
         <>
-          <RowHoverFill cell={cell} plain={plain} pressed={pressed} color={pressed ? pressedFill : hoverFill} radius={radius.chrome} />
-          <SidebarRowSurface
-            fill={selected && !active && pressed ? pressedFill : fill}
-            selected={active && !quiet}
-            border={border}
-            stroke={selected && !active ? tokens.multiSelectedStroke : undefined}
-            padLeft={textOnly ? TAB_ROW.contentLeft - TAB_ROW.titleGap : TAB_ROW.contentLeft}
-          >
+          <RowHoverFill cell={cell} pressed={pressed} color={pressed ? pressedFill : hoverFill} radius={radius.chrome} />
+          <View style={rowSurfaceFrame(textOnly ? TAB_ROW.contentLeft - TAB_ROW.titleGap : TAB_ROW.contentLeft)}>
+            {surface}
             {previewFade(preview, <>
-            <View {...(tab.pinnedUrl ? backToPin.hoverProps : null)} style={textOnly ? NO_SLOT : undefined}>
-              {resettable ? (
-                <Pressable
-                  onPress={() => returnToPinnedUrl(tab.id)}
-                  tooltip={withShortcut("Back to Pinned URL", backToPinHint)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to Pinned URL"
-                >
-                  <View pointerEvents="none">
-                    {resetting ? (
-                      <View style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box, alignItems: "center", justifyContent: "center" }}>
-                        <Symbol name="arrow.uturn.backward" size={ROW_GLYPH.small} weight="semibold" color={active ? theme.rowSelectedText : theme.textTab} style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box }} />
-                      </View>
-                    ) : (
-                      <View>
-                        <RowTabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} sleeping={!!(flags & SLEEPING)} compact={quiet} />
-                        <TabBadges tabId={tab.id} />
-                      </View>
-                    )}
-                  </View>
-                </Pressable>
-              ) : (
-                <>
-                  <RowTabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} sleeping={!!(flags & SLEEPING)} compact={quiet} />
-                  <TabBadges tabId={tab.id} />
-                </>
-              )}
-            </View>
+            {iconSlot}
             {pip && (
               <StatusIconButton icon="pip" color={theme.textTab} tooltip="Exit Picture in Picture" onPress={togglePip} />
             )}
@@ -180,7 +194,7 @@ export const TabRow = memo(function TabRow({
               ) : null}
             </RowCloseSlot>
             </>)}
-          </SidebarRowSurface>
+          </View>
         </>
       ) })}
       {preview.values ? <SplitPreview panes={SINGLE(tabId)} values={preview.values} rowActive={active && !quiet} /> : null}
@@ -311,9 +325,13 @@ export const SplitRowItem = memo(function SplitRowItem({
 });
 
 
-function rowGapSlop(inset: number) {
+const gapSlops = new Map<number, Insets>();
+
+function rowGapSlop(inset: number): Insets {
   const reach = inset + layout.rowGap / 2;
-  return { top: reach, bottom: reach };
+  let slop = gapSlops.get(reach);
+  if (!slop) gapSlops.set(reach, (slop = { top: reach, bottom: reach }));
+  return slop;
 }
 const SPLIT_SLOT = { flex: 1, flexDirection: "row", alignItems: "center", minWidth: 0 } as const;
 const SPLIT_SLOT_AFTER = { ...SPLIT_SLOT, marginLeft: SPLIT_PANE.gap } as const;

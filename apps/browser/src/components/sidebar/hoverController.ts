@@ -60,6 +60,7 @@ export function cardTargetNow<T extends Target>(target: T | null): T | null {
 
 export type RowHoverCell = {
   hovered: boolean;
+  plain: boolean;
   windowId: string;
   readers: Set<() => void>;
   set(hovered: boolean): void;
@@ -69,6 +70,7 @@ export type RowHoverCell = {
 export function rowHoverCell(windowId: string): RowHoverCell {
   const cell: RowHoverCell = {
     hovered: false,
+    plain: true,
     windowId,
     readers: new Set(),
     set(hovered) {

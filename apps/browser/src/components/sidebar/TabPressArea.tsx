@@ -42,7 +42,8 @@ export function tabPressView({
   press,
   inSplit,
   plainTooltip,
-}: TabPressProps & { press: { current: TabPress | null }; inSplit: boolean; plainTooltip: boolean }) {
+  onPressChange,
+}: TabPressProps & { press: { current: TabPress | null }; inSplit: boolean; plainTooltip: boolean; onPressChange?: (pressed: boolean) => void }) {
   return (
     <ContextMenuArea
       onMiddleClick={() => middleClickTab(tab.id)}
@@ -54,10 +55,14 @@ export function tabPressView({
     >
       <Pressable
         onPressIn={(e) => {
+          onPressChange?.(true);
           press.current = holdTabPress(windowId, tab.id, e, press.current);
         }}
         onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
-        onPressOut={(e) => pressOutTabPress(press.current, e)}
+        onPressOut={(e) => {
+          onPressChange?.(false);
+          pressOutTabPress(press.current, e);
+        }}
         style={pressStyle}
         nativeID={tabPressTag(tab.id, selected, inSplit)}
         collapsable={false}

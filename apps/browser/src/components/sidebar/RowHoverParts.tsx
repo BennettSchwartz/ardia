@@ -5,9 +5,9 @@ import { pressTabClose } from "../../state/sidebar/closeControl";
 import { useCellHovered, type RowHoverCell } from "./hoverController";
 import { RowCloseButton } from "./RowCloseButton";
 
-export const RowHoverFill = memo(function RowHoverFill({ cell, plain, pressed, color, radius }: { cell: RowHoverCell; plain: boolean; pressed: boolean; color: string; radius: number }) {
+export const RowHoverFill = memo(function RowHoverFill({ cell, pressed, color, radius }: { cell: RowHoverCell; pressed: boolean; color: string; radius: number }) {
   const hovered = useCellHovered(cell);
-  if (!plain || !(hovered || pressed)) return null;
+  if (!cell.plain || !(hovered || pressed)) return null;
   return <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: radius, backgroundColor: color }]} />;
 });
 
