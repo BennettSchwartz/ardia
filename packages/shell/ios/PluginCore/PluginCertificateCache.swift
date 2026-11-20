@@ -3,7 +3,7 @@ import Foundation
 final class PluginCertificateCache {
   static let preparationLimit: TimeInterval = 3
 
-  private let queue = DispatchQueue(label: "ardia.plugins.certificates", qos: .userInitiated)
+  private let queue = DispatchQueue(label: "ardia.plugins.certificates", qos: .userInitiated, attributes: .concurrent)
   private let lock = NSLock()
   private var cached: (key: [String: String], identities: [String: PluginSandbox.SourceIdentity], value: PluginSandbox.Certificates)?
   private let system: String

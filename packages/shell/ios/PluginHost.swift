@@ -9,6 +9,7 @@ final class PluginHost {
 
   private let queue = DispatchQueue(label: "ardia.plugins", qos: .userInitiated)
   private var sink: (owner: ObjectIdentifier, send: Sink)?
+  private var attachment = 0
   private let runs = PluginRuns<PluginProcess>()
   private let lifecycle = PluginLifecycle()
   private let outbox = PluginPageOutbox()
@@ -35,6 +36,7 @@ final class PluginHost {
   }
 
   private func terminateAll() {
+    attachment += 1
     let all = runs.all
     runs.removeAll()
     for process in all { process.terminateForQuit(within: Self.quitGrace / Double(max(1, all.count))) }
@@ -44,8 +46,13 @@ final class PluginHost {
     queue.async { [self] in
       lifecycle.enqueue(spec.name, .start, cancelled: { done(["ok": false, "reason": "a later stop or removal replaced this start"]) }) { [self] complete in
         runs.stopAll(spec.name, graceMs: 0) { [self] in
+          let attached = attachment
           PluginProcess.prepareCertificates(for: spec, deliverOn: queue) { [self] certificates in
-            spawn(spec, certificates: certificates, done: done)
+            if attachment == attached {
+              spawn(spec, certificates: certificates, done: done)
+            } else {
+              done(["ok": false, "reason": "Ardia closed its plugins while this one was starting"])
+            }
             complete()
           }
         }

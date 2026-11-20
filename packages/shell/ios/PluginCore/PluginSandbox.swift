@@ -100,17 +100,20 @@ struct PluginSandbox {
     let device: Int32
     let inode: UInt64
     let modified: timespec
+    let changed: timespec
     let size: off_t
 
     init(_ info: stat) {
       device = info.st_dev
       inode = info.st_ino
       modified = info.st_mtimespec
+      changed = info.st_ctimespec
       size = info.st_size
     }
 
     static func == (a: SourceIdentity, b: SourceIdentity) -> Bool {
-      a.device == b.device && a.inode == b.inode && a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec && a.size == b.size
+      a.device == b.device && a.inode == b.inode && a.size == b.size && a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec
+        && a.changed.tv_sec == b.changed.tv_sec && a.changed.tv_nsec == b.changed.tv_nsec
     }
   }
 
@@ -168,10 +171,12 @@ struct PluginSandbox {
         return certificateBlocks(in: String(decoding: read.data, as: UTF8.self))
       }
     }
-    var seen = Set<String>()
-    let systemBlocks = blocks([system]).filter { seen.insert($0).inserted }
-    let extraBlocks = blocks(extraCertificateSources(from: given, system: system)).filter { seen.insert($0).inserted }
-    return LoadedCertificates(certificates: Certificates(replacement: (systemBlocks + extraBlocks).joined(), extra: extraBlocks.joined()), identities: identities, complete: complete)
+    var seenSystem = Set<String>()
+    let systemBlocks = blocks([system]).filter { seenSystem.insert($0).inserted }
+    var seenExtra = Set<String>()
+    let extraBlocks = blocks(extraCertificateSources(from: given, system: system)).filter { seenExtra.insert($0).inserted }
+    let replacement = systemBlocks.isEmpty ? [] : systemBlocks + extraBlocks.filter { !seenSystem.contains($0) }
+    return LoadedCertificates(certificates: Certificates(replacement: replacement.joined(), extra: extraBlocks.joined()), identities: identities, complete: complete)
   }
 
   static func certificates(from given: [String: String], system: String = systemCertificates) -> Certificates {
@@ -192,24 +197,25 @@ struct PluginSandbox {
       unlinkat(directory, extraCertificateBundleName, 0)
       return nil
     case .ready(let ready):
-      guard !ready.replacement.isEmpty, writeAtomically(in: directory, name: certificateBundleName, contents: ready.replacement) else {
+      var staged = Certificates(replacement: "", extra: "")
+      if !ready.replacement.isEmpty, writeAtomically(in: directory, name: certificateBundleName, contents: ready.replacement) {
+        staged.replacement = ready.replacement
+      } else {
         unlinkat(directory, certificateBundleName, 0)
-        unlinkat(directory, extraCertificateBundleName, 0)
-        return nil
       }
-      guard !ready.extra.isEmpty, writeAtomically(in: directory, name: extraCertificateBundleName, contents: ready.extra) else {
+      if !ready.extra.isEmpty, writeAtomically(in: directory, name: extraCertificateBundleName, contents: ready.extra) {
+        staged.extra = ready.extra
+      } else {
         unlinkat(directory, extraCertificateBundleName, 0)
-        return Certificates(replacement: ready.replacement, extra: "")
       }
-      return ready
+      return staged.replacement.isEmpty && staged.extra.isEmpty ? nil : staged
     }
   }
 
   static func certificateVariables(dataFolder: String, staged: Certificates?) -> [String] {
-    guard let staged, !staged.replacement.isEmpty else { return ["SSL_CERT_FILE=\(systemCertificates)", "GIT_SSL_CAINFO=\(systemCertificates)"] }
-    let replacement = (dataFolder as NSString).appendingPathComponent(certificateBundleName)
+    let replacement = staged.map { !$0.replacement.isEmpty } == true ? (dataFolder as NSString).appendingPathComponent(certificateBundleName) : systemCertificates
     var variables = ["SSL_CERT_FILE=\(replacement)", "GIT_SSL_CAINFO=\(replacement)"]
-    if !staged.extra.isEmpty { variables.append("NODE_EXTRA_CA_CERTS=\((dataFolder as NSString).appendingPathComponent(extraCertificateBundleName))") }
+    if let staged, !staged.extra.isEmpty { variables.append("NODE_EXTRA_CA_CERTS=\((dataFolder as NSString).appendingPathComponent(extraCertificateBundleName))") }
     return variables
   }
 

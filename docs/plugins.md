@@ -522,17 +522,20 @@ settings only once it is saved, so a failed save changes nothing.
   proxy whose address carries a user name or password, which is dropped with one line in Ardia's log (an authenticated
   proxy is a follow-up the person would choose per plugin), and certificate settings that follow each tool's own
   meaning: `SSL_CERT_FILE` and `GIT_SSL_CAINFO` replace a tool's roots, so they point at
-  `PluginData/<name>/certificates.pem` (the system roots plus the extra ones); `NODE_EXTRA_CA_CERTS` adds to node's
-  roots, so it points at `PluginData/<name>/extra-certificates.pem` (the extra ones only, and only when there are any).
+  `PluginData/<name>/certificates.pem` (the system roots plus the extra ones, only when the system roots could be read;
+  otherwise they point at `/etc/ssl/cert.pem`); `NODE_EXTRA_CA_CERTS` adds to node's roots, so it points at
+  `PluginData/<name>/extra-certificates.pem` (every distinct extra root, even one the system bundle also has, since
+  node doesn't read the system bundle; only when there are any).
   The extra roots come from the files Ardia's own `SSL_CERT_FILE` or `NODE_EXTRA_CA_CERTS` name. The format is PEM
   with LF or CRLF line ends: only `-----BEGIN CERTIFICATE-----` blocks on lines of their own that each hold exactly one
   X.509 certificate are kept (`TRUSTED CERTIFICATE` blocks, a key labelled `CERTIFICATE`, trailing bytes, a block
   another marker interrupts or one that never ends is skipped), from regular files of at most 4 MB opened without
   blocking (a FIFO is refused), scanned line by line once. They are read on a background queue; before each start of a
-  helper with `network`, each file's device, inode, modification time and size are checked there, and a file that
+  helper with `network`, each file's device, inode, size, and modification and status-change times are checked there, and a file that
   changed, was replaced or was deleted is read again (a failed read is never kept, and a root whose file is gone
   disappears, together with `extra-certificates.pem` when no extra roots are left). The start waits for that, up to
-  3 s, then goes on on Ardia's plugin queue; past that it gets the system roots (`/etc/ssl/cert.pem`) directly. With no
+  3 s, then goes on on Ardia's plugin queue; past that it gets the system roots (`/etc/ssl/cert.pem`) directly. Each preparation reads on its own, so a file stuck on a stalled disk can't hold up later
+  starts, and a start still waiting when Ardia closes its plugins is cancelled, never launched. With no
   extra roots configured it gets them directly as well, and staged bundles are removed. The bundles are written through the already-open data folder, to a private file
   renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain
   isn't trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the

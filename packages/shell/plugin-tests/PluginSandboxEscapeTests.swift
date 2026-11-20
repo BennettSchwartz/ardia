@@ -507,7 +507,15 @@ final class PluginSandboxEscapeTests: XCTestCase {
     XCTAssertFalse(inside.output.hasPrefix("opened"), inside.output)
   }
 
-  func testWithoutNetworkThereIsNoResolverAndNoLoopback() throws {
+  func testWithoutNetworkThereIsNoResolver() throws {
+    let control = try Self.run(probe, ["resolve", "apple.com"])
+    try XCTSkipUnless(control.status == 0, "no DNS here: \(control.output)")
+    XCTAssertEqual(try sandboxed(probe, ["resolve", "apple.com"], network: true).status, 0, "with network the resolver works")
+    let resolved = try sandboxed(probe, ["resolve", "apple.com"], network: false)
+    XCTAssertEqual(resolved.status, 93, "without network a name resolves: \(resolved.output)")
+  }
+
+  func testWithoutNetworkThereIsNoLoopback() throws {
     let listener = socket(AF_INET, SOCK_STREAM, 0)
     var address = sockaddr_in()
     address.sin_family = sa_family_t(AF_INET)
@@ -520,13 +528,8 @@ final class PluginSandboxEscapeTests: XCTestCase {
     var length = socklen_t(MemoryLayout<sockaddr_in>.size)
     _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(listener, $0, &length) } }
     let port = String(UInt16(bigEndian: address.sin_port))
-    let control = try Self.run(probe, ["resolve", "apple.com"])
-    try XCTSkipUnless(control.status == 0, "no DNS here: \(control.output)")
     XCTAssertEqual(try Self.run(probe, ["tcp", port]).status, 0, "control: loopback accepts outside")
-    XCTAssertEqual(try sandboxed(probe, ["resolve", "apple.com"], network: true).status, 0, "with network the resolver works")
     XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: true).status, 0, "with network loopback works")
-    let resolved = try sandboxed(probe, ["resolve", "apple.com"], network: false)
-    XCTAssertEqual(resolved.status, 93, "without network a name resolves: \(resolved.output)")
     XCTAssertEqual(try sandboxed(probe, ["tcp", port], network: false).status, EPERM, "without network loopback is reachable")
   }
 
@@ -597,7 +600,7 @@ final class PluginSandboxEscapeTests: XCTestCase {
       return SecCertificateCopySubjectSummary(certificate) as String? ?? "?"
     } }
     XCTAssertEqual(names(kept.replacement), ["Ardia Test A", "Ardia Test B", "Ardia Test C"], "the system roots, then each distinct extra, nothing else")
-    XCTAssertEqual(names(kept.extra), ["Ardia Test B", "Ardia Test C"], "the additive bundle holds only the extras")
+    XCTAssertEqual(names(kept.extra), ["Ardia Test B", "Ardia Test C", "Ardia Test A"], "the additive bundle holds every distinct supplied root, even one the system bundle has, since node doesn't read the system bundle")
     XCTAssertFalse(kept.replacement.contains(b.keyDER), "a key, even labelled CERTIFICATE, is never kept")
     XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData, staged: kept), [
       "SSL_CERT_FILE=\(pluginData)/certificates.pem", "GIT_SSL_CAINFO=\(pluginData)/certificates.pem", "NODE_EXTRA_CA_CERTS=\(pluginData)/extra-certificates.pem",
@@ -622,8 +625,10 @@ final class PluginSandboxEscapeTests: XCTestCase {
     let cache = PluginCertificateCache(system: system)
     var answered: PluginSandbox.PreparedCertificates?
     let preparing = Date()
-    lifecycle.sync { cache.prepare(for: ["NODE_EXTRA_CA_CERTS": fifo], deliverOn: lifecycle) { answered = $0 } }
-    XCTAssertNil(answered, "preparing returns at once and answers later on the lifecycle queue")
+    lifecycle.sync {
+      cache.prepare(for: ["NODE_EXTRA_CA_CERTS": fifo], deliverOn: lifecycle) { answered = $0 }
+      XCTAssertNil(answered, "preparing returns at once and answers later on the lifecycle queue")
+    }
     guard case .ready(let ready) = prepared(cache, ["NODE_EXTRA_CA_CERTS": fifo], on: lifecycle) else { return XCTFail("a FIFO source still lets preparation answer") }
     XCTAssertEqual(names(ready.replacement), ["Ardia Cache"])
     XCTAssertEqual(ready.extra, "")
@@ -677,10 +682,37 @@ final class PluginSandboxEscapeTests: XCTestCase {
     try handle.write(contentsOf: Data(b.pem.utf8))
     try handle.close()
     XCTAssertEqual(extras(), ["Ardia Root B"], "a file rewritten in place is read again")
+    let width = max(b.pem.utf8.count, c.pem.utf8.count)
+    let padded = { (pem: String) in pem + String(repeating: " ", count: width - pem.utf8.count) }
+    try padded(b.pem).write(toFile: corporate, atomically: false, encoding: .utf8)
+    XCTAssertEqual(extras(), ["Ardia Root B"])
+    var kept = stat()
+    XCTAssertEqual(stat(corporate, &kept), 0)
+    Thread.sleep(forTimeInterval: 0.05)
+    let rewrite = try FileHandle(forWritingTo: URL(fileURLWithPath: corporate))
+    try rewrite.write(contentsOf: Data(padded(c.pem).utf8))
+    try rewrite.close()
+    var times = [timespec(tv_sec: kept.st_atimespec.tv_sec, tv_nsec: kept.st_atimespec.tv_nsec), timespec(tv_sec: kept.st_mtimespec.tv_sec, tv_nsec: kept.st_mtimespec.tv_nsec)]
+    XCTAssertEqual(utimensat(AT_FDCWD, corporate, &times, 0), 0)
+    var after = stat()
+    XCTAssertEqual(stat(corporate, &after), 0)
+    XCTAssertEqual(after.st_size, kept.st_size)
+    XCTAssertEqual(after.st_mtimespec.tv_nsec, kept.st_mtimespec.tv_nsec, "same inode, size and modification time")
+    XCTAssertEqual(extras(), ["Ardia Root C"], "a rewrite that restores the modification time is still seen through the status-change time")
     try FileManager.default.removeItem(atPath: corporate)
     XCTAssertEqual(extras(), [], "a deleted file's roots disappear")
     XCTAssertFalse(FileManager.default.fileExists(atPath: extraBundle), "and so does the staged bundle that held them")
     XCTAssertEqual(names(try String(contentsOfFile: "\(pluginData)/certificates.pem", encoding: .utf8)), ["Ardia Root A"])
+    try FileManager.default.removeItem(atPath: system)
+    try b.pem.write(toFile: corporate, atomically: true, encoding: .utf8)
+    guard case .ready(let systemless) = prepared(cache, given) else { return XCTFail("not ready") }
+    XCTAssertEqual(systemless.replacement, "", "without usable system roots there is no replacement bundle, never an extras-only one")
+    XCTAssertEqual(names(systemless.extra), ["Ardia Root B"])
+    let staged = PluginSandbox.stage(.ready(systemless), in: folder)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: "\(pluginData)/certificates.pem"))
+    XCTAssertEqual(PluginSandbox.certificateVariables(dataFolder: pluginData, staged: staged), [
+      "SSL_CERT_FILE=/etc/ssl/cert.pem", "GIT_SSL_CAINFO=/etc/ssl/cert.pem", "NODE_EXTRA_CA_CERTS=\(pluginData)/extra-certificates.pem",
+    ], "replacing tools keep the system path; node still gets the extra roots")
     XCTAssertEqual(prepared(cache, [:]), .notConfigured)
     _ = PluginSandbox.stage(.notConfigured, in: folder)
     XCTAssertFalse(FileManager.default.fileExists(atPath: "\(pluginData)/certificates.pem"), "with no extra roots configured, nothing staged is left")
