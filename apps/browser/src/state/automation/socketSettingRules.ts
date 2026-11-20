@@ -1,6 +1,7 @@
 import { resolveInput } from "@ardia/core";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { siteOf } from "../engines/engines";
+import { sameValue } from "../config/configSettings";
 import { customNewTabUrl, DEFAULT_SETTINGS, searchEngines, validSettingValue, type SettingKey, type Settings } from "../settings/settings";
 
 type Checked = { patch: Partial<Settings> } | { problem: string };
@@ -11,7 +12,8 @@ const NO_WEBKIT = "WebKit isn't part of Ardia on this platform, so pages always 
 
 const shaped = (key: SettingKey, value: unknown, then: () => Checked): Checked => (validSettingValue(key, value) ? then() : { problem: `${key} isn't a value Settings can choose` });
 
-const needsWebKit = (key: SettingKey, value: unknown, then: () => Checked): Checked => shaped(key, value, () => (PLATFORM_FEATURES.webKit ? then() : { problem: `${key}: ${NO_WEBKIT}` }));
+const needsWebKit = (key: SettingKey, value: unknown, then: () => Checked): Checked =>
+  shaped(key, value, () => (PLATFORM_FEATURES.webKit || sameValue(value, DEFAULT_SETTINGS[key]) ? then() : { problem: `${key}: ${NO_WEBKIT}` }));
 
 export const typedSite = (typed: string) => siteOf(SCHEME.test(typed.trim()) ? typed.trim() : resolveInput(typed.trim(), ""));
 
