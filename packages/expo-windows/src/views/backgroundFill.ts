@@ -6,7 +6,7 @@ export type Backed = { fill: Flat; own: Flat };
 
 export type ColorDraws = (color: unknown) => boolean;
 
-export const FILL_Z_INDEX = -2147483647;
+export const FILL_Z_INDEX = -2147483648;
 
 const CLEAR = "transparent";
 
@@ -41,8 +41,8 @@ function withoutPaint(style: Flat, clearBorder: boolean): Flat {
   return own;
 }
 
-export function backedStyles(flat: Flat, draws: ColorDraws = drawsByName): Backed | null {
-  if (!draws(flat.backgroundColor)) return null;
+export function backedStyles(flat: Flat | undefined, draws: ColorDraws = drawsByName): Backed | null {
+  if (!flat || !draws(flat.backgroundColor)) return null;
   const sides = borderWidths(flat);
   const fill: Flat = { position: "absolute", top: outward(sides.top), bottom: outward(sides.bottom), left: outward(sides.left), right: outward(sides.right), zIndex: FILL_Z_INDEX, backgroundColor: flat.backgroundColor };
   for (const key of Object.keys(flat)) if (isBorderKey(key)) fill[key] = flat[key];
@@ -50,9 +50,10 @@ export function backedStyles(flat: Flat, draws: ColorDraws = drawsByName): Backe
   return { fill, own: withoutPaint(flat, bordered) };
 }
 
-export function nativePaint(style: Flat): Backed | null {
+export function nativePaint(style: Flat | undefined): Backed | null {
+  if (!style) return null;
   const fill: Flat = {};
-  for (const key of Object.keys(style)) if (key === "backgroundColor" || isBorderColor(key) || isBorderShape(key)) fill[key] = style[key];
+  for (const key of Object.keys(style)) if (key === "backgroundColor" || isBorderColor(key) || isBorderShape(key)) fill[key] = style[key] === undefined ? null : style[key];
   if (!Object.keys(fill).length) return null;
   return { fill, own: withoutPaint(style, false) };
 }

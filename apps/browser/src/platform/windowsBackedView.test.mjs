@@ -11,6 +11,7 @@ const { backedOnWindows, backedView, rawView } = createRequire(import.meta.url)(
 const at = (offsets, extra = {}) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, ...offsets, zIndex: FILL_Z_INDEX, backgroundColor: "red", ...extra });
 
 test("no fill without a background that draws, so the view is left as it is", () => {
+  assert.equal(backedStyles(undefined), null);
   assert.equal(backedStyles({}), null);
   assert.equal(backedStyles({ backgroundColor: "transparent", borderRadius: 8 }), null);
   assert.equal(backedStyles({ backgroundColor: "rgba(0,0,0,0)" }, (color) => color !== "rgba(0,0,0,0)"), null);
@@ -32,7 +33,7 @@ test("the fill takes the background off the view and keeps everything else on it
 });
 
 test("the fill has the lowest zIndex, so Fabric mounts it before a static child or one with a negative zIndex", () => {
-  assert.ok(backedStyles({ backgroundColor: "red" }).fill.zIndex < -1000000);
+  assert.equal(backedStyles({ backgroundColor: "red" }).fill.zIndex, -(2 ** 31));
 });
 
 test("the fill covers the border box and draws the border, as React Native Windows paints a background under the border", () => {
@@ -56,7 +57,9 @@ test("a percentage radius passes through, and a borderless view gets no clear bo
 });
 
 test("setNativeProps paint goes to the fill: background and border colours only there, radius, curve and style to both", () => {
+  assert.equal(nativePaint(undefined), null);
   assert.equal(nativePaint({ opacity: 0.3, transform: [{ scale: 2 }] }), null);
+  assert.deepEqual(nativePaint({ backgroundColor: undefined, borderColor: undefined }), { fill: { backgroundColor: null, borderColor: null }, own: {} });
   assert.deepEqual(nativePaint({ backgroundColor: "blue", opacity: 0.4 }), { fill: { backgroundColor: "blue" }, own: { opacity: 0.4 } });
   assert.deepEqual(nativePaint({ backgroundColor: "transparent" }), { fill: { backgroundColor: "transparent" }, own: {} });
   assert.deepEqual(nativePaint({ borderRadius: 12, borderTopColor: "red", borderStyle: "dotted", borderWidth: 2 }), { fill: { borderRadius: 12, borderTopColor: "red", borderStyle: "dotted" }, own: { borderRadius: 12, borderStyle: "dotted", borderWidth: 2 } });

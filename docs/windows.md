@@ -490,26 +490,31 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
     border moved onto a first child (`views/backgroundFill.ts`): absolute at the border box, so it paints under the
     border as the sprite did, with the view's own radii, border widths, colours, style and curve, and the lowest
     `zIndex`, which Fabric mounts before every other child, a `position: "static"` one or one with a negative `zIndex`
-    included. It ignores the pointer. The view keeps its border widths for layout, with clear colours, and its shadow,
+    included (it is `-2147483648`, Fabric's lowest, and ties keep it first). It ignores the pointer. The view keeps its border widths for layout, with clear colours, and its shadow,
     which React Native Windows draws on its outer visual either way. With no sprite on the view, a child mounted later
     lands at its index, above the fill.
   - A backed view always forms a stacking context (`collapsable={false}`), so its children mount inside it and the
     fill can't be flattened into an ancestor and sorted under the ancestor's other content. That keeps it a native
-    view that takes presses, as its background made it. The one change it can make: a `zIndex` descendant of a
-    painted view that formed no stacking context before can't rise above that view's later siblings any more. The
-    shared UI's `zIndex` uses lift a row, chip or drop line among its own siblings.
+    view that takes presses, as its background made it. What that changes for a painted view that formed no stacking
+    context before: its children now mount inside it instead of being flattened into its ancestor, a `zIndex`
+    descendant can't rise above the view's later siblings any more, and `pointerEvents="box-only"` on it now also
+    keeps presses off children that used to be flattened out. The shared UI's `zIndex` uses lift a row, chip or drop
+    line among its own siblings, and it has no `box-only` view. Each fill is one more native view, outside UI
+    Automation's control and content views and never a tab stop.
   - A `setNativeProps` that changes the background or a border colour (an animated `backgroundColor`, as the split
     zones' glow) goes to the fill only; one that changes a radius, the curve or the border style goes to both. Not
     covered: a border width changed that way (the fill's offsets stay), and a background first given that way to a
-    view that had none, which reaches the view itself as before. The shared UI has neither, nor a
+    view that had none, which reaches the view itself as before and leaves it a sprite for life, even if a style
+    background later backs it. The shared UI has neither, nor a
     `position: "static"`, right-to-left or outlined view, which an absolute fill at the border box can't match
     (`platform/windowsBackedView.test.mjs` fails on the last three). `ARDIA_TEST=rawBackgrounds=1` turns fills off in
     a test instance, to compare. Mac, Linux and the web don't use this resolver and render as before.
   - Patching React Native Windows isn't the smaller fix: the app takes `Microsoft.ReactNative` prebuilt from NuGet
     (`UseExperimentalNuget`), so a C++ fix means building React Native Windows from source for both CPUs.
   - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
-    child mounted into a plain `View` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
-    round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
+    child mounted into a plain `View` with a background and `zIndex`, one with only a background, or one with only a
+    background and a child at `zIndex: -1` isn't drawn within 100 ms and still drawn at the round's end, or if a plain
+    `View` turned white with `setNativeProps({ style: { backgroundColor } })` isn't, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
     setup screen, #2280, and report unverified). It logs how many rounds a raw view still hides the child (5 of 5 on
     0.81.38); when that reads 0 after an upgrade, the resolver and `BackedView` can go. The same lab shows fades on mount draw and land.
   - **Not captured yet:** the top toolbar's address field (tabs on top) has a hover pill and mouse handlers, so the

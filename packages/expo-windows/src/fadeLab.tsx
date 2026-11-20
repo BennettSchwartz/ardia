@@ -18,7 +18,7 @@ const SHAPES = [
 
 export const FADE_VARIANTS: Variant[] = [false, true].flatMap((later) => SHAPES.map((shape) => ({ ...shape, name: `${shape.name}${later ? " later" : ""}`, later })));
 
-export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex"];
+export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex", "helper background", "helper background, child below zero", "helper setNativeProps background"];
 
 const CONTAINERS: { slot: number; style: object; pointerEvents?: "none" }[] = [
   { slot: 2, style: { backgroundColor: "#010101" } },
@@ -89,6 +89,15 @@ function NativePropsTile({ round }: { round: number }) {
   return <View ref={view} style={[styles.tile, styles.white, at(1, 1), { opacity: 0 }]} />;
 }
 
+function NativePaintTile() {
+  const view = useRef<View>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => view.current?.setNativeProps({ style: { backgroundColor: "#FFFFFF" } }));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return <View ref={view} style={[styles.tile, at(1, 10), { backgroundColor: "#010101" }]} />;
+}
+
 export function FadeLab() {
   const [round, setRound] = useState(1);
   useEffect(() => {
@@ -115,6 +124,9 @@ export function FadeLab() {
       {shown ? <StateTile key={`${round}-state`} round={round} /> : null}
       {shown ? <NativePropsTile key={`${round}-native`} round={round} /> : null}
       <View style={[styles.tile, at(1, 7), { backgroundColor: "#010101", zIndex: 10 }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</View>
+      <View style={[styles.tile, at(1, 8), { backgroundColor: "#010101" }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</View>
+      <View style={[styles.tile, at(1, 9), { backgroundColor: "#010101" }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white, { zIndex: -1 }]} /> : null}</View>
+      {shown ? <NativePaintTile key={`${round}-paint`} /> : null}
       {CONTAINERS.map(({ slot, style, pointerEvents }) => (
         <RawView key={slot} pointerEvents={pointerEvents} style={[styles.tile, at(1, slot), style]}>
           {shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}
