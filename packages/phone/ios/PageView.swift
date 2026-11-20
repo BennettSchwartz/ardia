@@ -165,8 +165,8 @@ final class PageView: ExpoView {
       return
     }
     webView.removeFromSuperview()
-    webView.frame = bounds
-    webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    webView.frame = webViewFrame
+    webView.autoresizingMask = []
     addSubview(webView)
     if let summaryLayer { bringSubviewToFront(summaryLayer) }
     applyObscuredInsets()
