@@ -1,10 +1,10 @@
-import { shape } from "../ui";
+import { capsule, deckChromeLayout } from "../ui";
 
 export const deckLook = {
-  buttonCorner: shape.control,
-  fieldCorner: shape.field,
-  archiveCorner: shape.card,
-  archiveClearance: 12,
-  archiveShadow: "0px 8px 24px rgba(0,0,0,0.12)",
-  archiveShadowDark: "0px 8px 24px rgba(0,0,0,0.4)",
+  switcherHeight: deckChromeLayout.headerCircle,
+  switcherCorner: capsule(deckChromeLayout.headerCircle),
+  switcherLead: 14,
+  switcherTrail: 16,
+  fieldCorner: capsule(deckChromeLayout.barCircle),
+  darkDepth: ["rgba(0,0,0,0.5)", "rgba(0,0,0,0.3)", "rgba(0,0,0,0.42)"],
 } as const;

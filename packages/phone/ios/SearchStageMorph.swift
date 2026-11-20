@@ -90,9 +90,17 @@ extension SearchStageView {
 
 struct StageMorphLook {
   var usesGlass = true
+  var frosted = false
   var panelTint: UIColor = .clear
   var panelStyle: UIUserInterfaceStyle = .unspecified
   var classicPanel: UIColor = .secondarySystemBackground
+}
+
+struct StageCardPlace {
+  var cardInset: CGFloat = BrowseLayout.panelInset
+  var cardGap: CGFloat = BrowseLayout.panelAboveKeyboard
+  var fieldInset: CGFloat = BrowseLayout.panelFieldInset
+  var fieldTop: CGFloat = BrowseLayout.panelFieldInset
 }
 
 struct StageCorners {
@@ -108,6 +116,7 @@ struct StageCorners {
 final class StageEmergence {
   private let pill: CGRect
   private let corners: StageCorners
+  private let place: StageCardPlace
   private let fieldCenter: CGFloat
   private let mask = CALayer()
   private let cardLens = CALayer()
@@ -134,9 +143,10 @@ final class StageEmergence {
     return face.layer.opacity == 0 && (face.layer.animationKeys() ?? []).isEmpty
   }
 
-  init(pill: CGRect, fieldCenter: CGFloat, corners: StageCorners, face: UIView?, on tray: UIView) {
+  init(pill: CGRect, fieldCenter: CGFloat, corners: StageCorners, place: StageCardPlace, face: UIView?, on tray: UIView) {
     self.pill = pill
     self.corners = corners
+    self.place = place
     self.fieldCenter = fieldCenter
     self.face = face
     CATransaction.begin()
@@ -214,11 +224,11 @@ final class StageEmergence {
   }
 
   private func fieldFrame(in card: CGRect) -> CGRect {
-    let height = 2 * (fieldCenter - BrowseLayout.panelFieldInset) + 2 * Self.fieldClearance
+    let height = 2 * (fieldCenter - place.fieldTop) + 2 * Self.fieldClearance
     return CGRect(
-      x: card.minX + BrowseLayout.panelFieldInset - Self.fieldClearance,
+      x: card.minX + place.fieldInset - Self.fieldClearance,
       y: fieldCenter - height / 2,
-      width: card.width - 2 * BrowseLayout.panelFieldInset + 2 * Self.fieldClearance,
+      width: card.width - 2 * place.fieldInset + 2 * Self.fieldClearance,
       height: height
     )
   }
@@ -408,6 +418,11 @@ final class StageMorph {
     UIView.performWithoutAnimation { view.isHidden = false }
   }
 
+  func restart(from frame: CGRect) {
+    guard !hasFlown, !frame.isEmpty else { return }
+    UIView.performWithoutAnimation { view.shape(to: frame, radius: min(view.radius, frame.height / 2)) }
+  }
+
   private func startFades() {
     fades = [
       Self.run(Motion.stageContentFade) { [view] in view.contents.alpha = 0 },
@@ -448,6 +463,13 @@ final class StageMorphView: UIView {
     if look.usesGlass {
       surface = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
       classicFill = nil
+    } else if look.frosted {
+      let frost = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterial))
+      frost.contentView.backgroundColor = look.classicPanel
+      frost.clipsToBounds = true
+      frost.layer.cornerCurve = .continuous
+      surface = frost
+      classicFill = .systemBackground
     } else {
       surface = UIView()
       surface.backgroundColor = look.classicPanel
@@ -509,6 +531,11 @@ final class StageMorphView: UIView {
 
   func settle(style: UIUserInterfaceStyle) {
     surface.overrideUserInterfaceStyle = style
-    if let classicFill { surface.backgroundColor = classicFill }
+    guard let classicFill else { return }
+    if let frost = surface as? UIVisualEffectView {
+      frost.contentView.backgroundColor = classicFill
+    } else {
+      surface.backgroundColor = classicFill
+    }
   }
 }

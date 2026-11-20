@@ -3,7 +3,7 @@ import { countRender } from "../../state/app/interactionPerf";
 import { PixelRatio, Platform, StyleSheet, Text, View, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { isUnseenReceived } from "../../lib/tabFace";
-import { DECK, DECK_HEADER, deckBarBand, deckFlyLift, deckHeaderIconReveal, deckHeaderReveal, deckLeaveFade, deckStatusStrip, deckHeaderLeading, deckHeaderPlacement, deckLeading, deckSlot, deckVisibleWidth, lerp, titleReveal, type DeckGeometry, type DeckLeaving, type DeckSlots } from "../../lib/deckGeometry";
+import { DECK, DECK_HEADER, deckArcHeaderPlacement, deckArcTitleReveal, deckBarBand, deckPileScale, deckFlyLift, deckHeaderIconReveal, deckHeaderReveal, deckLeaveFade, deckStatusStrip, deckHeaderLeading, deckHeaderPlacement, deckLeading, deckSlot, deckVisibleWidth, lerp, titleReveal, type DeckGeometry, type DeckLeaving, type DeckSlots } from "../../lib/deckGeometry";
 import { pullTuck } from "../../lib/deckPull";
 import { useHeldPageTone } from "../../state/browse/deckHold";
 import { display } from "../../state/search/omnibox";
@@ -168,19 +168,19 @@ export function cardPose(g: DeckGeometry, role: DeckRole, relative: number, sp: 
   const cy = g.cardCenterY;
   let x = cx;
   let y = cy;
-  let scale = 1;
-  let corner: number = DECK.cardRadius;
+  let scale = role === "expanded" || role === "launcher" ? 1 : deckPileScale(g, relative);
+  let corner: number = g.cardCorner * scale;
   let opacity = 1;
   if (role === "expanded") {
     scale = lerp(g.width / Math.max(g.cardWidth, 1), 1, sp);
     x = lerp(g.width / 2, cx, pp);
     y = lerp(g.height / 2, cy, rise);
-    corner = lerp(g.screenCorner, DECK.cardRadius, sp);
+    corner = lerp(g.screenCorner, g.cardCorner, sp);
   } else if (role === "launcher") {
     scale = lerp(DECK.launcherStartWidth / Math.max(g.cardWidth, 1), 1, sp);
     x = lerp(g.tabButtonX, cx, pp);
     y = lerp(g.barCenterY, cy, pp);
-    corner = lerp(DECK.launcherStartRadius, DECK.cardRadius, sp);
+    corner = lerp(DECK.launcherStartRadius, g.cardCorner, sp);
     opacity = Math.min(1, sp * 2.5);
   } else if (role === "slideLeft") {
     x -= (1 - pp) * g.width * 0.7;
@@ -195,7 +195,7 @@ export function cardPose(g: DeckGeometry, role: DeckRole, relative: number, sp: 
   return { x, y, scale, corner, opacity, header: Math.min(1, settle) * Math.min(1, liftFade) * shown, visible: deckVisibleWidth(g, relative, isLast), lift, fade: 1 - shown };
 }
 
-export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion, restCorner: number = DECK.cardRadius) {
+export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion, restCorner: number = g.cardCorner) {
   const { orderIds, covering } = motion;
   const at = useDerivedValue(() => orderIds.value.indexOf(id), [id]);
 
@@ -219,7 +219,7 @@ export function useCardPlacement(id: string, g: DeckGeometry, motion: DeckMotion
   }, [g, id]);
   const cardStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
-    const corner = p.corner + (restCorner - DECK.cardRadius) * placed.value.rest;
+    const corner = p.corner + (restCorner - g.cardCorner) * placed.value.rest;
     return {
       zIndex: placed.value.z,
       opacity: covering.value === id ? 0 : p.opacity,
@@ -252,6 +252,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
   const tone = shownTone(useHeldPageTone(tab.id), tab.themeColorHex);
   const { orderIds, scaleProgress, covering } = motion;
   const id = tab.id;
+  const arcHeader = g.stack === "arc";
 
   const at = useDerivedValue(() => orderIds.value.indexOf(id), [id]);
 
@@ -264,8 +265,9 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
     const tucks = pulled && m.role !== "expanded" && now.expanded >= 0;
     const p = tucks ? { ...slot, ...pullTuck(cardPose(g, "expanded", now.expanded - now.scroll, now.scaleProgress, now.positionProgress, 0, 0, false, now.riseProgress), slot, revealed) } : slot;
     const top = p.y - (g.cardHeight * p.scale) / 2 - tabsLayout.headerGap - tabsLayout.headerHeight;
-    return { pose: p, top, place: deckHeaderPlacement(p.x - (g.cardWidth * p.scale) / 2, p.visible), z: m.z, expanded: m.role === "expanded", shown: 1, headed: revealed };
-  }, [g, id]);
+    const cardLeft = p.x - (g.cardWidth * p.scale) / 2;
+    return { pose: p, top, place: arcHeader ? deckArcHeaderPlacement(cardLeft, p.visible) : deckHeaderPlacement(cardLeft, p.visible), z: m.z, expanded: m.role === "expanded", shown: 1, headed: revealed };
+  }, [g, id, arcHeader]);
   const cardStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
     return {
@@ -276,7 +278,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
     };
   }, [g]);
   const titleWidth = useSharedValue(0);
-  const wholeHeader = design === "redesigned";
+  const wholeHeader = design === "redesigned" && !arcHeader;
   const headerStyle = useAnimatedStyle(() => {
     const { pose: p, top, place } = placed.value;
     return {
@@ -299,9 +301,9 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
   }, [g]);
   const rowStyle = useAnimatedStyle(() => {
     const available = placed.value.place.available;
-    return { transform: [{ translateX: g.cardWidth - available + (wholeHeader ? 0 : deckHeaderLeading(available, tabsLayout.faviconSize, tabsLayout.headerSpacing, titleWidth.value, titleReveal(available))) }] };
-  }, [wholeHeader]);
-  const titleStyle = useAnimatedStyle(() => ({ opacity: wholeHeader ? 1 : titleReveal(placed.value.place.available) }), [wholeHeader]);
+    return { transform: [{ translateX: g.cardWidth - available + (wholeHeader || arcHeader ? 0 : deckHeaderLeading(available, tabsLayout.faviconSize, tabsLayout.headerSpacing, titleWidth.value, titleReveal(available))) }] };
+  }, [wholeHeader, arcHeader]);
+  const titleStyle = useAnimatedStyle(() => ({ opacity: wholeHeader ? 1 : arcHeader ? deckArcTitleReveal(placed.value.place.available, tabsLayout.faviconSize, tabsLayout.headerSpacing) : titleReveal(placed.value.place.available) }), [wholeHeader, arcHeader]);
   const underBars = usePageUnderBars();
   const pageTop = (tab.snapshotFileName ? snapshotPageTop(tab.snapshotFileName) : null) ?? (underBars ? 0 : g.safeTop);
   const faceStyle = useAnimatedStyle(() => ({ transform: [{ translateY: placed.value.expanded ? deckStatusStrip(g, scaleProgress.value, pageTop) : 0 }] }), [g, pageTop]);
@@ -336,7 +338,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
         ]}
       >
         {nativeMenus() ? (
-          <DeckCardMenu tab={tab} index={index} onClose={onClose} fill={tone.top ?? theme.surface}>
+          <DeckCardMenu tab={tab} index={index} onClose={onClose} fill={tone.top ?? theme.surface} corner={g.cardCorner}>
             {cardContents}
           </DeckCardMenu>
         ) : (
@@ -436,9 +438,9 @@ export function CardMenu({ tab, close, testID, haptic, style, children }: CardMe
 
 export const CARD_MENU_ACTION = "Tab Options";
 
-export function DeckCardMenu({ tab, index, onClose, fill, children }: { tab: BrowserTab; index: number; onClose: (index: number) => void; fill: string; children: ReactNode }) {
+export function DeckCardMenu({ tab, index, onClose, fill, corner = DECK.cardRadius, children }: { tab: BrowserTab; index: number; onClose: (index: number) => void; fill: string; corner?: number; children: ReactNode }) {
   return (
-    <CardMenu testID="deckCardMenu" tab={tab} close={() => onClose(index)} style={[styles.cardMenu, { backgroundColor: fill }]}>
+    <CardMenu testID="deckCardMenu" tab={tab} close={() => onClose(index)} style={[styles.cardMenu, { backgroundColor: fill, borderRadius: corner }]}>
       {() => children}
     </CardMenu>
   );
@@ -509,7 +511,7 @@ export function OpeningCard({ tab, geometry: g, centerX, centerY, growsAtMount =
   const bar = deckBarBand(inner, barHeight(g.safeBottom), 1);
   const host = display(tab.url).host;
   const title = tab.title || host || "New Tab";
-  const start = { translateX: centerX - g.width / 2, translateY: centerY - g.height / 2, scale: frame.startScale, cornerRadius: DECK.cardRadius / frame.startScale };
+  const start = { translateX: centerX - g.width / 2, translateY: centerY - g.height / 2, scale: frame.startScale, cornerRadius: g.cardCorner / frame.startScale };
   const to = grown ? { translateX: 0, translateY: 0, scale: full, cornerRadius: endsSquare ? 0 : DECK.displayCornerRadius / full } : start;
   return (
     <MotionView
@@ -571,7 +573,7 @@ const styles = StyleSheet.create({
   },
   statusBand: { position: "absolute", left: 0, right: 0, top: 0 },
   band: { position: "absolute", left: 0, right: 0, bottom: 0, transformOrigin: "bottom" },
-  cardMenu: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, borderRadius: DECK.cardRadius, ...smoothCorners },
+  cardMenu: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, ...smoothCorners },
   opening: { position: "absolute", overflow: "hidden", ...smoothCorners },
   openingEdge: { borderWidth: StyleSheet.hairlineWidth },
   openingEdgeOverlay: { ...StyleSheet.absoluteFill, borderWidth: StyleSheet.hairlineWidth },

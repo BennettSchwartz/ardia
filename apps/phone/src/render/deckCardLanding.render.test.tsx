@@ -43,7 +43,7 @@ const expandedCard = (root: ReactTestRenderer): Card | null => {
 
 onAndroid("a deck card lands on the page's own bounds and the screen's own corner before the page takes over, so the hand-over doesn't jump or square its corners", () => {
   const root = renderSurface(<Surfaces />);
-  const g = deckGeometry(393, 873, 40, 24, 0, "android", appDesign, deckHeaderBottom(), SCREEN_CORNER);
+  const g = deckGeometry(393, 873, 40, 24, 0, "android", appDesign, deckHeaderBottom(), SCREEN_CORNER, "arc");
   act(() => sendDeckCommand({ kind: "openFocused" }));
   let last: Card | null = null;
   for (let frame = 0; frame < 120 && useBrowse.getState().surface === "deck"; frame++) {

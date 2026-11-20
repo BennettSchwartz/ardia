@@ -320,15 +320,6 @@ onIPhone("an Incognito tab's cell is titled Incognito, and its card reads Incogn
   unmount(root);
 });
 
-test("the Archive capsule yields to the grid, as main hides its archive card in the grid", () => {
-  const root = deck();
-  act(() => useArchiveCard.setState({ showing: true }));
-  expect(byTestId(root, "archiveCapsule").length + hosts(root, "archiveCapsule").length).toBeGreaterThan(0);
-  toggle();
-  expect(byTestId(root, "archiveCapsule").length + hosts(root, "archiveCapsule").length).toBe(0);
-  unmount(root);
-});
-
 onAndroid("a grid card's Tab Options action gives TalkBack the same drawn CardMenu, placed from the card as a long press with no touch point", () => {
   const root = deck();
   toggle();

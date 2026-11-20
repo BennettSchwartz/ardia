@@ -51,7 +51,7 @@ import { ConfirmDialog, FloatingMenu, font, MaterialIconButton, menuLayout, Pres
 import { MaterialPageMenu, MaterialPageMenuItems, MaterialSiteSettingsContent, MaterialSiteSettingsHeader } from "./MaterialPageMenu";
 import { countSearchExpansion, MaterialSearchField, MaterialSearchResults, useMaterialSheetSearch } from "../search/MaterialSearchView";
 import { barAddress } from "./FloatingBar";
-import { PageMenuWords, usePageMenuInk } from "./PageMenuWords";
+import { PageMenuCard, PageMenuWords } from "./PageMenuWords";
 import { MaterialAddressContent } from "../ui/MaterialBottomBar";
 import { useMaterialTheme } from "../ui/materialTheme";
 import { MaterialSheet, useMaterialRipple } from "../ui/MaterialSurfaces";
@@ -73,7 +73,6 @@ export function PageMenu({ tabId, open, onHidden }: { tabId: string; open: boole
   const docked = useMenuDocked();
   const design = useDesign();
   const redesigned = design === "redesigned";
-  const ink = usePageMenuInk();
   const hidden = () => {
     onHidden();
     pageMenuHidden();
@@ -84,16 +83,25 @@ export function PageMenu({ tabId, open, onHidden }: { tabId: string; open: boole
       onClose={() => setConfirmsTranslation(false)}
     />
   ) : null;
+  const tappedAway = isPrivate ? undefined : () => countUsage("page_menu_tapped_away");
   if (design === "material" && docked) {
     return <DockedPageMenu tabId={tabId} tab={tab} model={model} page={page} open={open} onHidden={hidden} onTranslate={translate}>{confirmation}</DockedPageMenu>;
   }
+  if (redesigned) {
+    return (
+      <>
+        <PageMenuCard open={open} onDismiss={closePageMenu} onHidden={hidden} onTapAway={tappedAway}>
+          <PageMenuWords tabId={tabId} model={model} onTranslate={translate} />
+        </PageMenuCard>
+        {confirmation}
+      </>
+    );
+  }
   return (
-    <Sheet open={open} onDismiss={closePageMenu} onBack={design === "material" && page === "siteSettings" ? closeMenuSubpage : undefined} onHidden={hidden} fill={redesigned ? ink.sheet : undefined} onTapAway={isPrivate ? undefined : () => countUsage("page_menu_tapped_away")}>
+    <Sheet open={open} onDismiss={closePageMenu} onBack={design === "material" && page === "siteSettings" ? closeMenuSubpage : undefined} onHidden={hidden} onTapAway={tappedAway}>
       {confirmation}
       {design === "material" ? (
         <MaterialPageMenu tabId={tabId} model={model} page={page} onTranslate={translate} />
-      ) : redesigned ? (
-        <PageMenuWords tabId={tabId} model={model} onTranslate={translate} />
       ) : (
         <LayoutAnimationConfig skipEntering>
           <Animated.View key={page} entering={FadeIn.duration(tabsMotion.surfaceFade)} exiting={FadeOut.duration(tabsMotion.surfaceFade)}>

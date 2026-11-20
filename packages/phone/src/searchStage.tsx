@@ -4,7 +4,7 @@ import { Platform, View, type ColorValue, type NativeSyntheticEvent, type ViewPr
 
 export type SearchStageExit = "morph" | "depart" | "drop";
 
-export type SearchStageMorphLook = { usesGlass: boolean; panelTint: ColorValue; panelDark: boolean; classicPanel: ColorValue };
+export type SearchStageMorphLook = { usesGlass: boolean; panelTint: ColorValue; panelDark: boolean; classicPanel: ColorValue; frosted?: boolean };
 
 export type SearchStageCorners = { anchor?: number; panel: number; field?: number };
 
@@ -30,6 +30,10 @@ export type SearchStageProps = ViewProps & {
   landsDirectly?: boolean;
   morphLook?: SearchStageMorphLook;
   morphCorners?: SearchStageCorners;
+  cardInset?: number;
+  cardGap?: number;
+  fieldInset?: number;
+  fieldTop?: number;
   onLift?: (lift: SearchStageLift) => void;
   onReveal?: (reveal: { late: boolean }) => void;
   onSettled?: (settled: { landed: boolean }) => void;
@@ -48,6 +52,7 @@ type NativeProps = Omit<SearchStageProps, "onLift" | "onReveal" | "onSettled" | 
   commandTop?: number;
   morphUsesGlass?: boolean;
   morphPanelTint?: ColorValue;
+  morphFrosted?: boolean;
   morphPanelDark?: boolean;
   morphClassicPanel?: ColorValue;
   anchorRadius?: number;
@@ -95,6 +100,7 @@ export const SearchStage = forwardRef<SearchStageHandle, SearchStageProps>(funct
     commandTop: commandTop ?? undefined,
     morphUsesGlass: morphLook?.usesGlass,
     morphPanelTint: morphLook?.panelTint,
+    morphFrosted: morphLook?.frosted,
     morphPanelDark: morphLook?.panelDark,
     morphClassicPanel: morphLook?.classicPanel,
     anchorRadius: morphCorners?.anchor,

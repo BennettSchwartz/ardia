@@ -1,4 +1,4 @@
-import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { countRender } from "../../state/app/interactionPerf";
 import { AppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SheetScrollContext, SheetScrollView, sheetPullTranslation, type SheetScroll } from "../ui/Sheet";
@@ -7,7 +7,7 @@ import Animated, { cancelAnimation, FadeIn, FadeOut, runOnJS, runOnUI, useAnimat
 import type { GestureType } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { activateRow, cancelSearch, submitSearch, toggleTrayIncognito } from "../../state/browse/store";
-import { menuOpenedHaptic, trayRowActions } from "../../state/browse/tabMenus";
+import { copyLink, menuOpenedHaptic, trayRowActions } from "../../state/browse/tabMenus";
 import { useSearchEditsPage, useSearchFieldVersion, useSearchInitialText, useSearchOpen, useSearchOrigin, useSearchRows, useSearchSession, useSearchText } from "../../state/search/hooks";
 import { SEARCH_ANCHOR_ID, SEARCH_FACE_ID, SEARCH_FIELD_ID, SEARCH_REVEAL_ID, SEARCH_ROWS_REVEAL_ID, setStageMorphs, stageExit, stageOpened, stagePresented, stageSettled, useStageBar } from "../../state/search/stageBar";
 import { SearchStage, SearchStagePanel, searchStageIsNative, type SearchStageHandle, type SearchStageLift } from "../../platform/searchStage";
@@ -23,10 +23,10 @@ import { haptics } from "../../state/app/haptics";
 import { refinedText, type TrayRow } from "../../state/search/omnibox";
 import { searchState, setSearchText, typeSearch } from "../../state/search/store";
 import { coverTray, followTrayBack, trayBackTravel, useTrayCovers } from "../../state/search/trayBack";
-import { useIncognito } from "../../state/tabs/hooks";
+import { useIncognito, useSelectedTab } from "../../state/tabs/hooks";
 import { useTabs } from "../../state/tabs/store";
 import { countUsage, reportLaunchTray } from "../../state/telemetry/telemetry";
-import { browseLayout, capsule, DeckLookBackdrop, shape, smoothCorners, FloatingMenu, font, ink, LookFrost, MotionView, moveTo, radius, screenReaderActions, type MotionCurve, type MotionTarget, rolesFor, trayLandingDelayMs, space, stageMotion, barReturnMotion, Symbol, SURFACES_FROST, tabsCurve, tabsInk, tabsLayout, tabsMotion, trayMotion, trayShadow, useTheme, FadeView, fadeIsNative, floatingPanelLayout, useDesign, useReduceTransparency, useReduceMotion, settingsUIAvailable, SystemGlyph } from "../ui";
+import { browseLayout, capsule, DeckLookBackdrop, Favicon, shape, smoothCorners, FloatingMenu, font, ink, LookFrost, MotionView, moveTo, radius, screenReaderActions, type MotionCurve, type MotionTarget, rolesFor, trayLandingDelayMs, space, stageMotion, barReturnMotion, Symbol, SURFACES_FROST, tabsCurve, tabsInk, tabsLayout, tabsMotion, trayMotion, trayShadow, useTheme, FadeView, fadeIsNative, floatingPanelLayout, useDesign, useReduceTransparency, useReduceMotion, settingsUIAvailable, SystemGlyph } from "../ui";
 import { SuggestionRow } from "./SuggestionRow";
 import { MaterialSearchTray } from "./MaterialSearchView";
 import { TrayInput, type TrayInputHandle } from "./TrayInput";
@@ -36,6 +36,7 @@ import { commandBarMotion, commandPanelPlace, useCommandBar } from "../duo/Comma
 const LARGE_FONT_SCALE = 1.5;
 import { useTrayKeyboard } from "./useTrayKeyboard";
 import { useKeyboardTopFromBottom } from "./useKeyboardHeight";
+import { searchPanel, searchPanelFieldCenter, searchPanelHeight, searchPanelInk } from "./searchPanelTokens";
 import type { Point } from "../../lib/menuPlace";
 
 const SHEET_ABOVE_KEYBOARD = 274;
@@ -46,9 +47,9 @@ type TrayList = { drag: GestureType; scroll: SheetScroll };
 
 const TrayListContext = createContext<TrayList | null>(null);
 
-export const NewTabPanelContext = createContext(false);
+export const SearchPanelContext = createContext(false);
 
-export const newTabPanelShown = (editsPage: boolean, phoneLayout: boolean, commandBar: boolean) => !editsPage && phoneLayout && !commandBar;
+export const searchPanelShown = (phoneLayout: boolean, commandBar: boolean) => phoneLayout && !commandBar;
 
 const PANEL_GLYPHS = { mic: 22, clear: 21 } as const;
 
@@ -60,7 +61,37 @@ const ROWS_FALLBACK = 5;
 
 const TRAY_MORPH_CORNERS = { panel: floatingPanelLayout.panelRadius } as const;
 
+const SEARCH_PANEL_CORNERS = { panel: searchPanel.radius } as const;
+
+const FLOATING_PLACE = { cardInset: floatingPanelLayout.inset, cardGap: floatingPanelLayout.aboveKeyboard, fieldInset: floatingPanelLayout.fieldInset, fieldTop: floatingPanelLayout.fieldInset } as const;
+
+const SEARCH_PANEL_PLACE = { cardInset: 0, cardGap: 0, fieldInset: searchPanel.fieldSide, fieldTop: searchPanel.fieldTop } as const;
+
 const trayPanelFill = (incognito: boolean, dark: boolean) => (incognito ? floatingPanelLayout.incognitoFill : dark ? floatingPanelLayout.panelDark : floatingPanelLayout.panelLight);
+
+const frostedPanelFill = (incognito: boolean, dark: boolean, frosted: boolean) => {
+  const panelInk = searchPanelInk(incognito, dark);
+  return frosted ? panelInk.tint : panelInk.solid;
+};
+
+function SearchPanelFace({ incognito, dark, height }: { incognito: boolean; dark: boolean; height?: number }) {
+  const reduceTransparency = useReduceTransparency();
+  const frosted = Platform.OS === "ios" && !reduceTransparency;
+  const fill = frostedPanelFill(incognito, dark, frosted);
+  const place = [StyleSheet.absoluteFill, styles.searchPanelFace, height === undefined ? null : { bottom: undefined, height }];
+  if (!frosted) return <View testID="searchPanelFace" pointerEvents="none" style={[place, { backgroundColor: fill }]} />;
+  return (
+    <View testID="searchPanelFace" pointerEvents="none" style={[place, styles.searchPanelClip]}>
+      <LookFrost source={SURFACES_FROST} variant="thin" cornerRadius={0} fill={ink.clear} dark={incognito || dark} incognito={incognito} style={StyleSheet.absoluteFill} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: fill }]} />
+    </View>
+  );
+}
+
+const clearPagePrefill = () => {
+  const now = searchState();
+  if (now.open && now.editsPage && now.initialText && now.text === now.initialText && now.fieldVersion === 0) setSearchText("");
+};
 
 const TrayContentContext = createContext<(height: number) => void>(() => undefined);
 
@@ -140,7 +171,15 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
   const panel = useDesign() === "redesigned";
   const placement = useCommandBar(Math.max(keyboard.target, safeBottom));
   const command = panel ? placement : null;
-  const trayHeight = command ? command.maxHeight : trayMaxHeight(preferred, window.height - insets.top, Math.max(keyboard.target, safeBottom), space.s + (panel ? floatingPanelLayout.aboveKeyboard : 0));
+  const arcPanel = panel && command === null;
+  useLayoutEffect(() => {
+    if (arcPanel && !closing) clearPagePrefill();
+  }, []);
+  const trayHeight = command
+    ? command.maxHeight
+    : arcPanel
+      ? trayMaxHeight(searchPanelHeight(searchPanel.fieldHeight * window.fontScale, window.fontScale), window.height - insets.top - NEW_TAB_FIELD.gapAbove, Math.max(keyboard.target, safeBottom), 0)
+      : trayMaxHeight(preferred, window.height - insets.top, Math.max(keyboard.target, safeBottom), space.s + (panel ? floatingPanelLayout.aboveKeyboard : 0));
   const extend = window.height;
   const closedOnPressIn = useRef(false);
   const closeFromTouch = () => {
@@ -344,7 +383,7 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
     if (command) return commandBarMotion(Math.max(landing.value, keyboardProgress(keyboard.height.value, keyboard.full.value, 0)), dim.value, reduceMotion, drag.value, back.value * trayBackTravel);
     return {
       opacity: reduceMotion ? dim.value : 1,
-      transform: [{ translateY: trayOffset(lift, drag.value, rise, trayHeight, panel ? floatingPanelLayout.panelRadius : radius.sheet) + back.value * trayBackTravel }],
+      transform: [{ translateY: trayOffset(lift, drag.value, rise, trayHeight, arcPanel ? searchPanel.radius : panel ? floatingPanelLayout.panelRadius : radius.sheet) + back.value * trayBackTravel }],
     };
   }, [trayHeight, safeBottom, reduceMotion, panel, command !== null]);
 
@@ -366,19 +405,25 @@ function TrayLayer({ session, closing, onClosed }: LayerProps) {
         <Animated.View
           testID="trayPanel"
           style={[
-            command ? commandPanelPlace(command) : [styles.panel, { left: insets.left + floatingPanelLayout.inset, right: insets.right + floatingPanelLayout.inset, height: trayHeight }],
+            command ? commandPanelPlace(command) : arcPanel ? [styles.searchPanelSurface, styles.searchPanelSheet, { left: insets.left, right: insets.right, bottom: -extend, height: trayHeight + extend }] : [styles.panel, { left: insets.left + floatingPanelLayout.inset, right: insets.right + floatingPanelLayout.inset, height: trayHeight }],
             { boxShadow: incognito ? floatingPanelLayout.incognitoShadow : floatingPanelLayout.shadow },
             trayStyle,
           ]}
         >
-          <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.panelFace, { backgroundColor: trayPanelFill(incognito, theme.dark), borderColor: theme.dark || incognito ? theme.panelBorder : ink.clear }]} />
-          <View style={[styles.panelClip, { height: trayHeight }]}>
-            <GestureDetector gesture={dismissDrag}>
-              <View collapsable={false}>
-                <TrayField key={session} closing={closing} />
-              </View>
-            </GestureDetector>
-            <TrayRows dismissDrag={dismissDrag} />
+          {arcPanel ? (
+            <SearchPanelFace incognito={incognito} dark={theme.dark} />
+          ) : (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.panelFace, { backgroundColor: trayPanelFill(incognito, theme.dark), borderColor: theme.dark || incognito ? theme.panelBorder : ink.clear }]} />
+          )}
+          <View style={[arcPanel ? styles.searchPanelClip : styles.panelClip, { height: trayHeight }]}>
+            <SearchPanelContext.Provider value={arcPanel}>
+              <GestureDetector gesture={dismissDrag}>
+                <View collapsable={false}>
+                  <TrayField key={session} closing={closing} />
+                </View>
+              </GestureDetector>
+              <TrayRows dismissDrag={dismissDrag} />
+            </SearchPanelContext.Provider>
           </View>
         </Animated.View>
         </MotionView>
@@ -448,7 +493,7 @@ function StagedTray() {
   const [holdsScroll, setHoldsScroll] = useState(open);
   const [presented, setPresented] = useState(false);
   const [lift, setLift] = useState<SearchStageLift>({ lift: knownLift, up: false });
-  const [fieldHeight, setFieldHeight] = useState(knownFieldHeight || browseLayout.searchFieldHeight * window.fontScale);
+  const [fieldHeight, setFieldHeight] = useState(knownFieldHeight || searchPanel.fieldHeight * window.fontScale);
   const [rowsHeight, setRowsHeight] = useState(knownRowsHeight || ROWS_FALLBACK * browseLayout.suggestionPitch * window.fontScale);
   const live = useRef<{ mounted: number | null; closing: boolean; revealed: boolean; velocity: number; morphs: boolean; presentation: number }>({ mounted: null, closing: false, revealed: false, velocity: 0, morphs: false, presentation: 0 });
   const heldRelease = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -460,14 +505,14 @@ function StagedTray() {
   const resting = Math.max(lift.lift, safeBottom);
   const command = useCommandBar(resting);
   const editsPage = useSearchEditsPage();
-  const newTabPanel = mounted !== null && newTabPanelShown(editsPage, phoneLayout, command !== null);
+  const arcPanel = mounted !== null && searchPanelShown(phoneLayout, command !== null);
   const fieldBlock = floatingPanelLayout.fieldInset + fieldHeight + space.xs;
-  const reach = newTabPanel ? fieldBlock + floatingPanelLayout.reachRows * browseLayout.suggestionPitch * window.fontScale : SHEET_ABOVE_KEYBOARD + browseLayout.searchFieldHeight * (window.fontScale - 1);
-  const preferred = Math.min(reach, fieldBlock + rowsHeight);
-  const trayHeight = command ? command.maxHeight : trayMaxHeight(preferred, window.height - insets.top - (newTabPanel ? NEW_TAB_FIELD.gapAbove : 0), resting, space.s + floatingPanelLayout.aboveKeyboard);
-  const underKeyboard = newTabPanel ? resting : 0;
-  const newTabPanelNow = useRef(newTabPanel);
-  newTabPanelNow.current = newTabPanel;
+  const preferred = arcPanel ? searchPanelHeight(fieldHeight, window.fontScale) : Math.min(SHEET_ABOVE_KEYBOARD + browseLayout.searchFieldHeight * (window.fontScale - 1), fieldBlock + rowsHeight);
+  const trayHeight = command ? command.maxHeight : arcPanel ? trayMaxHeight(preferred, window.height - insets.top - NEW_TAB_FIELD.gapAbove, resting, 0) : trayMaxHeight(preferred, window.height - insets.top, resting, space.s + floatingPanelLayout.aboveKeyboard);
+  const underKeyboard = arcPanel ? resting : 0;
+  const place = arcPanel ? (hinged ? { ...SEARCH_PANEL_PLACE, cardInset: floatingPanelLayout.inset } : SEARCH_PANEL_PLACE) : FLOATING_PLACE;
+  const newTabPanelNow = useRef(!editsPage && arcPanel);
+  newTabPanelNow.current = !editsPage && arcPanel;
   const morphs = phoneLayout && !reduceMotion && command === null && pills > 0;
   live.current.morphs = morphs;
   const heightNow = useSharedValue(trayHeight);
@@ -496,6 +541,7 @@ function StagedTray() {
       now.closing = false;
       now.revealed = false;
       now.velocity = 0;
+      if (searchPanelShown(phoneLayout, command !== null)) clearPagePrefill();
       setMounted(session);
       setClosing(false);
       setHoldsScroll(true);
@@ -564,7 +610,7 @@ function StagedTray() {
     if (next.up && next.lift > 0) knownLift = next.lift;
     setLift((was) => (was.lift === next.lift && was.up === next.up ? was : next));
   };
-  const dimUp = newTabPanel ? !closing : lift.up;
+  const dimUp = arcPanel ? !closing : lift.up;
   useEffect(() => {
     dim.value = withTiming(dimUp ? 1 : 0, { duration: reduceMotion ? barReturnMotion.fadeMs : stageMotion.dimMs, easing: tabsCurve.easeOut });
   }, [dimUp]);
@@ -676,9 +722,11 @@ function StagedTray() {
   const dimStyle = useAnimatedStyle(() => ({ opacity: dim.value * (1 - clampedProgress(drag.value, travel.value)) }));
   const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: drag.value }] }));
   const panelFill = trayPanelFill(incognito, theme.dark);
-  const morphLook = useMemo(() => ({ usesGlass: false, panelTint: ink.clear, panelDark: incognito, classicPanel: panelFill }), [panelFill, incognito]);
+  const morphFrosted = arcPanel && !reduceTransparency;
+  const morphPanel = arcPanel ? frostedPanelFill(incognito, theme.dark, morphFrosted) : panelFill;
+  const morphLook = useMemo(() => ({ usesGlass: false, panelTint: ink.clear, panelDark: incognito, classicPanel: morphPanel, frosted: morphFrosted }), [morphPanel, incognito, morphFrosted]);
   const overPage = origin === "page";
-  const dimTakesTouches = (newTabPanel || lift.up) && !closing;
+  const dimTakesTouches = (arcPanel || lift.up) && !closing;
   const field = useMemo<StagedField>(() => ({ holdsScroll, presented, onFieldHeight: measuredField }), [holdsScroll, presented, measuredField]);
 
   return (
@@ -692,11 +740,15 @@ function StagedTray() {
       focusNativeId={SEARCH_FIELD_ID}
       revealNativeId={SEARCH_REVEAL_ID}
       rowsRevealNativeId={SEARCH_ROWS_REVEAL_ID}
-      fieldCenter={floatingPanelLayout.fieldInset + fieldHeight / 2}
+      fieldCenter={arcPanel ? searchPanelFieldCenter(fieldHeight) : floatingPanelLayout.fieldInset + fieldHeight / 2}
+      cardInset={place.cardInset}
+      cardGap={place.cardGap}
+      fieldInset={place.fieldInset}
+      fieldTop={place.fieldTop}
       commandTop={command ? command.top : null}
       landsDirectly={landsDirectly}
       morphLook={morphLook}
-      morphCorners={TRAY_MORPH_CORNERS}
+      morphCorners={arcPanel ? SEARCH_PANEL_CORNERS : TRAY_MORPH_CORNERS}
       onLift={lifted}
       onReveal={revealed}
       onSettled={settled}
@@ -714,24 +766,28 @@ function StagedTray() {
         onPress={closeOnPress}
         style={[StyleSheet.absoluteFill, { backgroundColor: overPage ? theme.trayDim : ink.clear }, dimStyle]}
       >
-        {overPage && !reduceTransparency ? <LookFrost source={SURFACES_FROST} variant="thin" cornerRadius={0} fill={theme.trayDim} style={StyleSheet.absoluteFill} /> : null}
-        {newTabPanel && !overPage && !incognito ? <DeckLookBackdrop /> : null}
+        {overPage && !reduceTransparency ? <LookFrost source={SURFACES_FROST} variant="thin" cornerRadius={0} fill={theme.trayDim} dark={incognito || theme.dark} style={StyleSheet.absoluteFill} /> : null}
+        {arcPanel && !overPage && !incognito ? <DeckLookBackdrop /> : null}
       </AnimatedPressable>
       <SearchStagePanel testID="trayPanel" pointerEvents="box-none" style={command ? [styles.stagePanel, { top: command.top }] : [styles.stagePanel, { bottom: -underKeyboard }]}>
         <Animated.View testID="trayDrag" collapsable={false} style={dragStyle}>
           {mounted !== null ? (
             <View
               key={presentation}
-              style={command ? { marginLeft: command.left, width: command.width } : [styles.stageCard, hinged ? { paddingLeft: insets.left + floatingPanelLayout.inset, paddingRight: insets.right + floatingPanelLayout.inset } : null]}
+              style={command ? { marginLeft: command.left, width: command.width } : hinged ? [arcPanel ? null : styles.stageCard, { paddingLeft: insets.left + floatingPanelLayout.inset, paddingRight: insets.right + floatingPanelLayout.inset }] : arcPanel ? { paddingLeft: insets.left, paddingRight: insets.right } : styles.stageCard}
               importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
               accessibilityElementsHidden={closing}
             >
-              <View testID="traySurface" style={[styles.stageSurface, { height: trayHeight + underKeyboard, boxShadow: incognito ? floatingPanelLayout.incognitoShadow : floatingPanelLayout.shadow }]}>
-                <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.panelFace, { backgroundColor: panelFill, borderColor: theme.dark || incognito ? theme.panelBorder : ink.clear }]} />
-                <View style={[styles.panelClip, { height: trayHeight + underKeyboard }]}>
+              <View testID="traySurface" style={[arcPanel ? styles.searchPanelSurface : styles.stageSurface, { height: trayHeight + underKeyboard, boxShadow: incognito ? floatingPanelLayout.incognitoShadow : floatingPanelLayout.shadow }]}>
+                {arcPanel ? (
+                  <SearchPanelFace incognito={incognito} dark={theme.dark} />
+                ) : (
+                  <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.panelFace, { backgroundColor: panelFill, borderColor: theme.dark || incognito ? theme.panelBorder : ink.clear }]} />
+                )}
+                <View style={[arcPanel ? styles.searchPanelClip : styles.panelClip, { height: trayHeight + underKeyboard }]}>
                   <TrayContentContext.Provider value={measuredRows}>
-                  <NewTabPanelContext.Provider value={newTabPanel}>
-                    <TrayListContext.Provider value={newTabPanel ? trayList : null}>
+                  <SearchPanelContext.Provider value={arcPanel}>
+                    <TrayListContext.Provider value={arcPanel ? trayList : null}>
                     <StagedFieldContext.Provider value={field}>
                       <GestureDetector gesture={dismissDrag}>
                         <View collapsable={false}>
@@ -743,7 +799,7 @@ function StagedTray() {
                       <TrayRows dismissDrag={dismissDrag} />
                     </View>
                     </TrayListContext.Provider>
-                  </NewTabPanelContext.Provider>
+                  </SearchPanelContext.Provider>
                   </TrayContentContext.Provider>
                 </View>
               </View>
@@ -834,7 +890,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
   const input = useRef<TrayInputHandle | null>(null);
   const submitted = useRef(false);
   const staged = useContext(StagedFieldContext);
-  const newTab = useContext(NewTabPanelContext);
+  const arc = useContext(SearchPanelContext);
 
   const [fieldGone, dropField] = useState(false);
   useEffect(() => {
@@ -852,10 +908,16 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
     return () => clearTimeout(focus);
   }, [closing, staged?.presented]);
   const lastText = useRef(start);
+  const arcInk = searchPanelInk(incognitoField, theme.dark);
+  const areaStyle = arc ? styles.searchPanelFieldArea : panelField ? styles.panelFieldArea : styles.fieldArea;
+  const capsuleStyle = arc
+    ? [styles.searchPanelField, { backgroundColor: arcInk.field, borderColor: arcInk.fieldEdge }]
+    : [styles.field, panelField ? [styles.panelField, theme.dark || incognitoField ? styles.panelFieldDark : styles.panelFieldLight] : { backgroundColor: theme.fieldFill, borderColor: theme.fieldStroke }];
+  const inputStyle = arc ? styles.searchPanelInput : [styles.input, panelField ? styles.panelInput : null];
 
   return (
-    <View testID={newTab ? "newTabFieldRow" : undefined} style={[useDesign() === "redesigned" ? styles.panelFieldArea : styles.fieldArea, newTab ? styles.newTabFieldRow : null]}>
-      <View testID="trayFieldCapsule" onLayout={staged ? (event) => staged.onFieldHeight(event.nativeEvent.layout.height) : undefined} style={[styles.field, panelField ? [styles.panelField, theme.dark || incognitoField ? styles.panelFieldDark : styles.panelFieldLight] : { backgroundColor: theme.fieldFill, borderColor: theme.fieldStroke }, newTab ? styles.newTabField : null]}>
+    <View testID={arc ? "searchPanelFieldRow" : undefined} style={areaStyle}>
+      <View testID="trayFieldCapsule" onLayout={staged ? (event) => staged.onFieldHeight(event.nativeEvent.layout.height) : undefined} style={capsuleStyle}>
         <View testID="trayFieldReveal" nativeID={staged ? SEARCH_REVEAL_ID : undefined} collapsable={false} style={[styles.fieldContents, panelField ? styles.panelField : null]}>
         {fieldGone ? (
           <Text testID="trayFieldLeaving" numberOfLines={1} style={[font.title3, styles.input, styles.leavingText, { color: lastText.current ? theme.foregroundPrimary : theme.foregroundTertiary }]}>
@@ -867,7 +929,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
             input.current = field;
             trayInput = field;
           }}
-          style={[styles.input, panelField ? styles.panelInput : null]}
+          style={inputStyle}
           start={start}
           selectsStart={first && Boolean(initialText)}
           color={theme.foregroundPrimary}
@@ -894,7 +956,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
         ) : (
           <VoiceButton />
         )}
-        <IncognitoToggle />
+        {arc ? <PanelIncognitoToggle /> : <IncognitoToggle />}
         </View>
       </View>
     </View>
@@ -937,6 +999,24 @@ function IncognitoToggle() {
   );
 }
 
+function PanelIncognitoToggle() {
+  const theme = useTrayTheme();
+  const on = useIncognito();
+  const { fontScale } = useWindowDimensions();
+  return (
+    <Pressable testID="trayIncognito" accessibilityRole="button" accessibilityLabel={on ? "Deactivate Incognito" : "Activate Incognito"} hitSlop={space.xs} onPress={toggleTrayIncognito} style={styles.panelIncognitoToggle}>
+      {on && fontScale <= LARGE_FONT_SCALE ? (
+        <Animated.Text testID="trayIncognitoLabel" entering={modeToggleIn} exiting={modeToggleOut} numberOfLines={1} style={[styles.panelIncognitoLabel, { color: searchPanel.incognito.label }]}>
+          Incognito
+        </Animated.Text>
+      ) : null}
+      <View testID="trayIncognitoGlyph">
+        <Symbol name="eyes" size={searchPanel.eyes} color={on ? tabsInk.onDark : theme.foregroundTertiary} />
+      </View>
+    </Pressable>
+  );
+}
+
 function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
   const leaving = useLeavingActions();
   const theme = useTrayTheme();
@@ -956,10 +1036,12 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
     menuOpenedHaptic();
     setMenu({ row, at });
   }, []);
-  const newTab = useContext(NewTabPanelContext);
+  const arc = useContext(SearchPanelContext);
   const list = useContext(TrayListContext);
   const reportRows = useContext(TrayContentContext);
+  const editsPage = useSearchEditsPage();
   const caption = incognito && !typed.trim();
+  const currentPage = arc && editsPage && !typed.trim() ? <CurrentPageRow /> : null;
   const empty = !caption && !rows.length;
   useEffect(() => {
     if (caption) reportRows(INCOGNITO_CAPTION_ROWS * browseLayout.suggestionPitch * window.fontScale);
@@ -969,6 +1051,18 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
     rows.map((_row, index) => bottoms[index] ?? 0),
     room,
   );
+  if (caption && arc) {
+    return (
+      <GestureDetector gesture={dismissDrag}>
+        <Animated.View key="caption" testID="searchPanelCaption" entering={resultsIn} exiting={resultsOut} style={styles.rows}>
+          {currentPage ? <View style={styles.searchPanelRowsContent}>{currentPage}</View> : null}
+          <View style={[styles.rows, styles.incognitoNote]}>
+            <Text style={[styles.searchPanelCaption, styles.centered, { color: searchPanel.incognito.caption }]}>You’re browsing Incognito</Text>
+          </View>
+        </Animated.View>
+      </GestureDetector>
+    );
+  }
   if (caption) {
     return (
       <GestureDetector gesture={dismissDrag}>
@@ -978,7 +1072,7 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
       </GestureDetector>
     );
   }
-  if (!rows.length) {
+  if (!rows.length && !currentPage) {
     return (
       <GestureDetector gesture={dismissDrag}>
         <Animated.View key="empty" entering={resultsIn} exiting={resultsOut} style={styles.rows} collapsable={false} />
@@ -1005,7 +1099,7 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
       <SuggestionRow row={row} typed={typed} roles={theme} menu={trayRowActions(row)} onActivate={leaving.activate} onRefine={refine} onMenu={showMenu} />
     </View>
   ));
-  if (window.fontScale <= LARGE_FONT_SCALE && !newTab) {
+  if (window.fontScale <= LARGE_FONT_SCALE && !arc) {
     return (
       <Animated.View key="rows" testID="trayRows" entering={resultsIn} exiting={resultsOut} style={styles.rows} onLayout={(event) => setRoom(event.nativeEvent.layout.height)}>
         <ScrubbedRows rows={rows} typed={typed} budget={room} onRefine={refine} onMenu={showMenu} onContentHeight={(height) => reportRowsHeight(reportRows, height)} />
@@ -1014,12 +1108,13 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
     );
   }
   return (
-    <Animated.View key="rows" testID={newTab ? "newTabRows" : undefined} entering={resultsIn} exiting={resultsOut} style={styles.rows} onLayout={(event) => setRoom(event.nativeEvent.layout.height)}>
+    <Animated.View key="rows" testID={arc ? "searchPanelRows" : undefined} entering={resultsIn} exiting={resultsOut} style={styles.rows} onLayout={(event) => setRoom(event.nativeEvent.layout.height)}>
       {list ? (
         <GestureDetector gesture={list.drag}>
           <View style={styles.rows} collapsable={false}>
             <SheetScrollContext.Provider value={list.scroll}>
-              <SheetScrollView testID="newTabRowsScroll" style={styles.rows} contentContainerStyle={styles.rowsContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="none" bounces={false} onContentSizeChange={(_width, height) => reportRowsHeight(reportRows, height)}>
+              <SheetScrollView testID="searchPanelRowsScroll" style={styles.rows} contentContainerStyle={arc ? styles.searchPanelRowsContent : styles.rowsContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="none" bounces={false} onContentSizeChange={(_width, height) => reportRowsHeight(reportRows, height)}>
+                {currentPage}
                 {rowViews}
               </SheetScrollView>
             </SheetScrollContext.Provider>
@@ -1027,18 +1122,44 @@ function TrayRows({ dismissDrag }: { dismissDrag: GestureType }) {
         </GestureDetector>
       ) : (
         <ScrollView
-          testID={newTab ? "newTabRowsScroll" : undefined}
-          style={newTab || shown === null ? styles.rows : { height: shown, flexGrow: 0 }}
-          contentContainerStyle={styles.rowsContent}
+          testID={arc ? "searchPanelRowsScroll" : undefined}
+          style={arc || shown === null ? styles.rows : { height: shown, flexGrow: 0 }}
+          contentContainerStyle={arc ? styles.searchPanelRowsContent : styles.rowsContent}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="none"
           onContentSizeChange={(_width, height) => reportRowsHeight(reportRows, height)}
         >
+          {currentPage}
           {rowViews}
         </ScrollView>
       )}
       {menuView}
     </Animated.View>
+  );
+}
+
+function CurrentPageRow() {
+  const theme = useTrayTheme();
+  const incognito = useIncognito();
+  const tab = useSelectedTab();
+  const initialText = useSearchInitialText();
+  if (!tab || !initialText || tab.isPrivate !== incognito) return null;
+  const title = tab.title || initialText;
+  return (
+    <Pressable testID="trayCurrentPage" accessibilityRole="button" accessibilityLabel={`Edit ${title}`} accessibilityHint="Puts this page's address in the search field" onPress={() => setSearchText(initialText)} style={({ pressed }) => [styles.searchPanelRow, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
+      <View style={styles.searchPanelIcon}>
+        <Favicon iconUrl={tab.faviconUrl} pageUrl={tab.url} size={searchPanel.iconSlot} />
+      </View>
+      <Text numberOfLines={1} style={[styles.searchPanelTitle, { color: theme.foregroundPrimary }]}>
+        {title}
+      </Text>
+      <View style={[styles.searchPanelTrailing, styles.refineArrow]}>
+        <Symbol name="arrowUpForward" size={searchPanel.trailingGlyph} color={theme.rowIcon} />
+      </View>
+      <Pressable testID="trayCurrentPageCopy" accessibilityRole="button" accessibilityLabel="Copy Link" hitSlop={space.xs} onPress={() => copyLink(tab.url)} style={styles.searchPanelTrailing}>
+        <SystemGlyph systemName="doc.on.doc" pointSize={searchPanel.trailingGlyph} weight="medium" name="docOnDoc" size={searchPanel.trailingGlyph} color={theme.rowIcon} />
+      </Pressable>
+    </Pressable>
   );
 }
 
@@ -1240,5 +1361,30 @@ const styles = StyleSheet.create({
   semibold: { fontWeight: "600" },
   centered: { textAlign: "center" },
   rowsContent: { paddingHorizontal: space.s, paddingBottom: space.s },
+  searchPanelSheet: { position: "absolute" },
+  searchPanelSurface: { borderTopLeftRadius: searchPanel.radius, borderTopRightRadius: searchPanel.radius, ...smoothCorners },
+  searchPanelFace: { borderTopLeftRadius: searchPanel.radius, borderTopRightRadius: searchPanel.radius, ...smoothCorners },
+  searchPanelClip: { borderTopLeftRadius: searchPanel.radius, borderTopRightRadius: searchPanel.radius, overflow: "hidden", ...smoothCorners },
+  searchPanelFieldArea: { paddingHorizontal: searchPanel.fieldSide, paddingTop: searchPanel.fieldTop, paddingBottom: searchPanel.rowsTop },
+  searchPanelField: {
+    minHeight: searchPanel.fieldHeight,
+    borderRadius: capsule(searchPanel.fieldHeight),
+    borderWidth: searchPanel.fieldEdge,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: searchPanel.fieldLeading,
+    paddingRight: searchPanel.fieldTrailing,
+    ...smoothCorners,
+  },
+  searchPanelInput: { flex: 1, paddingVertical: 0, minHeight: searchPanel.fieldHeight - searchPanel.fieldEdge * 2 },
+  panelIncognitoToggle: { flexDirection: "row", alignItems: "center", gap: searchPanel.eyesGap, minHeight: 40, paddingLeft: space.xs, paddingRight: space.xs },
+  panelIncognitoLabel: { fontSize: searchPanel.incognitoLabel, fontWeight: "500" },
+  searchPanelRowsContent: { paddingHorizontal: searchPanel.rowInset, paddingBottom: searchPanel.bottom },
+  searchPanelRow: { minHeight: searchPanel.rowPitch, flexDirection: "row", alignItems: "center", gap: searchPanel.iconGap, paddingLeft: searchPanel.rowLeading, paddingRight: searchPanel.rowTrailing - space.s, borderRadius: radius.row, ...smoothCorners },
+  searchPanelIcon: { width: searchPanel.iconSlot, height: searchPanel.iconSlot, alignItems: "center", justifyContent: "center" },
+  searchPanelTitle: { flex: 1, fontSize: searchPanel.titleSize },
+  searchPanelTrailing: { width: searchPanel.trailingHit, height: searchPanel.rowPitch, alignItems: "center", justifyContent: "center" },
+  refineArrow: { transform: [{ rotate: "-90deg" }] },
+  searchPanelCaption: { fontSize: searchPanel.captionSize, fontWeight: "500" },
   highlight: { position: "absolute", borderRadius: radius.row, ...smoothCorners },
 });

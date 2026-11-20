@@ -5,7 +5,7 @@ import { DeckBar } from "../components/tabs/DeckBar";
 import { IncognitoChip } from "../components/tabs/DeckChrome";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { ConfirmSheet, DesignProvider, IncognitoSpecs, Symbol, SystemGlyph } from "../components/ui";
-import { deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
+import { DECK, DECK_ARC, deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import { designFor, type Design } from "../lib/design";
 import { haptics } from "../state/app/haptics";
 import { useArchiveCard } from "../state/browse/archiveCard";
@@ -110,23 +110,24 @@ test("the redesign drops the old bar and chip for main's header and bottom bar",
   unmount(root);
 });
 
-test("the redesigned cards sit 24 points lower than the original's on iPhone, centred in the band between main's header and bar; on Android the bar sits where the browsing bar does, so the band's centre rises by half of that lift", () => {
+test("the redesigned cards stack as Arc Search's: two thirds of the screen wide and tall, centred a little under the screen's middle, with 20-point corners; the original keeps its own band", () => {
   const { width, height } = Dimensions.get("window");
   const original = deck("original");
   const before = cardCentres(original);
   unmount(original);
+  for (const centre of before) expect(centre).toBeCloseTo(deckGeometry(width, height, SAFE_TOP, SAFE_BOTTOM, 0, Platform.OS, "original", 48).cardCenterY, 5);
   const root = deck();
   const after = cardCentres(root);
   expect(after.length).toBeGreaterThan(0);
-  const expected = deckGeometry(width, height, SAFE_TOP, SAFE_BOTTOM, 0, Platform.OS, "redesigned", 48).cardCenterY;
-  for (const centre of after) expect(centre).toBeCloseTo(expected, 5);
-  const barLift = redesignedBarCenterFromBottom(SAFE_BOTTOM, Platform.OS) - (Math.max(SAFE_BOTTOM, 20) + 11);
-  expect(barLift).toBe(Platform.OS === "android" ? 10.5 : 0);
-  for (const centre of before) expect(centre).toBeCloseTo(expected - 24 + barLift / 2, 5);
+  const arc = deckGeometry(width, height, SAFE_TOP, SAFE_BOTTOM, 0, Platform.OS, "redesigned", 48, DECK.displayCornerRadius, "arc");
+  for (const centre of after) expect(centre).toBeCloseTo(arc.cardCenterY, 5);
+  expect(arc.cardWidth).toBeCloseTo(width * DECK_ARC.cardWidthRatio, 5);
+  expect(StyleSheet.flatten(hosts(root, "deckCard")[0]!.props.style)).toMatchObject({ width: arc.cardWidth, height: arc.cardHeight });
+  expect(arc.cardCorner).toBe(20);
   unmount(root);
 });
 
-test("the header is centred 26 points under the safe top, 24 in from the sides like the bottom bar, and its ··· is a 44-point glass rounded square", () => {
+test("the header is centred 26 points under the safe top, 24 in from the sides like the bottom bar, and its ··· is a 44-point glass circle", () => {
   const root = deck();
   const header = style(root, "deckHeader");
   expect(header.top + header.height / 2).toBe(SAFE_TOP + 26);
@@ -134,7 +135,8 @@ test("the header is centred 26 points under the safe top, 24 in from the sides l
   expect(style(root, "deckBottomBar")).toMatchObject({ paddingLeft: header.paddingHorizontal, paddingRight: header.paddingHorizontal });
   const more = root.root.findAll((node) => Array.isArray(node.props.items) && node.props.place && node.props.items.some((item: { label?: string }) => item?.label === "Settings"))[0]!;
   expect(more.props.place).toMatchObject({ right: 24 });
-  expect(style(root, "deckHeaderMore")).toMatchObject({ width: 44, height: 44, borderRadius: 12 });
+  expect(style(root, "deckHeaderMore")).toMatchObject({ width: 44, height: 44, borderRadius: 22 });
+  expect(host(root, "deckHeaderMore")!.props.shape ?? "circle").toBe("circle");
   unmount(root);
 });
 
@@ -157,20 +159,20 @@ test("without spaces the switcher reads Tabs; with one space it is that space's 
   unmount(many);
 });
 
-test("the ··· menu holds Archive, New Incognito Tab, Close All Tabs and Settings, adding Spaces From Your Mac with sync on and Reopen Closed Tab when there is one", () => {
+test("the ··· menu holds New Incognito Tab, Close All Tabs and Settings, adding Spaces From Your Mac with sync on and Reopen Closed Tab when there is one; the Archive lives in Settings, not the deck", () => {
   const plain = deck();
   act(() => pressable(plain, "More").props.onPress());
-  expect(menuLabels(plain)).toEqual(["Archive", "New Incognito Tab", "Close All Tabs", "Settings"]);
+  expect(menuLabels(plain)).toEqual(["New Incognito Tab", "Close All Tabs", "Settings"]);
   unmount(plain);
   withSpaces([profile("work", "Work")]);
   jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
   const full = deck();
   act(() => pressable(full, "More").props.onPress());
-  expect(menuLabels(full)).toEqual(["Archive", "Spaces From Your Mac", "New Incognito Tab", "Reopen Closed Tab", "Close All Tabs", "Settings"]);
+  expect(menuLabels(full)).toEqual(["Spaces From Your Mac", "New Incognito Tab", "Reopen Closed Tab", "Close All Tabs", "Settings"]);
   unmount(full);
 });
 
-test("each ··· row does its action: the Archive and Spaces sheets, a private tab, reopening, Settings, and Close All asks first", () => {
+test("each ··· row does its action: the Spaces sheet, a private tab, reopening, Settings, and Close All asks first", () => {
   withSpaces([profile("work", "Work")]);
   jest.spyOn(tabHooks, "useCanReopen").mockReturnValue(true);
   const incognito = jest.spyOn(browse, "newIncognitoTab").mockImplementation(() => undefined);
@@ -182,9 +184,6 @@ test("each ··· row does its action: the Archive and Spaces sheets, a private 
     act(() => pressable(root, "More").props.onPress());
     pickMenu(root, label);
   };
-  choose("Archive");
-  expect(browse.useBrowse.getState().sheet).toBe("archive");
-  act(() => browse.useBrowse.setState({ sheet: null }));
   choose("Spaces From Your Mac");
   expect(browse.useBrowse.getState().sheet).toBe("spaces");
   act(() => browse.useBrowse.setState({ sheet: null }));
@@ -223,7 +222,7 @@ test("the Incognito pill shows only while there are private tabs, with their cou
   unmount(root);
 });
 
-test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-point plus, with no grid button, 8 apart, 24 in from the sides, centred 11 points above the safe bottom on iPhone and where the browsing bar sits on Android", () => {
+test("the bottom bar is the Incognito switch, the Search Tabs pill and a 48-point plus, each round, with no grid button, 8 apart, 24 in from the sides, centred 11 points above the safe bottom on iPhone and where the browsing bar sits on Android", () => {
   const { height } = Dimensions.get("window");
   const root = deck();
   const bar = style(root, "deckBottomBar");
@@ -235,9 +234,9 @@ test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-p
   if (Platform.OS === "android") expect(anchor).toMatchObject({ bottom: centerFromBottom - 24 });
   else expect((anchor.top as number) + 24).toBe(height - centerFromBottom);
   expect(host(root, "deckBarGrid")).toBeUndefined();
-  expect(style(root, "deckBarIncognito")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
-  expect(style(root, "deckBarPlus")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
-  expect(style(root, "deckSearchTabs")).toMatchObject({ borderRadius: 12, borderCurve: "continuous", paddingLeft: 13, paddingRight: 16 });
+  expect(style(root, "deckBarIncognito")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
+  expect(style(root, "deckBarPlus")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
+  expect(style(root, "deckSearchTabs")).toMatchObject({ borderRadius: 24, paddingLeft: 16, paddingRight: 16 });
   const pieces = ["deckBarIncognito", "deckSearchTabs", "deckBarPlus"];
   const shown = host(root, "deckBottomBar")!.findAll((node) => typeof node.type === "string" && pieces.includes(node.props.testID)).map((node) => node.props.testID);
   expect(shown.filter((id, at) => id !== shown[at - 1])).toEqual(pieces);
@@ -276,7 +275,7 @@ test("a tap on the switch shows only the Incognito tabs, fills the whole switch 
   expect(incognitoSwitch(root)!.props.accessibilityState).toMatchObject({ checked: true });
   expect(incognitoSwitch(root)!.props.accessibilityHint).toBe("Shows your tabs.");
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true).length).toBeGreaterThan(0);
-  expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
+  expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyesClosed")).toHaveLength(1);
   expect(pressable(root, "New Incognito Tab")).toBeDefined();
   expect(counted.mock.calls.filter(([name]) => name === "deck_incognito_switches")).toHaveLength(1);
@@ -304,14 +303,11 @@ test("the switch fades the shown side's cards out before the other side's cards 
   unmount(root);
 });
 
-test("with no Incognito tabs the switch shows an empty Incognito deck that says so, without the Archive link or the Archive capsule, and switching back shows every normal tab", () => {
-  act(() => useArchiveCard.setState({ showing: true }));
+test("with no Incognito tabs the switch shows an empty Incognito deck that says so, without the Archive link, and switching back shows every normal tab", () => {
   const root = deck();
-  expect(host(root, "archiveCapsule")).toBeDefined();
   act(() => incognitoSwitch(root)!.props.onPress());
   act(() => jest.advanceTimersByTime(600));
   expect(hosts(root, "deckCard")).toHaveLength(0);
-  expect(host(root, "archiveCapsule")).toBeUndefined();
   expect(textOf(root)).toContain("No Incognito Tabs");
   expect(textOf(root)).toContain("Incognito tabs aren’t saved to your history or the Archive.");
   expect(textOf(root)).not.toContain("Open Archive");
@@ -319,7 +315,6 @@ test("with no Incognito tabs the switch shows an empty Incognito deck that says 
   act(() => jest.advanceTimersByTime(600));
   expect(hosts(root, "deckCard")).toHaveLength(9);
   expect(textOf(root)).not.toContain("No Incognito Tabs");
-  expect(host(root, "archiveCapsule")).toBeDefined();
   unmount(root);
 });
 
@@ -399,22 +394,27 @@ test("opening Search Tabs counts search_tabs_opened once per focus, and never wh
   unmount(privately);
 });
 
-test("the redesign's Archive card is a 43-point rounded rectangle centred 78.5 under the safe top and 24 in from the sides like the header, floating over the deck: the cards stay where they are while it shows, and its x dismisses it", () => {
+test("the redesigned deck shows no Archive banner, icon or link, even when the old offer is up, and its cards never move for one; the original deck still offers its Archive card", () => {
   act(() => useArchiveCard.setState({ showing: true }));
   const root = deck();
   expect(host(root, "archiveCardPlace")).toBeUndefined();
-  const place = style(root, "archiveCapsulePlace");
-  expect(place.top + 43 / 2).toBe(SAFE_TOP + 78.5);
-  expect(place.paddingHorizontal).toBe(24);
-  expect(style(root, "archiveCapsule")).toMatchObject({ minHeight: 43, borderRadius: 16, borderCurve: "continuous", maxWidth: 560 });
-  act(() => jest.advanceTimersByTime(1000));
-  const shift = () => (getAnimatedStyle(host(root, "deckCards")!).transform as { translateY?: number }[]).find((step) => step.translateY !== undefined)!.translateY;
-  expect(shift()).toBeCloseTo(0, 1);
-  act(() => pressable(root, "Dismiss").props.onPress());
-  expect(useArchiveCard.getState().showing).toBe(false);
-  act(() => jest.advanceTimersByTime(1000));
   expect(host(root, "archiveCapsule")).toBeUndefined();
-  expect(shift()).toBeCloseTo(0, 1);
+  expect(root.root.findAll((node) => node.props.systemName === "archivebox" || node.props.name === "archivebox")).toHaveLength(0);
+  const before = cardCentres(root);
+  act(() => jest.advanceTimersByTime(1000));
+  expect(cardCentres(root)).toEqual(before);
+  unmount(root);
+  act(() => useArchiveCard.setState({ showing: true }));
+  const original = deck("original");
+  expect(host(original, "archiveCardPlace")).toBeDefined();
+  unmount(original);
+});
+
+test("the space switcher sits on a glass capsule as tall as the ··· circle", () => {
+  withSpaces([profile("work", "Work"), profile("home", "Home")]);
+  const root = deck();
+  expect(style(root, "deckSwitcherGlass")).toMatchObject({ borderRadius: 22 });
+  expect(root.root.findAll((node) => node.props.testID === "deckSwitcherGlass" && node.props.shape === "capsule").length).toBeGreaterThan(0);
   unmount(root);
 });
 

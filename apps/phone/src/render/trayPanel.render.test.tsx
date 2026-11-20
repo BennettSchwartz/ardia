@@ -30,16 +30,14 @@ const host = (root: ReturnType<typeof renderSurface>, testID: string) => root.ro
 
 const departure = (root: ReturnType<typeof renderSurface>) => root.root.findAll((node) => node.type === MotionView)[0]!;
 
-test("in the redesign search is a clean floating panel: 8 points in from the sides and above the keyboard, 22-point smooth corners concentric with the field's 12, the field 9 points in, solid white with no space tint", () => {
+test("in the redesign search is Arc's panel: edge to edge, sitting on the keyboard and running on under it, 20-point smooth top corners, the field 16 in and 15 down", () => {
   const root = open("redesigned");
   const panel = StyleSheet.flatten(host(root, "trayPanel")!.props.style);
-  expect(panel).toMatchObject({ position: "absolute", left: 8, right: 8, bottom: 8, borderRadius: 22, borderCurve: "continuous" });
+  expect(panel).toMatchObject({ position: "absolute", left: 0, right: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, borderCurve: "continuous" });
+  expect(panel.bottom as number).toBeLessThan(0);
   expect(panel.boxShadow).toBe("0px 4px 36px rgba(0, 0, 0, 0.1)");
-  const fieldArea = root.root.findAll((node) => typeof node.type === "string" && StyleSheet.flatten(node.props.style)?.paddingTop === 9)[0];
-  expect(StyleSheet.flatten(fieldArea!.props.style)).toMatchObject({ paddingHorizontal: 9, paddingTop: 9 });
-  const face = host(root, "trayPanel")!.findAll((node) => typeof node.type === "string" && StyleSheet.flatten(node.props.style)?.backgroundColor === "#FFFFFF" && StyleSheet.flatten(node.props.style)?.borderRadius === 22);
-  expect(face.length).toBeGreaterThan(0);
-  expect(host(root, "trayPanel")!.findAll((node) => typeof node.type === "string" && StyleSheet.flatten(node.props.style)?.opacity === 0.55)).toHaveLength(0);
+  expect(StyleSheet.flatten(host(root, "searchPanelFieldRow")!.props.style)).toMatchObject({ paddingHorizontal: 16, paddingTop: 15 });
+  expect(host(root, "searchPanelFace")).toBeDefined();
   unmount(root);
 });
 
@@ -61,7 +59,7 @@ test("in the redesign a submitted search lifts the panel 120 points and fades it
   unmount(root);
 });
 
-test("in the redesign the field is a grey 12-point rounded rectangle on the white panel, not a pill, and rows have no refine arrow", () => {
+test("in the redesign the field is Arc's grey 44-point pill and rows have no refine arrow", () => {
   act(() => presentSearch("page", "otter"));
   const root = renderSurface(
     <DesignProvider design="redesigned">
@@ -69,7 +67,7 @@ test("in the redesign the field is a grey 12-point rounded rectangle on the whit
     </DesignProvider>,
   );
   const field = root.root.findAll((node) => typeof node.type === "string" && StyleSheet.flatten(node.props.style)?.borderWidth === 0.5 && StyleSheet.flatten(node.props.style)?.minHeight !== undefined)[0];
-  expect(StyleSheet.flatten(field!.props.style)).toMatchObject({ backgroundColor: "rgba(118,118,128,0.12)", borderRadius: 12, borderCurve: "continuous" });
+  expect(StyleSheet.flatten(field!.props.style)).toMatchObject({ backgroundColor: "rgba(118,118,128,0.17)", minHeight: 44, borderRadius: 22, borderCurve: "continuous" });
   expect(root.root.findAll((node) => typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Refine ") && typeof node.props.onPress === "function")).toHaveLength(0);
   unmount(root);
 });

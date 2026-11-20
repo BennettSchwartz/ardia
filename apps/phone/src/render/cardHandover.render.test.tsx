@@ -31,7 +31,7 @@ const translateY = (node: ReactTestInstance) => ((getAnimatedStyle(node).transfo
 const scaleY = (node: ReactTestInstance) => ((getAnimatedStyle(node).transform as { scaleY?: number }[] | undefined) ?? []).reduce((value, step) => (step.scaleY === undefined ? value : step.scaleY), 1);
 
 test("an opening card grows a bar band in the page's bar colour from its first frame, and lands its picture where the page view sat when it was captured", () => {
-  const g = deckGeometry(393, 873, 40, 24, 0, Platform.OS, appDesign, deckHeaderBottom());
+  const g = deckGeometry(393, 873, 40, 24, 0, Platform.OS, appDesign, deckHeaderBottom(), 55, "arc");
   const root = renderSurface(<Surfaces />);
   act(() => sendDeckCommand({ kind: "openFocused" }));
   const bands = root.root.findAll((node) => node.props.testID === "deckCardBarBand" && typeof node.type === "string");

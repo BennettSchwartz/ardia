@@ -101,7 +101,7 @@ test("the original menu is unchanged: icon rows and tiles, no glass capsules, Pr
 
 test("the redesign has main's word rows in main's order, each with its icon, in main's groups, with the Library's rows on both phones", async () => {
   const root = await openMenu("redesigned");
-  expect(wordRows(root)).toEqual(["Find on Page", "Print", "History", "Bookmarks", "Downloads", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Block Ads and Trackers", "Site Settings", "Open in Default Browser"]);
+  expect(wordRows(root)).toEqual(["Print", "History", "Bookmarks", "Downloads", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Block Ads and Trackers", "Site Settings", "Open in Default Browser"]);
   expect(hosts(root, (id) => id === "pageMenuGroup")).toHaveLength(4);
   for (const row of hosts(root, (id) => id.startsWith("pageMenuRow:") || id.startsWith("menuToggle:"))) expect(symbolsIn(row)).toHaveLength(1);
   unmount(root);
@@ -129,17 +129,17 @@ test("opening the Library from an Incognito page isn't counted", async () => {
   unmount(root);
 });
 
-test("the redesign puts Send under Find and above Print, as main's first group", async () => {
+test("the redesign puts Send above Print, as main's first group", async () => {
   withOneMac();
   const root = await openMenu("redesigned");
-  expect(wordRows(root).slice(0, 3)).toEqual(["Find on Page", "Send to Studio", "Print"]);
+  expect(wordRows(root).slice(0, 2)).toEqual(["Send to Studio", "Print"]);
   unmount(root);
 });
 
-test("the redesign's Reader, Copy Link and Share are rounded tiles with an icon and a label, in one row under the navigation bar, on a grouped sheet", async () => {
+test("the redesign's Reader, Find on Page, Copy Link and Share are square rounded tiles with their label under them, in one row under a pill navigation bar, on a floating card", async () => {
   const root = await openMenu("redesigned");
   const capsules = hosts(root, (id) => id.startsWith("pageMenuAction:"));
-  expect(capsules.map((node) => node.props.testID)).toEqual(["pageMenuAction:Reader", "pageMenuAction:Copy Link", "pageMenuAction:Share"]);
+  expect(capsules.map((node) => node.props.testID)).toEqual(["pageMenuAction:Reader", "pageMenuAction:Find on Page", "pageMenuAction:Copy Link", "pageMenuAction:Share"]);
   for (const capsule of capsules) {
     expect(textOf({ root: capsule } as never)).toBe(capsule.props.testID.slice("pageMenuAction:".length));
     expect(symbolsIn(capsule)).toHaveLength(1);
@@ -148,7 +148,11 @@ test("the redesign's Reader, Copy Link and Share are rounded tiles with an icon 
   for (const label of ["Back", "Forward", "Pin to Mac", "Reload"]) expect(nav.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(0);
   expect(textOf({ root: nav } as never)).toContain("Site 0");
   expect(host(root, "pageMenuCapsuleRow")!.findAll((node) => node.props.testID === "pageMenuTitle" && typeof node.type === "string")).toHaveLength(1);
-  expect(StyleSheet.flatten(host(root, "sheetFill")!.props.style).backgroundColor).toBe("#F2F2F7");
+  expect(StyleSheet.flatten(nav.props.style).borderRadius).toBe(StyleSheet.flatten(host(root, "pageMenuCapsuleRow")!.props.style).minHeight / 2);
+  expect(host(root, "sheetFill")).toBeUndefined();
+  const card = StyleSheet.flatten(host(root, "pageMenuCard")!.props.style);
+  expect(card.borderRadius).toBe(30);
+  expect(card.bottom).toBeGreaterThan(48);
   unmount(root);
 });
 
@@ -164,7 +168,7 @@ test("Print shows only where the phone can print", async () => {
   jest.spyOn(pages, "canPrint").mockReturnValue(false);
   const root = await openMenu("redesigned");
   expect(wordRows(root)).not.toContain("Print");
-  expect(wordRows(root)[0]).toBe("Find on Page");
+  expect(wordRows(root)[0]).toBe("History");
   unmount(root);
 });
 
@@ -333,7 +337,7 @@ test("at accessibility text sizes the redesign's title moves under the navigatio
   expect(titlesIn("pageMenuCapsule")).toBe(1);
   expect(titlesIn("pageMenuCapsuleRow")).toBe(0);
   expect(StyleSheet.flatten(host(root, "menuZoom")!.props.style).flexDirection).not.toBe("row");
-  expect(hosts(root, (id) => id.startsWith("pageMenuAction:"))).toHaveLength(3);
+  expect(hosts(root, (id) => id.startsWith("pageMenuAction:"))).toHaveLength(4);
   unmount(root);
 });
 
