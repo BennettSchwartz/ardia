@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
-import { RawView } from "./views/rawView";
+import { RawView } from "./views/raw/rawView";
 import { VisualEffect } from "./views/materials";
 import { WindowDragRegion } from "./windowDragRegion";
 

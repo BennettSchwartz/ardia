@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const backedView = path.resolve(__dirname, "src/views/BackedView.tsx");
-const rawView = path.resolve(__dirname, "src/views/rawView.ts");
+const rawView = path.resolve(__dirname, "src/views/raw/rawView.ts");
 const reactNativeWindowsView = /[/\\]react-native-windows[/\\]Libraries[/\\]Components[/\\]View[/\\]View\.windows\.js$/;
 
 const realPath = (file) => {

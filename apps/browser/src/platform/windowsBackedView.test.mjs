@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 
-const { backedStyles, routedNativeStyle, touchesFill } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
+const { backedStyles, fillPointerEvents, processedColorDraws, routedNativeStyle, touchesFill } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
 const { backedOnWindows, backedView, rawView } = createRequire(import.meta.url)("../../../../packages/expo-windows/metroResolution.js");
 
 const at = (offsets, extra = {}) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, ...offsets, backgroundColor: "red", ...extra });
@@ -14,6 +15,30 @@ test("no fill without a meaningful background or with a shadow, so the view is l
   assert.equal(backedStyles({ backgroundColor: "red", shadowColor: "black", shadowOpacity: 0.2 }), null);
   assert.equal(backedStyles({ backgroundColor: "red", boxShadow: "0 1px 2px black" }), null);
   assert.equal(backedStyles({ backgroundColor: "rgba(0,0,0,0)" }, (color) => color !== "rgba(0,0,0,0)"), null);
+});
+
+test("a colour draws when its alpha byte isn't zero, as React Native Windows decides, whatever its other channels", () => {
+  assert.equal(processedColorDraws(0xff0000ff), true);
+  assert.equal(processedColorDraws(0x01000000), true);
+  assert.equal(processedColorDraws(0x00ff0000), false);
+  assert.equal(processedColorDraws(0), false);
+  assert.equal(processedColorDraws(null), false);
+  assert.equal(processedColorDraws({ windowsbrush: ["SystemAccentColor"] }), true);
+});
+
+test("a view the fill can't match keeps its own background: static, right to left, or with an outline", () => {
+  assert.equal(backedStyles({ backgroundColor: "red", position: "static" }), null);
+  assert.equal(backedStyles({ backgroundColor: "red", direction: "rtl" }), null);
+  assert.equal(backedStyles({ backgroundColor: "red", outlineWidth: 2, outlineColor: "blue" }), null);
+  assert.ok(backedStyles({ backgroundColor: "red", position: "relative", direction: "ltr" }));
+});
+
+test("the fill takes the view's presses, unless the view lets presses through its own area", () => {
+  assert.equal(fillPointerEvents(undefined), undefined);
+  assert.equal(fillPointerEvents("auto"), undefined);
+  assert.equal(fillPointerEvents("box-only"), undefined);
+  assert.equal(fillPointerEvents("box-none"), "none");
+  assert.equal(fillPointerEvents("none"), "none");
 });
 
 test("the fill takes the background off the view and keeps everything else on it", () => {
@@ -51,7 +76,9 @@ test("setNativeProps that change the background or border go to the fill, and th
   assert.deepEqual(routed.fill, at({ top: -1, bottom: -1, left: -1, right: -1 }, { backgroundColor: "blue", borderWidth: 1, borderColor: "black" }));
   assert.deepEqual(routed.own, { opacity: 0.4, borderColor: "transparent" });
   assert.equal(routed.latest.backgroundColor, "blue");
-  assert.equal(routedNativeStyle({ backgroundColor: "red" }, { backgroundColor: "transparent" }), null);
+  const cleared = routedNativeStyle({ backgroundColor: "red", borderRadius: 4 }, { backgroundColor: "transparent" });
+  assert.deepEqual(cleared.fill, at({}, { backgroundColor: "transparent", borderRadius: 4 }));
+  assert.deepEqual(cleared.own, {});
 });
 
 test("Metro hands every importer of React Native Windows' View the backed view, except the raw view's own module", () => {
@@ -62,4 +89,32 @@ test("Metro hands every importer of React Native Windows' View the backed view, 
   assert.deepEqual(backedOnWindows({ type: "sourceFile", filePath: view }, rawView), { type: "sourceFile", filePath: view });
   assert.deepEqual(backedOnWindows(other, "/repo/x.js"), other);
   assert.deepEqual(backedOnWindows({ type: "empty" }, "/repo/x.js"), { type: "empty" });
+});
+
+const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../../../..");
+const packageSources = readdirSync(path.join(repo, "packages"), { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => path.join(repo, "packages", entry.name, "src"));
+
+function* sources(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) yield* sources(full);
+    else if (/\.tsx?$/.test(entry.name) && !entry.name.includes(".test.")) yield full;
+  }
+}
+
+test("no shared view is static or has a negative zIndex, since Fabric mounts either before a background's fill", () => {
+  const offending = [];
+  for (const dir of [path.join(repo, "apps/browser/src"), ...packageSources]) {
+    for (const file of sources(dir)) {
+      if (/position:\s*["']static["']|zIndex:\s*-\s*\d|zIndex=\{\s*-/.test(readFileSync(file, "utf8"))) offending.push(path.relative(repo, file));
+    }
+  }
+  assert.deepEqual(offending, []);
 });

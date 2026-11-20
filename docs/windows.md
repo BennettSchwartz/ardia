@@ -482,23 +482,28 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   visuals but not the background. React Native mounts children inside a view only when it forms a stacking context
   (`zIndex` with a position, `opacity` below 1, a transform, `pointerEvents="none"` and so on), so only a view with a
   background and a stacking context is hit: a later child lands under the background, or under its previous sibling.
-  - **Remedy, for every view:** the Windows bundle never gives a view a background sprite. Metro resolves React
-    Native Windows' own `View` (`Libraries/Components/View/View.windows.js`), whoever imports it (the app, `Pressable`,
-    `Animated.View`, our `views/`), to `packages/expo-windows/src/views/BackedView.tsx`
-    (`packages/expo-windows/metroResolution.js`); only `views/rawView.ts` gets the original. A view whose style has a
-    background that draws and no shadow renders through the original with the background and the border moved onto a
-    permanent first child (`views/backgroundFill.ts`): absolute at the border box, so it paints under the border as
-    the sprite did, with the view's own radii, border widths, colours, style and curve. The view keeps its border
-    widths for layout, with clear colours. With no sprite on the view, a child mounted later lands at its index, above
-    the fill, whether or not the view forms a stacking context. The fill has no `zIndex`, so in a view that forms no
-    stacking context it's flattened into its ancestor in the view's own place. A `setNativeProps` that changes the
-    background or the border (an animated `backgroundColor`, as the split zones' glow) goes to the fill. Left as they
-    were: a view with a shadow (React Native Windows draws it on the view's outer visual), a background that first
-    arrives through `setNativeProps`, and borders that differ by side under right-to-left layout, which the offsets
-    read left to right. `ARDIA_TEST=rawBackgrounds=1` turns the fill off in a test instance, to compare.
-    Mac, Linux and the web don't use this resolver and render as before. Patching React Native Windows instead isn't
-    open to us: the app takes `Microsoft.ReactNative` prebuilt from NuGet (`UseExperimentalNuget`), so a C++ fix means
-    building React Native Windows from source for both CPUs.
+  - **Remedy, by default:** the Windows bundle keeps backgrounds off the views children mount into. Metro resolves
+    React Native Windows' own `View` (`Libraries/Components/View/View.windows.js`), whoever imports it (the app,
+    `Pressable`, `Animated.View`, our `views/`), to `packages/expo-windows/src/views/BackedView.tsx`
+    (`packages/expo-windows/metroResolution.js`); only `views/raw/rawView.ts` gets the original. A view whose style
+    has a background that draws renders through the original with the background and the border moved onto a first
+    child (`views/backgroundFill.ts`): absolute at the border box, so it paints under the border as the sprite did,
+    with the view's own radii, border widths, colours, style and curve. The view keeps its border widths for layout,
+    with clear colours. With no sprite on the view, a child mounted later lands at its index, above the fill, whether
+    or not the view forms a stacking context. The fill has no `zIndex`, so in a view that forms no stacking context
+    it's flattened into its ancestor in the view's own place. It takes the view's presses, so a painted overlay still
+    stops clicks, unless the view's `pointerEvents` lets them through its own area (`none`, `box-none`). A
+    `setNativeProps` that changes the background or the border (an animated `backgroundColor`, as the split zones'
+    glow) goes to the fill.
+  - Views keep their own background, as before, when the fill can't match them: a shadow (React Native Windows draws
+    it on the view's outer visual), `position: "static"` (its absolute fill would size against an ancestor), an
+    outline, or `direction: "rtl"`. So does a view once it has painted its own background, through `setNativeProps`
+    or one of those, since React Native Windows never removes a sprite it made. Fabric mounts a `position: "static"`
+    child and one with a negative `zIndex` before an absolute fill, so the shared UI has neither
+    (`platform/windowsBackedView.test.mjs` fails on one). `ARDIA_TEST=rawBackgrounds=1` turns fills off in a test
+    instance, to compare. Mac, Linux and the web don't use this resolver and render as before.
+  - Patching React Native Windows isn't the smaller fix: the app takes `Microsoft.ReactNative` prebuilt from NuGet
+    (`UseExperimentalNuget`), so a C++ fix means building React Native Windows from source for both CPUs.
   - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
     child mounted into a plain `View` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
     round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
