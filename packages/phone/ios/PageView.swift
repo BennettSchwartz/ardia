@@ -317,13 +317,15 @@ final class PageView: ExpoView {
     let scrollView = hostedWebView.scrollView
     let adjustment: UIScrollView.ContentInsetAdjustmentBehavior = pins ? .never : .always
     let top = topClearance + pinned.top
-    if scrollView.contentInset.top != top || scrollView.contentInset.bottom != pinned.bottom || scrollView.contentInsetAdjustmentBehavior != adjustment {
+    let target = UIEdgeInsets(top: top, left: pinned.left, bottom: pinned.bottom, right: pinned.right)
+    if scrollView.contentInset != target || scrollView.contentInsetAdjustmentBehavior != adjustment {
       let restsAtTop = scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top + 0.5
+      let restsAtLeft = scrollView.contentOffset.x <= -scrollView.adjustedContentInset.left + 0.5
       scrollView.contentInsetAdjustmentBehavior = adjustment
-      scrollView.contentInset.top = top
-      scrollView.contentInset.bottom = pinned.bottom
+      scrollView.contentInset = target
       scrollView.verticalScrollIndicatorInsets.top = topClearance
       if restsAtTop { scrollView.contentOffset.y = -scrollView.adjustedContentInset.top }
+      if restsAtLeft { scrollView.contentOffset.x = -scrollView.adjustedContentInset.left }
     }
   }
 
