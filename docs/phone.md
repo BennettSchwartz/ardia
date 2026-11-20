@@ -1668,7 +1668,10 @@ What the switch changes, and what it leaves alone:
   cross-fading card pictures are not carried over, since main's deck parity replaced that path.
 - Main's tests run on main's design; the Material tests turn the switch on with `withMaterialYou()` from the render
   harness.
-- My Filters puts the keyboard away when it is left by its back arrow or unmounted, in both designs.
+- My Filters puts the keyboard away when it is left by its back arrow or unmounted, with Material You on only;
+  main's design is left as it is.
+- Spaces split the tabs with Material You on exactly as they do in main's design (`tabSpacesFor` answers for every
+  design but the original), so the Material deck's Space switcher shows that Space's tabs.
 
 With the switch on:
 

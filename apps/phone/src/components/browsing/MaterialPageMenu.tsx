@@ -6,6 +6,7 @@ import { withAlpha } from "../../lib/color";
 import { copy } from "../../lib/platformCopy";
 import {
   canPrintPages,
+  canSummarizePages,
   closeMenuSubpage,
   closePageMenu,
   copyCurrentLink,
@@ -29,6 +30,7 @@ import {
   showReader,
   zoomIn,
   zoomOut,
+  summarizeCurrentPage,
 } from "../../state/page/actions";
 import type { MenuModel } from "../../state/page/pageMenu";
 import { useMenuTitle, useTitleFeedback } from "../../state/page/hooks";
@@ -38,6 +40,7 @@ import { openLibrary, type LibrarySection } from "../../state/library/store";
 import { useIsPinned, useSendTargets } from "../../state/sync/hooks";
 import { syncOffered } from "../../state/sync/offer";
 import { useTab } from "../../state/tabs/hooks";
+import { usePageSummariesEnabled } from "../../state/pageSummary/enabled";
 import { MaterialSettingsSheetSurface } from "../settings/MaterialSettingsKit";
 import { AllowedSites, SiteSettingsGroups } from "../settings/SitePages";
 import { Favicon, MaterialIconButton, Symbol, Toggle, type MenuItem, type SymbolName } from "../ui";
@@ -103,6 +106,7 @@ export function MaterialSiteSettingsContent() {
 export function MaterialPageMenuItems({ tabId, model, onTranslate, onFind = showFind }: { tabId: string; model: MenuModel; onTranslate: () => void; onFind?: () => void }) {
   const large = useWindowDimensions().fontScale >= copy().menuLargeTextScale;
   const devices = useSendTargets(tabId);
+  const offersSummary = usePageSummariesEnabled() && canSummarizePages();
   return (
     <>
       {large ? (
@@ -121,6 +125,7 @@ export function MaterialPageMenuItems({ tabId, model, onTranslate, onFind = show
       <Groups>
         <Group>
           <ListRow icon="textMagnifyingglass" title="Find on Page" enabled={model.find} onPress={onFind} />
+          {offersSummary ? <ListRow icon="sparkles" title="Summarize Page" enabled={model.summarize} onPress={summarizeCurrentPage} /> : null}
           {model.isWebPage && devices.length ? <SendRow devices={devices} /> : null}
           {canPrintPages() ? <ListRow icon="printer" title="Print" enabled={model.print} onPress={printCurrentPage} /> : null}
         </Group>

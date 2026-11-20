@@ -258,11 +258,11 @@ class MaterialModule : Module() {
 
     private fun startWatching() {
         val context = context() ?: return
-        changes.read()
+        changes.check("wallpaper")
         if (MaterialScheme.dynamic && wallpaperListener == null) {
             val listener = WallpaperManager.OnColorsChangedListener { _: WallpaperColors?, _: Int ->
                 changes.check("wallpaper")
-                main.postDelayed({ changes.check("wallpaper") }, PALETTE_SETTLE_MS)
+                main.postDelayed({ changes.check("wallpaper") }, SETTLE_TOKEN, PALETTE_SETTLE_MS)
             }
             runCatching { WallpaperManager.getInstance(context).addOnColorsChangedListener(listener, main) }.onSuccess { wallpaperListener = listener }
         }
@@ -283,7 +283,7 @@ class MaterialModule : Module() {
 
     private fun stopWatching() {
         val context = context() ?: return
-        main.removeCallbacksAndMessages(null)
+        main.removeCallbacksAndMessages(SETTLE_TOKEN)
         wallpaperListener?.let { listener -> runCatching { WallpaperManager.getInstance(context).removeOnColorsChangedListener(listener) } }
         wallpaperListener = null
         configurationListener?.let(context::unregisterComponentCallbacks)
@@ -338,5 +338,6 @@ class MaterialModule : Module() {
     private companion object {
         const val CHANGE = "onSchemeChange"
         const val PALETTE_SETTLE_MS = 800L
+        val SETTLE_TOKEN = Any()
     }
 }

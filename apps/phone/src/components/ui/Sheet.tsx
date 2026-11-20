@@ -107,7 +107,7 @@ type Props = {
 };
 
 export function Sheet(props: Props) {
-  return useDesign() === "material" ? <MaterialSheet open={props.open} onDismiss={props.onDismiss} onBack={props.onBack} onHidden={props.onHidden}>{props.children}</MaterialSheet> : <ClassicSheet {...props} />;
+  return useDesign() === "material" ? <MaterialSheet open={props.open} onDismiss={props.onDismiss} onTapAway={props.onTapAway} onBack={props.onBack} onHidden={props.onHidden}>{props.children}</MaterialSheet> : <ClassicSheet {...props} />;
 }
 
 function ClassicSheet({ open, onDismiss, onHidden, fill, onTapAway, children }: Props) {

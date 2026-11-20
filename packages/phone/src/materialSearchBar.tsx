@@ -123,7 +123,7 @@ export const MaterialSearchBar = forwardRef<MaterialSearchBarHandle, MaterialSea
         onTypedChange?.(event.nativeEvent.typed);
       },
       onSubmit: (event) => {
-        if (Platform.OS === "android") labLog(`PAGELAB completion js received submit #${event.nativeEvent.submit ?? "?"} "${event.nativeEvent.displayed}"`);
+        if (Platform.OS === "android") labLog(`PAGELAB material search js received submit #${event.nativeEvent.submit ?? "?"}`);
         onSubmit?.(event.nativeEvent.displayed);
       },
       onFocusChange: (event) => onFocusChange?.(event.nativeEvent.focused),

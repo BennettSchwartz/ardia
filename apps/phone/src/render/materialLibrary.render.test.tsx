@@ -132,7 +132,12 @@ onAndroid("the active tab is labelled in primary over a 3 dp primary indicator w
 
 onAndroid("history lists each day under a titleSmall primary header, as 72 dp two-line items, and a tap opens the page", () => {
   const opened = jest.spyOn(library, "openFromLibrary").mockImplementation(() => undefined);
-  act(() => useLibrary.setState({ history: [entry(1, NOW), entry(2, NOW - 60_000), entry(3, NOW - DAY - 60_000)], historyLoaded: true }));
+  const noon = new Date();
+  noon.setHours(12, 0, 0, 0);
+  jest.setSystemTime(noon);
+  const yesterday = new Date(noon);
+  yesterday.setDate(noon.getDate() - 1);
+  act(() => useLibrary.setState({ history: [entry(1, noon.getTime()), entry(2, noon.getTime() - 60_000), entry(3, yesterday.getTime())], historyLoaded: true }));
   openAt("history");
   const root = libraryAlone();
   const headers = nodes(root, "materialLibraryHeader");

@@ -172,7 +172,7 @@ export function MaterialDeckBottomRow({ shown, barBlocked = false, safeSide, saf
       canReopen={canReopen}
       menusShown={menusShown}
       onMenu={onMenu}
-      container={{ ref: row, testID: "materialDeckBottomRow", onLayout: measure, pointerEvents: "box-none", style: [styles.bottomRow, { bottom: safeBottom + materialBottomBar.inset, left: side, right: side }, riseStyle, chromeStyle] }}
+      container={{ ref: row, testID: "materialDeckBottomRow", onLayout: measure, pointerEvents: barBlocked ? "none" : "box-none", style: [styles.bottomRow, { bottom: safeBottom + materialBottomBar.inset, left: side, right: side }, riseStyle, chromeStyle] }}
     />
   );
 }

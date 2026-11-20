@@ -143,9 +143,9 @@ export type MaterialSheetSearch = {
   incognito: boolean;
   onBackSwipe: () => void;
 };
-type SheetProps = { open: boolean; onDismiss: () => void; onBack?: () => void; onHidden: () => void; expandableList?: ExpandableList; dockedBar?: (spread: SharedValue<number>) => ReactNode; dockedBarReserved?: boolean; dockedBarColor?: string; search?: MaterialSheetSearch; children: ReactNode };
+type SheetProps = { open: boolean; onDismiss: () => void; onTapAway?: () => void; onBack?: () => void; onHidden: () => void; expandableList?: ExpandableList; dockedBar?: (spread: SharedValue<number>) => ReactNode; dockedBarReserved?: boolean; dockedBarColor?: string; search?: MaterialSheetSearch; children: ReactNode };
 
-export function MaterialSheet({ open, onDismiss, onBack, onHidden, expandableList, dockedBar, dockedBarReserved = true, dockedBarColor, search, children }: SheetProps) {
+export function MaterialSheet({ open, onDismiss, onTapAway, onBack, onHidden, expandableList, dockedBar, dockedBarReserved = true, dockedBarColor, search, children }: SheetProps) {
   const { scheme } = useMaterialTheme(search?.incognito);
   const insets = useSafeAreaInsets();
   const { height, width } = useWindowDimensions();
@@ -350,7 +350,10 @@ export function MaterialSheet({ open, onDismiss, onBack, onHidden, expandableLis
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents={open ? "box-none" : "none"} collapsable={false} importantForAccessibility={open ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!open}>
       <Animated.View testID="materialScrim" style={[StyleSheet.absoluteFill, scrim]}>
-        <Pressable accessibilityLabel={searching ? "Close Search" : "Close"} style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(scheme.scrim, MATERIAL_STATE.scrim) }]} onPress={onDismiss} />
+        <Pressable accessibilityLabel={searching ? "Close Search" : "Close"} style={[StyleSheet.absoluteFill, { backgroundColor: withAlpha(scheme.scrim, MATERIAL_STATE.scrim) }]} onPress={() => {
+            onTapAway?.();
+            onDismiss();
+          }} />
       </Animated.View>
       {dockedBar ? (
         <Animated.View

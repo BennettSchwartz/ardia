@@ -123,7 +123,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const underBar = usePageUnderBars();
   const layout = column ? COLUMN_PAGE : underBar ? { pageBottom: 0, toneBottom: design === "material" ? 0 : barSlotHeight } : pageInsets(collapse.collapses, barSlotHeight, browseLayout.pageOverlap);
   const fullscreen = usePages((s) => s.fullscreen[tab.id] ?? false);
-  const coveredBottom = design === "material" ? 0 : obscuredBottom({ follows: Platform.OS === "android", bar: barSlotHeight, pill: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2 + hostPillLayout.height, collapsed: collapse.collapsed, cleared: fullscreen || finding || searching });
+  const coveredBottom = design === "material" ? materialCoveredBottom(collapse.collapses, barSlotHeight, fullscreen || finding || searching) : obscuredBottom({ follows: Platform.OS === "android", bar: barSlotHeight, pill: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2 + hostPillLayout.height, collapsed: collapse.collapsed, cleared: fullscreen || finding || searching });
   const obscured = column ? COLUMN_OBSCURED : underBar ? { top: insets.top, bottom: coveredBottom } : undefined;
   const painted = useSharedValue(false);
   useEffect(() => {
@@ -316,6 +316,8 @@ function PageStack({ column, pulledTab, barTop, children }: { column: ScreenColu
     </View>
   );
 }
+
+const materialCoveredBottom = (folds: boolean, bar: number, cleared: boolean) => (folds || cleared ? 0 : bar);
 
 function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, design: Design, height: number) {
   const folds = design === "redesigned" || design === "material";

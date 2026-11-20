@@ -1023,7 +1023,7 @@ export const TabDeck = memo(function TabDeck() {
   const bottomRowTop = g.height - materialBottomRowCenter(insets.bottom) - materialSize.fab / 2 - MATERIAL_DECK.keyboardGap;
   const closeFromX = (index: number) => {
     const id = order[index];
-    if (!id || leavingIds.current.has(id)) return;
+    if (!id || phase.kind !== "settled" || leavingIds.current.has(id)) return;
     haptics.barPress();
     if (!tabs.get(id)?.isPrivate) countUsage("card_close_tapped");
     close(index, 0);

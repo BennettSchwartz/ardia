@@ -33,6 +33,7 @@ const LIGHT = SEEDED_SCHEMES.ardia.light;
 beforeEach(() => {
   jest.useFakeTimers();
   withTabs(3);
+  jest.spyOn(pages, "listsSitePermissions").mockReturnValue(false);
   setDynamicScheme(null);
   setPreference("collapsesBottomBar", null);
   usePages.setState({ navigation: {}, tones: {}, lastTones: {}, heldTones: {} });
@@ -412,7 +413,7 @@ onAndroid("scrolling a page down folds the Material bottom bar into a host pill 
   unmount(root);
 });
 
-onAndroid("turning Collapse Bottom Bar off keeps the Material bottom bar visible while scrolling down", () => {
+onAndroid("turning Collapse Bottom Bar off keeps the Material bottom bar unfolded while scrolling down, and the page stops above it so its end stays reachable", () => {
   setPreference("collapsesBottomBar", false);
   scrolled("up");
   const root = screen();
@@ -420,5 +421,10 @@ onAndroid("turning Collapse Bottom Bar off keeps the Material bottom bar visible
   settle();
   expect(moved(node(root, "pageBar")!)).toMatchObject({ opacity: 1, translateY: 0 });
   expect(node(root, "pageBar")!.props.pointerEvents).toBe("box-none");
+  expect(node(root, "materialBarFold")!).toHaveAnimatedStyle({ opacity: 1 });
+  expect(node(root, "materialBarFold")!.props.pointerEvents).toBe("box-none");
+  expect(node(root, "materialBarPillPlace")!).toHaveAnimatedStyle({ opacity: 0 });
+  const pageView = root.root.findAll((found) => found.props.pageId !== undefined && found.props.obscuredInsets !== undefined)[0]!;
+  expect(pageView.props.obscuredInsets.bottom).toBe(barHeight(24, "material"));
   unmount(root);
 });

@@ -31,7 +31,7 @@ import {
   filterListAddress,
   FILTER_LIST_ADDRESS,
 } from "../../state/settings/settingsRules";
-import { ConfirmSheet, duration, font, ink, screenReaderActions, Sheet, usePresence, settingsLayout, settingsTint, space, Symbol, Toggle, useTheme, type Confirmation, useWarningInk } from "../ui";
+import { ConfirmSheet, duration, font, ink, screenReaderActions, Sheet, usePresence, settingsLayout, settingsTint, space, Symbol, Toggle, useDesign, useTheme, type Confirmation, useWarningInk } from "../ui";
 import { copy } from "../../lib/platformCopy";
 
 const FILTER_SYNTAX_URL = "https://github.com/gorhill/uBlock/wiki/Static-filter-syntax";
@@ -306,9 +306,10 @@ export function MyFiltersPage() {
   const lift = useAnimatedStyle(() => ({ height: Math.max(keyboard.height.value - insets.bottom, 0) }));
   const large = useWindowDimensions().fontScale >= settingsLayout.accessibilityFontScale;
   const field = useRef<TextInputInstance>(null);
-  useEffect(() => (Platform.OS === "android" ? () => Keyboard.dismiss() : undefined), []);
+  const material = useDesign() === "material";
+  useEffect(() => (material ? () => Keyboard.dismiss() : undefined), [material]);
   const leave = () => {
-    if (Platform.OS === "android") {
+    if (material) {
       field.current?.blur();
       Keyboard.dismiss();
     }

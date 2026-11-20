@@ -10,6 +10,9 @@ import { useBrowse } from "../state/browse/store";
 import { useLibrary } from "../state/library/store";
 import * as pageActions from "../state/page/actions";
 import { usePages } from "../state/pages/store";
+import { pages } from "../platform/pages";
+import { usePageSummariesSwitch } from "../state/pageSummary/enabled";
+import * as telemetry from "../state/telemetry/telemetry";
 import { useDefaultBrowser } from "../state/settings/defaultBrowser";
 import { useSettingsNav } from "../state/settings/nav";
 import { useTabs } from "../state/tabs/store";
@@ -33,6 +36,7 @@ beforeEach(() => {
   useLibrary.setState({ open: false, section: "history", path: [] });
   useSettingsNav.setState({ open: false, stack: [{ page: "root" }], popping: false });
   useDefaultBrowser.setState({ status: { isDefault: false, canAsk: true } });
+  jest.spyOn(pages, "listsSitePermissions").mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -158,5 +162,30 @@ onAndroid("the original design's menu is untouched by the Material one", async (
   const root = await openMenu(classicOnAndroid);
   expect(node(root, "materialPageMenu")).toBeUndefined();
   expect(node(root, "materialSwitch")).toBeUndefined();
+  unmount(root);
+});
+
+onAndroid("Summarize Page sits under Find on Page in the Material menu where the phone summarizes and Pinch to Summarize is on, and runs the same summary", async () => {
+  jest.spyOn(pages, "canSummarize").mockReturnValue(true);
+  const summarize = jest.spyOn(pageActions, "summarizeCurrentPage").mockImplementation(() => undefined);
+  usePageSummariesSwitch.setState({ enabled: false });
+  const off = await openMenu();
+  expect(node(off, "pageMenuRow:Summarize Page")).toBeUndefined();
+  unmount(off);
+  usePageSummariesSwitch.setState({ enabled: true });
+  const root = await openMenu();
+  expect(node(root, "pageMenuRow:Summarize Page")).toBeDefined();
+  act(() => pressable(root, "pageMenuRow:Summarize Page").props.onPress());
+  expect(summarize).toHaveBeenCalledTimes(1);
+  unmount(root);
+  usePageSummariesSwitch.setState({ enabled: false });
+});
+
+onAndroid("a tap on the scrim around the Material page menu counts page_menu_tapped_away, as main's sheet does", async () => {
+  const counted = jest.spyOn(telemetry, "countUsage").mockImplementation(() => undefined);
+  const root = await openMenu();
+  const scrim = root.root.findAll((found) => found.props.accessibilityLabel === "Close" && typeof found.props.onPress === "function")[0]!;
+  act(() => scrim.props.onPress());
+  expect(counted).toHaveBeenCalledWith("page_menu_tapped_away");
   unmount(root);
 });

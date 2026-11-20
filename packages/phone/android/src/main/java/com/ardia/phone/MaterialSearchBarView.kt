@@ -79,6 +79,7 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
     private val focusRequester = FocusRequester()
     private var eventCount by mutableIntStateOf(0)
     private var focusRequests by mutableIntStateOf(0)
+    private var focusWanted = false
     private var pendingText: String? = null
     private var pendingTextCount = 0
     private var selectsAllOnFocus = false
@@ -108,6 +109,7 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
                 state = state,
                 focusRequester = focusRequester,
                 focusRequests = focusRequests,
+                focusWanted = { focusWanted },
                 placeholder = placeholderText,
                 fieldLabel = fieldLabelText,
                 incognito = incognitoState,
@@ -254,9 +256,10 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
     }
 
     fun focusField() {
+        focusWanted = true
         focusRequests += 1
         post {
-            if (!isAttachedToWindow) return@post
+            if (!isAttachedToWindow || !focusWanted) return@post
             runCatching { focusRequester.requestFocus() }
             if (selectsAllOnFocus && state.typed.isNotEmpty()) state.reset(state.typed, selectsAll = true)
             val target = compose.findFocus() ?: compose.getChildAt(0) ?: compose
@@ -265,6 +268,7 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
     }
 
     fun blurField() {
+        focusWanted = false
         val beforeSuffix = state.suffix
         state.dropSuffix()
         if (state.suffix != beforeSuffix) onSuffixChange(mapOf("suffix" to state.suffix))
@@ -313,6 +317,7 @@ private fun MaterialSearchBarContent(
     state: CompletingFieldState,
     focusRequester: FocusRequester,
     focusRequests: Int,
+    focusWanted: () -> Boolean,
     placeholder: String,
     fieldLabel: String,
     incognito: Boolean,
@@ -328,7 +333,7 @@ private fun MaterialSearchBarContent(
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(focusRequests) {
-        if (focusRequests > 0) {
+        if (focusRequests > 0 && focusWanted()) {
             runCatching { focusRequester.requestFocus() }
             keyboardController?.show()
         }

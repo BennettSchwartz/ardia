@@ -82,7 +82,9 @@ export function MaterialLibrary() {
   useEffect(() => {
     if (open) setMounted(true);
   }, [open]);
-  const gone = useCallback(() => setMounted(false), []);
+  const gone = useCallback(() => {
+    if (!useLibrary.getState().open) setMounted(false);
+  }, []);
   if (!mounted) return null;
   return <MaterialLibraryView open={open} onGone={gone} />;
 }

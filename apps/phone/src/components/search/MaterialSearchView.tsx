@@ -11,7 +11,7 @@ import { useSurface } from "../../state/browse/hooks";
 import { useSearchCompletedFor, useSearchCompletion, useSearchFieldVersion, useSearchFromDockedMenu, useSearchInitialText, useSearchOpen, useSearchRows, useSearchSession, useSearchText } from "../../state/search/hooks";
 import { refinedText, type TrayRow } from "../../state/search/omnibox";
 import { searchState, setSearchText, typeSearch } from "../../state/search/store";
-import { useTrayCovers } from "../../state/search/trayBack";
+import { coverTray, useTrayCovers } from "../../state/search/trayBack";
 import { useIncognito, useSelectedTab } from "../../state/tabs/hooks";
 import { useTabs } from "../../state/tabs/store";
 import { countUsage } from "../../state/telemetry/telemetry";
@@ -195,6 +195,8 @@ export function MaterialSearchResults({ scrollY }: { scrollY: SharedValue<number
   const rows = useSearchRows();
   const typed = useSearchText();
   const [menu, setMenu] = useState<{ row: TrayRow; at: Point } | null>(null);
+  const menuOpen = menu !== null;
+  useEffect(() => (menuOpen ? coverTray() : undefined), [menuOpen]);
   const refine = useCallback((row: TrayRow) => setSearchText(refinedText(row)), []);
   const showMenu = useCallback((row: TrayRow, at: Point) => {
     if (!trayRowActions(row).length) return;
