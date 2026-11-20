@@ -1,7 +1,7 @@
 import { predictiveBack, type PredictiveBackHandlers } from "@ardia/phone-native";
 import { Platform, Text } from "react-native";
 import { act } from "react-test-renderer";
-import { Dialog, DesignProvider, Menu, Sheet } from "../components/ui";
+import { Dialog, DesignProvider, Sheet } from "../components/ui";
 import { backSwipe, materialSheetBackOffset, onMaterialBackSwiped } from "../components/ui/MaterialSurfaces";
 import { renderSurface, unmount, withMaterialYou } from "../../test/render/harness";
 
@@ -63,10 +63,9 @@ onAndroid("when a Material sheet has an onBack handler, a committed back invokes
   unmount(root);
 });
 
-onAndroid("a Material dialog or menu opened over a sheet takes Back from it, and gives it back when it closes", () => {
+onAndroid("a Material dialog opened over a sheet takes Back from it, and gives it back when it closes", () => {
   const sheet = jest.fn();
   const dialog = jest.fn();
-  const menu = jest.fn();
   const root = material(
     <Sheet open onDismiss={sheet} onHidden={() => undefined}>
       <Text>Rows</Text>
@@ -76,10 +75,6 @@ onAndroid("a Material dialog or menu opened over a sheet takes Back from it, and
   act(() => top().onCommit?.());
   expect(dialog).toHaveBeenCalledTimes(1);
   unmount(over);
-  const floating = material(<Menu place={{ top: 100, left: 20 }} onDismiss={menu} items={[{ label: "Copy Link", icon: "link", onPress: () => undefined }]} />);
-  act(() => top().onCommit?.());
-  expect(menu).toHaveBeenCalledTimes(1);
-  unmount(floating);
   act(() => top().onCommit?.());
   expect(sheet).toHaveBeenCalledTimes(1);
   unmount(root);

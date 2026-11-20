@@ -6,7 +6,7 @@ import { deckOpeningScroll, TabDeck } from "../components/tabs/TabDeck";
 import { deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { fitsMaterialChrome, MATERIAL_DECK, materialCloseCenter, materialCloseHit, materialDeckGeometry, materialOnScreen } from "../components/tabs/MaterialDeckLayout";
 import { getByGestureTestId } from "react-native-gesture-handler/jest-utils";
-import { deckGeometry } from "../lib/deckGeometry";
+import { deckGeometry, openingDeckScroll } from "../lib/deckGeometry";
 import { DesignProvider } from "../components/ui";
 import { MenuTrigger } from "../components/ui/MenuTrigger";
 import { materialKeyboardLift } from "../components/tabs/MaterialDeckChrome";
@@ -276,9 +276,9 @@ onAndroid("a tap on the bottom row's Search Tabs field never dismisses the keybo
   unmount(root);
 });
 
-test("the Material deck opens on the active card itself, so a last tab opens fully on screen; the other designs keep main's peek", () => {
+test("the Material deck opens on the active card itself, so a last tab opens fully on screen, as main's designs now do", () => {
   expect(deckOpeningScroll(2, 3, true)).toBe(2);
-  expect(deckOpeningScroll(2, 3, false)).toBe(1);
+  expect(deckOpeningScroll(2, 3, false)).toBe(openingDeckScroll(2, 3, true));
   expect(deckOpeningScroll(0, 3, true)).toBe(0);
 });
 

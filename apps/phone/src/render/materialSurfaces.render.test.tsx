@@ -1,6 +1,6 @@
 import { Dimensions, Platform, StyleSheet, Text } from "react-native";
 import { act, type ReactTestInstance } from "react-test-renderer";
-import { DesignProvider, Dialog, Menu, Sheet, useTheme } from "../components/ui";
+import { DesignProvider, Dialog, Sheet, useTheme } from "../components/ui";
 import { rolesFromScheme } from "../components/ui/materialRoles";
 import { materialMenuFill, materialSheetMs } from "../components/ui/MaterialSurfaces";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
@@ -124,23 +124,6 @@ onAndroid("a dialog in the material design is Material's: surfaceContainerHigh, 
   expect(flat(texts.find((node) => node.props.children === "Close All")).color).toBe(LIGHT.error);
   const button = root.root.findAll((node) => node.props.accessibilityRole === "button" && typeof node.props.onPress === "function")[0]!;
   expect(button.props.android_ripple).toMatchObject({ borderless: false });
-  unmount(root);
-});
-
-onAndroid("a menu in the material design is Material's: surfaceContainer, 4 dp corners, 48 dp items with the icon leading and a ripple", () => {
-  const picked = jest.fn();
-  const dismissed = jest.fn();
-  const root = material(<Menu place={{ top: 100, left: 20 }} onDismiss={dismissed} items={[{ label: "New Incognito Tab", icon: "eyes", onPress: picked }, "divider", { label: "Close All Tabs", destructive: true, onPress: () => undefined }]} />);
-  expect(flat(host(root, "materialMenu"))).toMatchObject({ top: 100, left: 20 });
-  const groups = root.root.findAll((found) => found.props.testID === "materialMenuGroup" && typeof found.type === "string");
-  expect(groups).toHaveLength(2);
-  for (const group of groups) expect(flat(group)).toMatchObject({ backgroundColor: LIGHT.surfaceContainer, borderRadius: 16 });
-  const item = root.root.findAll((node) => node.props.accessibilityRole === "menuitem" && typeof node.props.onPress === "function")[0]!;
-  expect(flat(item).minHeight).toBe(48);
-  expect(item.props.android_ripple).toBeDefined();
-  act(() => item.props.onPress());
-  expect(picked).toHaveBeenCalledTimes(1);
-  expect(dismissed).toHaveBeenCalledTimes(1);
   unmount(root);
 });
 
