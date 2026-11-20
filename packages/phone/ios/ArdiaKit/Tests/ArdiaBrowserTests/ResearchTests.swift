@@ -82,12 +82,16 @@ import Testing
     #expect(lines.allSatisfy { $0.hasPrefix("- ") && $0.hasSuffix("]") })
   }
 
-  @Test func answersStayBrief() {
-    let paragraphs = (1...8).map { "Mount Everest fact number \($0) is about how tall the mountain stands above the sea." }
+  @Test func answersAreBriefUnlessTheQueryAsksForDetail() {
+    let paragraphs = (1...10).map { "Mount Everest fact number \($0) is about how tall the mountain stands above the sea." }
     let sources = [ResearchSource(id: 1, url: URL(string: "https://a.com")!, title: "A", siteName: "A", paragraphs: paragraphs)]
     #expect(ResearchDigest.extractiveAnswer(query: "how tall is mount everest", sources: sources).split(separator: "\n").count == 3)
-    #expect(ResearchDigest.instructions.contains("Be very brief"))
-    #expect(!ResearchDigest.instructions.contains("##"))
+    #expect(ResearchDigest.extractiveAnswer(query: "explain mount everest's height in detail", sources: sources).split(separator: "\n").count == 8)
+    #expect(ResearchDigest.asksForDetail("how to climb mount everest"))
+    #expect(ResearchDigest.asksForDetail("list the tallest mountains"))
+    #expect(!ResearchDigest.asksForDetail("golden gate bridge history"))
+    #expect(ResearchDigest.instructions.contains("Be brief by default"))
+    #expect(ResearchDigest.instructions.contains("asks for detail"))
   }
 
   @Test func answerBlocksReadHeadingsBulletsAndParagraphs() {
