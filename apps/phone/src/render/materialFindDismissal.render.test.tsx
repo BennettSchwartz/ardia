@@ -3,6 +3,7 @@ import { Keyboard, Platform } from "react-native";
 import { Pressable } from "react-native-gesture-handler";
 import { act } from "react-test-renderer";
 import { Surfaces } from "../App";
+import { pages } from "../platform/pages";
 import { useBrowse } from "../state/browse/store";
 import { usePageUi } from "../state/page/store";
 import { pageMenuHidden, showDockedFind } from "../state/page/actions";
@@ -29,6 +30,7 @@ beforeEach(() => {
   useSearch.setState({ open: false });
   usePageUi.setState({ menuOpen: false, menuDocked: false, findOpen: false, findQuery: "", readerTabId: null, press: null });
   claims.length = 0;
+  jest.spyOn(pages, "listsSitePermissions").mockReturnValue(false);
   jest.spyOn(predictiveBack, "isNative").mockReturnValue(true);
   jest.spyOn(predictiveBack, "claim").mockImplementation((handlers) => {
     claims.push(handlers);
