@@ -99,14 +99,43 @@ final class PasskeyStoreLock {
   }
 }
 
+enum PasskeyStoreIdentity {
+  static let fileName = "passkeys-store-id"
+
+  static func load(directory: String) -> String? {
+    let file = (directory as NSString).appendingPathComponent(fileName)
+    if let text = try? String(contentsOfFile: file, encoding: .utf8), let id = UUID(uuidString: text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+      return id.uuidString.lowercased()
+    }
+    let id = UUID().uuidString.lowercased()
+    guard (try? id.write(toFile: file, atomically: true, encoding: .utf8)) != nil else { return nil }
+    return id
+  }
+}
+
 final class PasskeyKeychainStore: PasskeyKeyStore {
-  static let service = "com.ardia.browser.passkeys"
+  static let servicePrefix = "com.ardia.browser.passkeys."
   private let accessGroup: String
+  private let storeId: String
+  private let service: String
+  private let keyLabel: String
+  private let publicKeyLabel: String
   private let lock: PasskeyStoreLock
 
-  init(accessGroup: String, lockPath: String) {
+  init(accessGroup: String, storeId: String, lockPath: String) {
     self.accessGroup = accessGroup
+    self.storeId = storeId
+    self.service = Self.servicePrefix + storeId
+    self.keyLabel = "Ardia passkey " + storeId
+    self.publicKeyLabel = "Ardia passkey public key " + storeId
     self.lock = PasskeyStoreLock(path: lockPath)
+  }
+
+  private func scoped(_ locator: Data) -> Data {
+    var input = Data(storeId.utf8)
+    input.append(0)
+    input.append(locator)
+    return Data(SHA256.hash(data: input))
   }
 
   private func base(_ query: [CFString: Any]) -> CFDictionary {
@@ -118,15 +147,22 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
   }
 
   private func metadataQuery(_ locator: Data) -> [CFString: Any] {
-    [kSecClass: kSecClassGenericPassword, kSecAttrService: Self.service, kSecAttrAccount: PasskeyStoreLocator.hex(locator)]
+    [kSecClass: kSecClassGenericPassword, kSecAttrService: service, kSecAttrAccount: PasskeyStoreLocator.hex(scoped(locator))]
   }
 
   private func keyQuery(_ locator: Data, _ keyClass: CFString = kSecAttrKeyClassPrivate) -> [CFString: Any] {
-    [kSecClass: kSecClassKey, kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: keyClass, kSecAttrApplicationTag: locator]
+    [kSecClass: kSecClassKey, kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: keyClass, kSecAttrApplicationTag: scoped(locator),
+     kSecAttrLabel: keyClass == kSecAttrKeyClassPublic ? publicKeyLabel : keyLabel]
   }
 
-  private func anyKeyQuery(_ locator: Data) -> [CFString: Any] {
-    [kSecClass: kSecClassKey, kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrApplicationTag: locator]
+  private func keyQuery(tag: Data, _ keyClass: CFString) -> [CFString: Any] {
+    [kSecClass: kSecClassKey, kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeyClass: keyClass, kSecAttrApplicationTag: tag,
+     kSecAttrLabel: keyClass == kSecAttrKeyClassPublic ? publicKeyLabel : keyLabel]
+  }
+
+  private func removeKeys(_ locator: Data) throws {
+    try removeItem(keyQuery(locator, kSecAttrKeyClassPrivate))
+    try removeItem(keyQuery(locator, kSecAttrKeyClassPublic))
   }
 
   static func silentContext() -> LAContext {
@@ -152,7 +188,6 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     var add = query
     add[kSecValueData] = data
     add[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-    add[kSecAttrLabel] = "Ardia passkey details"
     let status = SecItemAdd(base(add), nil)
     guard status == errSecSuccess else { throw PasskeyStoreError.keychain(status) }
   }
@@ -189,7 +224,6 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     var add = keyQuery(locator, kSecAttrKeyClassPublic)
     add[kSecValueRef] = key
     add[kSecAttrAccessible] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-    add[kSecAttrLabel] = "Ardia passkey public key"
     var status = SecItemAdd(base(add), nil)
     if status == errSecDuplicateItem {
       try removeItem(keyQuery(locator, kSecAttrKeyClassPublic))
@@ -205,7 +239,6 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     var add = keyQuery(locator)
     add[kSecValueRef] = key
     add[kSecAttrAccessControl] = try accessControl()
-    add[kSecAttrLabel] = "Ardia passkey"
     var status = SecItemAdd(base(add), nil)
     if status == errSecDuplicateItem {
       try removeItem(keyQuery(locator))
@@ -251,7 +284,6 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
       privateAttributes.removeValue(forKey: kSecAttrKeyClass)
       privateAttributes[kSecAttrIsPermanent] = true
       privateAttributes[kSecAttrAccessControl] = try accessControl()
-      privateAttributes[kSecAttrLabel] = "Ardia passkey"
       privateAttributes[kSecUseDataProtectionKeychain] = true
       privateAttributes[kSecAttrAccessGroup] = accessGroup
       let attributes: [CFString: Any] = [kSecAttrKeyType: kSecAttrKeyTypeECSECPrimeRandom, kSecAttrKeySizeInBits: 256, kSecPrivateKeyAttrs: privateAttributes]
@@ -294,7 +326,7 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
 
   func delete(_ credential: PasskeyCredential) throws {
     try lock.withLock {
-      try removeItem(anyKeyQuery(credential.locator))
+      try removeKeys(credential.locator)
       try removeItem(metadataQuery(credential.locator))
     }
   }
@@ -303,7 +335,7 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
     try lock.withLock {
       let mine = try allMetadata().filter { $0.groupId == groupId }
       for credential in mine {
-        try removeItem(anyKeyQuery(credential.locator))
+        try removeKeys(credential.locator)
         try removeItem(metadataQuery(credential.locator))
       }
       return mine.count
@@ -317,7 +349,7 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
         case .unknown:
           continue
         case .missing:
-          try removeItem(anyKeyQuery(credential.locator))
+          try removeKeys(credential.locator)
           try removeItem(metadataQuery(credential.locator))
         case .present(let label):
           if let expected = credential.publicKeyLabel, label == expected {
@@ -327,22 +359,25 @@ final class PasskeyKeychainStore: PasskeyKeyStore {
               try writeMetadata(ready)
             }
           } else {
-            try removeItem(anyKeyQuery(credential.locator))
+            try removeKeys(credential.locator)
             try removeItem(metadataQuery(credential.locator))
           }
         }
       }
-      var query = keyQuery(Data(), kSecAttrKeyClassPublic)
+      var query = keyQuery(tag: Data(), kSecAttrKeyClassPublic)
       query.removeValue(forKey: kSecAttrApplicationTag)
       query[kSecMatchLimit] = kSecMatchLimitAll
       query[kSecReturnAttributes] = true
       var result: CFTypeRef?
       let status = SecItemCopyMatching(base(query), &result)
       guard status == errSecSuccess, let keys = result as? [[String: Any]] else { return }
-      let known = Set(try allMetadata().map(\.locator))
+      let known = Set(try allMetadata().map { scoped($0.locator) })
       for attributes in keys {
-        guard let tag = attributes[kSecAttrApplicationTag as String] as? Data, tag.count == 32, !known.contains(tag) else { continue }
-        try removeItem(anyKeyQuery(tag))
+        guard attributes[kSecAttrLabel as String] as? String == publicKeyLabel, let tag = attributes[kSecAttrApplicationTag as String] as? Data,
+          tag.count == 32, !known.contains(tag)
+        else { continue }
+        try removeItem(keyQuery(tag: tag, kSecAttrKeyClassPrivate))
+        try removeItem(keyQuery(tag: tag, kSecAttrKeyClassPublic))
       }
     }
   }

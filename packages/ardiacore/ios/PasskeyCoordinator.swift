@@ -37,8 +37,8 @@ public final class PasskeyCoordinator: NSObject {
   }
 
   var makeAuthenticator: () -> PasskeyAuthenticator? = {
-    guard let suffixes = PasskeyPublicSuffixList.bundled else { return nil }
-    return PasskeyAuthenticator(store: PasskeyCoordinator.defaultStore(), suffixes: suffixes)
+    guard let suffixes = PasskeyPublicSuffixList.bundled, let store = PasskeyCoordinator.defaultStore() else { return nil }
+    return PasskeyAuthenticator(store: store, suffixes: suffixes)
   }
   var makeContext: () -> LAContext? = {
     let context = LAContext()
@@ -63,14 +63,14 @@ public final class PasskeyCoordinator: NSObject {
 
   static var testStore: PasskeyTestStore?
 
-  static func defaultStore() -> PasskeyKeyStore {
+  static func defaultStore() -> PasskeyKeyStore? {
     if let testStore { return testStore }
+    guard let dataDirectory, let storeId = PasskeyStoreIdentity.load(directory: dataDirectory) else { return nil }
     let group = (Bundle.main.object(forInfoDictionaryKey: "AppIdentifierPrefix") as? String ?? "U5L5T3NGVV.") + "com.ardia.browser.passkeys"
-    let lock = PasskeyCoordinator.lockPath ?? FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys.lock").path
-    return PasskeyKeychainStore(accessGroup: group, lockPath: lock)
+    return PasskeyKeychainStore(accessGroup: group, storeId: storeId, lockPath: (dataDirectory as NSString).appendingPathComponent("passkeys.lock"))
   }
 
-  static var lockPath: String?
+  static var dataDirectory: String?
 
   func setProviders(_ entries: [PasskeyProviderEntry], generation next: Int) {
     guard next >= generation else { return }

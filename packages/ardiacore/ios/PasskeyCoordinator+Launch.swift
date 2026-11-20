@@ -8,7 +8,7 @@ extension PasskeyCoordinator {
 
   static func configureFromLaunch() {
     let data: String? = ArdiaHost.dataDirectory.isEmpty ? nil : ArdiaHost.dataDirectory
-    if let data { lockPath = (data as NSString).appendingPathComponent("passkeys.lock") }
+    dataDirectory = data
     let coordinator = PasskeyCoordinator.shared
     coordinator.providersChanged = { entries, generation in
       guard let data else { return }
@@ -29,7 +29,7 @@ extension PasskeyCoordinator {
       }
     #endif
     DispatchQueue.global(qos: .utility).async {
-      try? PasskeyCoordinator.defaultStore().recover()
+      try? PasskeyCoordinator.defaultStore()?.recover()
       registerHelper(dataDirectory: data)
     }
   }

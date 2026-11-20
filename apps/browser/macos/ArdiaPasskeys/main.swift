@@ -94,7 +94,8 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
 
   private static func copy(token: UUID, groupId: String, generation: Int, directory: URL) async -> PasskeyImportCounts? {
     guard let suffixes = PasskeyPublicSuffixList.bundled else { return nil }
-    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", lockPath: directory.appendingPathComponent("passkeys.lock").path)
+    guard let storeId = PasskeyStoreIdentity.load(directory: directory.path) else { return nil }
+    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", storeId: storeId, lockPath: directory.appendingPathComponent("passkeys.lock").path)
     do {
       let export = try await ASCredentialImportManager().importCredentials(token: token)
       guard let current = HelperPaths.groups(in: directory), current.generation == generation, current.groups.contains(where: { $0.id == groupId }) else { return nil }
@@ -137,9 +138,46 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum StoreSelfTest {
+  static func throwawayId(_ name: String) -> String { "\(name)-\(UUID().uuidString.lowercased())" }
+
+  static func scope() -> String {
+    let lock = FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys-scope-test.lock").path
+    let group = "U5L5T3NGVV.com.ardia.browser.passkeys"
+    let idA = throwawayId("selftest-a")
+    let idB = throwawayId("selftest-b")
+    let a = PasskeyKeychainStore(accessGroup: group, storeId: idA, lockPath: lock)
+    let b = PasskeyKeychainStore(accessGroup: group, storeId: idB, lockPath: lock)
+    var credentialId = Data(count: 16)
+    _ = credentialId.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+    let record = PasskeyCredential(
+      groupId: "scope-test", rpId: "scope-test.invalid", credentialId: credentialId, userHandle: Data("t".utf8), userName: "t",
+      userDisplayName: "t", created: Date(), source: .ardia, backupEligible: false, ready: false)
+    let keyA = P256.Signing.PrivateKey()
+    let keyB = P256.Signing.PrivateKey()
+    var steps: [String: String] = ["serviceA": PasskeyKeychainStore.servicePrefix + idA, "serviceB": PasskeyKeychainStore.servicePrefix + idB]
+    let run = { (name: String, body: () throws -> String) in
+      do { steps[name] = try body() } catch { steps[name] = PasskeyStoreError.code(error) }
+    }
+    run("aAdd") { "\(try a.add(record, privateX963: keyA.x963Representation))" }
+    run("bListBeforeOwnAdd") { "\(try b.credentials(groupId: "scope-test", rpId: nil).count)" }
+    run("bDeleteAll") { "\(try b.deleteAll(groupId: "scope-test"))" }
+    run("bDeleteOne") { try b.delete(record); return "done" }
+    run("bRecover") { try b.recover(); return "done" }
+    run("aListAfterB") { "\(try a.credentials(groupId: "scope-test", rpId: nil).count)" }
+    run("bAddSameCredential") { "\(try b.add(record, privateX963: keyB.x963Representation))" }
+    run("aAddAgainSameKey") { "\(try a.add(record, privateX963: keyA.x963Representation))" }
+    run("aRecover") { try a.recover(); return "done" }
+    run("bListAfterARecover") { "\(try b.credentials(groupId: "scope-test", rpId: nil).count)" }
+    run("aDeleteAll") { "\(try a.deleteAll(groupId: "scope-test"))" }
+    run("bListAfterADelete") { "\(try b.credentials(groupId: "scope-test", rpId: nil).count)" }
+    run("bDeleteAllOwn") { "\(try b.deleteAll(groupId: "scope-test"))" }
+    let data = (try? JSONSerialization.data(withJSONObject: steps, options: [.sortedKeys, .prettyPrinted])) ?? Data()
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+
   static func run() -> String {
     let lock = FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys-self-test.lock").path
-    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", lockPath: lock)
+    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", storeId: StoreSelfTest.throwawayId("selftest"), lockPath: lock)
     let key = P256.Signing.PrivateKey()
     var id = Data(count: 16)
     _ = id.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
@@ -163,7 +201,7 @@ extension StoreSelfTest {
     let lockDirectory = arguments.firstIndex(of: "--lock-dir").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
     let lock = lockDirectory.map { ($0 as NSString).appendingPathComponent("passkeys.lock") }
       ?? FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys-self-test.lock").path
-    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", lockPath: lock)
+    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", storeId: StoreSelfTest.throwawayId("selftest"), lockPath: lock)
     let items = (1...5).map { n -> ASImportableItem in
       let passkey = ASImportableCredential.Passkey(
         credentialID: Data((0..<16).map { _ in UInt8.random(in: 0...255) }), relyingPartyIdentifier: "site\(n).self-test.example",
@@ -182,6 +220,10 @@ extension StoreSelfTest {
 
 enum HelperCommand {
   static func run(_ arguments: [String]) -> Bool {
+    if arguments.contains("--scope-self-test") {
+      print(StoreSelfTest.scope())
+      return true
+    }
     if arguments.contains("--import-self-test") {
       let result = StoreSelfTest.importWalk()
       print(result)
