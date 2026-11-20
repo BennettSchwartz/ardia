@@ -68,3 +68,5 @@ export function watchMarks(marks: StoreApi<DragMarks>): KeyedWatch {
   }
   return watch;
 }
+
+export const markNow = (marks: StoreApi<DragMarks>, key: string): number => markOf(marks.getState(), key);

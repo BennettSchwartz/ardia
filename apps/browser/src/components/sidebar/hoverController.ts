@@ -3,7 +3,7 @@ import type { LayoutChangeEvent } from "react-native";
 import { markHoverProps } from "../../lib/hoverMarks";
 import { currentWindow } from "../../state/browser/current";
 import { PageProfileContext, useSettings, useWindow } from "../../state/browser/hooks";
-import { useBrowser } from "../../state/browser/store";
+import { cardTargetFor, cardTargetNow } from "../../state/sidebar/cardTarget";
 import {
   cardEntered,
   cardLaidOut,
@@ -41,22 +41,6 @@ export function useCardTarget<T extends Target>(target: T | null): T | null {
   return cardTargetFor(target, cards, pinned && playing);
 }
 
-function cardTargetFor<T extends Target>(target: T | null, cards: boolean, player: boolean): T | null {
-  if (cards || !target || player) return target;
-  return target.kind === "tab" || target.kind === "folder" ? null : target;
-}
-
-function playerShowing(tabId: string): boolean {
-  const session = useMedia.getState().sessions[tabId];
-  return !!session && session.controllable && session.playbackState !== "none" && !!(session.title || session.artwork);
-}
-
-export function cardTargetNow<T extends Target>(target: T | null): T | null {
-  const cards = useBrowser.getState().settings.showTabHoverMenu;
-  const playerTab = !cards && target?.kind === "tab" ? target.id : undefined;
-  const player = !!playerTab && !!useBrowser.getState().tabs[playerTab]?.pin && playerShowing(playerTab);
-  return cardTargetFor(target, cards, player);
-}
 
 export type RowHoverCell = {
   hovered: boolean;

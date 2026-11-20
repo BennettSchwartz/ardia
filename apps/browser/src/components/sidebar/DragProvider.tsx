@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { perLook, radius } from "../ui";
 import { useClipped, type ClipSource } from "./EntryMotion";
-import { LANDING, markOf, noDragMarks, SOURCE, SPLIT_LEFT, SPLIT_RIGHT, watchMarks, type SplitHalfMark } from "../../state/sidebar/dragMarks";
+import { LANDING, markNow, noDragMarks, SOURCE, SPLIT_LEFT, SPLIT_RIGHT, watchMarks, type SplitHalfMark } from "../../state/sidebar/dragMarks";
 import { useKeyed } from "../../state/browser/keyedWatch";
 import { cellKey, dragItemStyle, restingTail, type Ghost, type ItemSpec } from "./dragModel";
 import { DragController } from "./dragController";
@@ -148,7 +148,7 @@ export function useDragItem(key: string, spec: ItemSpec, clip: ClipSource | null
     [item],
   );
 
-  const mark = useKeyed(watchMarks(marks), key, () => markOf(marks.getState(), key));
+  const mark = useKeyed(watchMarks(marks), key, () => markNow(marks, key));
   const source = !!(mark & SOURCE);
   const landing = !!(mark & LANDING);
   const scoped = !!useContext(DragContext);
