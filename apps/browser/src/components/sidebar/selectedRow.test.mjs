@@ -87,3 +87,43 @@ test("the tracker hands the pill the selected tab only while its row is out of v
   assert.equal(seen.at(-1), null);
   detach();
 });
+
+test("the pill animates its value only while it is on screen, and builds its motion once per phase, so no native value is left with no view to hold it", async (t) => {
+  const { Animated } = await import("react-native");
+  const { SelectedRowPill } = await import("./SelectedRowPill.tsx");
+  const timing = Animated.timing;
+  const proto = Object.getPrototypeOf(new Animated.Value(0));
+  const interpolate = proto.interpolate;
+  let animations = 0;
+  let interpolations = 0;
+  Animated.timing = (value, config) => (animations++, timing(value, config));
+  proto.interpolate = function (config) {
+    interpolations++;
+    return interpolate.call(this, config);
+  };
+  t.after(() => {
+    Animated.timing = timing;
+    proto.interpolate = interpolate;
+  });
+  let sink = () => {};
+  const tracker = { attach: (next) => ((sink = next), next(null), () => {}), judge() {}, relocate() {} };
+  const pill = mount(() => SelectedRowPill({ windowId: "w", tracker, lift: 0 }));
+  t.after(() => pill.unmount());
+  assert.equal(pill.value, null);
+  assert.equal(animations, 0, "a hidden pill starts no animation, so its value never becomes native without a view");
+  const tab = { id: "t", url: "https://a.com/", favicon: null, icon: null, profileId: "default", faviconUri: null, template: false, marks: 0 };
+  for (let i = 0; i < 20; i++) {
+    sink({ side: "above", tab });
+    pill.value;
+    pill.rerender();
+    sink(null);
+    pill.value;
+    pill.rerender();
+  }
+  assert.equal(animations, 40, "one enter and one exit per show, none while hidden");
+  assert.ok(interpolations <= 20 * 2 * 3, "the motion's interpolations are built once per phase, not on every render");
+  const settled = animations;
+  sink(null);
+  pill.value;
+  assert.equal(animations, settled, "hiding an already hidden pill animates nothing");
+});

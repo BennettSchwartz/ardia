@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Animated, Pressable, StyleSheet, View, type ScrollView } from "react-native";
 import { watchWindowRecord } from "../../state/browser/keyedWatch";
 import { revealTab, rowsStamp, sameRows, selectedTabIn, selectedTabSnapshot, type PillTab, type RowsStamp } from "../../state/sidebar/reveal";
@@ -138,6 +138,8 @@ export function SelectedRowPill({ windowId, tracker, lift, bottomShift }: { wind
   const [shown, setShown] = useState<PillAway>(null);
   const [leaving, setLeaving] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
+  const onScreen = useRef(false);
+  onScreen.current = !!shown;
   useEffect(() => tracker.attach(setAway), [tracker]);
   useEffect(() => {
     if (away) {
@@ -146,18 +148,20 @@ export function SelectedRowPill({ windowId, tracker, lift, bottomShift }: { wind
       setLeaving(false);
       return settle(progress, "enter");
     }
+    if (!onScreen.current) return;
     setLeaving(true);
     return settle(progress, "exit", () => setShown(null));
   }, [away]);
+  const outward = shown?.side === "below" ? 1 : -1;
+  const motion = useMemo(() => (leaving ? leaveStyle(progress, outward) : enterStyle(progress, outward)), [leaving, outward]);
   if (!shown) return null;
-  const outward = shown.side === "below" ? 1 : -1;
   return (
     <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { top: GLOW_ROOM - lift, zIndex: 2 }]}>
       <Animated.View
         pointerEvents="box-none"
         style={[PLACE, shown.side === "below" ? AT_BOTTOM : AT_TOP, shown.side === "below" && bottomShift ? { transform: [{ translateY: bottomShift }] } : null]}
       >
-        <Animated.View pointerEvents={away ? "auto" : "none"} style={leaving ? leaveStyle(progress, outward) : enterStyle(progress, outward)}>
+        <Animated.View pointerEvents={away ? "auto" : "none"} style={motion}>
           <PillFace windowId={windowId} side={shown.side} tab={shown.tab} />
         </Animated.View>
       </Animated.View>
