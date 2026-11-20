@@ -89,6 +89,8 @@ import Testing
     #expect(ResearchDigest.extractiveAnswer(query: "explain mount everest's height in detail", sources: sources).split(separator: "\n").count == 8)
     #expect(ResearchDigest.asksForDetail("how to climb mount everest"))
     #expect(ResearchDigest.asksForDetail("list the tallest mountains"))
+    #expect(ResearchDigest.asksForDetail("mount everest vs k2"))
+    #expect(ResearchDigest.asksForDetail("mount everest versus k2"))
     #expect(!ResearchDigest.asksForDetail("golden gate bridge history"))
     #expect(ResearchDigest.instructions.contains("Be brief by default"))
     #expect(ResearchDigest.instructions.contains("asks for detail"))

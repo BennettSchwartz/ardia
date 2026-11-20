@@ -114,6 +114,8 @@ class ResearchTest {
         assertEquals(8, ResearchDigest.extractiveAnswer("explain mount everest's height in detail", listOf(many)).lines().size)
         assertTrue(ResearchDigest.asksForDetail("how to climb mount everest"))
         assertTrue(ResearchDigest.asksForDetail("list the tallest mountains"))
+        assertTrue(ResearchDigest.asksForDetail("mount everest vs k2"))
+        assertTrue(ResearchDigest.asksForDetail("mount everest versus k2"))
         assertFalse(ResearchDigest.asksForDetail("golden gate bridge history"))
     }
 

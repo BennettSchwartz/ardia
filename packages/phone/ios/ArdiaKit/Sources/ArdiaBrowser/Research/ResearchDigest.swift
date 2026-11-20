@@ -22,7 +22,7 @@ public enum ResearchDigest {
   public static let minimumSourceCharacters = 300
   public static let briefLineLimit = 3
   public static let detailedLineLimit = 8
-  static let detailWords: Set<String> = ["detail", "detailed", "details", "explain", "elaborate", "steps", "step-by-step", "list", "guide", "tutorial", "compare", "comparison", "overview", "everything", "thorough", "in-depth", "longer", "full"]
+  static let detailWords: Set<String> = ["detail", "detailed", "details", "explain", "elaborate", "steps", "step-by-step", "list", "guide", "tutorial", "compare", "comparison", "vs", "versus", "overview", "everything", "thorough", "in-depth", "longer", "full"]
 
   public static let instructions = """
     You answer a search query using only the numbered web pages you are given. \

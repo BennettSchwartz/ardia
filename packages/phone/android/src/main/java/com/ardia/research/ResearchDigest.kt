@@ -11,7 +11,7 @@ object ResearchDigest {
     const val MINIMUM_SOURCE_CHARACTERS = 300
     const val BRIEF_LINE_LIMIT = 3
     const val DETAILED_LINE_LIMIT = 8
-    private val detailWords = setOf("detail", "detailed", "details", "explain", "elaborate", "steps", "step-by-step", "list", "guide", "tutorial", "compare", "comparison", "overview", "everything", "thorough", "in-depth", "longer", "full")
+    private val detailWords = setOf("detail", "detailed", "details", "explain", "elaborate", "steps", "step-by-step", "list", "guide", "tutorial", "compare", "comparison", "vs", "versus", "overview", "everything", "thorough", "in-depth", "longer", "full")
 
     const val INSTRUCTIONS =
         "You answer a search query using only the numbered web pages you are given. " +
