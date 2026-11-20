@@ -154,6 +154,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
   );
   const edge = useMemo(() => scrollY.interpolate({ inputRange: [0, 1], outputRange: [0, GLOW_ROOM - edgeLift], extrapolate: "clamp" }), [scrollY, edgeLift]);
   const unedge = useMemo(() => Animated.multiply(edge, -1), [edge]);
+  const clipUnedged = useMemo(() => Animated.add(unedge, playerMotion.listClip), [unedge, playerMotion.listClip]);
   const slack = useRef<number | null>(null);
   const applySlack = () => {
     if (resting || !canDock || height <= 0 || slack.current === null) return;
@@ -192,9 +193,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
               <Animated.View
                 style={{ flex: 1, marginTop: -GLOW_ROOM, overflow: "hidden", transform: [{ translateY: edge }] }}
               >
-                <Animated.View style={{ flex: 1, transform: [{ translateY: unedge }] }}>
-                  <Animated.View style={{ flex: 1, overflow: "hidden", transform: [{ translateY: playerMotion.listClip }] }}>
-                    <Animated.View style={{ flex: 1, transform: [{ translateY: playerMotion.listUnclip }] }}>
+                <Animated.View style={{ flex: 1, overflow: "hidden", transform: [{ translateY: clipUnedged }] }}>
                       <Animated.ScrollView
                         ref={scrollView}
                         onLayout={(e) => {
@@ -205,7 +204,7 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                           geometry.current.viewport = page.viewport;
                           geometry.current.laidOut?.();
                         }}
-                        style={{ flex: 1 }}
+                        style={{ flex: 1, transform: [{ translateY: playerMotion.listUnclip }] }}
                         showsVerticalScrollIndicator={false}
                         scrollEventThrottle={16}
                         onScroll={onScroll}
@@ -237,10 +236,8 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                           </ContextMenuArea>
                         </View>
                       </Animated.ScrollView>
-                    </Animated.View>
-                  </Animated.View>
-                  {geometry ? <SelectedRowPill windowId={windowId} tracker={selectedRow} lift={edgeLift} bottomShift={playerMotion.listClip} /> : null}
                 </Animated.View>
+                {geometry ? <SelectedRowPill windowId={windowId} tracker={selectedRow} lift={edgeLift} unedge={unedge} bottomShift={playerMotion.listClip} /> : null}
               </Animated.View>
               <ScrollEdgeLine edge={scrollEdgeBelow} opacity={scrollEdgeBelow.opacity} style={{ marginTop: -SCROLL_EDGE.line, zIndex: 1, transform: [{ translateY: playerMotion.listClip }] }} />
               {playerTab ? (

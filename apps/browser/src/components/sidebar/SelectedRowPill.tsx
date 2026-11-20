@@ -133,7 +133,7 @@ export function useSelectedRowAway(
   return tracker;
 }
 
-export function SelectedRowPill({ windowId, tracker, lift, bottomShift }: { windowId: string; tracker: PillTracker; lift: number; bottomShift?: Animated.AnimatedInterpolation<number> }) {
+export function SelectedRowPill({ windowId, tracker, lift, unedge, bottomShift }: { windowId: string; tracker: PillTracker; lift: number; unedge: Animated.AnimatedNode; bottomShift?: Animated.AnimatedInterpolation<number> }) {
   const [away, setAway] = useState<PillAway>(null);
   const [shown, setShown] = useState<PillAway>(null);
   const [leaving, setLeaving] = useState(false);
@@ -156,7 +156,7 @@ export function SelectedRowPill({ windowId, tracker, lift, bottomShift }: { wind
   const motion = useMemo(() => (leaving ? leaveStyle(progress, outward) : enterStyle(progress, outward)), [leaving, outward]);
   if (!shown) return null;
   return (
-    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { top: GLOW_ROOM - lift, zIndex: 2 }]}>
+    <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, { top: GLOW_ROOM - lift, zIndex: 2, transform: [{ translateY: unedge }] }]}>
       <Animated.View
         pointerEvents="box-none"
         style={[PLACE, shown.side === "below" ? AT_BOTTOM : AT_TOP, shown.side === "below" && bottomShift ? { transform: [{ translateY: bottomShift }] } : null]}
@@ -165,7 +165,7 @@ export function SelectedRowPill({ windowId, tracker, lift, bottomShift }: { wind
           <PillFace windowId={windowId} side={shown.side} tab={shown.tab} />
         </Animated.View>
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
