@@ -1012,7 +1012,7 @@ function PanelIncognitoToggle() {
         </Animated.Text>
       ) : null}
       <View testID="trayIncognitoGlyph">
-        <IncognitoEyes size={searchPanel.eyes} outline={on ? "rgba(0,0,0,0.45)" : theme.foregroundTertiary} opacity={on ? 1 : 0.7} />
+        <IncognitoEyes size={searchPanel.eyes} color={on ? searchPanel.incognito.label : theme.foregroundTertiary} />
       </View>
     </Pressable>
   );

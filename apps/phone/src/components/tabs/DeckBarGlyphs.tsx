@@ -4,7 +4,7 @@ import { capsule, deckChromeLayout, font, ink, iPhoneOr, rolesFor, startLayout, 
 
 export function IncognitoGlyph({ incognito, dark }: { incognito: boolean; dark: boolean }) {
   const theme = useTheme();
-  if (!incognito) return <IncognitoEyes size={deckChromeLayout.incognitoEyes} outline={eyeOutline(dark)} />;
+  if (!incognito) return <IncognitoEyes size={deckChromeLayout.incognitoEyes} color={rolesFor(dark).label} />;
   return (
     <View style={styles.switch}>
       <View style={[styles.switchOn, { backgroundColor: theme.dark ? ink.white : tabsInk.incognitoCard }]} />
@@ -39,5 +39,3 @@ const styles = StyleSheet.create({
   search: { flex: 1, alignSelf: "stretch", flexDirection: "row", alignItems: "center", gap: deckChromeLayout.searchSpacing, paddingLeft: deckChromeLayout.searchLead, paddingRight: deckChromeLayout.searchTrail },
   words: { flex: 1 },
 });
-
-export const eyeOutline = (dark: boolean) => (dark ? "rgba(0,0,0,0.45)" : rolesFor(dark).label);
