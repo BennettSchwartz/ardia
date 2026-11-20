@@ -26,7 +26,7 @@ export const materialShape = { none: 0, extraSmall: 4, small: 8, medium: 12, lar
 
 export const MATERIAL_SEGMENT_GAP = 2;
 
-export const materialBottomBar = { height: 56, field: 48, inset: 8, pad: 4, edge: 16, gap: 2 } as const;
+export const materialBottomBar = { height: 64, field: 48, inset: 8, pad: 8, edge: 16, gap: 4 } as const;
 
 export const materialBarPill = { height: 36, maxWidth: 240, sideInset: 14, spacing: 8, siteIcon: 16, collapsedScale: 0.62 } as const;
 

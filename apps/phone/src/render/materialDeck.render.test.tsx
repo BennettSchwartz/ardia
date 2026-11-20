@@ -151,8 +151,8 @@ onAndroid("the deck keeps its card geometry where the Material bars fit, and mov
   expect(fitsMaterialChrome(deckGeometry(360, 740, 52, 48, 0, "android", "material", deckHeaderBottom(), 55))).toBe(false);
   expect(fitsMaterialChrome(short)).toBe(true);
   expect(short.cardCenterY - short.cardHeight / 2 - 8 - 20).toBeGreaterThanOrEqual(52 + 64);
-  expect(short.cardCenterY + short.cardHeight / 2).toBeLessThanOrEqual(740 - 48 - 8 - 56);
-  expect(short.barCenterY).toBe(740 - 48 - 8 - 28);
+  expect(short.cardCenterY + short.cardHeight / 2).toBeLessThanOrEqual(740 - 48 - 16 - 56);
+  expect(short.barCenterY).toBe(740 - 48 - 8 - 32);
   expect(short.safeBottom).toBe(48);
 });
 
@@ -184,7 +184,7 @@ onAndroid("the capsule keeps add on the right with a 48 dp target and its long p
   expect(trigger.props.trigger).toBe("longPress");
   expect(trigger.props.items.map((item: { label: string }) => item.label)).toContain("New Incognito Tab");
   const row = flat(host(root, "materialDeckBottomRow"));
-  expect(row).toMatchObject({ bottom: SAFE.bottom + 8, right: 16, height: 56, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainer });
+  expect(row).toMatchObject({ bottom: SAFE.bottom + 8, right: 16, height: 64, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainer });
   unmount(root);
 });
 

@@ -86,7 +86,7 @@ onAndroid("the material page bar has a rounded capsule with tabs, centered searc
   expect(pageView.props.toneInsets).toEqual({ top: 0, bottom: 0 });
   expect(node(root, "pageBar")!.props.pointerEvents).toBe("box-none");
   expect(flat(node(root, "pageBar")).backgroundColor).toBeUndefined();
-  expect(flat(node(root, "materialPageBar"))).toMatchObject({ height: 56, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainer });
+  expect(flat(node(root, "materialPageBar"))).toMatchObject({ height: 64, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainer });
   expect(flat(node(root, "materialAddressField"))).toMatchObject({ height: 48, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
   for (const id of ["materialBarPlus", "materialBarTabs"]) {
     expect(flat(node(root, id))).toMatchObject({ width: 48, height: 48 });
@@ -99,9 +99,9 @@ onAndroid("the material page bar has a rounded capsule with tabs, centered searc
   unmount(root);
 });
 
-onAndroid("the bar's height and centre are a 56 dp bar with 8 dp above and below over the navigation inset", () => {
-  expect(barHeight(48, "material")).toBe(120);
-  expect(barCenterFromBottom(48, "material")).toBe(84);
+onAndroid("the bar's height and centre are Material's 80 dp over the navigation inset", () => {
+  expect(barHeight(48, "material")).toBe(128);
+  expect(barCenterFromBottom(48, "material")).toBe(88);
 });
 
 onAndroid("search edits the address, Tabs opens the deck, add opens a new search, holding the address opens the page menu, and the URL box three-dots icon opens site settings", () => {
@@ -205,7 +205,7 @@ onAndroid("the page menu capsule docks with the iOS history controls, page title
   const root = screen();
   await act(async () => { await pressable(root, "materialBarSiteSettings").props.onPress(); });
   const dock = node(root, "materialSheetDockedBar")!;
-  expect(dock).toHaveAnimatedStyle({ left: 70, right: 70, bottom: 36, transform: [{ translateY: 0 }] });
+  expect(dock).toHaveAnimatedStyle({ left: 76, right: 76, bottom: 40, transform: [{ translateY: 0 }] });
   expect(flat(node(root, "materialAddressField")).opacity).toBe(0);
   for (let frame = 0; frame < 6; frame++) act(() => jest.advanceTimersByTime(16));
   const widening = getAnimatedStyle(dock);
@@ -214,7 +214,7 @@ onAndroid("the page menu capsule docks with the iOS history controls, page title
   expect(widening.transform).toEqual([{ translateY: 0 }]);
   settle();
   const compactHeight = flat(node(root, "materialSheet")).maxHeight as number;
-  expect(dock).toHaveAnimatedStyle({ left: 16, right: 16, transform: [{ translateY: 132 - compactHeight }] });
+  expect(dock).toHaveAnimatedStyle({ left: 16, right: 16, transform: [{ translateY: 136 - compactHeight }] });
   expect(node(root, "siteSettingsAddressHost")?.props.children).toEqual(node(root, "materialBarHost")?.props.children);
   expect(node(root, "siteSettingsAddressHost")?.props.ellipsizeMode).toBe("tail");
   expect(pressable(root, "dockedPageMenuTitle").props.accessibilityLabel).toBe(tab.title);
@@ -296,7 +296,7 @@ onAndroid("the docked menu opens each library section and Find on Page uses the 
   expect(usePageUi.getState().menuOpen).toBe(false);
   settle();
   expect(node(root, "materialSheet")).toBeUndefined();
-  expect(flat(node(root, "materialFindBar"))).toMatchObject({ height: 56, left: 16, right: 16, bottom: 32 });
+  expect(flat(node(root, "materialFindBar"))).toMatchObject({ height: 64, left: 16, right: 16, bottom: 32 });
   const id = currentTabs().selectedId!;
   expect(node(root, "materialSearchIncognito")).toBeUndefined();
   const input = root.root.findAll((found) => found.props.accessibilityLabel === "Find on Page" && typeof found.props.onChangeText === "function")[0]!;
@@ -342,7 +342,7 @@ onAndroid("swiping up expands the docked page menu, then swiping down restores i
   settle();
   expect(sheet).toHaveAnimatedStyle({ height: windowHeight, paddingTop: 40, borderTopLeftRadius: 0 });
   layout(windowHeight);
-  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ left: 16, right: 16, transform: [{ translateY: 172 - windowHeight }] });
+  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ left: 16, right: 16, transform: [{ translateY: 176 - windowHeight }] });
   swipe(180);
   settle();
   expect(sheet).toHaveAnimatedStyle({ maxHeight: compactHeight, paddingTop: 0, borderTopLeftRadius: 28 });

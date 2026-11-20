@@ -58,7 +58,7 @@ onAndroid("the material start screen is the scheme's surfaces, a top app bar of 
     bottom: 32,
     left: 16,
     right: 16,
-    height: 56,
+    height: 64,
     borderRadius: 9999,
     backgroundColor: "transparent",
     elevation: 0,

@@ -68,7 +68,7 @@ onAndroid("the Material search capsule uses the same docked sheet as the page me
     borderTopRightRadius: 28,
   });
   expect(node(root, "materialDragHandle")).toBeDefined();
-  expect(node(root, "materialSheetDockedBar")).toHaveAnimatedStyle({ left: 16, right: 16, bottom: 36 });
+  expect(node(root, "materialSheetDockedBar")).toHaveAnimatedStyle({ left: 16, right: 16, bottom: 40 });
   expect(flat(node(root, "materialSheetDockedBar"))).toMatchObject({ height: 48, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
   expect(flat(node(root, "materialSearchBar"))).toMatchObject({
     height: 48,
@@ -104,7 +104,7 @@ onAndroid("the expanded field lands in the sheet header with results visible bel
   const root = tray();
   const bar = node(root, "materialSheetDockedBar")!;
   act(() => jest.advanceTimersByTime(400));
-  expect(bar).toHaveAnimatedStyle({ left: 16, transform: [{ translateY: -232 }] });
+  expect(bar).toHaveAnimatedStyle({ left: 16, transform: [{ translateY: -228 }] });
   act(() => closeSearch(root));
   expect(node(root, "materialSheet")).toBeDefined();
   act(() => jest.advanceTimersByTime(400));
@@ -152,7 +152,7 @@ onAndroid("in landscape the sheet grows past its top bar room so the search fiel
   Dimensions.set({ window: portrait, screen: portrait });
 });
 
-onAndroid.each([["start", 20], ["browsing", 70], ["deck", 70]] as const)("search returns to the %s bar with the menu's timing and morphs into the resting contents before removal", (surface, side) => {
+onAndroid.each([["start", 24], ["browsing", 80], ["deck", 80]] as const)("search returns to the %s bar with the menu's timing and morphs into the resting contents before removal", (surface, side) => {
   act(() => {
     browse.useBrowse.setState({ surface });
     presentSearch("start", "");
@@ -198,7 +198,7 @@ onAndroid("swiping up expands search to the whole screen, down returns to the sh
   settle();
   expect(searchState().open).toBe(true);
   expect(sheet).toHaveAnimatedStyle({ height, paddingTop: 40, borderTopLeftRadius: 0 });
-  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ transform: [{ translateY: -(height - 172) }] });
+  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ transform: [{ translateY: -(height - 176) }] });
   layout(height);
   swipe(180);
   settle();
