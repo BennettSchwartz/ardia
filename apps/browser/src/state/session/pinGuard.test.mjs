@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 const { useBrowser } = await import("../browser/store.ts");
 const { flushPersistence, loadSession, resumePersistence, startPersistence } = await import("./persist.ts");
 const { parsePinBackups, PINS_BACKUP_DOCUMENT } = await import("./pinGuard.ts");
 const { takeSessionWrites } = await import("../telemetry/sessionWrites.ts");
+const { finishQuitSaves } = await import("../app/quit.ts");
+const { sessionSaved } = await import("./persist.ts");
 const stub = await import("../../test-native/index.ts");
+const { setConsentPeriod } = await import("../telemetry/consentPeriod.ts");
+const sharing = (on) => setConsentPeriod(on, on ? "epoch-pin-guard" : null);
 
 const S = () => useBrowser.getState();
 const turn = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -36,6 +40,7 @@ function workShownInSecondWindowOnly() {
 
 test("closing the only window that showed a profile keeps its pins on disk, and they come back after a relaunch (#2175)", () => {
   stub.docs.clear();
+  stub.stagedDocs.clear();
   const stop = startPersistence();
   const { a, b, work } = workShownInSecondWindowOnly();
   flushPersistence();
@@ -54,7 +59,9 @@ test("closing the only window that showed a profile keeps its pins on disk, and 
 });
 
 test("a save that drops pins keeps them in pins-backup.json, ready to park again", async () => {
+  sharing(true);
   stub.docs.clear();
+  stub.stagedDocs.clear();
   takeSessionWrites();
   const stop = startPersistence();
   const w = S().createWindow({ url: "https://a1.com" });
@@ -81,6 +88,7 @@ test("a save that drops pins keeps them in pins-backup.json, ready to park again
   const counts = takeSessionWrites();
   assert.equal(counts.session_pin_backups, 1);
   assert.equal(counts.session_pins_backed_up, 3);
+  sharing(false);
   S().closeWindow(w);
   useBrowser.setState({ parkedPins: { ...S().parkedPins, [profileId]: pins } });
   const n = S().createWindow({ url: "https://b1.com" });
@@ -90,6 +98,7 @@ test("a save that drops pins keeps them in pins-backup.json, ready to park again
 
 test("closing a window whose pins stay in another window or the park, or deleting a profile, keeps no backup", () => {
   stub.docs.clear();
+  stub.stagedDocs.clear();
   const stop = startPersistence();
   const a = S().createWindow({ url: "https://a1.com" });
   const pin = S().newTab(a, { url: "https://pin.com", background: true });
@@ -119,6 +128,7 @@ function dropPins(ids) {
 
 test("the backup keeps two pins of the same page that parking would merge", async () => {
   stub.docs.clear();
+  stub.stagedDocs.clear();
   const stop = startPersistence();
   const w = S().createWindow({ url: "https://a1.com" });
   const one = S().newTab(w, { url: "https://example.com/page", background: true });
@@ -135,6 +145,7 @@ test("the backup keeps two pins of the same page that parking would merge", asyn
 
 function onePin() {
   stub.docs.clear();
+  stub.stagedDocs.clear();
   const stop = startPersistence();
   const w = S().createWindow({ url: "https://a1.com" });
   const pin = S().newTab(w, { url: "https://pin.com", background: true });
@@ -244,4 +255,129 @@ test("saves that drop no pins write the session at once and never touch the back
   }
   assert.ok(sessionUrls().includes("https://more.com"), "written in the same flush, no wait");
   assert.equal(backupSaves, 0);
+});
+
+const microtasks = async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
+async function elapse(ms) {
+  for (let at = 0; at < ms; at += 250) {
+    mock.timers.tick(250);
+    await microtasks();
+  }
+}
+
+function twoProfilePins() {
+  stub.docs.clear();
+  stub.stagedDocs.clear();
+  const stop = startPersistence();
+  const a = S().createWindow({ url: "https://a1.com" });
+  const pinA = S().newTab(a, { url: "https://pin-a.com", background: true });
+  S().pinTabs([pinA], true);
+  const work = S().createProfile({ name: "Work" });
+  const b = S().createWindow({ url: "https://b1.com", profileId: work });
+  const pinB = S().newTab(b, { url: "https://pin-b.com", profileId: work, background: true });
+  S().pinTabs([pinB], true);
+  flushPersistence();
+  return { stop, a, pinA, pinB, personal: S().windows[a].profileId, work };
+}
+
+test("a save during the retry wait doesn't cancel the retry: the session lands on its own once the backup does", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const { stop, w, pin } = onePin();
+  try {
+    stub.refusedSaves.on = true;
+    dropPins([pin]);
+    flushPersistence();
+    await microtasks();
+    stub.refusedSaves.on = false;
+    S().newTab(w, { url: "https://during-wait.com", background: true });
+    flushPersistence();
+    assert.ok(sessionUrls().includes("https://pin.com"), "still held during the wait");
+    await elapse(3_000);
+    assert.equal(backups().length, 1, "the retry landed the backup");
+    assert.ok(!sessionUrls().includes("https://pin.com"), "and the session followed without another change");
+  } finally {
+    stop();
+    mock.timers.reset();
+  }
+});
+
+test("retries never pile up entries: one backup entry covers every profile of one unsaved state, and an earlier profile isn't evicted", async () => {
+  sharing(true);
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const { stop, pinA, pinB, personal, work } = twoProfilePins();
+  takeSessionWrites();
+  try {
+    stub.heldSaves.on = true;
+    dropPins([pinA]);
+    flushPersistence();
+    dropPins([pinB]);
+    flushPersistence();
+    stub.heldSaves.on = false;
+    stub.refusedSaves.on = true;
+    for (const land of stub.heldSaves.queue.splice(0)) land();
+    await microtasks();
+    for (let i = 0; i < 25; i++) await elapse(60_000);
+    stub.refusedSaves.on = false;
+    await elapse(60_000);
+    assert.ok(!sessionUrls().includes("https://pin-a.com") && !sessionUrls().includes("https://pin-b.com"), "the session is saved at last");
+    const kept = backups();
+    assert.equal(kept.length, 1, "one entry, not one per retry");
+    assert.deepEqual(kept[0].pins[personal]?.tabs.map((t) => t.url), ["https://pin-a.com"], "the first profile's pins are still kept");
+    assert.deepEqual(kept[0].pins[work]?.tabs.map((t) => t.url), ["https://pin-b.com"]);
+    const counts = takeSessionWrites();
+    assert.equal(counts.session_pin_backups, 2, "each landing counted once, when it landed");
+    assert.equal(counts.session_pins_backed_up, 2);
+  } finally {
+    sharing(false);
+    stub.refusedSaves.on = false;
+    stub.heldSaves.on = false;
+    stop();
+    mock.timers.reset();
+  }
+});
+
+test("sessionSaved waits through a second backup that starts while the first lands", async () => {
+  const { stop, pinA, pinB } = twoProfilePins();
+  try {
+    stub.heldSaves.on = true;
+    dropPins([pinA]);
+    const answer = sessionSaved();
+    await turn();
+    dropPins([pinB]);
+    for (const land of stub.heldSaves.queue.splice(0)) land();
+    await turn();
+    for (const land of stub.heldSaves.queue.splice(0)) land();
+    stub.heldSaves.on = false;
+    for (let i = 0; i < 5; i++) {
+      await turn();
+      for (const land of stub.heldSaves.queue.splice(0)) land();
+    }
+    assert.equal(await answer, true);
+    assert.ok(!sessionUrls().includes("https://pin-a.com") && !sessionUrls().includes("https://pin-b.com"));
+  } finally {
+    stub.heldSaves.on = false;
+    stop();
+  }
+});
+
+test("quitting while a healthy backup is still landing writes the session once it lands, within the quit wait", async () => {
+  const { stop, pin } = onePin();
+  try {
+    stub.heldSaves.on = true;
+    dropPins([pin]);
+    flushPersistence({ final: true });
+    assert.ok(sessionUrls().includes("https://pin.com"), "nothing that drops the pin went out yet");
+    const quit = finishQuitSaves(3_000);
+    stub.heldSaves.on = false;
+    for (const land of stub.heldSaves.queue.splice(0)) land();
+    await quit;
+    assert.equal(backups().length, 1);
+    assert.ok(!sessionUrls().includes("https://pin.com"), "the session followed the backup before quitting");
+  } finally {
+    stub.heldSaves.on = false;
+    stop();
+    resumePersistence();
+  }
 });

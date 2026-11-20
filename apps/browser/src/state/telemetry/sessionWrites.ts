@@ -1,15 +1,20 @@
+import { consentOrNow, countFor, type ConsentToken } from "./consentPeriod";
+
 let writes = 0;
 let cosmeticWrites = 0;
 let characters = 0;
 let pinBackups = 0;
 let pinsBackedUp = 0;
 
-export function noteSessionWrite(length: number, cosmeticOnly: boolean, pinsKept = 0) {
-  writes++;
-  if (pinsKept) {
+export function noteSessionPinBackup(pins: number, consent?: ConsentToken | null) {
+  countFor(consentOrNow(consent), () => {
     pinBackups++;
-    pinsBackedUp += pinsKept;
-  }
+    pinsBackedUp += pins;
+  });
+}
+
+export function noteSessionWrite(length: number, cosmeticOnly: boolean) {
+  writes++;
   if (cosmeticOnly) cosmeticWrites++;
   characters += length;
 }

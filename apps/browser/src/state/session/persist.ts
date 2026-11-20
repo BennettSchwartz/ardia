@@ -14,8 +14,9 @@ import type { BrowserWindow, ClosedWindow, ParkedPins, SplitView, Tab } from "..
 import { downloadSession, withoutRepeats } from "../downloads/downloadsSlice";
 import { anyDownloadProgress, withLiveProgress } from "../downloads/progress";
 import { noteDownloadHistoryWrite } from "../telemetry/downloadWork";
-import { noteSessionWrite } from "../telemetry/sessionWrites";
-import { pinGuard } from "./pinGuard";
+import { noteSessionPinBackup, noteSessionWrite } from "../telemetry/sessionWrites";
+import { saveBeforeQuit } from "../app/quit";
+import { landHeldPins, pinGuard, savedAfterPins } from "./pinGuard";
 import { noteSavedTopAppsMerged } from "../telemetry/topAppsSharing";
 import { parseSaved, unchanged, type Migrations, type SavedObject } from "../../lib/savedDocument";
 import { sessionWithCleanUpMinutes } from "../settings/cleanUpAfter";
@@ -260,7 +261,7 @@ export function loadSession({ restoreSession }: LaunchOverrides = {}): (HydrateD
 
 let flush: () => void = () => {};
 let unstaged: () => boolean = () => false;
-let pinsLanded: () => Promise<void> = () => Promise.resolve();
+let pinsLanding: () => Promise<void> | null = () => null;
 let resume: () => void = () => {};
 let stageDownloads: () => void = () => {};
 let frozen = false;
@@ -275,9 +276,7 @@ export function flushPersistence({ final = false } = {}): boolean {
 }
 
 export async function sessionSaved(): Promise<boolean> {
-  if (!flushPersistence()) return false;
-  if (unstaged()) await pinsLanded();
-  if (unstaged() && (!flushPersistence() || unstaged())) return false;
+  if (!(await savedAfterPins(flushPersistence, unstaged, pinsLanding))) return false;
   try {
     await documentSaved(SESSION_DOCUMENT);
     return !frozen;
@@ -311,8 +310,9 @@ export function startPersistence(overrides: LaunchOverrides = {}) {
   useBrowser.getState().hydrate(loaded ?? {});
   restoreLaunchLook();
 
-  const keepDroppedPins = pinGuard(useBrowser.getState(), (delay) => schedule(delay));
-  pinsLanded = keepDroppedPins.landed;
+  const keepDroppedPins = pinGuard(useBrowser.getState(), (delay) => schedule(delay), noteSessionPinBackup);
+  pinsLanding = keepDroppedPins.landing;
+  saveBeforeQuit(() => landHeldPins(() => unstaged() && frozen, pinsLanding, () => ((frozen = false), save(), (frozen = true))));
   const lastSources = new Map<string, unknown[]>();
   const lastJson = new Map<string, string>();
   const dirty = new Set<Doc>();
@@ -335,25 +335,28 @@ export function startPersistence(overrides: LaunchOverrides = {}) {
     const s = useBrowser.getState();
     const done = beginActivity("sessionSave");
     let held = false;
+    let againIn: number | null = null;
     for (const doc of DOCS.filter((d) => dirty.has(d))) {
       const json = doc.json(s);
       const saved = lastJson.get(doc.name) === json;
       const pins = !saved && doc.name === SESSION_DOCUMENT ? keepDroppedPins(s) : null;
       if (pins?.hold) {
         held = true;
+        againIn = pins.againIn;
         continue;
       }
       if (saved || write(doc.name, json)) {
         pins?.commit();
         if (!saved && doc.name === DOWNLOADS_DOCUMENT) noteDownloadHistoryWrite(json.length);
-        if (!saved && doc.name === SESSION_DOCUMENT) noteSessionWrite(json.length, cosmeticOnly, pins ? pins.kept : 0);
+        if (!saved && doc.name === SESSION_DOCUMENT) noteSessionWrite(json.length, cosmeticOnly);
         lastJson.set(doc.name, json);
         dirty.delete(doc);
       }
     }
     done();
     cosmeticOnly = true;
-    if ([...dirty].some((d) => !held || d.name !== SESSION_DOCUMENT)) schedule(SAVE_DELAY_MS);
+    if ([...dirty].some((d) => d.name !== SESSION_DOCUMENT || !held)) schedule(SAVE_DELAY_MS);
+    if (againIn !== null) schedule(againIn);
   };
   flush = save;
   stageDownloads = () => dirty.add(DOCS.find((d) => d.name === DOWNLOADS_DOCUMENT)!);

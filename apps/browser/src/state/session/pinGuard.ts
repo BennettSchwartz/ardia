@@ -5,6 +5,7 @@ import { isRegularWindow } from "../windows/small";
 import { isFields } from "../../lib/decode";
 import { readDocument, saveDocument } from "../../platform/documents";
 import type { ParkedPins } from "../browser/types";
+import { consentToken, type ConsentToken } from "../telemetry/client";
 
 export const PINS_BACKUP_DOCUMENT = "pins-backup.json";
 export const PINS_BACKUP_VERSION = 1;
@@ -88,80 +89,120 @@ export function parsePinBackups(json: string | null | undefined): PinBackup[] {
   }
 }
 
-export function withPinBackup(existing: PinBackup[], previous: PinState, dropped: Map<string, number>, at: number): PinBackups {
-  const pins = pinsOf(previous, [...dropped.keys()]);
-  const kept = Object.fromEntries([...dropped].filter(([p]) => pins[p]));
-  return { version: PINS_BACKUP_VERSION, backups: [...existing, { at, dropped: kept, pins }].slice(-MAX_PIN_BACKUPS) };
-}
 
-export const PIN_BACKUP_RETRY_MS = 2_000;
-export const MAX_PIN_BACKUP_RETRY_MS = 60_000;
+export const PIN_BACKUP_WAIT_MS = 2_000;
+export const MAX_PIN_BACKUP_WAIT_MS = 60_000;
 
-export type PinCheck = { hold: false; kept: number; commit: () => void } | { hold: true };
-const NOTHING: PinCheck = { hold: false, kept: 0, commit: () => {} };
-const HOLD: PinCheck = { hold: true };
+export type PinCheck = { hold: false; commit: () => void } | { hold: true; againIn: number | null };
+export type PinGuard = ((s: PinState) => PinCheck) & { landing: () => Promise<void> | null };
+type Cover = { baseline: PinState; base: PinBackup[]; at: number; dropped: Map<string, number> };
 
-function landPinBackup(previous: PinState, dropped: Map<string, number>): Promise<void> {
+const NOTHING: PinCheck = { hold: false, commit: () => {} };
+
+function savedBackups(): PinBackup[] {
   try {
-    return saveDocument(PINS_BACKUP_DOCUMENT, JSON.stringify(withPinBackup(parsePinBackups(readDocument(PINS_BACKUP_DOCUMENT)), previous, dropped, Date.now())));
-  } catch (error) {
-    return Promise.reject(error);
+    return parsePinBackups(readDocument(PINS_BACKUP_DOCUMENT));
+  } catch {
+    return [];
   }
 }
 
-export type PinGuard = ((s: PinState) => PinCheck) & { landed: () => Promise<void> };
+function coverJson(cover: Cover): string {
+  const entry: PinBackup = { at: cover.at, dropped: Object.fromEntries(cover.dropped), pins: pinsOf(cover.baseline, [...cover.dropped.keys()]) };
+  return JSON.stringify({ version: PINS_BACKUP_VERSION, backups: [...cover.base, entry].slice(-MAX_PIN_BACKUPS) });
+}
 
-export function pinGuard(initial: PinState, saveAgain: (delay: number) => void): PinGuard {
+export function pinGuard(initial: PinState, saveAgain: (delay: number) => void, noteBackup: (pins: number, consent: ConsentToken | null) => void): PinGuard {
   let saved = initial;
   let sourcesSaved = pinSources(saved);
   let censusSaved: PinCensus | null = null;
-  let landedFor: PinState | null = null;
-  let landed = new Map<string, number>();
+  let cover: Cover | null = null;
+  let landed = new Set<string>();
   let landing: Promise<void> | null = null;
   let failures = 0;
-  let retryAt = 0;
+  let againAt = 0;
+
+  const stage = (staged: Cover) => {
+    const profiles = [...staged.dropped.keys()];
+    const consent = consentToken();
+    let attempt: Promise<void>;
+    try {
+      attempt = saveDocument(PINS_BACKUP_DOCUMENT, coverJson(staged));
+    } catch (error) {
+      attempt = Promise.reject(error);
+    }
+    landing = attempt.then(
+      () => {
+        landing = null;
+        failures = 0;
+        againAt = 0;
+        if (cover === staged) {
+          const fresh = profiles.filter((p) => !landed.has(p));
+          for (const p of fresh) landed.add(p);
+          if (fresh.length) noteBackup(fresh.reduce((a, p) => a + (staged.dropped.get(p) ?? 0), 0), consent);
+        }
+        saveAgain(0);
+      },
+      () => {
+        landing = null;
+        failures++;
+        const delay = Math.min(MAX_PIN_BACKUP_WAIT_MS, PIN_BACKUP_WAIT_MS * 2 ** (failures - 1));
+        againAt = Date.now() + delay;
+        saveAgain(delay);
+      },
+    );
+  };
+
   const check = (s: PinState): PinCheck => {
     const sources = pinSources(s);
     if (sources.every((v, i) => v === sourcesSaved[i])) return NOTHING;
     const census = pinCensus(s);
     const dropped = droppedPins(censusSaved ?? pinCensus(saved), census, s.profiles);
-    if (landedFor !== saved) landed = new Map();
-    const missing = new Map([...dropped].filter(([p]) => !landed.has(p)));
-    if (missing.size) {
-      if (landing || Date.now() < retryAt) return HOLD;
-      const baseline = saved;
-      landing = landPinBackup(baseline, missing).then(
-        () => {
-          landing = null;
-          failures = 0;
-          retryAt = 0;
-          if (landedFor !== baseline) landed = new Map();
-          landedFor = baseline;
-          for (const [p, n] of missing) landed.set(p, n);
-          saveAgain(0);
-        },
-        () => {
-          landing = null;
-          failures++;
-          const delay = Math.min(MAX_PIN_BACKUP_RETRY_MS, PIN_BACKUP_RETRY_MS * 2 ** (failures - 1));
-          retryAt = Date.now() + delay;
-          saveAgain(delay);
-        },
-      );
-      return HOLD;
+    if (cover && cover.baseline !== saved) {
+      cover = null;
+      landed = new Set();
     }
-    const kept = [...dropped.keys()].reduce((a, p) => a + (landed.get(p) ?? 0), 0);
+    const missing = [...dropped].filter(([p]) => !landed.has(p));
+    if (missing.length) {
+      cover ??= { baseline: saved, base: savedBackups(), at: Date.now(), dropped: new Map() };
+      let grew = false;
+      for (const [p, n] of missing) {
+        if (cover.dropped.has(p)) continue;
+        cover.dropped.set(p, n);
+        grew = true;
+      }
+      if (landing) return { hold: true, againIn: null };
+      const wait = againAt - Date.now();
+      if (wait > 0 && !grew) return { hold: true, againIn: wait };
+      stage(cover);
+      return { hold: true, againIn: null };
+    }
     return {
       hold: false,
-      kept,
       commit: () => {
         saved = s;
         sourcesSaved = sources;
         censusSaved = census;
-        landed = new Map();
-        landedFor = null;
+        cover = null;
+        landed = new Set();
       },
     };
   };
-  return Object.assign(check, { landed: () => landing ?? Promise.resolve() });
+  return Object.assign(check, { landing: () => landing });
+}
+
+export async function savedAfterPins(flush: () => boolean, held: () => boolean, landing: () => Promise<void> | null): Promise<boolean> {
+  if (!flush()) return false;
+  for (let waiting = landing(); held() && waiting; waiting = landing()) {
+    await waiting;
+    if (!flush()) return false;
+  }
+  return !held();
+}
+
+export async function landHeldPins(held: () => boolean, landing: () => Promise<void> | null, saveNow: () => void): Promise<void> {
+  const waiting = held() ? landing() : null;
+  if (!waiting) return;
+  await waiting;
+  saveNow();
 }
