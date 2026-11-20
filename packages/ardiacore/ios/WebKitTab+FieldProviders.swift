@@ -90,11 +90,6 @@ extension WebKitTab {
                                         frameAlive: { [weak view] frame in view?.scriptFrames[frame] != nil }, completion: done)
   }
 
-  func fieldProviderNavigationStarted() {
-    guard let view = webView else { return }
-    ArdiaWebView.dropVerificationCodes(of: view, frame: nil)
-  }
-
   func fieldProviderCommitted() {
     guard let view = webView else { return }
     view.scriptFrames = [:]

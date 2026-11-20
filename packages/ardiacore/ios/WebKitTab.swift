@@ -525,7 +525,6 @@ final class WebKitTab: NSView, WKNavigationDelegate, WKUIDelegate {
   }
 
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-    fieldProviderNavigationStarted()
     respondedStatus = 0
     resetBlocked()
     if showingError && webView.url != errorURL { showingError = false }
