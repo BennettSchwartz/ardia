@@ -12,7 +12,7 @@ import { TabStack } from "./BottomBar";
 import { barReturnedToPage } from "../../state/browse/deckPull";
 import { useDeckOwnsBar } from "../../state/browse/hooks";
 import { PullGhost, PullGlyphs } from "./PagePull";
-import { IncognitoGlyph, PlusGlyph, SearchTabsGlyphs } from "../tabs/DeckBarGlyphs";
+import { IncognitoGlyph, PlusGlyph, SearchTabsGlyph, SearchTabsGlyphs } from "../tabs/DeckBarGlyphs";
 import { DUO_PLUS_ABOVE, type DuoSqueeze } from "../../lib/bottomBarSpan";
 
 type Props = {
@@ -139,8 +139,14 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
         </PullGlyphs>
         </Animated.View>
         {handed ? null : (
-          <PullGhost style={styles.ghostRow}>
-            <SearchTabsGlyphs dark={dark} />
+          <PullGhost style={squeeze ? styles.ghostEnd : styles.ghostRow}>
+            {squeeze ? (
+              <View testID="floatingBarSearchGhost" style={styles.ghostSlot}>
+                <SearchTabsGlyph dark={dark} />
+              </View>
+            ) : (
+              <SearchTabsGlyphs dark={dark} />
+            )}
           </PullGhost>
         )}
       </ChromeSurface>
@@ -242,4 +248,6 @@ const styles = StyleSheet.create({
   menu: { width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
   ghost: { alignItems: "center", justifyContent: "center" },
   ghostRow: { flexDirection: "row", alignItems: "center" },
+  ghostEnd: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end" },
+  ghostSlot: { width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
 });
