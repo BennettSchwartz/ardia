@@ -56,3 +56,50 @@ test("adopting parked pins next to a pin of the same page keeps both; the same p
   useBrowser.setState(adoptParkedPins({ ...S(), parkedPins: { [profileId]: parked } }, w, profileId));
   assert.deepEqual(pinsIn(w).map(([u]) => u).sort(), [PAGE, NOTES]);
 });
+
+test("reopening a closed copy of a pin whose pin is parked brings that pin back, not a second one (#3149)", () => {
+  S().hydrate({});
+  const a = S().createWindow({ url: "https://a1.com" });
+  const profileId = S().windows[a].profileId;
+  const pin = S().newTab(a, { url: "https://pin.com", background: true });
+  S().pinTabs([pin], true);
+  const b = S().createWindow({ url: "https://b1.com" });
+  const work = S().createProfile({ name: "Work" });
+  S().createWindow({ url: "https://w1.com", profileId: work });
+  S().closeWindow(a);
+  const copy = S().windows[b].tabIds.find((id) => S().tabs[id].pin && (S().tabs[id].pinKey ?? id) === pin);
+  assert.notEqual(copy, pin, "B shows its own copy of the pin");
+  S().activate(copy);
+  S().closeTab(copy);
+  const entry = S().closedTabs.at(-1);
+  S().closeWindow(b);
+  assert.deepEqual(S().parkedPins[profileId]?.tabs.map((t) => t.id), [pin]);
+  S().restoreClosed(entry.id, null);
+  const live = Object.values(S().tabs).filter((t) => t.profileId === profileId && t.pin);
+  assert.deepEqual(live.map((t) => t.pinKey ?? t.id), [pin], "the parked pin itself is back");
+  for (const w of Object.values(S().windows).filter((x) => x.profileId === profileId)) S().closeWindow(w.id);
+  assert.deepEqual(S().parkedPins[profileId]?.tabs.map((t) => t.id), [pin], "and parks again as one pin");
+});
+
+test("adopting a parked split whose pane the window already holds keeps the split (#3149)", () => {
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://a1.com" });
+  const profileId = S().windows[w].profileId;
+  const one = S().newTab(w, { url: "https://one.com", background: true });
+  S().pinTabs([one], true);
+  const held = S().tabs[one];
+  const row = { as: "row" };
+  useBrowser.setState({ tabs: { ...S().tabs, [one]: { ...held, pin: row } } });
+  const parked = {
+    tabs: [
+      { ...held, pin: row, id: one, groupId: null },
+      { ...held, pin: row, url: "https://two.com", pinnedUrl: "https://two.com", id: "parked-two", groupId: null },
+    ],
+    groups: [],
+    splits: [{ orientation: "horizontal", slots: [{ size: 0.5, tabId: one }, { size: 0.5, tabId: "parked-two" }] }],
+  };
+  useBrowser.setState(adoptParkedPins({ ...S(), parkedPins: { [profileId]: parked } }, w, profileId));
+  const split = Object.values(S().splits).find((v) => v.windowId === w);
+  assert.ok(split, "the split comes back");
+  assert.deepEqual(split.slots.map((x) => S().tabs[x.tabId].pinnedUrl ?? S().tabs[x.tabId].url), ["https://one.com", "https://two.com"]);
+});

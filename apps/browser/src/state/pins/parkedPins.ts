@@ -7,7 +7,7 @@ import { samePage } from "../../lib/url";
 import { historyOf } from "../history/history";
 import { isRegularWindow } from "../windows/small";
 import { ASLEEP, withWake } from "../tabs/pageSession";
-import { mapSlotIds, slotTabIds, splitTabIds } from "../splits/splits";
+import { mapSlotIds, slotTabIds, splitOf, splitTabIds } from "../splits/splits";
 
 
 type PinSource = Pick<BrowserState, "tabs" | "groups" | "history" | "profiles"> & Partial<Pick<BrowserState, "windows" | "splits">>;
@@ -41,7 +41,6 @@ export function parkWindowPins(parked: Record<string, ParkedPins>, w: BrowserWin
     const tiles: ParkedPins["tabs"] = [];
     const rest: ParkedPins["tabs"] = [];
     const paneIds = new Map<string, string>();
-    const splitPanes = new Set(Object.values(s.splits ?? {}).filter((v) => v.windowId === w.id).flatMap((v) => splitTabIds(v)));
     const pending = (t: Tab, moved: boolean) => {
       const from = !moved && !isIncognitoProfile(t.profileId) ? pendingRestore(t) : undefined;
       return from ? { restoreFrom: from } : {};
@@ -84,14 +83,18 @@ export function adoptParkedPins(s: BrowserState, windowId: string, profileId: st
   const w = s.windows[windowId];
   if (!park || !w || w.kind === "private" || !s.profiles[profileId]) return s;
   const tabs = { ...s.tabs };
-  const held = new Set(w.tabIds.map((id) => tabs[id]).filter((t): t is Tab => !!t?.pin && t.profileId === profileId).map(pinKeyOf));
+  const held = new Map(w.tabIds.map((id) => tabs[id]).filter((t): t is Tab => !!t?.pin && t.profileId === profileId).map((t) => [pinKeyOf(t), t.id]));
   const keyOf = new Map<string, string>();
   const tabOf = new Map<string, string>();
   const added: string[] = [];
   const splitPanes = new Set((park.splits ?? []).flatMap((v) => splitTabIds(v)));
   for (const { id, groupId, restoreFrom, ...snap } of park.tabs) {
     const home = homeOf(snap);
-    if (!groupId && held.has(id)) continue;
+    const heldId = groupId ? undefined : held.get(id);
+    if (heldId) {
+      if (splitPanes.has(id) && !splitOf(s, heldId)) tabOf.set(id, heldId);
+      continue;
+    }
     const tab: Tab = {
       ...makeTab(windowId, profileId, snap.url, { ...snap, profileId, pin: groupId ? null : (snap.pin ?? TILE_PIN), pinnedUrl: home || null }),
       ...(tabs[id] ? { id: newId("tab"), pinKey: id } : { id }),
