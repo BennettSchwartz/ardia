@@ -77,7 +77,7 @@ builds on; `programs.test.mjs` and `adoption.test.mjs` pin it.
 
 - `useOfficialPlugins(): OfficialPlugin[]`, a hook, and `officialPlugins(store, supported?, showComingSoon?)`, its pure
   form. `OfficialPlugin` is `{ name, title, blurb, icon, version, switchable, state }` (`switchable`: built in but not always on, so it has an off switch), `state` one of `"available"`, `"installed"`,
-  `"comingSoon"`, `"unsupported"`. The list is `OFFICIAL_CATALOGUE` (the plugins Ardia means to ship, `cli` today) plus
+  `"comingSoon"`, `"unsupported"`. The list is `OFFICIAL_CATALOGUE` (the plugins Ardia means to ship: `cli` and `apple-passwords` today) plus
   any other built-in plugin whose manifest says `official`; title, blurb and icon come from the bundled manifest when
   there is one. Only a built-in plugin can claim `official`, so a plugin you install never shows here. Where plugins
   aren't supported (Linux and Windows today, `PLATFORM_FEATURES.plugins`), or the app has no bundled copy, every entry
