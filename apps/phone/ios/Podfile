@@ -61,6 +61,7 @@ link_ardia_kit = lambda do |installer|
   project = installer.pods_project
   target = project.targets.find { |t| t.name == 'ArdiaPhoneNative' }
   next unless target
+  target.build_configurations.each { |configuration| configuration.build_settings['ENABLE_SIGNATURE_AGGREGATION'] = 'NO' }
   { ardia_kit => %w[ArdiaBrowser ArdiaDesign], ardia_talk => %w[ArdiaTalk], phone_sync => %w[PhoneSync] }.each do |package, products|
     path = package.relative_path_from(Pathname.new(project.project_dir)).to_s
     reference = project.root_object.package_references.find do |existing|
