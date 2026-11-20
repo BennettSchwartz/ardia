@@ -29,4 +29,5 @@ Ardia builds on and ships third-party software under its own licenses, including
 - React Native and React Native macOS (MIT)
 - Phonon 31M (Apache-2.0), copyright Gradium, https://huggingface.co/gradium/phonon-31m-en, with its voices from
   https://huggingface.co/gradium/phonon-voices (Apache-2.0), run through Gradium's ptts package (MIT or Apache-2.0),
-  https://github.com/gradium-ai/xn-ptts: the iPhone's Talk to Me voice, downloaded as an asset pack
+  https://github.com/gradium-ai/xn-ptts: the iPhone's Talk to Me voice, downloaded from
+  https://github.com/ardia-browser/ardia-voices when Talk to Me is turned on

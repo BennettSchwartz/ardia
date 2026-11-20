@@ -1434,24 +1434,29 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
   Each answer block is one `tts.stream(_:)` call, consumed in order; `pause()` and `resume()` pause the player node,
   cancelling the consuming task stops generation, `stop()` clears what was scheduled, and when the engine stops on a
   route change it restarts at the block being heard.
-- **Distribution: an Apple-hosted Background Assets pack, on demand.** `talk-to-me-phonon-31m-en`
-  (`apps/phone/ios/AssetPacks/talk-to-me-phonon-31m-en/Manifest.json`, `downloadPolicy: onDemand`, iOS) holds
-  `TalkToMe/`: the three Core ML models compiled to `.mlmodelc`, `host.safetensors`, `tokenizer.json`, a pruned
-  `bundle.json` and six voices (Harper, Juniper, Miles and Preston, American; Maeve and Hugh, British). About 127 MB to
-  download and 156 MB installed. The models are compiled on the Mac, so the phone loads them straight from the
-  read-only pack and never writes or copies them (`Phonon` compiles only a `.mlpackage` with no `.mlmodelc` beside
-  it). `build-pack` beside the manifest fetches `phonon-31m-en-coreml.zip` from the v0.7.1 release, checks its SHA-256,
-  every kept file against the zip's `bundle.json` and each voice against `voices.tsv`, compiles with `coremlcompiler`
-  and packs with `xcrun ba-package`; the model files are never committed. The app's Info.plist has
-  `BAHasManagedAssetPacks`, `BAUsesAppleHosting` and `BAAppGroupID` (`group.com.ardia.browser.ios`), and the app embeds
-  `ArdiaTalkToMe.appex` (`com.ardia.browser.ios.talktome`, in `Extensions/`), Apple's managed downloader: a
-  `StoreDownloaderExtension` with the default behaviour, in the same app group. `TalkToMe.swift` asks
-  `AssetPackManager` for the pack: `ensureLocalAvailability` when Talk to Me is turned on, progress from
-  `statusUpdates(forAssetPackWithID:)`, Cancel through the update's `Progress`, `remove(assetPackWithID:)` for Remove
-  Voice Download, and `url(for: "TalkToMe/bundle.json")` for the folder to load. Nothing downloads before the switch.
+- **Distribution: our own download from GitHub, on demand.** The voice is one LZFSE Apple Archive,
+  `phonon-31m-en.aar` in the `phonon-31m-en-v0.7.1` release of `ardia-browser/ardia-voices` (132,936,282 bytes, SHA-256
+  `f72408f2…6579`). It unpacks to `TalkToMe/`: the three Core ML models compiled to `.mlmodelc`, `host.safetensors`,
+  `tokenizer.json`, a pruned `bundle.json` and six voices (Harper, Juniper, Miles and Preston, American; Maeve and
+  Hugh, British), 156 MB installed. The models are compiled on the Mac, so the phone never compiles or writes beside
+  them (`Phonon` compiles only a `.mlpackage` with no `.mlmodelc` beside it). The URL, size and SHA-256 are pinned
+  together in `VoiceDownload` in `packages/phone/ios/TalkToMe.swift`. Turning Talk to Me on downloads it with a
+  foreground `URLSession` download task into `Application Support/TalkToMe-incoming-<uuid>/`, checks the byte count and
+  the SHA-256 (CryptoKit, streamed in 4 MB reads), unpacks it with AppleArchive into the same folder, writes
+  `voice.sha256` into the unpacked `TalkToMe/`, and moves it to `Application Support/TalkToMe` in one step (replacing
+  an older one), excluded from backup; the archive and the incoming folder are then deleted. A wrong size or hash
+  deletes the archive and fails. The voice counts as in only when that folder's `bundle.json` is there and its
+  `voice.sha256` matches the pinned one, so pinning a new voice treats the old folder as absent and deletes it.
+  Nothing downloads before the switch, and the app binary carries no part of the voice. No App ID, extension, App
+  Store Connect upload or TestFlight is involved: development, ad hoc and simulator builds download it the same way.
+  `apps/phone/ios/TalkToMe/build-voice` makes the archive: it fetches `phonon-31m-en-coreml.zip` from xn-ptts' v0.7.1
+  release, checks its SHA-256, every kept file against the zip's `bundle.json` and each voice against `voices.tsv`,
+  compiles with `coremlcompiler`, packs with `aa archive -d <stage> -subdir TalkToMe -o phonon-31m-en.aar -a lzfse`
+  (reproducible: the same stage gives the same bytes) and prints its size and SHA-256. The model files are never
+  committed.
 - **Settings › Browse for Me › Talk to Me.** The switch (off by default) starts the download and shows its progress
-  with Cancel, or the failure with Try Again (offline, or "App Store and TestFlight builds only" when the pack is not
-  found). With the voice in: Speed (0.8× to 1.5×), the six voices (a tap chooses one and plays a short sample), the
+  with Cancel, or the failure with Try Again ("Check your connection" for a network error, "Try again in a moment"
+  for anything else, a wrong hash included); a failure stays until Try Again or the switch. With the voice in: Speed (0.8× to 1.5×), the six voices (a tap chooses one and plays a short sample), the
   download's size and Remove Voice Download (confirmed; it turns Talk to Me off). The footer says the bar at the end
   of an answer plays it, or the phone held to the ear does, that Phonon speaks it on this iPhone and nothing leaves it,
   and that it is English only for now. Settings are in `UserDefaults` (`ArdiaTalkToMeOn`, `ArdiaTalkToMeVoice`,
@@ -1473,25 +1478,20 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
   plays with the silent switch on. A call, Siri, unplugged headphones or the app leaving the foreground pause it; a
   new search, opening a source, Search the Web or closing the page stop it and turn the sensor off. In the simulator
   the page blacks out while "near", as a real screen turns off.
-- **Testing** (test builds only). `-ArdiaTalkToMeModels <folder>` loads the models from a folder instead of the pack
-  (`build-pack --models-only --out <dir>` writes `<dir>/stage/TalkToMe`), so the simulator can speak.
+- **Testing** (test builds only). `-ArdiaTalkToMeModels <folder>` loads the models from a folder instead of the download
+  (`build-voice --models-only --out <dir>` writes `<dir>/stage/TalkToMe`); the simulator can also download the real voice.
   `-ArdiaTalkToMeRecord <path.wav>` also writes what was generated to a 24 kHz WAV, finished when the answer ends or
   the page closes, with `<path.wav>.txt` listing each block (time, output, index, text). `-ArdiaProximity
   "4:near,12:far"` plays proximity changes at those seconds after the page opens, and `xcrun simctl --set <set> spawn
   <udid> notify_post com.ardia.browser.ios.proximity.near` (or `.far`) sends one by hand. `-ArdiaTalkToMeOn YES`
   turns Talk to Me on for the run (the setting's own key, through the launch argument domain). The app logs
-  `TALKTOME first audio after … (earpiece|speaker|sample)` and `TALKTOME utterance: …`. Apple's mock server (`xcrun
-  ba-serve --host <host> <pack>.aar`, with an SSL certificate the test device trusts and Settings › Developer ›
-  Development Overrides › URL Override pointing at it) serves the pack to a development build on a device; it was not
-  set up for #2845.
-- **Release step.** Apple-hosted packs download only in TestFlight and App Store builds, so the pack is uploaded to the
-  app record before (or with) the first build that needs it, and again whenever `AssetPacks/` changes; see
-  "Talk to Me's asset pack" under TestFlight below.
+  `TALKTOME first audio after … (earpiece|speaker|sample)`, `TALKTOME utterance: …`, `TALKTOME voice installed after …` and
+  `TALKTOME download failed: …`.
 - **Telemetry.** Five counts in `usage_counts`: `talk_to_me_answers_read` (an answer whose first audio played, once per
-  answer, never a sample: the total), `talk_to_me_ear_listens` (those started by raising the phone to the ear), `talk_to_me_voice_downloads` (the pack finished downloading), `talk_to_me_download_failed`
-  (it failed, not cancelled) and `talk_to_me_failed` (the models wouldn't load or speech failed). The native side sends
+  answer, never a sample: the total), `talk_to_me_ear_listens` (those started by raising the phone to the ear), `talk_to_me_voice_downloads` (the voice downloaded, checked and unpacked), `talk_to_me_download_failed`
+  (it failed, not cancelled: offline, a bad status, a wrong size or hash, or an archive that wouldn't unpack) and `talk_to_me_failed` (the models wouldn't load or speech failed). The native side sends
   `{ name: "talkToMe", count }` on `onBrowseForMe`, and `noteBrowseForMe` counts it outside Incognito.
-- **Left for a person.** The Apple-hosted download itself (TestFlight only), the real proximity sensor and the
+- **Left for a person.** The download over a phone's cellular connection, the real proximity sensor and the
   earpiece route, the microphone prompt, the sound with the silent switch on, ducking under music, a call
   interrupting it, and the Neural Engine's speed.
 
@@ -1636,7 +1636,7 @@ Every count and timing the phone can send, for the owner to read as one set and 
 | `deck_incognito_switches` | the deck bar's Incognito switch on iPhone (build 16 feedback) | Whether people switch the deck to Incognito from its bar; zero across testers after a release means the switch stopped showing or stopped switching. Taps back to the normal tabs are not counted, since they start in Incognito |
 | `browse_for_me_opened` | Browse for Me on Expo | Whether people use Browse for Me at all; zero across testers after a release means the tray row or the voice button stopped opening it |
 | `browse_answers_chatgpt`, `browse_answers_on_device`, `browse_answers_excerpts`, `browse_answers_failed` | Browse for Me on Expo | Who writes the answers: a share of `excerpts` that grows on phones with Apple Intelligence means the model path broke, and a growing `failed` share against `browse_for_me_opened` means search or page reading broke (DuckDuckGo's page changing is the likely cause) |
-| `talk_to_me_answers_read`, `talk_to_me_ear_listens`, `talk_to_me_voice_downloads`, `talk_to_me_download_failed`, `talk_to_me_failed` | Talk to Me on iPhone (#2845) | Whether people listen: answers read against `browse_for_me_opened`, and how many of them start at the ear (`ear_listens`) rather than from the speaker button; zero ear listens across testers means the proximity sensor stopped starting it. After the first TestFlight with the asset pack, `download_failed` against `voice_downloads` shows whether Apple's hosting works; a rising `failed` against answers read means the models stopped loading or speaking |
+| `talk_to_me_answers_read`, `talk_to_me_ear_listens`, `talk_to_me_voice_downloads`, `talk_to_me_download_failed`, `talk_to_me_failed` | Talk to Me on iPhone (#2845) | Whether people listen: answers read against `browse_for_me_opened`, and how many of them start at the ear (`ear_listens`) rather than from the speaker button; zero ear listens across testers means the proximity sensor stopped starting it. `download_failed` against `voice_downloads` shows whether the GitHub download works; a rising `failed` against answers read means the models stopped loading or speaking |
 | `page_summaries_pinched`, `page_summaries_from_menu` | Pinch to Summarize on iPhone and Android | It is off by default, so opens count only people who turned it on. A drop in pinch opens alongside steady menu opens can point to a gesture regression. A rise in pinch opens relative to `tabs_opened` can indicate accidental summaries |
 | `page_summaries_on_device`, `page_summaries_excerpts`, `page_summaries_failed` | Pinch to Summarize on iPhone | A rising excerpt share can point to problems with Apple Intelligence. A rising failure share can point to problems reading pages |
 | `page_summaries_chatgpt`, `page_summaries_chatgpt_fallbacks` | Pinch to Summarize on Android | Android has no excerpts, so `page_summaries_failed` against `page_summaries_on_device` is the share of phones without a ready Gemini Nano. How many summaries the opt-in ChatGPT choice writes; fallbacks rising against `page_summaries_chatgpt` mean the Responses call or the token refresh broke. On Android, pinch opens against menu opens show the passive pinch watcher working, and zero pinch opens after a release with steady menu opens mean it stopped |
@@ -3800,24 +3800,18 @@ This was `docs/ios.md`'s, for main's SwiftUI app; since the clean-up the workflo
 
   Confirm installation of `com.ardia.browser.ios` on the iPhone.
 - **The app record.** "Ardia", bundle id `com.ardia.browser.ios`, team `U5L5T3NGVV`; the extensions are `.widgets`,
-  `.share` and `.open`, and the ExtensionKit downloader `.talktome` (Talk to Me's asset pack), all sharing the app group
-  `group.com.ardia.browser.ios`. The first signed archive with `.talktome` needs its App ID with the App Groups
-  capability; automatic signing registers it, which changes the team, so ask the owner first.
-- **Talk to Me's asset pack.** Apple hosts `talk-to-me-phonon-31m-en` beside the builds. Before the first upload that
-  carries Talk to Me, and again whenever `apps/phone/ios/AssetPacks/` changes, build and upload it on a Mac:
+  `.share` and `.open`, sharing the app group `group.com.ardia.browser.ios`.
+- **Talk to Me's voice** is not part of a build or an upload. Only a new voice needs a step, on a Mac:
 
   ```sh
-  apps/phone/ios/AssetPacks/talk-to-me-phonon-31m-en/build-pack --out /private/tmp/ardia-talk-to-me-pack
-  xcrun altool --upload-asset-pack /private/tmp/ardia-talk-to-me-pack/talk-to-me-phonon-31m-en.aar --apple-id <app id> \
-    --api-key "$ASC_KEY_ID" --api-issuer "$ASC_ISSUER" --p8-file-path "$ASC_KEY" --wait
-  xcrun altool --list-asset-pack-versions --apple-id <app id> --asset-pack-identifier talk-to-me-phonon-31m-en \
-    --api-key "$ASC_KEY_ID" --api-issuer "$ASC_ISSUER" --p8-file-path "$ASC_KEY"
+  apps/phone/ios/TalkToMe/build-voice --out /private/tmp/ardia-talk-to-me-pack
+  gh release create <tag> /private/tmp/ardia-talk-to-me-pack/phonon-31m-en.aar --repo ardia-browser/ardia-voices \
+    --title <tag> --notes "<model and release it was built from>"
   ```
 
-  The app id is the record's numeric id (`node apps/phone/scripts/asc.mjs status`). Wait for `READY`, then upload the
-  build as usual; internal TestFlight testers get the pack when they turn Talk to Me on. Public testers need one more
-  step: after the build is submitted for TestFlight review, submit the pack's version under TestFlight › Asset Packs
-  and wait for its own external-testing approval. An unchanged pack needs no new upload.
+  Use a new tag (never replace a published asset, since older apps pin its hash), then update `url`, `bytes` and
+  `sha256` in `VoiceDownload` (`packages/phone/ios/TalkToMe.swift`) with what `build-voice` printed. Phones that had
+  the old voice download the new one the next time Talk to Me is on.
 - **The workflow** (`.github/workflows/ios-release.yml`). What each mode touches in App Store Connect:
   - `mode=status` only reads: the app record, App IDs, devices, certificates, profiles, builds, build uploads and
     tester groups.
