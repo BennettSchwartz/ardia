@@ -23,6 +23,15 @@ export function bottomBarLayout(width: number, insets: { left: number; right: nu
   return stripLeft ? { span: { left: near, right: far }, strip: { side: "left", centerX: fromEdge } } : { span: { left: far, right: near }, strip: { side: "right", centerX: width - fromEdge } };
 }
 
+export type DuoSqueeze = { marginLeft: number; marginRight: number };
+
+export function duoSqueeze(width: number, layout: BottomBarLayout): DuoSqueeze | null {
+  const { span, strip } = layout;
+  if (!strip) return null;
+  const half = DUO_BAR.button / 2;
+  return { marginLeft: strip.centerX - half - span.left, marginRight: width - span.right - (strip.centerX + half) };
+}
+
 export const barSpanCenter = (width: number, span: BarSpan) => (span.left + width - span.right) / 2;
 
 export function besideStrip(strip: DuoStrip, width: number, menuWidth: number, margin: number) {

@@ -121,12 +121,13 @@ for (const pose of DUO_POSES) {
     expect(holds(row, "floatingBarAddress")).toBe(true);
     expect(holds(row, "floatingBarTabs")).toBe(false);
     expect(holds(row, "floatingBarPlus")).toBe(false);
-    const tabs = flat(hosts(page, "floatingBarLeading")[0]!) as { left: number; top: number };
-    const plus = flat(hosts(page, "floatingBarTrailing")[0]!) as { left: number; top: number; width: number };
-    expect(left + tabs.left + 24).toBe(pose.stripX);
-    expect(left + plus.left + plus.width / 2).toBe(pose.stripX);
-    expect(tabs.top).toBe(0);
-    expect(plus.top).toBe(-55);
+    const strip = hosts(page, "floatingBarStrip")[0]!;
+    const { left: stripLeft, top: stripTop, width: stripWidth, gap } = flat(strip) as { left: number; top: number; width: number; gap: number };
+    expect(left + stripLeft + stripWidth / 2).toBe(pose.stripX);
+    expect(stripTop).toBe(-55);
+    expect(stripWidth + gap).toBe(55);
+    const order = strip.findAll((node) => node.props.testID === "floatingBarPlus" || node.props.testID === "floatingBarTabs").map((node) => node.props.testID as string);
+    expect([...new Set(order)]).toEqual(["floatingBarPlus", "floatingBarTabs"]);
     unmount(page);
   });
 

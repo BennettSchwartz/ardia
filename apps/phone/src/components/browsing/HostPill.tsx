@@ -66,7 +66,7 @@ export function useBarFold(collapsed: boolean, reduceMotion: boolean) {
     return { transform: [{ translateY: (hostPillLayout.height / 2) * (1 - scale) }, { scale }] };
   }, [shrink]);
   const pillContent = useAnimatedStyle(() => ({ opacity: fold.value }));
-  return { bar, pill, pillContent, pillMounted: presence.mounted };
+  return { bar, pill, pillContent, pillMounted: presence.mounted, progress: fold };
 }
 
 const styles = StyleSheet.create({

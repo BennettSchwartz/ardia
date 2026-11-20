@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { barSpanCenter, besideStrip, bottomBarLayout, DUO_PLUS_ABOVE } from "./bottomBarSpan.ts";
+import { barSpanCenter, besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoSqueeze } from "./bottomBarSpan.ts";
 
 test("with no hinge every bottom bar pads by the larger side inset plus its own side, on both sides, and nothing goes to a strip", () => {
   assert.deepEqual(bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), { span: { left: 24, right: 24 }, strip: null });
@@ -33,4 +33,18 @@ test("a strip on the leading side mirrors it all", () => {
   assert.deepEqual(bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24), { span: { left: 96, right: 455 }, strip: { side: "left", centerX: 48 } });
   assert.deepEqual(besideStrip({ side: "left", centerX: 48 }, 466, 250, 16), { left: 80, width: 250 });
   assert.equal(bottomBarLayout(466, { left: 0, right: 60 }, "closed", 24).strip!.centerX, 466 - 36);
+});
+
+test("collapsed, the capsule squeezes into a 48 circle on the bar's line in the strip, and Tabs and + rise one step each, 55 then 110 above the line", () => {
+  const closed = bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24);
+  assert.deepEqual(duoSqueeze(466, closed), { marginLeft: 370, marginRight: -72 });
+  assert.equal(24 + 370, 418 - 24);
+  assert.equal(466 - 96 + 72, 418 + 24);
+  const open = bottomBarLayout(951, { left: 0, right: 84 }, "fullyOpen", 24);
+  assert.deepEqual(duoSqueeze(951, open), { marginLeft: 424, marginRight: -72 });
+  assert.equal(455 + 424, 903 - 24);
+  const mirrored = bottomBarLayout(466, { left: 84, right: 0 }, "closed", 24);
+  assert.deepEqual(duoSqueeze(466, mirrored), { marginLeft: -72, marginRight: 370 });
+  assert.equal(duoSqueeze(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24)), null);
+  assert.equal(DUO_PLUS_ABOVE * 2, 110);
 });

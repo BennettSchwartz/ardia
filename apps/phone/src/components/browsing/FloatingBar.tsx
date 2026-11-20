@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ComponentProps } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import Animated from "react-native-reanimated";
+import Animated, { useAnimatedStyle, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { useBarReturn } from "./barReturn";
 import { NotSecureLock } from "./NotSecureLock";
 import { haptics } from "../../state/app/haptics";
@@ -13,7 +13,7 @@ import { barReturnedToPage } from "../../state/browse/deckPull";
 import { useDeckOwnsBar } from "../../state/browse/hooks";
 import { PullGhost, PullGlyphs } from "./PagePull";
 import { IncognitoGlyph, PlusGlyph, SearchTabsGlyphs } from "../tabs/DeckBarGlyphs";
-import { DUO_PLUS_ABOVE } from "../../lib/bottomBarSpan";
+import { DUO_PLUS_ABOVE, type DuoSqueeze } from "../../lib/bottomBarSpan";
 
 type Props = {
   tab: BrowserTab;
@@ -22,7 +22,7 @@ type Props = {
   dark: boolean;
   showsPlus: boolean;
   anchors?: boolean;
-  stripLeft?: number | null;
+  duo?: DuoBar | null;
   onTabs: () => void;
   onTabsMenu: () => void;
   onStep: (delta: -1 | 1) => void;
@@ -30,6 +30,8 @@ type Props = {
   onPlus: () => void;
   onMore: () => void;
 };
+
+export type DuoBar = { stripLeft: number; squeeze: DuoSqueeze; progress: SharedValue<number>; collapsed: boolean };
 
 export type BarAddress = { host: string; insecure: boolean; isPrivate: boolean; iconUrl: string | null; pageUrl: string | null };
 
@@ -59,7 +61,7 @@ export function barAddress(tab: BrowserTab): BarAddress {
   };
 }
 
-export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true, stripLeft = null, onTabs, onTabsMenu, onStep, onAddress, onPlus, onMore }: Props) {
+export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true, duo = null, onTabs, onTabsMenu, onStep, onAddress, onPlus, onMore }: Props) {
   const ink = dark ? chromeInk.dark : chromeInk.light;
   const address = barAddress(tab);
   const size = floatingBarLayout.control;
@@ -73,14 +75,27 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
   const swaps = handed || wasHanded.current;
   const back = swaps ? { ...returning, centreGlass: { shown: returning.centreGlass.shown && !handed, shownMs: 0 }, sidesGlass: { shown: returning.sidesGlass.shown && !handed, shownMs: 0 } } : returning;
   const ids = anchors ? back.ids : null;
-  const inStrip = stripLeft !== null;
+  const inStrip = duo !== null;
+  const idle = useSharedValue(0);
+  const progress = duo?.progress ?? idle;
+  const squeeze = duo?.squeeze ?? null;
+  const squeezed = duo?.collapsed ?? false;
+  const shut = (value: number) => {
+    "worklet";
+    return Math.min(Math.max(value, 0), 1);
+  };
+  const centreSqueeze = useAnimatedStyle(() => (squeeze ? { marginLeft: squeeze.marginLeft * shut(progress.value), marginRight: squeeze.marginRight * shut(progress.value) } : {}), [squeeze]);
+  const addressFade = useAnimatedStyle(() => (squeeze ? { opacity: 1 - shut(progress.value) } : {}), [squeeze]);
+  const dotsFade = useAnimatedStyle(() => (squeeze && address.insecure ? { opacity: 1 - shut(progress.value) } : {}), [squeeze, address.insecure]);
+  const lockFade = useAnimatedStyle(() => ({ opacity: shut(progress.value) }));
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -DUO_PLUS_ABOVE * shut(progress.value) }] }));
   const leading = (
-    <Animated.View testID="floatingBarLeading" collapsable={false} style={[inStrip ? [styles.strip, { left: stripLeft, top: 0 }] : null, back.leading]} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
+    <Animated.View testID="floatingBarLeading" collapsable={false} style={back.leading} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
       <FloatingTabsButton tab={tab} order={order} roles={roles} dark={dark} testID="floatingBarTabs" glass={back.sidesGlass} glyphs={back.leadingGlyphs} ghost={!handed} onTabs={onTabs} onTabsMenu={onTabsMenu} onStep={onStep} />
     </Animated.View>
   );
   const trailing = (
-    <Animated.View testID="floatingBarTrailing" collapsable={false} style={[styles.circleHit, inStrip ? [styles.strip, { left: stripLeft, top: -DUO_PLUS_ABOVE }] : null, back.trailing]} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
+    <Animated.View testID="floatingBarTrailing" collapsable={false} style={[styles.circleHit, back.trailing]} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
       {showsPlus ? <FloatingPlusButton tab={tab} dark={dark} testID="floatingBarPlus" glass={back.sidesGlass} glyphs={back.trailingGlyphs} ghost={!handed} onPlus={onPlus} /> : null}
     </Animated.View>
   );
@@ -88,10 +103,11 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     <>
     <View testID="floatingBar" style={styles.row} pointerEvents="box-none">
       {inStrip ? null : leading}
-      <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={styles.addressSlot} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={styles.address}>
+      <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={[styles.addressSlot, centreSqueeze]} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
+      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, inStrip ? styles.squeezes : null]}>
         <Animated.View testID="floatingBarCentreGlyphs" nativeID={ids?.face} collapsable={false} style={[styles.addressRow, back.centreGlyphs]}>
         <PullGlyphs style={styles.addressRow}>
+        <Animated.View testID="floatingBarAddressFade" collapsable={false} style={[styles.addressFade, addressFade]} pointerEvents={squeezed ? "none" : "box-none"} importantForAccessibility={squeezed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={squeezed}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Address"
@@ -110,8 +126,16 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
             {address.host}
           </Text>
         </Pressable>
-        <PressScale label="Page Menu" onPress={onMore} onPressIn={haptics.barPress} style={styles.menu}>
-          <Symbol name="ellipsis" size={floatingBarLayout.menuSymbol} color={ink.foreground} />
+        </Animated.View>
+        <PressScale label={squeezed ? `Page Menu, ${spokenAddress(address)}` : "Page Menu"} onPress={onMore} onPressIn={haptics.barPress} style={styles.menu}>
+          <Animated.View style={[styles.menuGlyph, dotsFade]}>
+            <Symbol name="ellipsis" size={floatingBarLayout.menuSymbol} color={ink.foreground} />
+          </Animated.View>
+          {inStrip && address.insecure ? (
+            <Animated.View style={[styles.menuGlyph, styles.menuLock, lockFade]}>
+              <NotSecureLock testID="floatingBarMoreNotSecure" size={floatingBarLayout.siteIcon} color={ink.notSecure} />
+            </Animated.View>
+          ) : null}
         </PressScale>
         </PullGlyphs>
         </Animated.View>
@@ -124,8 +148,12 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
       </Animated.View>
       {inStrip ? null : trailing}
     </View>
-    {inStrip ? trailing : null}
-    {inStrip ? leading : null}
+    {inStrip ? (
+      <Animated.View testID="floatingBarStrip" pointerEvents="box-none" style={[styles.strip, { left: duo.stripLeft, top: -DUO_PLUS_ABOVE }, lift]}>
+        {trailing}
+        {leading}
+      </Animated.View>
+    ) : null}
     </>
   );
 }
@@ -201,7 +229,11 @@ const styles = StyleSheet.create({
     height: floatingBarLayout.control,
   },
   circleHit: { width: floatingBarLayout.control, height: floatingBarLayout.control },
-  strip: { position: "absolute" },
+  strip: { position: "absolute", width: floatingBarLayout.control, gap: DUO_PLUS_ABOVE - floatingBarLayout.control },
+  squeezes: { overflow: "hidden" },
+  addressFade: { flex: 1, alignSelf: "stretch", flexDirection: "row" },
+  menuGlyph: { alignItems: "center", justifyContent: "center" },
+  menuLock: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0 },
   circle: { width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
   addressSlot: { flex: 1, height: floatingBarLayout.control },
   address: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },

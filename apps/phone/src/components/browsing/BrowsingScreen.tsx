@@ -63,7 +63,7 @@ import { PagerBackdrop, PagerNeighbour, useTabPager } from "./TabPager";
 import { launchArguments } from "../../state/app/launchFlags";
 import { labTrace } from "../../platform/lab";
 import { shownTone } from "../../lib/pageTone";
-import { besideStrip, bottomBarLayout, DUO_BAR } from "../../lib/bottomBarSpan";
+import { besideStrip, bottomBarLayout, DUO_BAR, duoSqueeze } from "../../lib/bottomBarSpan";
 import { useScreenLayout } from "../../state/app/screenLayout";
 
 export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: BrowserTab }) {
@@ -74,10 +74,11 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const { width, height } = useWindowDimensions();
   const hinge = useScreenLayout((s) => s.hinge);
   const barSide = design === "redesigned" ? chromeLayout.barSideInset : browseLayout.barSideInset - 4;
-  const { span: barSpan, strip } = bottomBarLayout(width, insets, hinge, barSide);
+  const barLayout = bottomBarLayout(width, insets, hinge, barSide);
+  const { span: barSpan, strip } = barLayout;
   const controlsSpan = { left: barSpan.left - barSide, right: barSpan.right - barSide };
   const duoStrip = design === "redesigned" ? strip : null;
-  const stripLeft = duoStrip ? duoStrip.centerX - DUO_BAR.button / 2 - controlsSpan.left : null;
+  const squeeze = duoStrip ? duoSqueeze(width, barLayout) : null;
   const menuOpen = useMenuOpen();
   const finding = useFindOpen();
   const readerId = useReaderTabId();
@@ -110,6 +111,8 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const barDark = design === "redesigned" && !pageTone?.bottom ? theme.dark : isDarkColor(bottom);
   useSystemBars(isDarkColor(top), barDark);
   const collapse = useBarCollapse(tab.id, finding, design === "redesigned");
+  const duoBar = useMemo(() => (duoStrip && squeeze ? { stripLeft: duoStrip.centerX - DUO_BAR.button / 2 - controlsSpan.left, squeeze, progress: collapse.fold.progress, collapsed: collapse.collapsed } : null), [duoStrip?.centerX, controlsSpan.left, squeeze?.marginLeft, squeeze?.marginRight, collapse.fold.progress, collapse.collapsed]);
+  const folds = duoBar === null;
   const staged = design === "redesigned" && searchStageIsNative();
   useEffect(() => (staged && !collapse.hidden ? reportBarPill() : undefined), [staged, collapse.hidden]);
   const underBar = usePageUnderBars();
@@ -186,10 +189,10 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                 <Animated.View
                   testID="floatingBarFold"
                   collapsable={false}
-                  style={collapse.fold.bar}
-                  pointerEvents={collapse.collapsed ? "none" : "box-none"}
-                  importantForAccessibility={collapse.collapsed ? "no-hide-descendants" : "auto"}
-                  accessibilityElementsHidden={collapse.collapsed}
+                  style={folds ? collapse.fold.bar : null}
+                  pointerEvents={folds && collapse.collapsed ? "none" : "box-none"}
+                  importantForAccessibility={folds && collapse.collapsed ? "no-hide-descendants" : "auto"}
+                  accessibilityElementsHidden={folds && collapse.collapsed}
                 >
                   <FloatingBar
                     tab={tab}
@@ -197,8 +200,8 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                     roles={rolesFor(barDark)}
                     dark={barDark}
                     showsPlus={staged || !searching}
-                    anchors={!collapse.collapsed}
-                    stripLeft={stripLeft}
+                    anchors={!folds || !collapse.collapsed}
+                    duo={duoBar}
                     onTabs={showDeck}
                     onTabsMenu={openTabsMenu}
                     onStep={stepTab}
@@ -207,7 +210,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                     onMore={openPageMenu}
                   />
                 </Animated.View>
-                {collapse.fold.pillMounted ? (
+                {folds && collapse.fold.pillMounted ? (
                   <Animated.View
                     testID="hostPillFold"
                   collapsable={false}
