@@ -93,6 +93,53 @@ const laterEvent = <E extends EventName>(name: E, data: EventData<E>) => queueMi
 export const emitDownload = (download: EngineEvents["downloads.changed"]) => emitEvent("downloads.changed", download);
 export const emitPermission = (request: EngineEvents["permissions.requested"]) => emitEvent("permissions.requested", request);
 
+export const passwordProviders = {
+  calls: [] as unknown[][],
+  generation: 0,
+  profiles: [] as { profile: string; fields: string[]; codeSetup: boolean }[],
+  panel: { shown: true } as CallResult<"passwords.showSystemPanel">,
+  handlerApp: "Passwords" as string | null,
+  lastPanelGeneration: undefined as number | undefined,
+  opened: [] as { tab: string; token: string; generation?: number }[],
+  openResult: true,
+  hold: null as Promise<void> | null,
+  holdNext: null as Promise<void> | null,
+  notAppliedNext: 0,
+  bareReplyNext: 0,
+  sessions: [] as unknown[],
+  rejectNext: 0,
+  handlerGate: null as Promise<void> | null,
+};
+const providerFakes = {
+  setFieldProviders: async (args: { generation: number; session: string; profiles: { profile: string; fields: string[]; codeSetup: boolean }[] }) => {
+    const { generation, profiles } = args;
+    passwordProviders.calls.push(["setFieldProviders", generation, profiles.map((p) => p.profile)]);
+    passwordProviders.sessions.push(args.session);
+    if (passwordProviders.rejectNext > 0) {
+      passwordProviders.rejectNext -= 1;
+      throw new Error("native refused the provider set");
+    }
+    const once = passwordProviders.holdNext;
+    passwordProviders.holdNext = null;
+    await once;
+    await passwordProviders.hold;
+    if (passwordProviders.bareReplyNext > 0) {
+      passwordProviders.bareReplyNext -= 1;
+      return {} as { applied: boolean };
+    }
+    if (passwordProviders.notAppliedNext > 0) {
+      passwordProviders.notAppliedNext -= 1;
+      return { applied: false };
+    }
+    passwordProviders.generation = generation;
+    passwordProviders.profiles = profiles.map((p) => ({ ...p, fields: [...p.fields] }));
+    return { applied: true };
+  },
+  showSystemPanel: ({ tab, generation }: { tab: string; generation?: number }) => (passwordProviders.calls.push(["showSystemPanel", tab]), (passwordProviders.lastPanelGeneration = generation), { ...passwordProviders.panel }),
+  systemPanelAvailable: () => ({ chromium: true, webkit: true }),
+  otpauthHandler: async () => (passwordProviders.calls.push(["otpauthHandler"]), await passwordProviders.handlerGate, { app: passwordProviders.handlerApp }),
+  setUpVerificationCode: ({ tab, token, generation }: { tab: string; token: string; generation?: number }) => (passwordProviders.opened.push({ tab, token, generation }), { opened: passwordProviders.openResult }),
+};
 export const current = { device: null as string | null };
 
 type Login = { origin: string; url: string; username: string; password: string; created: number };
@@ -155,9 +202,22 @@ function addHistoryVisits(profile: string, { pages, toleranceMs = 1000 }: { page
   return { added };
 }
 
+export const ENGINE_REQUEST_LIMIT_BYTES = 8 * 1024 * 1024;
+export const historyImportRequestBytes: number[] = [];
+export const refusedHistoryImports = { next: 0 };
+export const heldHistoryImports: { reply: Promise<void> | null } = { reply: null };
+export const heldHistoryQueries: { reply: Promise<void> | null } = { reply: null };
+
 function importHistoryRows(profile: string, { rows }: { rows: { u: string; t: string; l: number }[] }) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ rows })).length;
+  historyImportRequestBytes.push(bytes);
+  if (bytes > ENGINE_REQUEST_LIMIT_BYTES) throw Object.assign(new Error("Invalid or oversized engine request"), { code: "ERR_ENGINE" });
+  if (refusedHistoryImports.next > 0) {
+    refusedHistoryImports.next--;
+    throw Object.assign(new Error("no history"), { code: "ERR_ENGINE" });
+  }
   for (const r of rows) if (!chromeHistory(profile).has(r.u)) chromeHistory(profile).set(r.u, { title: r.t, visits: [r.l] });
-  return {};
+  return heldHistoryImports.reply ? heldHistoryImports.reply.then(() => ({})) : {};
 }
 
 function deleteHistoryUrls(profile: string, { urls }: { urls: string[] }) {
@@ -434,7 +494,12 @@ const fakeModules = {
       allowSaving: () => ({ ok: true }),
       export: () => ({ status: "cancelled" }),
       autofillEnabled: ({ profile }) => profileToggle(profile, "passwords"),
-      setAutofillEnabled: ({ profile, enabled }) => (setProfileToggle(profile, "passwords", enabled), null),
+      setAutofillEnabled: ({ profile, enabled }) => {
+        setProfileToggle(profile, "passwords", enabled);
+        passwordProviders.calls.push(["offerToSave", profile, enabled]);
+        return null;
+      },
+      ...providerFakes,
     },
     {
       save: async (_profile: string, origin: string, username: string, password: string) => {
@@ -531,7 +596,10 @@ const fakeModules = {
     setAllowed: () => null,
   }),
   ArdiaHistory: domain("history", {
-    query: ({ profile, ...args }) => queryHistory(profile, args),
+    query: ({ profile, ...args }) => {
+      const read = queryHistory(profile, args);
+      return heldHistoryQueries.reply ? heldHistoryQueries.reply.then(() => read) : read;
+    },
     add: ({ profile, ...args }) => addHistoryVisits(profile, args),
     import: ({ profile, ...args }) => importHistoryRows(profile, args),
     deleteUrls: ({ profile, ...args }) => deleteHistoryUrls(profile, args),
