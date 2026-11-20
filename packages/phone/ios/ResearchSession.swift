@@ -20,7 +20,7 @@ final class ResearchSession: Identifiable {
     case excerpts(reason: String)
   }
 
-  static let responseTokens = 650
+  static let responseTokens = 300
   static let instructionTokens = 260
   static let charactersPerToken = 3
   static let readConcurrency = 3

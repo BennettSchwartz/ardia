@@ -82,6 +82,14 @@ import Testing
     #expect(lines.allSatisfy { $0.hasPrefix("- ") && $0.hasSuffix("]") })
   }
 
+  @Test func answersStayBrief() {
+    let paragraphs = (1...8).map { "Mount Everest fact number \($0) is about how tall the mountain stands above the sea." }
+    let sources = [ResearchSource(id: 1, url: URL(string: "https://a.com")!, title: "A", siteName: "A", paragraphs: paragraphs)]
+    #expect(ResearchDigest.extractiveAnswer(query: "how tall is mount everest", sources: sources).split(separator: "\n").count == 3)
+    #expect(ResearchDigest.instructions.contains("Be very brief"))
+    #expect(!ResearchDigest.instructions.contains("##"))
+  }
+
   @Test func answerBlocksReadHeadingsBulletsAndParagraphs() {
     let answer = "**Everest is 8,849 m tall** [1].\n\n## Height\n- Measured in 2020 [1, 2]\n* - Grows 4 mm a year [2]\nSafety tips:\n"
     #expect(ResearchAnswer.blocks(answer) == [

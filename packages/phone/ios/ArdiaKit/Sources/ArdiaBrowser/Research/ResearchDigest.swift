@@ -20,12 +20,13 @@ public struct ResearchSource: Identifiable, Equatable, Hashable, Sendable {
 
 public enum ResearchDigest {
   public static let minimumSourceCharacters = 300
-  public static let extractiveLineLimit = 6
+  public static let extractiveLineLimit = 3
 
   public static let instructions = """
     You answer a search query using only the numbered web pages you are given. \
-    Start with a one or two sentence direct answer. Then add up to three short sections, each a line starting with "## " \
-    followed by two to four lines starting with "- ". Keep every line short and plain, as if read aloud. \
+    Be very brief: one to three short sentences, under 60 words, starting with the direct answer. \
+    Only when the query asks for several things, list at most three, each a short line starting with "- ". \
+    No headings, no introduction, no closing summary. Keep it plain, as if read aloud. \
     After each fact put the number of the page it came from in brackets, like [2]. \
     If the pages don't answer the query, say so in one sentence. Never invent facts or links.
     """
