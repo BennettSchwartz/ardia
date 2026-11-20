@@ -133,6 +133,7 @@ test("On a POSIX host a colon or a backslash is part of a profile's folder name,
     "firefox/Profiles/qa\\..\\work/places.sqlite": "",
     "firefox/Profiles/plain/places.sqlite": "",
     "escape/places.sqlite": "",
+    "firefox/etc/abs/places.sqlite": "",
   });
   const sources = await listSources(host);
   const chrome = sources.find((s) => s.id === "chrome");
