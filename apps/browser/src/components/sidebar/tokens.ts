@@ -262,4 +262,4 @@ export const SELECTED_ROW_PILL_MOTION = {
   exit: { duration: 60, easing: Easing.linear },
 } as const;
 export const SELECTED_ROW_REVEAL_SETTLE_MS = 400;
-export const REVEAL_GLIDE = { duration: 300, easing: Easing.inOut(Easing.quad), margin: space.s } as const;
+export const REVEAL_ROW_MARGIN = space.s;
