@@ -203,6 +203,26 @@ public final class PageViewModule: Module {
       }
     }.runOnQueue(.main)
 
+    AsyncFunction("summarizePage") { (pageID: String) -> Bool in
+      MainActor.assumeIsolated { PageView.host(of: pageID)?.summarize(.menu) ?? false }
+    }.runOnQueue(.main)
+
+    AsyncFunction("dismissPageSummaries") { () in
+      MainActor.assumeIsolated { PageView.dismissAllSummaries() }
+    }.runOnQueue(.main)
+
+    AsyncFunction("pageSummariesEnabled") { () -> Bool in
+      MainActor.assumeIsolated { PageSummarySwitch.shared.isOn }
+    }.runOnQueue(.main)
+
+    AsyncFunction("setPageSummariesEnabled") { (enabled: Bool) -> Bool in
+      MainActor.assumeIsolated { () -> Bool in
+        PageSummarySwitch.shared.turn(enabled)
+        if !enabled { PageView.stopAllSummaries() }
+        return PageSummarySwitch.shared.isOn
+      }
+    }.runOnQueue(.main)
+
     AsyncFunction("snapshot") { (pageID: String, options: SnapshotOptionsRecord, promise: Promise) in
       Self.main(promise) { try await PhonePages.shared.snapshot(pageID, maxWidth: options.maxWidth, quality: options.quality) }
     }.runOnQueue(.main)
@@ -410,8 +430,20 @@ public final class PageViewModule: Module {
         view.obscuresSafeTop = follows == true
       }
 
+      Prop("pinsSafeArea") { (view: PageView, pins: Bool?) in
+        view.pinsSafeArea = pins == true
+      }
+
       Prop("swipeNavigation") { (view: PageView, mode: String?) in
         view.swipeNavigation = mode.flatMap(PageGestures.Swipe.init(rawValue:)) ?? .anywhere
+      }
+
+      Prop("closesOnSwipeBack") { (view: PageView, closes: Bool?) in
+        view.closesOnSwipeBack = closes == true
+      }
+
+      Prop("reopensOnSwipeForward") { (view: PageView, reopens: Bool?) in
+        view.reopensOnSwipeForward = reopens == true
       }
 
       Prop("pullToRefresh") { (view: PageView, pulls: Bool?) in

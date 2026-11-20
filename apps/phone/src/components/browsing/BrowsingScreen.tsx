@@ -1,24 +1,27 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { countRender } from "../../state/app/interactionPerf";
 import { Platform, StyleSheet, useWindowDimensions, View } from "react-native";
-import { GestureDetector } from "react-native-gesture-handler";
-import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BAR_SHOWN, barShown, followScroll, obscuredBottom, pageInsets } from "../../lib/barCollapse";
-import { neighbours } from "../../lib/pagerPhysics";
+import { neighbours, PAGER } from "../../lib/pagerPhysics";
 import { useSystemBars } from "../../state/app/systemBars";
 import { useFrozenOrder, useNavigation, usePageTone, watchPageLoad } from "../../state/browse/hooks";
+import { armDeckPull, beginDeckPull, deckPull, disarmDeckPull, releaseDeckPull, trackDeckPull, type PullSettled } from "../../state/browse/deckPull";
+import { refreshHiddenDeck } from "../../state/browse/deckHold";
 import { closePageMenu, editPageQuery, openPageMenu } from "../../state/page/actions";
 import { useFindOpen, useMenuOpen, usePressOpen, useReaderTabId } from "../../state/page/hooks";
-import { captureCurrentCover, newTab, pageLaidOut, showDeck, swipeOrder, switchToNeighbour } from "../../state/browse/store";
+import { captureCurrentCover, deckPullBegan, deckPullReleased, deckPullSettled, newTab, pageLaidOut, showDeck, swipeOrder, switchToNeighbour } from "../../state/browse/store";
 import { useSearchOpen } from "../../state/search/hooks";
 import { usePages } from "../../state/pages/store";
 import { reportBarPill } from "../../state/search/stageBar";
 import { searchStageIsNative } from "../../platform/searchStage";
 import { usePreferences } from "../../state/settings/hooks";
 import { closeFrontTab, menuOpenedHaptic, recentTabs, switchToTab, tabTitle } from "../../state/browse/tabMenus";
-import { useDeckOrder } from "../../state/tabs/hooks";
+import { useDeckOrder, useIncognito } from "../../state/tabs/hooks";
 import type { BrowserTab } from "../../state/tabs/tabModels";
+import { countUsage } from "../../state/telemetry/telemetry";
 import {
   barCenterFromBottom,
   barHeight,
@@ -53,9 +56,12 @@ import { ReaderView } from "./ReaderView";
 import { PageFailureView } from "./PageFailureView";
 import { PageCover } from "./PageCover";
 import { PageSurface } from "./PageSurface";
+import { PagePull, PullBlocker, usePullBarShift } from "./PagePull";
+import { redesignedBarCenterFromBottom } from "../../lib/deckGeometry";
 import { useDemoMotion } from "./DemoMotion";
 import { PagerBackdrop, PagerNeighbour, useTabPager } from "./TabPager";
 import { launchArguments } from "../../state/app/launchFlags";
+import { labTrace } from "../../platform/lab";
 import { columnContentWidth, SCREEN_COLUMN, type ScreenColumn } from "../../state/app/screenLayout";
 import { BrowsingColumn } from "../column/BrowsingColumn";
 import { columnMenuPlace, columnPadding, useColumn } from "../column/SideColumn";
@@ -76,6 +82,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const pressing = usePressOpen();
   const tone = usePageTone(tab.id);
   const order = useDeckOrder();
+  const barOrder = useMemo(() => (design === "redesigned" && !column ? order.filter((other) => other.isPrivate === tab.isPrivate) : order), [order, design, column, tab.isPrivate]);
   const frozen = useFrozenOrder();
   const searching = useSearchOpen();
   const [tabsMenu, setTabsMenu] = useState(false);
@@ -100,7 +107,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const bottom = pageTone?.bottom ?? theme.surface;
   const barDark = design === "redesigned" && !pageTone?.bottom ? theme.dark : isDarkColor(bottom);
   useSystemBars(isDarkColor(top), barDark);
-  const collapse = useBarCollapse(tab.id, finding, design === "redesigned");
+  const collapse = useBarCollapse(tab.id, tab.isPrivate, finding, design === "redesigned");
   const staged = design === "redesigned" && !column && searchStageIsNative();
   useEffect(() => (staged && !collapse.hidden ? reportBarPill() : undefined), [staged, collapse.hidden]);
   const underBar = usePageUnderBars();
@@ -120,17 +127,39 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
     const id = delta < 0 ? left?.id : right?.id;
     if (id) switchToNeighbour(id);
   };
+  const incognito = useIncognito();
+  const reduceMotion = useReduceMotion();
+  const pulls = design === "redesigned" && !column;
+  const tracks = pulls && !reduceMotion;
+  useEffect(() => {
+    if (!pulls) return;
+    armDeckPull(tab.id, reduceMotion);
+    return () => disarmDeckPull(tab.id, deckPullSettled);
+  }, [pulls, reduceMotion, tab.id]);
+  const barCenter = barCenterFromBottom(insets.bottom, design);
+  const barTop = barCenter + floatingBarLayout.control / 2;
+  const barShift = usePullBarShift(barTop, barCenter - redesignedBarCenterFromBottom(insets.bottom, Platform.OS));
+  const swipesUp = !column && !searching && !collapse.hidden && !(pulls && collapse.collapsed);
+  const openDeckFromBar = () => {
+    if (!incognito) countUsage("deck_bar_swipes");
+    if (pulls) labTrace("PAGELAB bar swipe recognised with no pull to track");
+    void showDeck();
+  };
+  const pullBegan = () => deckPullBegan(tab.id);
+  const pullReleased = (lands: boolean) => deckPullReleased(tab.id, lands);
+  const barPull = tracks ? { id: tab.id, prepare: refreshHiddenDeck, began: pullBegan, released: pullReleased, settled: deckPullSettled } : null;
+  const barGesture = useMemo(() => Gesture.Race(pager.gesture, barSwipeUp(swipesUp, pager.active, openDeckFromBar, barPull, pulls && reduceMotion)), [pager.gesture, swipesUp, incognito, tracks, tab.id]);
   const statusStyle = useAnimatedStyle(() => ({ backgroundColor: painted.value ? withTiming(top, { duration: tabsMotion.barTone }) : top }), [top]);
   const barStyle = useAnimatedStyle(() => ({ backgroundColor: painted.value ? withTiming(bottom, { duration: tabsMotion.barTone }) : bottom }), [bottom]);
   return (
-    <View style={[StyleSheet.absoluteFill, { backgroundColor: column ? (theme.dark ? ink.black : ink.white) : theme.surface }]} onLayout={() => pageLaidOut(tab.id)}>
+    <View style={[StyleSheet.absoluteFill, pulls ? null : { backgroundColor: column ? (theme.dark ? ink.black : ink.white) : theme.surface }]} onLayout={() => pageLaidOut(tab.id)}>
       <Shade shaded={menuOpen || readerId === tab.id || pressing || tabsMenu}>
-        <PageStack column={column}>
+        <PageStack column={column} pulledTab={pulls ? tab.id : null} barTop={barTop}>
         <PagerBackdrop />
         <Animated.View style={[StyleSheet.absoluteFill, styles.outgoing, { backgroundColor: theme.surface }, pager.outgoing]}>
           {underBar ? null : <Animated.View testID="pageStatusStrip" style={[{ height: insets.top }, statusStyle]} />}
           <View testID="pageArea" style={[styles.page, { marginBottom: layout.pageBottom }]}>
-            <PageSurface key={tab.id} tab={tab} toneBottom={layout.toneBottom} obscured={obscured} />
+            <PageSurface key={tab.id} tab={tab} toneBottom={layout.toneBottom} obscured={obscured} bottomInsetTransitionMs={Platform.OS === "android" && collapse.collapses && design === "redesigned" && !fullscreen && !finding && !searching ? hostPillLayout.foldSettleMs : 0} pinsSafeArea={pulls ? true : undefined} />
             <PageCover key={`${tab.id}:cover`} tab={tab} />
             <PageFailureView key={`${tab.id}:failure`} tabId={tab.id} />
           </View>
@@ -159,7 +188,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
             onMore={openPageMenu}
           />
         ) : (
-          <GestureDetector gesture={pager.gesture}>
+          <GestureDetector gesture={barGesture}>
             <Animated.View
               testID="pageBar"
               pointerEvents={collapse.hidden ? "none" : design === "redesigned" ? "box-none" : "auto"} collapsable={false}
@@ -168,10 +197,11 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
               style={[styles.bar, { height: barHeight(insets.bottom, design) }, underBar ? null : barStyle, collapse.style]}
             >
               {design === "redesigned" ? (
-                <View style={[styles.controls, { bottom: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2, paddingHorizontal: safeSide }]} pointerEvents="box-none">
+                <Animated.View style={[styles.controls, { bottom: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2, paddingHorizontal: safeSide }, pulls ? barShift : null]} pointerEvents="box-none">
                   <Animated.View
                     testID="floatingBarFold"
                     collapsable={false}
+                    renderToHardwareTextureAndroid={Platform.OS === "android"}
                     style={collapse.fold.bar}
                     pointerEvents={collapse.collapsed ? "none" : "box-none"}
                     importantForAccessibility={collapse.collapsed ? "no-hide-descendants" : "auto"}
@@ -179,7 +209,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                   >
                     <FloatingBar
                       tab={tab}
-                      order={order}
+                      order={barOrder}
                       roles={rolesFor(barDark)}
                       dark={barDark}
                       showsPlus={staged || !searching}
@@ -195,8 +225,9 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                   {collapse.fold.pillMounted ? (
                     <Animated.View
                       testID="hostPillFold"
-                    collapsable={false}
-                      style={[styles.pillPlace, collapse.fold.pill]}
+                      collapsable={false}
+                      renderToHardwareTextureAndroid={Platform.OS === "android"}
+                        style={[styles.pillPlace, collapse.fold.pill]}
                       pointerEvents={collapse.collapsed ? "box-none" : "none"}
                       importantForAccessibility={collapse.collapsed ? "auto" : "no-hide-descendants"}
                       accessibilityElementsHidden={!collapse.collapsed}
@@ -204,7 +235,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                       <HostPill tab={tab} dark={barDark} shown={collapse.collapsed} anchors={collapse.collapsed} contentStyle={collapse.fold.pillContent} onExpand={collapse.expand} />
                     </Animated.View>
                   ) : null}
-                </View>
+                </Animated.View>
               ) : (
                 <>
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: barDark ? tabsInk.barShadeOnDark : tabsInk.barShadeOnLight }]} />
@@ -217,11 +248,13 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
           </GestureDetector>
         )}
         {finding ? <FindBar tabId={tab.id} /> : null}
+        {pulls ? <PullBlocker /> : null}
       </Shade>
       {tabsMenu ? (
         <Menu
-          items={tabsMenuItems(order)}
+          items={tabsMenuItems(barOrder)}
           place={column ? { ...columnMenuPlace(column, width, SCREEN_COLUMN.top), width: Math.min(tabsLayout.menuWidth, pageWidth - space.l * 2) } : { bottom: barHeight(insets.bottom, design) + space.xs, left: space.l, width: Math.min(tabsLayout.menuWidth, width - space.l * 2) }}
+          frost={null}
           onDismiss={() => setTabsMenu(false)}
         />
       ) : null}
@@ -233,10 +266,12 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   );
 });
 
+
 const COLUMN_PAGE = { pageBottom: 0, toneBottom: 0 };
 const COLUMN_OBSCURED = { top: 0, bottom: 0 };
 
-function PageStack({ column, children }: { column: ScreenColumn | null; children: ReactNode }) {
+function PageStack({ column, pulledTab, barTop, children }: { column: ScreenColumn | null; pulledTab: string | null; barTop: number; children: ReactNode }) {
+  if (pulledTab) return <PagePull tabId={pulledTab} barTop={barTop}>{children}</PagePull>;
   if (!column) return children;
   return (
     <View testID="columnPageStack" style={[styles.columnPage, columnPadding(column)]}>
@@ -245,19 +280,33 @@ function PageStack({ column, children }: { column: ScreenColumn | null; children
   );
 }
 
-function useBarCollapse(tabId: string, finding: boolean, folds: boolean) {
+function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, folds: boolean) {
   const collapses = usePreferences((p) => p.collapsesBottomBar);
   const direction = useNavigation(tabId, (n) => n?.scrollDirection ?? "up");
   const page = useNavigation(tabId, (n) => n?.url ?? null);
   const reduceMotion = useReduceMotion();
   const [state, setState] = useState(() => followScroll(BAR_SHOWN, tabId, page, direction, collapses));
-  useEffect(() => setState((now) => followScroll(now, tabId, page, direction, collapses)), [tabId, page, direction, collapses]);
-  const scrolledAway = state.hidden && state.tabId === tabId;
+  const android = Platform.OS === "android";
+  const followed = android ? followScroll(state, tabId, page, direction, collapses) : state;
+  if (followed !== state) setState(followed);
+  useEffect(() => {
+    if (!android) setState((now) => followScroll(now, tabId, page, direction, collapses));
+  }, [tabId, page, direction, collapses]);
+  const scrolledAway = followed.hidden && followed.tabId === tabId;
   const collapsed = folds && scrolledAway && !finding;
   const hidden = finding || (!folds && scrolledAway);
+  const wasCollapsed = useRef(collapsed);
+  useEffect(() => {
+    if (android && collapsed && !wasCollapsed.current && !isPrivate) countUsage("bottom_bar_collapses");
+    wasCollapsed.current = collapsed;
+  }, [collapsed, tabId, isPrivate]);
   const fold = useBarFold(collapsed, reduceMotion);
   const hide = useSharedValue(0);
   useEffect(() => {
+    if (android && reduceMotion) {
+      hide.value = hidden ? 1 : 0;
+      return;
+    }
     hide.value = reduceMotion ? withTiming(hidden ? 1 : 0, { duration: tabsMotion.barCollapseReduced }) : withSpring(hidden ? 1 : 0, tabsMotion.barCollapse);
   }, [hidden, reduceMotion]);
   const style = useAnimatedStyle(() => ({ opacity: 1 - hide.value, transform: [{ translateY: hide.value * browseLayout.barCollapseTravel }] }));
@@ -268,6 +317,63 @@ function useBarCollapse(tabId: string, finding: boolean, folds: boolean) {
 function tabsMenuItems(order: BrowserTab[]): MenuItem[] {
   const others = recentTabs(order).map((tab): MenuItem => ({ label: tabTitle(tab), onPress: () => switchToTab(tab.id) }));
   return [...others, ...(others.length ? ["divider" as const] : []), { label: "Close Tab", icon: "xmark", destructive: true, onPress: closeFrontTab }];
+}
+
+export type BarPull = { id: string; prepare: () => void; began: () => void; released: (lands: boolean) => void; settled: PullSettled };
+
+export function barSwipeUp(enabled: boolean, pagerActive: { value: number }, open: () => void, pull: BarPull | null = null, primes = false) {
+  const pan = Gesture.Pan()
+    .withTestId("barSwipeUp")
+    .enabled(enabled)
+    .activeOffsetY(-browseLayout.barSwipeUp)
+    .failOffsetY(PAGER.minimumDistance)
+    .failOffsetX([-PAGER.minimumDistance, PAGER.minimumDistance]);
+  if (!pull) {
+    const opens = pan.onStart(() => {
+      if (pagerActive.value) return;
+      runOnJS(open)();
+    });
+    if (!primes) return opens;
+    return opens
+      .onBegin(() => {
+        deckPull.warm.value = true;
+        deckPull.primed.value = true;
+      })
+      .onFinalize(() => {
+        deckPull.warm.value = false;
+        deckPull.primed.value = false;
+      });
+  }
+  const { id, prepare, began, released, settled } = pull;
+  const frameRelease = Platform.OS === "android";
+  return pan
+    .onBegin(() => {
+      deckPull.warm.value = true;
+      if (deckPull.target.value?.id !== id) runOnJS(prepare)();
+    })
+    .onStart((event) => {
+      if (pagerActive.value) return;
+      if (!beginDeckPull(id, event.translationY)) {
+        runOnJS(open)();
+        return;
+      }
+      runOnJS(began)();
+    })
+    .onUpdate((event) => {
+      trackDeckPull(event.translationY);
+    })
+    .onFinalize((event, success) => {
+      deckPull.warm.value = false;
+      const velocity = Number.isFinite(event.velocityY) ? event.velocityY : 0;
+      if (frameRelease) {
+        requestAnimationFrame(() => {
+          "worklet";
+          releaseDeckPull(id, velocity, success, released, settled);
+        });
+      } else {
+        releaseDeckPull(id, velocity, success, released, settled);
+      }
+    });
 }
 
 function PageLoadingLine({ tabId, color }: { tabId: string; color: string }) {

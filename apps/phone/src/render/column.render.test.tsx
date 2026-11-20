@@ -7,7 +7,7 @@ import { StartScreen } from "../components/search/StartScreen";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { DesignProvider, Symbol } from "../components/ui";
-import { deckGeometry } from "../lib/deckGeometry";
+import { deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import { setRootSize } from "../state/app/rootSize";
 import { columnCenterX, columnContentWidth, SCREEN_COLUMN, useScreenLayout, type ScreenColumn } from "../state/app/screenLayout";
 import * as browse from "../state/browse/store";
@@ -150,14 +150,14 @@ test("the deck in a trailing column lays out in the 382-wide content with no sid
   unmount(root);
 });
 
-test("the deck column holds grid, Search Tabs, ··· and Plus, and its Search Tabs field floats 358 wide centred at 191, 245", () => {
+test("the deck column holds Search Tabs, ··· and Plus, with no grid button, and its Search Tabs field floats 358 wide centred at 191, 245", () => {
   showDeck();
   const root = redesigned(<TabDeck />);
   const stack = flat(host(root, "deckColumn"));
   expect(stack).toMatchObject({ top: 166, width: 48, gap: 7 });
   expect((stack.left as number) + 24).toBe(418);
   const buttons = inOrder(root, "deckColumn", ["deckColumnGrid", "deckColumnSearch", "deckColumnMore", "deckColumnPlus"]);
-  expect(buttons).toEqual(Platform.OS === "ios" ? ["deckColumnGrid", "deckColumnSearch", "deckColumnMore", "deckColumnPlus"] : ["deckColumnSearch", "deckColumnMore", "deckColumnPlus"]);
+  expect(buttons).toEqual(["deckColumnSearch", "deckColumnMore", "deckColumnPlus"]);
   for (const id of buttons) expect(flat(host(root, id))).toMatchObject({ width: 48, height: 48 });
   const field = flat(host(root, "deckColumnField"));
   expect(field.width).toBe(358);
@@ -178,7 +178,7 @@ test("the start page in a trailing column: spaces 382 wide on the left, the dots
   const root = redesigned(<StartScreen />);
   expect(flat(host(root, "startContent"))).toMatchObject({ left: 0, right: 84, width: 382 });
   const dots = flat(host(root, "startPageDots"));
-  expect((dots.top as number) + (dots.height as number) / 2).toBe(678 - 20 - 11);
+  expect((dots.top as number) + (dots.height as number) / 2).toBe(678 - redesignedBarCenterFromBottom(20, Platform.OS));
   const stack = flat(host(root, "startColumn"));
   expect(stack).toMatchObject({ top: 166, width: 48, gap: 7 });
   expect((stack.left as number) + 24).toBe(418);

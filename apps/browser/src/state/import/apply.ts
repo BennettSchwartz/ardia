@@ -12,6 +12,9 @@ import {
   type SpaceSuggestion,
 } from "../../platform/importModule";
 import { passwordImportTally } from "../telemetry/passwordSaves";
+import { noteHistoryImport } from "../telemetry/importRuns";
+import { reloadEngineHistory } from "../history/engineSync";
+import type { ConsentToken } from "../telemetry/choice";
 import { bookmarkRoots, type BookmarkDraft } from "../bookmarks/bookmarks";
 import { useBrowser } from "../browser/store";
 import { engineProfile, isIncognitoProfile } from "../browser/model";
@@ -27,9 +30,9 @@ export { importArcSpace, importDiaSpace } from "./sidebarTree";
 
 export type { BrowserProfile, BrowserSource, DiaTabsResult, ImportedExtension, ImportKind, ImportResult, SpaceSuggestion, SpaceSummary } from "../../platform/importModule";
 
-export type ImportCounts = { bookmarks: number; history: number; tabs: number; passwords: number; cookies: number; addresses: number; cards: number };
+export type ImportCounts = { bookmarks: number; history: number; tabs: number; passwords: number; cookies: number; addresses: number; cards: number; rules: number; archived: number; settings: number };
 
-export const emptyCounts = (): ImportCounts => ({ bookmarks: 0, history: 0, tabs: 0, passwords: 0, cookies: 0, addresses: 0, cards: 0 });
+export const emptyCounts = (): ImportCounts => ({ bookmarks: 0, history: 0, tabs: 0, passwords: 0, cookies: 0, addresses: 0, cards: 0, rules: 0, archived: 0, settings: 0 });
 
 const toDraft = (n: ImportedNode): BookmarkDraft =>
   n.type === "url"
@@ -58,8 +61,18 @@ export function importBookmarks(profileId: string, root: ImportedNode | undefine
   return linkCount([...toolbar, ...other]);
 }
 
-export function importHistory(profileId: string, entries: { url: string; title: string; visits: number; lastVisit: number }[]): number {
-  return useBrowser.getState().importHistory(profileId, entries);
+export async function importHistory(
+  profileId: string,
+  entries: { url: string; title: string; visits: number; lastVisit: number }[],
+  onFailed?: (kind: ImportKind) => void,
+  consent?: ConsentToken | null,
+): Promise<number> {
+  const engine = engineProfile(useBrowser.getState(), profileId);
+  const { added, batches, failedBatches } = await useBrowser.getState().importHistory(profileId, entries);
+  if (batches) void reloadEngineHistory(engine);
+  noteHistoryImport(batches, failedBatches, consent);
+  if (failedBatches) onFailed?.("history");
+  return added;
 }
 
 async function importPasswords(profileId: string, credentials: Credential[]): Promise<number> {
@@ -125,12 +138,13 @@ export async function applyResult(
   browserName: string,
   requested: ImportKind[],
   onFailed?: (kind: ImportKind) => void,
+  consent?: ConsentToken | null,
 ): Promise<ImportCounts> {
   const toolbar = (result.bookmarks?.children ?? []).filter((c) => c.role === "toolbar");
   importFavicons(profileId, result.favicons, [...result.favorites.map((t) => t.url), ...(result.spaces.length ? [] : result.tabs.map((t) => t.url)), ...linksOf(toolbar)]);
   const counts = emptyCounts();
   counts.bookmarks += importBookmarks(profileId, result.bookmarks, browserName);
-  if (result.history.length) counts.history += importHistory(profileId, result.history);
+  if (result.history.length) counts.history += await importHistory(profileId, result.history, onFailed, consent);
   const native = (["cookies", "autofill"] as const).filter((k) => requested.includes(k));
   Object.assign(counts, await importNative(profileId, result.vaultToken, native, onFailed));
   if (result.tabs.length && !result.spaces.length) counts.tabs += importTabs(profileId, result.tabs, "Imported");
@@ -139,11 +153,11 @@ export async function applyResult(
   return counts;
 }
 
-export async function applySafari(profileId: string, data: SafariExport, cookies = true, onFailed?: (kind: ImportKind) => void): Promise<ImportCounts> {
+export async function applySafari(profileId: string, data: SafariExport, cookies = true, onFailed?: (kind: ImportKind) => void, consent?: ConsentToken | null): Promise<ImportCounts> {
   const counts = emptyCounts();
   counts.bookmarks = importBookmarks(profileId, data.bookmarks, "Safari");
   const history = data.profiles.find((p) => !p.name)?.history ?? data.profiles[0]?.history ?? [];
-  counts.history = importHistory(profileId, history);
+  counts.history = await importHistory(profileId, history, onFailed, consent);
   Object.assign(counts, await importNative(profileId, data.vaultToken, cookies ? ["cookies", "autofill"] : ["autofill"], onFailed));
   if (data.tabs.length) counts.tabs += importTabs(profileId, data.tabs, "Imported");
   counts.passwords = await importPasswords(profileId, data.credentials);

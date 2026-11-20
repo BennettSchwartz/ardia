@@ -1,5 +1,5 @@
 import { pressesWithoutRelease, pressRepeated } from "../../platform/focus";
-import { capture, useTelemetry } from "./client";
+import { capture, consentToken, stillValid, onConsentPeriodChange, type ConsentToken } from "./client";
 import { takeHoverCardCounts } from "./hoverCardCounts";
 import { percentile } from "./transport";
 
@@ -21,6 +21,17 @@ const empty = () => ({
   drag_clicks: 0,
   drags: 0,
   drags_without_drop: 0,
+  drops_gap: 0,
+  drops_split_left: 0,
+  drops_split_right: 0,
+  drops_split_pinned: 0,
+  drops_split_unpinned: 0,
+  drops_tile: 0,
+  drops_other_profile: 0,
+  drops_profile_icon: 0,
+  drag_profile_switches: 0,
+  drag_profile_holds: 0,
+  drag_profile_edge_holds: 0,
   unanswered: 0,
   drop_no_release: 0,
   drop_not_dragged: 0,
@@ -85,8 +96,9 @@ export function noteRowPress(shownTabEmpty: boolean): Promise<void> {
   const at = Date.now();
   const rowPressBefore = lastRowPressAt;
   lastRowPressAt = at;
+  const token = consentToken();
   return pressRepeated().then((earlier) => {
-    if (!earlier || rowPressBefore > at - earlier.ms - REPEAT_SLACK_MS) return;
+    if (!earlier || !stillValid(token) || rowPressBefore > at - earlier.ms - REPEAT_SLACK_MS) return;
     repeats.presses++;
     if (shownTabEmpty) repeats.onNewTab++;
     if (repeatGaps.length < MAX_SAMPLES) repeatGaps.push(earlier.ms);
@@ -94,7 +106,7 @@ export function noteRowPress(shownTabEmpty: boolean): Promise<void> {
   });
 }
 
-useTelemetry.subscribe((s, prev) => prev.sharing !== s.sharing && forgetPresses());
+onConsentPeriodChange(() => (emitTabPresses(null), forgetPresses()));
 
 export function notePressStarted(switchedOnPress = false, windowKey = true) {
   if (pending) tally.unanswered++;
@@ -165,7 +177,19 @@ export const notePagePressRefused = () => void tally.page_refused++;
 
 export const noteDragWithoutDrop = () => void tally.drags_without_drop++;
 
-export function emitTabPresses() {
+export type SidebarDropKind = "gap" | "split_left" | "split_right" | "split_pinned" | "split_unpinned" | "tile" | "other_profile" | "profile_icon";
+
+export const noteSidebarDrop = (kind: SidebarDropKind) => void tally[`drops_${kind}`]++;
+
+export type DragProfileHold = "icon" | "edge";
+
+export function noteDragProfileSwitch(by: DragProfileHold | null) {
+  tally.drag_profile_switches++;
+  if (by === "icon") tally.drag_profile_holds++;
+  else if (by === "edge") tally.drag_profile_edge_holds++;
+}
+
+export function emitTabPresses(consent: ConsentToken | null) {
   settleUnansweredPressOut();
   const counts = tally;
   const samples = toPageClick.sort((a, b) => a - b);
@@ -195,7 +219,7 @@ export function emitTabPresses() {
     held_ms_p75: at(held, 0.75),
     held_n: held.length,
     ...hoverCards,
-  });
+  }, consent);
 }
 
 export const devTabPresses = () => ({ ...tally, pending, unansweredOut: !!unansweredOut, toPageClick: toPageClick.length, held: heldMs.length });

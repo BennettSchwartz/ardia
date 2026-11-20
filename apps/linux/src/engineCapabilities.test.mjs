@@ -93,7 +93,7 @@ test("with every new capability on, each Settings row the engine unlocks is show
     { defaultBrowser: capabilities.defaultBrowser, launchAtLogin: capabilities.launchAtLogin, thinScrollBars: capabilities.thinScrollBars, externalLinks: capabilities.externalLinks, commandScrollZoom: capabilities.commandScrollZoom, littleArdiaNewTabLinks: capabilities.littleArdiaNewTabLinks, peekOtherSites: capabilities.peekOtherSites, linksFromOtherApps: capabilities.linksFromOtherApps, fullScreen: capabilities.fullScreen, pageEdits: capabilities.pageEdits },
     { defaultBrowser: true, launchAtLogin: true, thinScrollBars: true, externalLinks: true, commandScrollZoom: true, littleArdiaNewTabLinks: true, peekOtherSites: true, linksFromOtherApps: true, fullScreen: true, pageEdits: true },
   );
-  const unlocked = ["general.defaultBrowser", "general.openAtLogin", "tabs.peekLinksToOtherSites", "tabs.openLinksInLittleArdia", "tabs.appLinksFirst", "automations.meetingAlertCondition"];
+  const unlocked = ["general.defaultBrowser", "general.openAtLogin", "tabs.peekLinksToOtherSites", "tabs.openLinksInLittleArdia", "tabs.littleArdiaOpensNewTabLinks", "tabs.appLinksFirst", "automations.meetingAlertCondition"];
   const searchable = new Set(settings.SETTINGS_INDEX.map((item) => item.entry.id));
   const without = unavailableSettingIds(linuxCapabilities(bare), sharedSettings.SETTINGS.map((entry) => entry.id));
   for (const id of unlocked) {
@@ -110,7 +110,7 @@ test("with every new capability on, each command, menu entry and shortcut row ap
   const capabilities = linuxCapabilities(host);
   const hidden = unavailableCommands(capabilities);
   for (const command of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM]) assert.equal(hidden.has(command), false, command);
-  assert.deepEqual([...hidden].sort(), ["toggleJavaScriptFromAppleEvents", "togglePageEngine"]);
+  assert.deepEqual([...hidden].sort(), ["copyLastFreeze", "toggleJavaScriptFromAppleEvents", "togglePageEngine"], "Copy Last Freeze stays hidden: Linux keeps no freeze records");
   for (const command of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM, "hideElement", "showHiddenElements"]) assert.equal(unavailableCommands(linuxCapabilities(bare)).has(command), true, `${command} is hidden without the engine`);
   const items = appMenuItems(menuState, new Map(), hidden);
   for (const id of ["emailPageLocation", "toggleOpenLinksInLittleArdia", FULL_SCREEN_ITEM, "reportProblem"]) assert.ok(find(items, id), `${id} is in the menu`);

@@ -76,6 +76,23 @@ const MODULE_FALLBACKS: Record<string, Record<string, Fallback>> = {
   ArdiaSwipe: { haptic: now(undefined) },
   ArdiaWindowBackdrop: { holdKeyLook: answer(undefined) },
   ArdiaConfig: { watch: answer(undefined), writeSchemas: answer([]) },
+  ArdiaPlugins: {
+    folder: now(""),
+    list: answer([]),
+    start: answer({ ok: false, reason: "plugins aren't available on Linux yet" }),
+    stop: answer(undefined),
+    reply: now(undefined),
+    event: now(undefined),
+    call: now(undefined),
+    remove: answer({ ok: false, reason: "plugins aren't available on Linux yet" }),
+    linkPrograms: answer({ ok: false, reason: "plugins aren't available on Linux yet" }),
+    unlinkPrograms: answer({ ok: true }),
+    sweepPrograms: answer(undefined),
+    legacyProgramsInstalled: answer(false),
+    revealLog: now(undefined),
+    revealFolder: now(undefined),
+    devSnapshotPage: answer(false),
+  },
   ArdiaAutomation: { start: answer({ state: "off", generation: 0, path: "", reason: "the control socket is unavailable on Linux" }), stop: answer(undefined) },
   ArdiaSystemSignals: {
     watchIdle: () => undefined,
@@ -87,7 +104,7 @@ const MODULE_FALLBACKS: Record<string, Record<string, Fallback>> = {
   },
 };
 
-const DEVELOPER_MODULES = new Set(["ArdiaApp", "ArdiaMagnifyArea", "ArdiaFileDrop", "ArdiaLocation"]);
+const DEVELOPER_MODULES = new Set(["ArdiaApp", "ArdiaMagnifyArea", "ArdiaPeekStage", "ArdiaFileDrop", "ArdiaLocation"]);
 
 export function appModuleFallback(host: ArdiaHost, name: string, method: string): Fallback | undefined {
   if (hostSupports(`${name}.${method}`, host)) return undefined;

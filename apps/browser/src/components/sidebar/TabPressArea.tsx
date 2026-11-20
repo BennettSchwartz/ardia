@@ -8,7 +8,9 @@ import { middleClickTab } from "../../state/sidebar/clearTabs";
 import { dismissHover } from "../../state/sidebar/hover";
 import { openTabMenu } from "../../state/sidebar/menus";
 import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from "../../state/sidebar/heldTabPress";
-import { ContextMenuArea, MouseArea } from "../ui";
+import { tabPressTag } from "../../state/tabs/tabReveal";
+import { useSplitOf } from "../../state/windows/card";
+import { ContextMenuArea } from "../ui";
 
 export function TabPressArea({
   windowId,
@@ -17,6 +19,7 @@ export function TabPressArea({
   pressStyle,
   tooltip,
   hitSlop,
+  selected = false,
   children,
 }: {
   windowId: string;
@@ -25,33 +28,36 @@ export function TabPressArea({
   pressStyle?: StyleProp<ViewStyle>;
   tooltip?: string;
   hitSlop?: Insets;
+  selected?: boolean;
   children: ReactNode | ((state: { pressed: boolean }) => ReactNode);
 }) {
   const press = useRef<TabPress | null>(null);
+  const inSplit = !!useSplitOf(tab.id);
   const plainTooltip = useSettings((s) => !s.showTabHoverMenu);
   return (
-    <MouseArea onMiddleClick={() => middleClickTab(tab.id)} style={style}>
-      <ContextMenuArea
-        onContextMenu={() => {
-          dismissHover();
-          void openTabMenu(windowId, tab);
+    <ContextMenuArea
+      onMiddleClick={() => middleClickTab(tab.id)}
+      onContextMenu={() => {
+        dismissHover();
+        void openTabMenu(windowId, tab);
+      }}
+      style={style}
+    >
+      <Pressable
+        onPressIn={(e) => {
+          press.current = holdTabPress(windowId, tab.id, e, press.current);
         }}
-        style={style}
+        onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
+        onPressOut={(e) => pressOutTabPress(press.current, e)}
+        style={pressStyle}
+        nativeID={tabPressTag(tab.id, selected, inSplit)}
+        collapsable={false}
+        hitSlop={hitSlop}
+        tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
       >
-        <Pressable
-          onPressIn={(e) => {
-            press.current = holdTabPress(windowId, tab.id, e, press.current);
-          }}
-          onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
-          onPressOut={(e) => pressOutTabPress(press.current, e)}
-          style={pressStyle}
-          hitSlop={hitSlop}
-          tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
-        >
-          {children}
-        </Pressable>
-      </ContextMenuArea>
-    </MouseArea>
+        {children}
+      </Pressable>
+    </ContextMenuArea>
   );
 }
 

@@ -3,7 +3,7 @@ import { act } from "react-test-renderer";
 import { BottomBar } from "../components/browsing/BottomBar";
 import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { barAddress, FloatingBar } from "../components/browsing/FloatingBar";
-import { appDesign, DesignProvider, Symbol } from "../components/ui";
+import { appDesign, chromeInk, DesignProvider, Symbol } from "../components/ui";
 import { storeFullscreen, storeNavigation, storeTone, usePages, type PageState } from "../state/pages/store";
 import { usePageUi } from "../state/page/store";
 import { setPreference } from "../state/settings/store";
@@ -12,7 +12,8 @@ import { DESIGNS, designFor, type Design } from "../lib/design";
 import * as pageActions from "../state/page/actions";
 import { useBrowse } from "../state/browse/store";
 import { currentTabs, useTabs } from "../state/tabs/store";
-import { renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { renderSurface, someTabs, unmount, withTabs } from "../../test/render/harness";
+import type { BrowserTab } from "../state/tabs/tabModels";
 
 const safeArea = require("react-native-safe-area-context") as { useSafeAreaInsets: () => { top: number; bottom: number; left: number; right: number } };
 
@@ -39,9 +40,9 @@ const page = (design: Design, tab = currentTabs().open[0]!) =>
 
 const host = (root: ReturnType<typeof renderSurface>, testID: string) => root.root.findAll((node) => node.props.testID === testID && typeof node.type === "string")[0];
 
-test("the design is chosen in one place: the redesign on iPhone and the original on Android, and the app runs the one its phone gets", () => {
+test("the design is chosen in one place: the redesign on both phones, as the owner decided on 2026-11-15, and the app runs the one its phone gets", () => {
   expect(designFor("ios")).toBe("redesigned");
-  expect(designFor("android")).toBe("original");
+  expect(designFor("android")).toBe("redesigned");
   expect(appDesign).toBe(designFor(Platform.OS));
 });
 
@@ -52,16 +53,30 @@ test.each(DESIGNS)("the %s design draws its own page bar and only that one", (de
   unmount(root);
 });
 
-test("the redesigned bar is three glass pieces, 48 points tall, 8 apart and 12 in from the sides, their bottom 21.5 points above the screen's edge on iPhone and 8 above Android's 3-button bar", () => {
+test("the redesigned bar is three glass pieces, 48 points tall, 8 apart and 24 in from the sides, their bottom 21.5 points above the screen's edge on iPhone and 8 above Android's 3-button bar", () => {
   const root = page("redesigned");
   const row = StyleSheet.flatten(host(root, "floatingBar")!.props.style);
-  expect(row).toMatchObject({ gap: 8, paddingHorizontal: 12, height: 48 });
+  expect(row).toMatchObject({ gap: 8, paddingHorizontal: 24, height: 48 });
   let place = host(root, "floatingBar")!.parent;
   while (place && (typeof place.type !== "string" || StyleSheet.flatten(place.props.style)?.bottom === undefined)) place = place.parent;
   expect(StyleSheet.flatten(place!.props.style).bottom).toBe(Platform.OS === "android" ? 34 + 8 : 21.5);
   for (const piece of ["floatingBarTabs", "floatingBarPlus"]) expect(StyleSheet.flatten(host(root, piece)!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(StyleSheet.flatten(host(root, "floatingBarAddress")!.props.style)).toMatchObject({ flex: 1, height: 48, borderRadius: 24 });
   unmount(root);
+});
+
+test("the redesigned bar's tabs button and its recent-tabs menu hold only the tabs of the page's own mode, so a normal page never shows an Incognito page's picture; the original bar keeps them all", () => {
+  act(() => useTabs.setState((state) => ({ ...state, privates: someTabs(2, true) })));
+  const modes = (root: ReturnType<typeof renderSurface>, bar: typeof FloatingBar | typeof BottomBar) => (root.root.findAll((node) => node.type === bar)[0]!.props.order as BrowserTab[]).map((tab) => tab.isPrivate);
+  const normal = page("redesigned");
+  expect(modes(normal, FloatingBar)).toEqual([false, false, false]);
+  unmount(normal);
+  const incognito = page("redesigned", currentTabs().privates[0]!);
+  expect(modes(incognito, FloatingBar)).toEqual([true, true]);
+  unmount(incognito);
+  const original = page("original");
+  expect(modes(original, BottomBar)).toHaveLength(5);
+  unmount(original);
 });
 
 test("the address capsule shows the page's host, and a tap on it searches with the page's address while the dots open the page menu", () => {
@@ -131,21 +146,27 @@ test("on Android the page's obscured bottom is the bar's current height: the pil
   scrolled("up");
   const lift = follows ? 34 + 8 - 21.5 : 0;
   const root = page("redesigned", tab);
+  const transition = () => root.root.findAll((node) => node.props.pageId !== undefined && node.props.obscuredInsets !== undefined)[0]!.props.bottomInsetTransitionMs;
+  expect(transition()).toBe(follows ? 300 : 0);
   expect(bottom(root)).toBe(75 + lift);
   scrolled("down");
   expect(bottom(root)).toBe(follows ? 51.5 + lift : 75);
   scrolled("up");
   act(() => storeFullscreen(tab.id, true));
   expect(bottom(root)).toBe(follows ? 0 : 75);
+  expect(transition()).toBe(0);
   act(() => storeFullscreen(tab.id, false));
   act(() => usePageUi.setState({ findOpen: true }));
   expect(bottom(root)).toBe(follows ? 0 : 75);
+  expect(transition()).toBe(0);
   act(() => usePageUi.setState({ findOpen: false }));
   act(() => useSearch.setState({ open: true }));
   expect(bottom(root)).toBe(follows ? 0 : 75);
+  expect(transition()).toBe(0);
   act(() => useSearch.setState({ open: false }));
   expect(bottom(root)).toBe(75 + lift);
-  setPreference("collapsesBottomBar", false);
+  act(() => setPreference("collapsesBottomBar", false));
+  expect(transition()).toBe(0);
   unmount(root);
 });
 
@@ -172,7 +193,7 @@ test("the bar's glass and glyphs follow the page's sampled bottom colour, not th
   unmount(light);
   act(() => storeTone(tab.id, { top: "#101418", bottom: "#101418" }));
   const dark = page("redesigned", tab);
-  expect(StyleSheet.flatten(host(dark, "floatingBarTabs")!.props.style).backgroundColor).toBe("#000000");
+  expect(StyleSheet.flatten(host(dark, "floatingBarTabs")!.props.style).backgroundColor).toBe(chromeInk.dark.surface);
   unmount(dark);
 });
 
@@ -181,7 +202,7 @@ test("before a page has reported a colour, the redesigned bar takes the app's ow
   for (const scheme of ["light", "dark"] as const) {
     const spy = jest.spyOn(require("react-native"), "useColorScheme").mockReturnValue(scheme);
     const root = page("redesigned", tab);
-    expect(StyleSheet.flatten(host(root, "floatingBarTabs")!.props.style).backgroundColor).toBe(scheme === "dark" ? "#000000" : "#FFFFFF");
+    expect(StyleSheet.flatten(host(root, "floatingBarTabs")!.props.style).backgroundColor).toBe(scheme === "dark" ? chromeInk.dark.surface : chromeInk.light.surface);
     unmount(root);
     spy.mockRestore();
   }

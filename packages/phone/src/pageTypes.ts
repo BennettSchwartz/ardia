@@ -47,6 +47,8 @@ export type PageError = { code: string; message: string };
 
 export type SwipeNavigation = "anywhere" | "edges" | "off";
 
+export type PageSwipeDirection = "back" | "forward";
+
 export type PageViewProps = ViewProps & {
   pageId: string;
   initialUrl?: string;
@@ -54,13 +56,18 @@ export type PageViewProps = ViewProps & {
   isPrivate?: boolean;
   savedState?: string;
   toneInsets?: PageToneInsets;
+  bottomInsetTransitionMs?: number;
   obscuredInsets?: PageObscuredInsets;
   obscuredColors?: PageObscuredColors;
   topClearance?: number;
   obscuresSafeTop?: boolean;
+  pinsSafeArea?: boolean;
   swipeNavigation?: SwipeNavigation;
+  closesOnSwipeBack?: boolean;
+  reopensOnSwipeForward?: boolean;
   pullToRefresh?: boolean;
   surfaceColor?: ColorValue;
+  onSwipedPastHistory?: (direction: PageSwipeDirection) => void;
   onPageState?: (state: PageState) => void;
   onPageTone?: (tone: PageTone) => void;
   onPageError?: (error: PageError) => void;
@@ -117,6 +124,12 @@ export type PageRequestAnswer =
   | { type: "pickFiles" }
   | { type: "takePhoto" }
   | { type: "recordVideo" };
+
+export type PageSummaryTrigger = "pinch" | "menu";
+
+export type PageSummaryOutcome = "chatgpt" | "on_device" | "excerpts" | "failed";
+
+export type PageSummaryProvider = "on_device" | "chatgpt";
 
 export type PressTarget = { kind: "link"; url: string; text: string | null } | { kind: "image"; url: string; linkUrl: string | null };
 
@@ -184,6 +197,8 @@ export type PageEngineEvent =
     }
   | { name: "page.longPress"; pageId: string; target: PressTarget; x: number; y: number }
   | { name: "page.closeRequested"; pageId: string }
+  | { name: "page.summaryOpened"; pageId: string; trigger: PageSummaryTrigger; isPrivate: boolean }
+  | { name: "page.summarySettled"; pageId: string; trigger: PageSummaryTrigger; outcome: PageSummaryOutcome; chatGPTFellBack?: boolean; isPrivate: boolean }
   | { name: "page.snapshotLanded"; pageId: string; uri: string; generation: number }
   | { name: "page.externalAppMissing"; pageId: string; url: string }
   | { name: "page.desktop"; pageId: string; line: string }
@@ -195,6 +210,7 @@ export type PageEventPayload =
   | { name: "tone"; top?: string; bottom?: string }
   | { name: "drawn" }
   | { name: "coverHidden"; reason: "drawn" | "cap"; found: boolean }
+  | { name: "swipedPastHistory"; direction: PageSwipeDirection }
   | ({ name: "error" } & PageError);
 
 export type DownloadProgress = {
