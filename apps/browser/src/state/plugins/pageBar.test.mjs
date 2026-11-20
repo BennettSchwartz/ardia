@@ -121,7 +121,10 @@ test("typing a local address turns the switch on only with the toggle row on, on
   notePageDocument("e", "http://localhost:9999/", "http://localhost:9999/", Date.now(), false, R);
   notePageDocument("e", "http://localhost:5174/", "http://localhost:5174/", Date.now() + 5, false, R);
   assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5174"), undefined, "the intent is spent on the next document, whatever it is");
-  for (const id of ["a", "b", "c", "d", "e"]) forgetPageDocument(id, R);
+  noteTypedAddress("h", "http://LOCALHOST:5180");
+  notePageDocument("h", "http://localhost:5180/", "http://localhost:5180/", Date.now(), false, R);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5180"), true, "a bare typed origin matches the committed document with its trailing slash");
+  for (const id of ["a", "b", "c", "d", "e", "h"]) forgetPageDocument(id, R);
 });
 
 test("site switch values live beside the record, keyed by origin, and stay out of the helper's values", async () => {
@@ -208,4 +211,13 @@ test("review fixes: stale commits, same-document moves, missing reports and anot
   notePageDocument("h", LOCAL, undefined, undefined, false, R);
   assert.equal(usePageDocuments.getState().h, undefined, "a report without commit data clears the document");
   for (const id of ["f", "g", "h"]) forgetPageDocument(id, R);
+});
+
+test("a same-document change on a shown bar counts no second show", () => {
+  takePageBarCounts();
+  const match = { plugin: "developer-mode", official: true, spec: {}, url: "http://localhost:7001/", at: 4242, superseded: 0 };
+  publishPageBars("w-count", { "t-count": match });
+  publishPageBars("w-count", { "t-count": { ...match, url: "http://localhost:7001/#section" } });
+  assert.equal(takePageBarCounts().plugin_page_bar_shown_official, 1);
+  withdrawPageBars("w-count");
 });

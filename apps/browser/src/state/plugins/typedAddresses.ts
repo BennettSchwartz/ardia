@@ -1,9 +1,14 @@
+import { urlParts } from "../../lib/urlParts";
 import { isLocalOrigin, switchOrigin } from "../../lib/pluginPageBar";
 
 const TYPED_INTENT_MS = 20_000;
 const typed = new Map<string, { url: string; origin: string; at: number }>();
 
-const documentUrl = (url: string) => url.replace(/#.*$/, "");
+function documentUrl(url: string): string {
+  const origin = switchOrigin(url);
+  const parts = urlParts(url);
+  return origin && parts ? `${origin}${parts.path || "/"}${parts.query}` : url.replace(/#.*$/, "");
+}
 
 export function noteTypedAddress(tabId: string, url: string) {
   const origin = switchOrigin(url);
