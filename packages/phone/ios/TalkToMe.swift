@@ -462,7 +462,10 @@ final class TalkToMe {
       MainActor.assumeIsolated { self?.servicesReset() }
     })
     observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated { self?.interrupted() }
+      MainActor.assumeIsolated { self?.wentToBackground() }
+    })
+    observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+      MainActor.assumeIsolated { self?.cameToForeground() }
     })
   }
 
@@ -471,6 +474,17 @@ final class TalkToMe {
     guard listening.isPlaying else { return }
     speaker?.pause()
     listening.routeFailed()
+    deactivateAudio()
+  }
+
+  private func wentToBackground() {
+    interrupted()
+    proximity.stop()
+  }
+
+  private func cameToForeground() {
+    guard listeningSessionID != nil else { return }
+    proximity.start()
   }
 
   private func servicesReset() {
