@@ -44,6 +44,7 @@ async function setMaximized(params: Record<string, unknown>) {
   const w = geometryWindow(params.window);
   if (isFullScreen(w.id)) throw new OpError("refused", `Window ${w.id} is full screen; leave full screen first (windows.setFullScreen).`);
   const geometry = await nativeGeometry(w.id, setWindowZoomed(w.id, params.on as boolean));
+  expect(!geometry.fullScreen, "the window is full screen.");
   expect(geometry.zoomed === params.on, `the window isn't ${params.on ? "zoomed" : "back from zoom"}.`);
   return answer(w.id, geometry);
 }

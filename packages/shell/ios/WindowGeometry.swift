@@ -84,7 +84,7 @@ extension WindowManager {
 
   private static func isUsable(_ frame: CGRect) -> Bool {
     let values = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
-    return values.allSatisfy { $0.isFinite && abs($0) <= coordinateLimit } && frame.width > 0 && frame.height > 0
+    return values.allSatisfy { $0.isFinite && abs($0) <= coordinateLimit } && frame.size.width > 0 && frame.size.height > 0
   }
 
   private static func screen(holding frame: CGRect) -> NSScreen? {
