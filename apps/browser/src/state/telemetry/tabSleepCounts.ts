@@ -1,8 +1,9 @@
 import { takeCleanUpCounts } from "./cleanUpCounts";
 import type { ConsentToken } from "./choice";
 import { consentOrNow, countFor } from "./countFor";
+import type { KeptAwakeReason } from "../tabs/sleepRefusals";
 
-const none = () => ({ captureIndicatorsCleared: 0, mediaCardsCleared: 0, pinnedTabsSleptByMemorySaver: 0, tabsSleptOverBudget: 0, tabsSleptOverBudgetReopened: 0, tabsOverBudgetSkippedLoading: 0, tabsOverBudgetAsksPassedOn: 0, topAppsKeptRunning: 0, topAppWindowsClosedFromNewTab: 0, topAppsUnloadedFromMenu: 0, tabsSleptFromMenu: 0, groupsSleptFromMenu: 0, menuSleepsKeptAwake: 0 });
+const none = () => ({ captureIndicatorsCleared: 0, mediaCardsCleared: 0, pinnedTabsSleptByMemorySaver: 0, tabsSleptOverBudget: 0, tabsSleptOverBudgetReopened: 0, tabsOverBudgetSkippedLoading: 0, tabsOverBudgetAsksPassedOn: 0, topAppsKeptRunning: 0, topAppWindowsClosedFromNewTab: 0, topAppsUnloadedFromMenu: 0, tabsSleptFromMenu: 0, groupsSleptFromMenu: 0, menuSleepsKeptAwake: 0, menuSleepsPastAutomatic: 0, menuSleepKeptReason: null as KeptAwakeReason | null });
 
 let pending = none();
 
@@ -61,8 +62,17 @@ export function noteTopAppUnloadedFromMenu() {
   pending.topAppsUnloadedFromMenu++;
 }
 
-export function noteTabsSleptFromMenu(from: "tab" | "group", keptAwake: number, consent?: ConsentToken | null) {
-  countFor(consentOrNow(consent), () => void (pending[from === "tab" ? "tabsSleptFromMenu" : "groupsSleptFromMenu"]++, (pending.menuSleepsKeptAwake += keptAwake)));
+export function noteTabsSleptFromMenu(from: "tab" | "group", results: { outcome: string; keptBy?: KeptAwakeReason; pastAutomatic?: boolean }[], consent?: ConsentToken | null) {
+  const keptAwake = results.filter((r) => r.outcome === "kept").length;
+  const pastAutomatic = results.filter((r) => r.pastAutomatic).length;
+  const keptReason = [...results].reverse().find((r) => r.keptBy)?.keptBy;
+  const key = from === "tab" ? "tabsSleptFromMenu" : "groupsSleptFromMenu";
+  countFor(consentOrNow(consent), () => {
+    pending[key]++;
+    pending.menuSleepsKeptAwake += keptAwake;
+    pending.menuSleepsPastAutomatic += pastAutomatic;
+    if (keptReason) pending.menuSleepKeptReason = keptReason;
+  });
 }
 
 export function takeTabSleepCounts() {
@@ -78,6 +88,8 @@ export function takeTabSleepCounts() {
     tabs_slept_from_menu: taken.tabsSleptFromMenu,
     groups_slept_from_menu: taken.groupsSleptFromMenu,
     menu_sleeps_kept_awake: taken.menuSleepsKeptAwake,
+    menu_sleeps_past_automatic: taken.menuSleepsPastAutomatic,
+    ...(taken.menuSleepKeptReason ? { menu_sleep_kept_reason: taken.menuSleepKeptReason } : {}),
     ...takeProfileUnloadCounts(),
     ...takeCleanUpCounts(),
     tabs_slept_over_budget: taken.tabsSleptOverBudget,
