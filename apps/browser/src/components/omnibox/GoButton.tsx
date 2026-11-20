@@ -1,6 +1,6 @@
 import type { Suggestion } from "@ardia/core";
 import { memo } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Symbol, Text, useHover, useTheme } from "../ui";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { BAR_TYPE, GO_BUTTON } from "./tokens";
@@ -36,6 +36,7 @@ export const GoButton = memo(function GoButton({ label, enabled, onPress }: { la
             }}
           >
             {glass ? <GlassFill radius={GO_BUTTON.radius} state={!enabled ? "rest" : pressed ? "active" : hovered ? "pressed" : "lit"} /> : null}
+            {glass && pressed ? <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: GO_BUTTON.radius, backgroundColor: theme.toolbarPressed }]} /> : null}
             <Text lines={1} weight="semibold" tone={tone} ardiaCentersCapitals style={BAR_TYPE.goLabel}>
               {label}
             </Text>

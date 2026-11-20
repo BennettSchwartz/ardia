@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Symbol, Text, useHover, useTheme } from "../ui";
 import { GlassFill, useGlass } from "../ui/Glass";
 import { ADD_CHIP } from "./tokens";
@@ -27,6 +27,7 @@ export const AddChip = memo(function AddChip({ onPress }: { onPress(): void }) {
             }}
           >
             {glass ? <GlassFill radius={ADD_CHIP.radius} state={pressed ? "pressed" : hovered ? "lit" : "rest"} /> : null}
+            {glass && pressed ? <View pointerEvents="none" style={[StyleSheet.absoluteFill, { borderRadius: ADD_CHIP.radius, backgroundColor: theme.toolbarPressed }]} /> : null}
             <Symbol name="arrow.up.right" size={ADD_CHIP.glyph} weight="medium" color={theme.chipText} style={{ width: ADD_CHIP.glyphBox, height: ADD_CHIP.glyphBox }} />
             <Text tone="chipText" ardiaCentersCapitals>Open a tab or file</Text>
           </View>
