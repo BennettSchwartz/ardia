@@ -34,10 +34,10 @@ function decidingHook<A>(event: DecideEvent, plan: Plan<A>): Deciding<A> | null 
   return null;
 }
 
-function askHook<A>(hook: HookSpec, event: DecideEvent, data: Record<string, unknown>, plan: Plan<A>, signal?: AbortSignal): Promise<A | null> | null {
+function askHook<A>(hook: HookSpec, event: DecideEvent, data: Record<string, unknown>, plan: Plan<A>, signal?: AbortSignal, consent: ConsentToken | null = consentToken()): Promise<A | null> | null {
   if (servingConnection(hook) === null) return null;
   const sent = hook.fullUrls || typeof data.url !== "string" ? data : { ...data, url: minimizedUrl(data.url) };
-  return requestDecision(hook, event, sent, DECIDE_DEADLINE_MS[event], signal, consentToken()).then(
+  return requestDecision(hook, event, sent, DECIDE_DEADLINE_MS[event], signal, consent).then(
     (answer) => (answer === undefined || answer === null ? null : plan.answer(answer)),
     () => null,
   );
@@ -159,11 +159,11 @@ function settle(trace: Exclude<LinkTrace, { by: "program" }>, consent?: ConsentT
   return trace.by === "usual" ? null : trace.verdict;
 }
 
-export function decideLink(url: string, source: LinkSource, signal?: AbortSignal): LinkVerdict | null | Promise<LinkVerdict | null> {
-  const consent = consentToken();
+export function decideLink(url: string, source: LinkSource, signal?: AbortSignal, given?: ConsentToken | null): LinkVerdict | null | Promise<LinkVerdict | null> {
+  const consent = given === undefined ? consentToken() : given;
   const trace = traceLink(url, source);
   if (trace.by !== "program") return settle(trace, consent);
-  const asked = askHook(trace.hook, "link.opening", linkData(url, source), linkPlan(url, source), signal);
+  const asked = askHook(trace.hook, "link.opening", linkData(url, source), linkPlan(url, source), signal, consent);
   if (asked === null) return settle(trace.otherwise, consent);
   return asked.then((verdict) => verdict ?? settle(settledLink(), consent));
 }

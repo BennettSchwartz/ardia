@@ -42,7 +42,7 @@ export function openExternalUrls(given: string[], pointer?: [number, number], so
   if (!gate) return openUndecided(urls, pointer, false, app, consent);
   const verdicts = urls.map((url): LinkGateResult | Promise<LinkGateResult> => {
     try {
-      return gate(url, source ?? null);
+      return gate(url, source ?? null, consent);
     } catch {
       return { url, route: null, decided: false };
     }
