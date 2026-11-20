@@ -293,7 +293,7 @@ function codeSetupOn(tabId: string): boolean {
 export const verificationCodeFound = (tabId: string, found: VerificationCodeFound) => offerVerificationCode(tabId, found, codeSetupOn, generation);
 
 export function fieldProviderOpened(event: FieldProviderOpened) {
-  if (event?.via === "badge" || event?.via === "menu") notePasswordPanel(event.via, event.shown === true);
+  if (event?.via === "badge" || event?.via === "menu") notePasswordPanel(event.via, event.shown === true, event.reason);
 }
 
 export async function openSystemPanel(tabId: string): Promise<boolean> {

@@ -3,6 +3,8 @@
 #import "ArdiaRuntime.h"
 
 #import <objc/message.h>
+#import <objc/runtime.h>
+#import <os/log.h>
 
 #include <cmath>
 
@@ -16,6 +18,12 @@ double gFieldProviderGeneration = -1;
 NSString *gFieldProviderSession = @"";
 const NSTimeInterval kFocusQuerySeconds = 0.2;
 NSString *const kInsertFromPasswordsAction = @"_handleInsertFromPasswordsCommand:";
+NSString *const kShowOrHideAutoFill = @"_showOrHideAutoFillForCurrentTextInputContextIfAppropriate";
+NSString *const kSystemPanelOwner = @"AutoFillPanelService";
+const CFTimeInterval kAutoFillHeuristicsHold = 1.5;
+const CFTimeInterval kSystemPanelCheckDelay = 0.6;
+CFTimeInterval gHoldAutoFillHeuristicsUntil = 0;
+enum class SystemPanelSight { Seen, Missing, Unknown };
 const CFTimeInterval kSystemPanelInterval = 0.6;
 const NSUInteger kVerificationCodesPerPage = 8;
 
@@ -99,27 +107,72 @@ static BOOL SystemPanelActionExists() {
   return NSClassFromString(@"NSAutoFillHeuristicController") && [NSApplication instancesRespondToSelector:NSSelectorFromString(kInsertFromPasswordsAction)];
 }
 
-static NSDictionary *OpenSystemPanel(NSView *page) {
+
+bool AutoFillHeuristicsHeld() {
+  static bool installed = false;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    Class heuristic = NSClassFromString(@"NSAutoFillHeuristicController");
+    SEL sel = NSSelectorFromString(kShowOrHideAutoFill);
+    Method method = heuristic ? class_getInstanceMethod(heuristic, sel) : nullptr;
+    if (!method) return;
+    IMP original = method_getImplementation(method);
+    method_setImplementation(method, imp_implementationWithBlock(^(id controller) {
+      if (CACurrentMediaTime() < gHoldAutoFillHeuristicsUntil) return;
+      ((void (*)(id, SEL))original)(controller, sel);
+    }));
+    installed = true;
+  });
+  return installed;
+}
+
+SystemPanelSight SightOfSystemPanel() {
+  NSArray<NSDictionary *> *windows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
+  const pid_t me = getpid();
+  bool namesVisible = false;
+  for (NSDictionary *window in windows) {
+    NSString *owner = window[(id)kCGWindowOwnerName];
+    if ([window[(id)kCGWindowOwnerPID] intValue] == me && owner.length) namesVisible = true;
+    if (![owner isEqualToString:kSystemPanelOwner]) continue;
+    NSDictionary *bounds = window[(id)kCGWindowBounds];
+    if ([bounds[@"Width"] doubleValue] >= 100 && [bounds[@"Height"] doubleValue] >= 100) return SystemPanelSight::Seen;
+  }
+  return namesVisible ? SystemPanelSight::Missing : SystemPanelSight::Unknown;
+}
+
+void OpenSystemPanel(NSView *page, void (^done)(NSDictionary *result)) {
   static CFTimeInterval lastAt = -kSystemPanelInterval;
   NSWindow *window = page.window;
-  if (!SystemPanelActionExists()) return @{@"shown" : @NO, @"reason" : @"unavailable"};
-  if (!window.isKeyWindow) return @{@"shown" : @NO, @"reason" : @"notKey"};
-  if (!EditsWebText(window.firstResponder, page)) return @{@"shown" : @NO, @"reason" : @"notEditing"};
+  if (!SystemPanelActionExists()) return done(@{@"shown" : @NO, @"reason" : @"unavailable"});
+  if (!window.isKeyWindow) return done(@{@"shown" : @NO, @"reason" : @"notKey"});
+  if (!EditsWebText(window.firstResponder, page)) return done(@{@"shown" : @NO, @"reason" : @"notEditing"});
   const CFTimeInterval now = CACurrentMediaTime();
-  if (now - lastAt < kSystemPanelInterval) return @{@"shown" : @NO, @"reason" : @"throttled"};
+  if (now - lastAt < kSystemPanelInterval) return done(@{@"shown" : @NO, @"reason" : @"throttled"});
   lastAt = now;
   ArdiaLaunchConfig *config = ArdiaLaunchConfig.shared;
   if (config.background && ![config testFlag:@"applePasswordsPanel"]) {
-    NSLog(@"[ardiacore] system passwords panel (background mode, not shown) responder=%@", NSStringFromClass([window.firstResponder class]));
-    return @{@"shown" : @YES};
+    os_log(OS_LOG_DEFAULT, "[ardiacore] system passwords panel (background mode, not shown) responder=%{public}s",
+           class_getName([window.firstResponder class]));
+    return done(@{@"shown" : @YES});
   }
+  const bool held = AutoFillHeuristicsHeld();
+  if (held) gHoldAutoFillHeuristicsUntil = now + kAutoFillHeuristicsHold;
   SEL action = NSSelectorFromString(kInsertFromPasswordsAction);
   NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:@"AutoFill" action:action keyEquivalent:@""];
   id target = [NSApp targetForAction:action to:nil from:item];
   const BOOL sent = target && [NSApp sendAction:action to:target from:item];
-  NSLog(@"[ardiacore] system passwords panel responder=%@ target=%@ sent=%d", NSStringFromClass([window.firstResponder class]),
-        NSStringFromClass([target class]), sent);
-  return sent ? @{@"shown" : @YES} : @{@"shown" : @NO, @"reason" : @"refused"};
+  os_log(OS_LOG_DEFAULT, "[ardiacore] system passwords panel responder=%{public}s target=%{public}s sent=%d held=%d", class_getName([window.firstResponder class]),
+         class_getName([target class]), sent, held);
+  if (!sent) return done(@{@"shown" : @NO, @"reason" : @"refused"});
+  if ([config testFlag:@"systemPanelRace"]) {
+    id controller = ((id (*)(id, SEL))objc_msgSend)(NSClassFromString(@"NSAutoFillHeuristicController"), NSSelectorFromString(@"sharedInstance"));
+    ((void (*)(id, SEL))objc_msgSend)(controller, NSSelectorFromString(kShowOrHideAutoFill));
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSystemPanelCheckDelay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    const SystemPanelSight sight = SightOfSystemPanel();
+    os_log(OS_LOG_DEFAULT, "[ardiacore] system passwords panel %{public}s", sight == SystemPanelSight::Seen ? "seen" : sight == SystemPanelSight::Missing ? "missing" : "unchecked");
+    done(sight == SystemPanelSight::Missing ? @{@"shown" : @NO, @"reason" : @"noPanel"} : @{@"shown" : @YES});
+  });
 }
 
 }
@@ -184,11 +237,12 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
   [page removeObjectForKey:@"queryPending"];
   void (^completion)(NSDictionary *) = pending[@"completion"];
   if (CACurrentMediaTime() > [pending[@"deadline"] doubleValue]) return completion(@{@"shown" : @NO, @"reason" : @"notFocused"});
-  completion([ArdiaWebView requestSystemPanelIn:pending[@"view"]
-                                          owner:owner
-                                        profile:pending[@"profile"]
-                                          field:nil
-                                     generation:[pending[@"generation"] doubleValue]]);
+  [ArdiaWebView requestSystemPanelIn:pending[@"view"]
+                               owner:owner
+                             profile:pending[@"profile"]
+                               field:nil
+                          generation:[pending[@"generation"] doubleValue]
+                          completion:completion];
 }
 
 + (void)querySystemPanelIn:(NSView *)view
@@ -220,11 +274,12 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
   __weak id weakOwner = owner;
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kFocusQuerySeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     NSMutableDictionary *waiting = weakOwner ? [FieldProviderPages() objectForKey:weakOwner] : nil;
-    if ([waiting[@"query"] isEqualToString:query]) {
+    const BOOL unanswered = [waiting[@"query"] isEqualToString:query];
+    if (unanswered) {
       [waiting removeObjectForKey:@"query"];
       [waiting removeObjectForKey:@"queryPending"];
     }
-    answerOnce(@{@"shown" : @NO, @"reason" : @"notFocused"});
+    if (unanswered || !waiting) answerOnce(@{@"shown" : @NO, @"reason" : @"notFocused"});
   });
   ask(query);
 }
@@ -248,13 +303,25 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
     if ([tokens[token][@"frame"] isEqualToString:frame]) [tokens removeObjectForKey:token];
 }
 
-+ (NSDictionary *)requestSystemPanelIn:(NSView *)page owner:(id)owner profile:(NSString *)profile field:(NSString *)field generation:(double)generation {
++ (void)requestSystemPanelIn:(NSView *)page
+                       owner:(id)owner
+                     profile:(NSString *)profile
+                       field:(NSString *)field
+                  generation:(double)generation
+                  completion:(void (^)(NSDictionary *result))completion {
+  void (^done)(NSDictionary *) = ^(NSDictionary *result) {
+    NSString *reason = result[@"reason"];
+    if (reason)
+      os_log(OS_LOG_DEFAULT, "[ardiacore] system passwords panel refused reason=%{public}@ via=%{public}s field=%{public}@", reason, field ? "badge" : "menu",
+             field ?: @"-");
+    completion(result);
+  };
   NSDictionary *provider = FieldProviderFor(profile);
-  if (!provider) return @{@"shown" : @NO, @"reason" : @"noProvider"};
-  if ((field || generation >= 0) && generation != gFieldProviderGeneration) return @{@"shown" : @NO, @"reason" : @"stale"};
+  if (!provider) return done(@{@"shown" : @NO, @"reason" : @"noProvider"});
+  if ((field || generation >= 0) && generation != gFieldProviderGeneration) return done(@{@"shown" : @NO, @"reason" : @"stale"});
   NSString *focus = FieldProviderPage(owner)[@"focus"];
-  if (!ProviderWants(provider, focus) || (field && ![field isEqualToString:focus])) return @{@"shown" : @NO, @"reason" : @"notFocused"};
-  return OpenSystemPanel(page);
+  if (!ProviderWants(provider, focus) || (field && ![field isEqualToString:focus])) return done(@{@"shown" : @NO, @"reason" : @"notFocused"});
+  OpenSystemPanel(page, done);
 }
 
 + (NSDictionary *)offerVerificationCode:(NSString *)text owner:(id)owner frame:(NSString *)frame profile:(NSString *)profile generation:(double)generation {
@@ -330,8 +397,11 @@ static NSDictionary *OpenSystemPanel(NSView *page) {
       }
       completion:^(NSDictionary *result) {
         NSString *reason = result[@"reason"];
-        if (![reason isEqualToString:@"noProvider"] && ![reason isEqualToString:@"stale"])
-          [weakView emit:@"fieldProviderOpened" payload:@{@"via" : @"menu", @"shown" : result[@"shown"]}];
+        if (![reason isEqualToString:@"noProvider"] && ![reason isEqualToString:@"stale"]) {
+          NSMutableDictionary *payload = [@{@"via" : @"menu", @"shown" : result[@"shown"] ?: @NO} mutableCopy];
+          if (reason) payload[@"reason"] = reason;
+          [weakView emit:@"fieldProviderOpened" payload:payload];
+        }
         completion(result);
       }];
   return YES;
