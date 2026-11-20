@@ -1,28 +1,65 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { test } from "node:test";
 
-const { backgroundFill, FILL_Z_INDEX } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
+const { backedStyles, routedNativeStyle, touchesFill } = await import("../../../../packages/expo-windows/src/views/backgroundFill.ts");
+const { backedOnWindows, backedView, rawView } = createRequire(import.meta.url)("../../../../packages/expo-windows/metroResolution.js");
 
-const filled = (corners) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, zIndex: FILL_Z_INDEX, backgroundColor: "red", ...corners });
+const at = (offsets, extra = {}) => ({ position: "absolute", top: 0, bottom: 0, left: 0, right: 0, ...offsets, backgroundColor: "red", ...extra });
 
-test("no fill without a meaningful background, so the view is left as it is", () => {
-  assert.equal(backgroundFill({}), null);
-  assert.equal(backgroundFill({ backgroundColor: "transparent", borderRadius: 8 }), null);
+test("no fill without a meaningful background or with a shadow, so the view is left as it is", () => {
+  assert.equal(backedStyles({}), null);
+  assert.equal(backedStyles({ backgroundColor: "transparent", borderRadius: 8 }), null);
+  assert.equal(backedStyles({ backgroundColor: "red", shadowColor: "black", shadowOpacity: 0.2 }), null);
+  assert.equal(backedStyles({ backgroundColor: "red", boxShadow: "0 1px 2px black" }), null);
+  assert.equal(backedStyles({ backgroundColor: "rgba(0,0,0,0)" }, (color) => color !== "rgba(0,0,0,0)"), null);
 });
 
-test("the fill sits at the parent's padding box, since an absolute child's offsets already start inside the border", () => {
-  assert.deepEqual(backgroundFill({ backgroundColor: "red", borderWidth: 2 }), filled({}));
+test("the fill takes the background off the view and keeps everything else on it", () => {
+  const backed = backedStyles({ backgroundColor: "red", opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4 });
+  assert.deepEqual(backed.fill, at({}));
+  assert.deepEqual(backed.own, { opacity: 0.5, transform: [{ scale: 2 }], zIndex: 3, padding: 4 });
 });
 
-test("each corner's inner radius loses only the borders that meet at that corner", () => {
-  assert.deepEqual(backgroundFill({ backgroundColor: "red", borderRadius: 10 }), filled({ borderTopLeftRadius: 10, borderTopRightRadius: 10, borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }));
-  assert.deepEqual(backgroundFill({ backgroundColor: "red", borderRadius: 12, borderLeftWidth: 8 }), filled({ borderTopLeftRadius: 4, borderTopRightRadius: 12, borderBottomLeftRadius: 4, borderBottomRightRadius: 12 }));
-  assert.deepEqual(backgroundFill({ backgroundColor: "red", borderWidth: 2, borderTopWidth: 3, borderRadius: 10, borderTopLeftRadius: 2 }), filled({ borderTopLeftRadius: 0, borderTopRightRadius: 7, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 }));
-  assert.equal(backgroundFill({ backgroundColor: "red", borderRadius: 10, borderStartWidth: 4 }).borderTopLeftRadius, 6);
+test("the fill covers the border box and draws the border, as React Native Windows paints a background under the border", () => {
+  const backed = backedStyles({ backgroundColor: "red", borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", borderRadius: 10, borderStyle: "dashed", borderCurve: "continuous" });
+  assert.deepEqual(backed.fill, at({ top: -1, bottom: -1, left: -1, right: -1 }, { borderWidth: 1, borderColor: "rgba(0,0,0,0.1)", borderRadius: 10, borderStyle: "dashed", borderCurve: "continuous" }));
+  assert.deepEqual(backed.own, { borderWidth: 1, borderRadius: 10, borderStyle: "dashed", borderCurve: "continuous", borderColor: "transparent" });
 });
 
-test("a percentage radius passes through, and the fill sorts under children with a negative zIndex", () => {
-  assert.equal(backgroundFill({ backgroundColor: "red", borderRadius: "50%" }).borderBottomRightRadius, "50%");
-  assert.ok(backgroundFill({ backgroundColor: "red" }).zIndex < -1000000);
-  assert.equal(backgroundFill({ backgroundColor: "red", borderCurve: "continuous" }).borderCurve, "continuous");
+test("each side reaches out by its own border width, start and end winning over left and right as Yoga reads them", () => {
+  const backed = backedStyles({ backgroundColor: "red", borderWidth: 2, borderTopWidth: 3, borderLeftWidth: 5, borderStartWidth: 4, borderRightColor: "blue" });
+  assert.deepEqual([backed.fill.top, backed.fill.bottom, backed.fill.left, backed.fill.right], [-3, -2, -4, -2]);
+  assert.equal(backed.fill.borderRightColor, "blue");
+  assert.equal(backed.own.borderRightColor, undefined);
+  assert.equal(backed.own.borderColor, "transparent");
+});
+
+test("a percentage radius passes through, and the fill has no zIndex, so a view that forms no stacking context keeps it in its place", () => {
+  const backed = backedStyles({ backgroundColor: "red", borderRadius: "50%" });
+  assert.equal(backed.fill.borderRadius, "50%");
+  assert.equal("zIndex" in backed.fill, false);
+  assert.equal(backed.own.borderColor, undefined);
+});
+
+test("setNativeProps that change the background or border go to the fill, and the rest stays on the view", () => {
+  assert.equal(touchesFill({ opacity: 0.3 }), false);
+  assert.equal(touchesFill({ backgroundColor: "blue" }), true);
+  assert.equal(touchesFill({ borderRadius: 4 }), true);
+  const routed = routedNativeStyle({ backgroundColor: "red", borderWidth: 1, borderColor: "black", opacity: 1 }, { backgroundColor: "blue", opacity: 0.4 });
+  assert.deepEqual(routed.fill, at({ top: -1, bottom: -1, left: -1, right: -1 }, { backgroundColor: "blue", borderWidth: 1, borderColor: "black" }));
+  assert.deepEqual(routed.own, { opacity: 0.4, borderColor: "transparent" });
+  assert.equal(routed.latest.backgroundColor, "blue");
+  assert.equal(routedNativeStyle({ backgroundColor: "red" }, { backgroundColor: "transparent" }), null);
+});
+
+test("Metro hands every importer of React Native Windows' View the backed view, except the raw view's own module", () => {
+  const view = path.join("/repo", "node_modules", ".pnpm", "react-native-windows@0.81.38", "node_modules", "react-native-windows", "Libraries", "Components", "View", "View.windows.js");
+  const other = { type: "sourceFile", filePath: path.join(path.dirname(view), "ViewNativeComponent.js") };
+  assert.deepEqual(backedOnWindows({ type: "sourceFile", filePath: view }, "/repo/node_modules/react-native-windows/Libraries/Components/Pressable/Pressable.js"), { type: "sourceFile", filePath: backedView });
+  assert.deepEqual(backedOnWindows({ type: "sourceFile", filePath: view.replaceAll("/", "\\") }, "C:\\a\\b.js"), { type: "sourceFile", filePath: backedView });
+  assert.deepEqual(backedOnWindows({ type: "sourceFile", filePath: view }, rawView), { type: "sourceFile", filePath: view });
+  assert.deepEqual(backedOnWindows(other, "/repo/x.js"), other);
+  assert.deepEqual(backedOnWindows({ type: "empty" }, "/repo/x.js"), { type: "empty" });
 });

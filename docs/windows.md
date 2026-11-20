@@ -482,21 +482,31 @@ what differs; the Mac's list is `docs/dia-feature-parity.md`. Rows marked "hidde
   visuals but not the background. React Native mounts children inside a view only when it forms a stacking context
   (`zIndex` with a position, `opacity` below 1, a transform, `pointerEvents="none"` and so on), so only a view with a
   background and a stacking context is hit: a later child lands under the background, or under its previous sibling.
-  - **Remedy:** `BackedView` (`packages/expo-windows/src/views/BackedView.tsx`) draws the background on a permanent
-    first child at the padding box (an absolute child's offsets already start inside the border), with each corner's
-    radius less the borders that meet there and the lowest `zIndex`, so later children land above it. Its background
-    has to come through `style`: one set with `setNativeProps` or an animated `backgroundColor` reaches the outer view
-    and brings the fault back. Corners assume left-to-right. It's registered as `ArdiaBackedView`, and the shell
-    exports it like `ClipView`: `packages/shell/src/backedView.ts` is React Native's `View` on the Mac, Linux and the
-    web, and `backedView.windows.ts` is `requireNativeViewManager("ArdiaBackedView")`. Onboarding's `ChoiceCard` renders
-    through it, so a card's checkbox, mounted once the card is selected, draws above the card's fill.
+  - **Remedy, for every view:** the Windows bundle never gives a view a background sprite. Metro resolves React
+    Native Windows' own `View` (`Libraries/Components/View/View.windows.js`), whoever imports it (the app, `Pressable`,
+    `Animated.View`, our `views/`), to `packages/expo-windows/src/views/BackedView.tsx`
+    (`packages/expo-windows/metroResolution.js`); only `views/rawView.ts` gets the original. A view whose style has a
+    background that draws and no shadow renders through the original with the background and the border moved onto a
+    permanent first child (`views/backgroundFill.ts`): absolute at the border box, so it paints under the border as
+    the sprite did, with the view's own radii, border widths, colours, style and curve. The view keeps its border
+    widths for layout, with clear colours. With no sprite on the view, a child mounted later lands at its index, above
+    the fill, whether or not the view forms a stacking context. The fill has no `zIndex`, so in a view that forms no
+    stacking context it's flattened into its ancestor in the view's own place. A `setNativeProps` that changes the
+    background or the border (an animated `backgroundColor`, as the split zones' glow) goes to the fill. Left as they
+    were: a view with a shadow (React Native Windows draws it on the view's outer visual), a background that first
+    arrives through `setNativeProps`, and borders that differ by side under right-to-left layout, which the offsets
+    read left to right. `ARDIA_TEST=rawBackgrounds=1` turns the fill off in a test instance, to compare.
+    Mac, Linux and the web don't use this resolver and render as before. Patching React Native Windows instead isn't
+    open to us: the app takes `Microsoft.ReactNative` prebuilt from NuGet (`UseExperimentalNuget`), so a C++ fix means
+    building React Native Windows from source for both CPUs.
   - **Check:** `scripts/windows/fade-check.ps1`, in the launch check, launches with `ARDIA_TEST fadeLab` and fails if a
-    child mounted into a `BackedView` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
+    child mounted into a plain `View` with a background and `zIndex` isn't drawn within 100 ms and still drawn at the
     round's end, judging only samples where our window is the one at the lab (arm64 runners are covered by Windows'
     setup screen, #2280, and report unverified). It logs how many rounds a raw view still hides the child (5 of 5 on
-    0.81.38); when that reads 0 after an upgrade, `BackedView` can go. The same lab shows fades on mount draw and land.
-  - **Known, not fixed:** the top toolbar's address field (tabs on top) has a hover pill and mouse handlers, so the
-    reload glow and the not-secure lock mounted while it's hovered draw under the 6 to 10% pill.
+    0.81.38); when that reads 0 after an upgrade, the resolver and `BackedView` can go. The same lab shows fades on mount draw and land.
+  - **Not captured yet:** the top toolbar's address field (tabs on top) has a hover pill and mouse handlers, so the
+    reload glow and the not-secure lock mounted while it was hovered drew under the 6 to 10% pill. The default covers
+    a pill drawn as a view's background; no tour stop hovers the field.
 - Animations run in JavaScript on Windows (`packages/expo-windows/src/animation`). React Native for Windows' native
   animation driver adds what it animates to the view's own style instead of replacing it, turns a scale around the
   top-left corner, never reports where an animation ended, and drops scroll and gesture events, so anything but a

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
-import { BackedView } from "./views/BackedView";
+import { RawView } from "./views/rawView";
 import { VisualEffect } from "./views/materials";
 import { WindowDragRegion } from "./windowDragRegion";
 
@@ -114,11 +114,11 @@ export function FadeLab() {
       {shown ? FADE_VARIANTS.map((variant, i) => <FadeTile key={`${round}-${variant.name}`} variant={variant} round={round} slot={i + 1} />) : null}
       {shown ? <StateTile key={`${round}-state`} round={round} /> : null}
       {shown ? <NativePropsTile key={`${round}-native`} round={round} /> : null}
-      <BackedView style={[styles.tile, at(1, 7), { backgroundColor: "#010101", zIndex: 10 }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</BackedView>
+      <View style={[styles.tile, at(1, 7), { backgroundColor: "#010101", zIndex: 10 }]}>{shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}</View>
       {CONTAINERS.map(({ slot, style, pointerEvents }) => (
-        <View key={slot} pointerEvents={pointerEvents} style={[styles.tile, at(1, slot), style]}>
+        <RawView key={slot} pointerEvents={pointerEvents} style={[styles.tile, at(1, slot), style]}>
           {shown ? <View style={[StyleSheet.absoluteFill, styles.white]} /> : null}
-        </View>
+        </RawView>
       ))}
     </View>
   );

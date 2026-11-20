@@ -261,7 +261,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
     $rawWhite = @($byRound[$r] | Where-Object { $_.Values[$rawColumn] -ge $whiteAt })
     if ($rawWhite.Count -eq 0) { $rawMissed++ }
   }
-  Write-Host "fades, $Label`: a raw view with a background and zIndex still hides a child mounted later in $rawMissed of $([Math]::Max(0, $intervals.Count - 1)) rounds (React Native Windows 0.81.38 ViewComponentView::MountChildComponentView); when this reads 0, BackedView can go"
+  Write-Host "fades, $Label`: a raw view with a background and zIndex still hides a child mounted later in $rawMissed of $([Math]::Max(0, $intervals.Count - 1)) rounds (React Native Windows 0.81.38 ViewComponentView::MountChildComponentView); when this reads 0, the backed View in packages/expo-windows/metroResolution.js can go"
   foreach ($entry in $columns) {
     $column = $entry.Column
     $rows = @()
