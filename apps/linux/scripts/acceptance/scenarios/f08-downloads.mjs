@@ -30,6 +30,17 @@ async function pressInPanel(shell, target) {
   return point;
 }
 
+function menuItemPoint(shell, title) {
+  return shell.eval(`(() => {
+    for (const n of document.querySelectorAll('.ardia-menu-item:not(.disabled)')) {
+      if ((n.querySelector('.ardia-menu-title')?.textContent ?? '').trim() !== ${js(title)}) continue;
+      const r = n.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+    return null;
+  })()`);
+}
+
 async function openPanel(shell) {
   if (!(await panelOpen(shell))) await shell.command("downloads");
   await shell.waitState("return s.windowUi[windowId]?.downloadsOpen === true;", { timeout: 5000, label: "downloads panel" });
@@ -93,7 +104,7 @@ export default {
   title: "Downloads events, controls, settings and restart behaviour",
   deadline: 360000,
   manual: [
-    { name: "Move to Trash from the row menu", steps: ["Right-click a finished download in Ctrl+J and choose Move to Trash.", "The file moves to ~/.local/share/Trash/files with a .trashinfo record and the row shows it as gone."], reason: "F08D drives Open and Show in Folder through a private session; Move to Trash is only in the row's native context menu" },
+    { name: "Move to Trash from the row menu", steps: ["Right-click a finished download in Ctrl+J and choose Move to Trash.", "The file moves to ~/.local/share/Trash/files with a .trashinfo record and the row shows it as gone."], reason: "F08D drives Open and Show in Folder through a private session; F08 opens the row's menu for Escape and Open, and Move to Trash stays a manual desktop check" },
   ],
   async run(t) {
     const run = nonce("f08");
@@ -151,6 +162,24 @@ export default {
       await stillOpen(state.shell, "showing a file");
       return { opened: await desktop.opened(), reveal };
     });
+    await t.check("a row's menu takes Escape and its item presses, and leaves the downloads panel open", async () => {
+      await openPanel(state.shell);
+      const row = await until(() => panelPoint(state.shell, { text: small }), { timeout: 6000, label: `${small} in the downloads panel` });
+      const showMenu = async () => {
+        await state.shell.mouse(row.x, row.y, { button: "right" });
+        return until(() => menuItemPoint(state.shell, "Open"), { timeout: 5000, label: "Open in the row's menu" });
+      };
+      await showMenu();
+      await state.shell.key("Escape", { code: "Escape", keyCode: 27 });
+      await until(async () => !(await menuItemPoint(state.shell, "Open")), { timeout: 5000, label: "Escape to close the row's menu" });
+      await stillOpen(state.shell, "Escape closed the row's menu");
+      const openedBefore = (await desktop.opened()).filter((path) => path === smallDownload.path).length;
+      const item = await showMenu();
+      await state.shell.mouse(item.x, item.y);
+      await until(async () => (await desktop.opened()).filter((path) => path === smallDownload.path).length > openedBefore || false, { timeout: 8000, label: "xdg-open on the file chosen from the row's menu" });
+      await stillOpen(state.shell, "choosing Open from the row's menu");
+      return { opened: smallDownload.path };
+    });
     await t.check("View all downloads in the panel opens the downloads page and closes the panel", async () => {
       await openPanel(state.shell);
       await pressInPanel(state.shell, { text: "View all downloads" });
@@ -192,30 +221,43 @@ export default {
       }
       return decided;
     });
-    await t.check("a press outside the downloads panel closes it, and its pointer-down doesn't reach the control under it", async () => {
+    await t.check("a left or right press outside the downloads panel closes it, no part of that press reaches the control under it, and the next click does", async () => {
       await openPanel(state.shell);
       const target = await state.shell.eval(`(() => {
         const panel = document.querySelector(${js(PANEL)});
-        for (const n of document.querySelectorAll('[aria-label], [title]')) {
+        const inert = ['Go Back', 'Go Forward', 'Reload'];
+        const label = (n) => n.getAttribute('aria-label') ?? n.getAttribute('title') ?? '';
+        const rank = (n) => { const i = inert.findIndex((name) => label(n).startsWith(name)); return i < 0 ? inert.length : i; };
+        const controls = [...document.querySelectorAll('[aria-label], [title]')].filter((n) => rank(n) < inert.length).sort((a, b) => rank(a) - rank(b));
+        for (const n of controls) {
           const r = n.getBoundingClientRect();
           if (r.width <= 0 || r.height <= 0) continue;
           const x = r.left + r.width / 2, y = r.top + r.height / 2;
           const hit = document.elementFromPoint(x, y);
           if (!hit || panel.contains(hit) || !n.contains(hit)) continue;
           window.__outsidePress = [];
-          for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) hit.addEventListener(type, () => window.__outsidePress.push(type));
+          for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'auxclick', 'contextmenu']) hit.addEventListener(type, () => window.__outsidePress.push(type));
           return { x, y, control: n.getAttribute('aria-label') ?? n.getAttribute('title') };
         }
         return null;
       })()`);
-      if (!target) throw new Error("no labelled control outside the panel");
+      if (!target) throw new Error("no Go Back, Go Forward or Reload control outside the panel");
       await state.shell.mouse(target.x, target.y);
       await state.shell.waitState("return s.windowUi[windowId]?.downloadsOpen === false;", { timeout: 5000, label: "the panel to close" });
       await pause(800);
       const reached = await state.shell.eval("window.__outsidePress");
-      const pressed = reached.filter((type) => type === "pointerdown" || type === "mousedown");
-      if (pressed.length) throw new Error(`the closing press reached ${target.control}: ${pressed.join(", ")}`);
-      return { control: target.control, reached };
+      if (reached.length) throw new Error(`the closing press reached ${target.control}: ${reached.join(", ")}`);
+      await openPanel(state.shell);
+      await state.shell.eval("window.__outsidePress = [], true");
+      await state.shell.mouse(target.x, target.y, { button: "right" });
+      await state.shell.waitState("return s.windowUi[windowId]?.downloadsOpen === false;", { timeout: 5000, label: "a right-click to close the panel" });
+      const rightReached = await state.shell.eval("window.__outsidePress.splice(0)");
+      if (rightReached.length) throw new Error(`the closing right-click reached ${target.control}: ${rightReached.join(", ")}`);
+      await state.shell.mouse(target.x, target.y);
+      await pause(300);
+      const nextReached = await state.shell.eval("window.__outsidePress.splice(0)");
+      if (!nextReached.includes("click")) throw new Error(`a click right after the closing right-click was lost: ${nextReached.join(", ") || "nothing"} reached ${target.control}`);
+      return { control: target.control, reached, rightReached, nextReached };
     });
     await t.check("Escape closes the downloads panel", async () => {
       await openPanel(state.shell);
