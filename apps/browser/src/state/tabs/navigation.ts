@@ -53,9 +53,9 @@ export function goBack(tabId: string, mayAct: () => boolean = () => true): void 
 
 export async function goBackAsking(tabId: string, mayAct: () => boolean = () => true, ask: typeof confirm = confirm): Promise<boolean> {
   if (livePageId(tabId) !== tabId) {
-    let went: Promise<boolean> = Promise.resolve(true);
-    await withLivePage(tabId, (_, id) => (went = goBackAsking(id, mayAct, ask)), mayAct);
-    return went;
+    let went: Promise<boolean> = Promise.resolve(false);
+    const acted = await withLivePage(tabId, (_, id) => (went = goBackAsking(id, mayAct, ask)), mayAct);
+    return acted ? went : false;
   }
   if (pageOf(tabId).newTabShown) return true;
   if (pageOf(tabId).engineBack && !liveOf(tabId).canGoBack) return goBackAcrossEngines(tabId, mayAct, ask);
@@ -150,7 +150,7 @@ export async function historyItems(asked: string, direction: -1 | 1, max = 15): 
 }
 
 export async function goToHistoryItem(tabId: string, item: HistoryItem): Promise<void> {
-  if (livePageId(tabId) !== tabId) return withLivePage(tabId, (_, id) => void goToHistoryItem(id, item));
+  if (livePageId(tabId) !== tabId) return void (await withLivePage(tabId, (_, id) => void goToHistoryItem(id, item)));
   const page = pageOf(tabId);
   if (item.offset === "newTab") {
     const list = (await webviews.get(tabId)?.navigationEntries()) ?? [];
