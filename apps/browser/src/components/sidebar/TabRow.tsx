@@ -15,7 +15,7 @@ import { hidesRowIcon } from "../../state/pins/rowIcons";
 import { commitRename, endRename, startRename } from "../../state/sidebar/actions";
 import { useDragItem, useDropSplit } from "./DragProvider";
 import { SplitDropHalf } from "./DropMarks";
-import { PreviewFade, SplitPreview, useSplitPreview } from "./SplitPreview";
+import { PreviewFade, previewFade, SplitPreview, useSplitPreview } from "./SplitPreview";
 import { profileSurfaces } from "./profileSurfaces";
 import { SPLIT_PANE, splitPaneShape } from "./splitPaneGeometry";
 import { useShift, type EntryMotion } from "./EntryMotion";
@@ -24,7 +24,7 @@ import { RowCloseSlot, RowHoverFill } from "./RowHoverParts";
 import { RowCloseButton } from "./RowCloseButton";
 import { pressPaneClose, useTabCloseControlWhile } from "../../state/sidebar/closeControl";
 import { modifiersOf } from "../../lib/keys";
-import { ACTIVE, ICON_MARKS, LOADING, mutedBy, PLAYING, SELECTED, useRowState, useStruckTitle } from "../../state/sidebar/rowState";
+import { ACTIVE, ICON_MARKS, IN_SPLIT, LOADING, mutedBy, PLAYING, SELECTED, useRowState, useStruckTitle } from "../../state/sidebar/rowState";
 import { registerRow, useSidebarUi } from "../../state/sidebar/sidebarUi";
 import { TabIcon } from "./TabIcon";
 import { TabBadges } from "../media/TabBadges";
@@ -36,7 +36,8 @@ import { useSidebarRowLook } from "./rowLook";
 import { rowTitleFrame, SidebarRowLabel, SidebarRowSurface } from "./SidebarRow";
 import { AwayTitleLabel } from "./AwayTitle";
 import { withShortcut } from "../../state/commands/commandShortcuts";
-import { TabPressArea } from "./TabPressArea";
+import { TabPressArea, tabPressView } from "./TabPressArea";
+import type { TabPress } from "../../state/sidebar/heldTabPress";
 import { entryKey } from "../../state/sidebar/entryKey";
 import type { RowSection } from "./dragModel";
 import type { SplitDropSide } from "../../state/drag/drops";
@@ -85,14 +86,13 @@ export const TabRow = memo(function TabRow({
   const { cell, hoverProps } = useRowHoverCell(windowId, renaming ? null : { kind: "tab", id: tabId });
   const [moved, movedRef] = useShift(shift, useCallback((v: View | null) => registerRow(windowId, tabId, v), [windowId, tabId]));
   const backToPin = useHover();
-  const { backToPinHint, quiet } = useSidebarRowLook();
+  const { backToPinHint, quiet, plainTooltip } = useSidebarRowLook();
+  const press = useRef<TabPress | null>(null);
   const unread = useTabUnread(tabId);
   const badged = useTabBadged(tabId);
   const [unreadDrawn, setUnreadDrawn] = useState(false);
   const showsUnread = !!unread || unreadDrawn;
   const resettable = !!tab && (isPinnedRow(tab) || !tab.pin) && awayFromPin(tab);
-  const pinActionMotion = usePressScaleMotion(resettable, buttonMotion.iconPressScale);
-  const pinActionScale = pinActionMotion.scale ? { transform: [{ scale: pinActionMotion.scale }] } : undefined;
   const struck = useStruckTitle(tabId, flags & ICON_MARKS);
   const preview = useSplitPreview(splitSide, 1);
   if (!tab) return null;
@@ -115,8 +115,7 @@ export const TabRow = memo(function TabRow({
       style={moved.style as object}
       onDoubleClick={() => void startRename(windowId, { kind: "tab", id: tabId })}
     >
-      <TabPressArea windowId={windowId} tab={tab} squish={renaming ? undefined : "row"} hitSlop={rowGapSlop(0)} selected={selected}>
-      {({ pressed }) => (
+      {tabPressView({ windowId, tab, hitSlop: rowGapSlop(0), selected, press, inSplit: !!(flags & IN_SPLIT), plainTooltip, children: ({ pressed }) => (
         <>
           <RowHoverFill cell={cell} plain={plain} pressed={pressed} color={pressed ? pressedFill : hoverFill} radius={radius.chrome} />
           <SidebarRowSurface
@@ -126,18 +125,16 @@ export const TabRow = memo(function TabRow({
             stroke={selected && !active ? tokens.multiSelectedStroke : undefined}
             padLeft={textOnly ? TAB_ROW.contentLeft - TAB_ROW.titleGap : TAB_ROW.contentLeft}
           >
-            <PreviewFade preview={preview}>
+            {previewFade(preview, <>
             <View {...(tab.pinnedUrl ? backToPin.hoverProps : null)} style={textOnly ? NO_SLOT : undefined}>
               {resettable ? (
                 <Pressable
                   onPress={() => returnToPinnedUrl(tab.id)}
-                  onPressIn={pinActionMotion.onPressIn}
-                  onPressOut={pinActionMotion.onPressOut}
                   tooltip={withShortcut("Back to Pinned URL", backToPinHint)}
                   accessibilityRole="button"
                   accessibilityLabel="Back to Pinned URL"
                 >
-                  <Animated.View pointerEvents="none" style={pinActionScale}>
+                  <View pointerEvents="none">
                     {resetting ? (
                       <View style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box, alignItems: "center", justifyContent: "center" }}>
                         <Symbol name="arrow.uturn.backward" size={ROW_GLYPH.small} weight="semibold" color={active ? theme.rowSelectedText : theme.textTab} style={{ width: ROW_GLYPH.box, height: ROW_GLYPH.box }} />
@@ -148,7 +145,7 @@ export const TabRow = memo(function TabRow({
                         <TabBadges tabId={tab.id} />
                       </View>
                     )}
-                  </Animated.View>
+                  </View>
                 </Pressable>
               ) : (
                 <>
@@ -183,11 +180,10 @@ export const TabRow = memo(function TabRow({
                 </>
               ) : null}
             </RowCloseSlot>
-            </PreviewFade>
+            </>)}
           </SidebarRowSurface>
         </>
-      )}
-      </TabPressArea>
+      ) })}
       {preview.values ? <SplitPreview panes={SINGLE(tabId)} values={preview.values} rowActive={active && !quiet} /> : null}
     </View>
   );

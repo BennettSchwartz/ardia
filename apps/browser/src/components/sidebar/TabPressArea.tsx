@@ -11,34 +11,38 @@ import { clickHeldTabPress, holdTabPress, pressOutTabPress, type TabPress } from
 import { tabPressTag } from "../../state/tabs/tabReveal";
 import { useInSplit } from "../../state/windows/card";
 import { ContextMenuArea } from "../ui";
-import { Squish, useSquish, type SquishKind } from "../ui/Squish";
 
-export function TabPressArea({
-  windowId,
-  tab,
-  style,
-  pressStyle,
-  tooltip,
-  squish,
-  hitSlop,
-  selected = false,
-  children,
-}: {
+type TabPressProps = {
   windowId: string;
   tab: Tab;
   style?: StyleProp<ViewStyle>;
   pressStyle?: StyleProp<ViewStyle>;
   tooltip?: string;
-  squish?: SquishKind;
   hitSlop?: Insets;
   selected?: boolean;
   children: ReactNode | ((state: { pressed: boolean }) => ReactNode);
-}) {
+};
+
+export function TabPressArea(props: TabPressProps) {
   const press = useRef<TabPress | null>(null);
-  const inSplit = useInSplit(tab.id);
+  const inSplit = useInSplit(props.tab.id);
   const plainTooltip = useSettings((s) => !s.showTabHoverMenu);
-  const squishMotion = useSquish(squish);
-  const scale = squishMotion.scale;
+  return tabPressView({ ...props, press, inSplit, plainTooltip });
+}
+
+export function tabPressView({
+  windowId,
+  tab,
+  style,
+  pressStyle,
+  tooltip,
+  hitSlop,
+  selected = false,
+  children,
+  press,
+  inSplit,
+  plainTooltip,
+}: TabPressProps & { press: { current: TabPress | null }; inSplit: boolean; plainTooltip: boolean }) {
   return (
     <ContextMenuArea
       onMiddleClick={() => middleClickTab(tab.id)}
@@ -50,21 +54,17 @@ export function TabPressArea({
     >
       <Pressable
         onPressIn={(e) => {
-          squishMotion.onPressIn?.();
           press.current = holdTabPress(windowId, tab.id, e, press.current);
         }}
         onPress={(e) => clickHeldTabPress(windowId, tab.id, e, press.current)}
-        onPressOut={(e) => {
-          squishMotion.onPressOut?.();
-          pressOutTabPress(press.current, e);
-        }}
+        onPressOut={(e) => pressOutTabPress(press.current, e)}
         style={pressStyle}
         nativeID={tabPressTag(tab.id, selected, inSplit)}
         collapsable={false}
         hitSlop={hitSlop}
         tooltip={tooltip ?? (plainTooltip ? titleTooltip(tab) : undefined)}
       >
-        {scale ? (state) => <Squish scale={scale}>{typeof children === "function" ? children(state) : children}</Squish> : children}
+        {children}
       </Pressable>
     </ContextMenuArea>
   );

@@ -9,12 +9,14 @@ import { engineMark, type PageEngine } from "../engines/engines";
 import { isPageUnloaded } from "../pins/pinShare";
 import { muteState, type MuteState } from "../tabs/mute";
 import { useIsSleeping } from "../tabs/sleepingTabs";
+import { splitOf } from "../splits/splits";
 
 export const ACTIVE = 1;
 export const SELECTED = 2;
 export const PLAYING = 4;
 export const LOADING = 8;
 export const FADED = 16;
+export const IN_SPLIT = 512;
 const TAB_MUTED = 128;
 const SITE_MUTED = 256;
 const ENGINE_MARKS: Record<PageEngine, number> = { chromium: 32, webkit: 64 };
@@ -56,6 +58,7 @@ export function rowFlags(s: BrowserState, windowId: string, tabId: string): numb
   if (live.isLoading) flags |= LOADING;
   const mute = tab ? muteState(s, tab) : null;
   if (mute) flags |= mute === "site" ? SITE_MUTED : TAB_MUTED;
+  if (splitOf(s, tabId)) flags |= IN_SPLIT;
   return flags;
 }
 

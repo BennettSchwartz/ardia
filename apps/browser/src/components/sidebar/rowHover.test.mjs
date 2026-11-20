@@ -59,3 +59,18 @@ test("a row's Surface renders only when its own look changes, not when the row's
   assert.match(body, /\[fill, cornerRadius, border, stroke, selected, selectedBorder, shadowColor, shadowOpacity, shadowRadius\]/);
   assert.equal(body.match(/<Surface\b/g)?.length, 1);
 });
+
+test("a tab row reads nothing at mount that only a hover, a split or a press needs", () => {
+  const row = src("./TabRow.tsx");
+  const body = row.slice(row.indexOf("export const TabRow = memo"), row.indexOf("const AWAY_FRAME"));
+  assert.match(body, /tabPressView\(\{ windowId, tab, hitSlop: rowGapSlop\(0\), selected, press, inSplit: !!\(flags & IN_SPLIT\), plainTooltip,/);
+  assert.doesNotMatch(body, /<TabPressArea|<PreviewFade|usePressScaleMotion/);
+  const hover = src("./hoverController.ts");
+  const cell = hover.slice(hover.indexOf("export function useRowHoverCell"), hover.indexOf("export function useGroupHover"));
+  assert.doesNotMatch(cell, /useCardTarget|useSettings|useMedia\(/);
+  assert.match(cell, /const target = cardTargetNow\(latest\.current\.rowTarget\);/);
+  const parts = src("./RowHoverParts.tsx");
+  assert.doesNotMatch(parts, /useTabCloseControl/);
+  assert.match(parts, /export const RowHoverFill = memo\(/);
+  assert.match(parts, /export const RowCloseSlot = memo\(/);
+});
