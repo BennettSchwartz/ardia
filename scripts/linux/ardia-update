@@ -29,7 +29,7 @@ max_package=536870912
 max_manifest=4096
 signature_size=64
 install_budget=540
-watchdog_seconds=570
+watchdog_seconds=$((install_budget + 30))
 start_time_slack=0.25
 small_copy_seconds=60
 version_pattern='^([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(-nightly\.([0-9]{1,9}))?$'
@@ -45,6 +45,7 @@ owner_group=""
 work=""
 staged=""
 appimage=""
+launch_ticks=""
 
 note() { printf 'ardia-update: %s\n' "$*" >&2; }
 
@@ -98,15 +99,21 @@ installed_version() {
   printf '%s' "$line"
 }
 
-appimage_changed_since_launch() {
-  local stat ticks now changed
-  stat=$(cat "/proc/$PPID/stat" 2>/dev/null) || return 0
+caller_start_ticks() {
+  local stat
+  stat=$(cat "/proc/$PPID/stat" 2>/dev/null) || return 1
   read -r -a stat <<<"${stat##*) }"
+  [[ "${stat[19]:-}" =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "${stat[19]}"
+}
+
+appimage_changed_since_launch() {
+  local ticks now changed
   ticks=$(getconf CLK_TCK 2>/dev/null) || return 0
   now=$(date +%s.%N) || return 0
   changed=$(stat -c %.9Z -- "$appimage" 2>/dev/null) || return 0
-  [[ "${stat[19]:-}" =~ ^[0-9]+$ && "$ticks" =~ ^[1-9][0-9]*$ && "$now" =~ ^[0-9]+\.[0-9]+$ && "$changed" =~ ^[0-9]+\.[0-9]+$ ]] || return 0
-  awk -v started="${stat[19]}" -v ticks="$ticks" -v now="$now" -v changed="$changed" -v slack="$start_time_slack" \
+  [[ "$launch_ticks" =~ ^[0-9]+$ && "$ticks" =~ ^[1-9][0-9]*$ && "$now" =~ ^[0-9]+\.[0-9]+$ && "$changed" =~ ^[0-9]+\.[0-9]+$ ]] || return 0
+  awk -v started="$launch_ticks" -v ticks="$ticks" -v now="$now" -v changed="$changed" -v slack="$start_time_slack" \
     '{ exit !(changed > now - $1 + started / ticks + slack) }' /proc/uptime
 }
 
@@ -226,7 +233,7 @@ copy_in() {
     statuses=("${PIPESTATUS[@]}")
   } || true
   settle "${statuses[0]}" missing "couldn't read $name"
-  settle "${statuses[1]}" missing "couldn't store $name"
+  settle "${statuses[1]}" install "couldn't store $name"
   copied=$(stat -c %s -- "$destination")
   ((copied <= cap)) || fail "$oversize" "$name grew past $cap bytes"
 }
@@ -270,7 +277,8 @@ install_deb() {
     -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 -- "$work/$package_name" \
     </dev/null >&2 || status=$?
   settle "$status" install "apt-get couldn't install $package_name"
-  refresh_left
+  left=$((install_deadline - SECONDS))
+  ((left > 0)) || left=1
   status=0
   # shellcheck disable=SC2016
   installed=$(limited "$((left < 30 ? left : 30))" dpkg-query -W -f='${Version}' ardia 2>/dev/null) || status=$?
@@ -318,6 +326,7 @@ run_install() {
       exec 9>>/run/ardia-update.lock || fail install "couldn't open the lock"
       ;;
     appimage)
+      launch_ticks=$(caller_start_ticks) || fail install "couldn't tell when Ardia started"
       appimage=$(appimage_target) || fail kind "APPIMAGE no longer names a writable AppImage"
       exec 9<"$(dirname -- "$appimage")" || fail install "couldn't open the lock"
       ;;
@@ -374,7 +383,7 @@ run_install() {
   [[ "$(stat -c %s -- "$destination")" == "$package_size" ]] || fail checksum "$package_name is not $package_size bytes"
   local digest
   refresh_left
-  digest=$(limited "$left" sha256sum -- "$destination") || settle $? checksum "hashing $package_name"
+  digest=$(limited "$left" sha256sum <"$destination") || settle $? checksum "hashing $package_name"
   [[ "${digest%% *}" == "$package_digest" ]] || fail checksum "$package_name doesn't match the manifest's sha256"
 
   umask 022
@@ -399,7 +408,7 @@ case "${1:-}" in
     printf '%s\n' "$(detect_kind)"
     ;;
   install)
-    if [[ "$EUID" == 0 && "${ARDIA_UPDATE_WATCHED:-}" != 1 ]]; then
+    if [[ "$EUID" == 0 && -n "${PKEXEC_UID:-}" && "${ARDIA_UPDATE_WATCHED:-}" != 1 ]]; then
       exec timeout --kill-after=15 "$watchdog_seconds" env ARDIA_UPDATE_WATCHED=1 "$self" "$@"
     fi
     trap on_exit EXIT

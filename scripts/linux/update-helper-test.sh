@@ -45,13 +45,13 @@ for tool in python3 node openssl dpkg-deb readelf xz; do
   command -v "$tool" >/dev/null || { echo "update-helper-test.sh: $tool is required" >&2; exit 1; }
 done
 
-root=$(cd "$(dirname "$0")/../.." && pwd -P)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)
 if [[ -z "$work" ]]; then
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
 else
   mkdir -p "$work"
-  work=$(cd "$work" && pwd -P)
+  work=$(CDPATH='' cd -- "$work" && pwd -P)
   rm -rf "${work:?}/pkgs" "$work/cases" "$work/keys" "$work/arch" "$work/stub"
 fi
 
@@ -231,7 +231,16 @@ stage() {
   cp -a "/work/cases/$1" "$cases/$1"
   chown -hR 1234:1234 "$cases"
 }
-as_pkexec() { timeout 300 env -i PATH=/usr/bin:/bin HOME=/root PKEXEC_UID=1234 "$@" 2>>/tmp/helper.log | tail -n 1; }
+result_of() {
+  local out status=0 line
+  out=$("$@" 2>>/tmp/helper.log) || status=$?
+  line=$(printf '%s\n' "$out" | tail -n 1)
+  case "$line:$status" in
+    installed*:0 | failed*:[1-9]*) printf '%s' "$line" ;;
+    *) printf '%s (exit %s)' "$line" "$status" ;;
+  esac
+}
+as_pkexec() { result_of timeout 300 env -i PATH=/usr/bin:/bin HOME=/root PKEXEC_UID=1234 "$@"; }
 swap_key() { cp /work/keys/test.pub.pem /usr/lib/ardia/linux-update.pem; }
 installed_version() { cat /usr/lib/ardia/VERSION; }
 refusals() {
@@ -310,7 +319,7 @@ running_sleeps=$(for cmdline in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$cmdline
 ((running_sleeps > 0)) && bad "the timed-out apt-get is still running" || ok "the timed-out apt-get was killed"
 rm /usr/sbin/apt-get
 cp /tmp/helper.aside "$helper"
-sed -i 's/^watchdog_seconds=570$/watchdog_seconds=5/' "$helper"
+sed -i 's/^watchdog_seconds=.*/watchdog_seconds=5/' "$helper"
 mv /usr/bin/find /usr/bin/find.real
 printf '#!/bin/sh\nexec sleep 301\n' > /usr/bin/find
 chmod 0755 /usr/bin/find
@@ -408,7 +417,7 @@ cp /work/keys/test.pub.pem "$mnt/squashfs-root/lib/ardia/linux-update.pem"
 chown 1234:1234 "$mnt/squashfs-root/lib/ardia/linux-update.pem"
 inner="$mnt/squashfs-root/lib/ardia/ardia-update"
 as_app() { as_tester APPIMAGE="$apps/Ardia.AppImage" APPDIR="$mnt/squashfs-root" "$@"; }
-app_install() { timeout 300 setpriv --reuid=1234 --regid=1234 --clear-groups env -i HOME=/home/tester PATH=/usr/bin:/bin APPIMAGE="$apps/Ardia.AppImage" APPDIR="$mnt/squashfs-root" "$inner" install "$1" 2>>/tmp/helper.log | tail -n 1; }
+app_install() { result_of timeout 300 setpriv --reuid=1234 --regid=1234 --clear-groups env -i HOME=/home/tester PATH=/usr/bin:/bin APPIMAGE="$apps/Ardia.AppImage" APPDIR="$mnt/squashfs-root" "$inner" install "$1"; }
 old_sum=$(sha256sum < "$apps/Ardia.AppImage")
 expect "appimage kind" appimage "$(as_app "$inner" kind)"
 expect "kind with another AppImage's APPDIR" "unsupported noPolicy" "$(as_tester APPIMAGE="$apps/Ardia.AppImage" APPDIR=/tmp "$inner" kind)"
@@ -432,9 +441,9 @@ expect "appimage refuses a concurrent run" "failed busy" "$(app_install "$cases/
 kill "$holder"
 wait "$holder" 2>/dev/null || true
 stage valid
-replaced_after_launch=$(timeout 300 bash -c 'sleep 5; touch -c "$1"; shift; exec "$@"' _ "$apps/Ardia.AppImage" \
+replaced_after_launch=$(result_of timeout 300 bash -c 'sleep 5; touch -c "$1"; shift; exec "$@"' _ "$apps/Ardia.AppImage" \
   setpriv --reuid=1234 --regid=1234 --clear-groups env -i HOME=/home/tester PATH=/usr/bin:/bin APPIMAGE="$apps/Ardia.AppImage" \
-  APPDIR="$mnt/squashfs-root" "$inner" install "$cases/valid" 2>>/tmp/helper.log | tail -n 1 || true)
+  APPDIR="$mnt/squashfs-root" "$inner" install "$cases/valid")
 expect "appimage refuses to replace an AppImage that changed after Ardia started" "failed notNewer" "$replaced_after_launch"
 expect "the refusals left the AppImage alone" "$old_sum" "$(sha256sum < "$apps/Ardia.AppImage")"
 expect "the refusals left no staged AppImage" "" "$(find "$apps" -name '.ardia-update-*')"

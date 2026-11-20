@@ -709,7 +709,7 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   requires `<V>` to be newer than `lib/ardia/VERSION` (a nightly sorts before its stable), then copies its package
   (at most the manifest's size, the same way) and checks size and sha256. Everything from its start to the post-install version check shares
   one 9-minute deadline, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. Run
-  as root, it re-runs itself under a 9.5-minute `timeout` watchdog too, since the browser can't signal a root process,
+  through pkexec, it re-runs itself under a `timeout` watchdog 30 s past that deadline too, since the browser can't signal a root process,
   so a step outside that deadline (a `stat` that stalls) still ends. A `.deb` goes through `apt-get install --no-remove`, a
   tarball through its own `install.sh --prefix <the helper's prefix>`, and an AppImage is staged as
   `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it, unless `$APPIMAGE` changed after the browser that
