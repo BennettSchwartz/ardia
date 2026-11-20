@@ -228,6 +228,7 @@ final class TalkToMe {
     if session.answer != answer, !answer.isEmpty {
       speechRequest += 1
       speaker?.stop()
+      deactivateAudio()
       listening.reset()
       startedAtEar = false
       countedRead = false
@@ -480,6 +481,7 @@ final class TalkToMe {
   private func wentToBackground() {
     interrupted()
     proximity.stop()
+    perform(listening.proximity(isNear: false))
   }
 
   private func cameToForeground() {

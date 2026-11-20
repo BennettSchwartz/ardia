@@ -1445,7 +1445,7 @@ phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must
   `tokenizer.json`, a pruned `bundle.json` and six voices (Harper, Juniper, Miles and Preston, American; Maeve and
   Hugh, British), 156 MB installed. The models are compiled on the Mac, so the phone never compiles or writes beside
   them (`Phonon` compiles only a `.mlpackage` with no `.mlmodelc` beside it). The URL, size and SHA-256 are pinned
-  together in `VoiceDownload` in `packages/phone/ios/TalkToMe.swift`. Turning Talk to Me on downloads it with a
+  together in `VoiceDownload` in `packages/phone/ios/VoiceDownload.swift`. Turning Talk to Me on downloads it with a
   foreground `URLSession` download task into `Application Support/TalkToMe-incoming-<uuid>/`, checks the byte count and
   the SHA-256 (CryptoKit, streamed in 4 MB reads), unpacks it with AppleArchive into the same folder, writes
   `voice.sha256` into the unpacked `TalkToMe/`, and moves it to `Application Support/TalkToMe` in one step (replacing

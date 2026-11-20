@@ -86,6 +86,10 @@ enum VoiceDownload {
     } else {
       try FileManager.default.moveItem(at: staged, to: folder)
     }
+    if Task.isCancelled {
+      try? FileManager.default.removeItem(at: folder)
+      throw CancellationError()
+    }
     try excludeFromBackup(folder)
   }
 
