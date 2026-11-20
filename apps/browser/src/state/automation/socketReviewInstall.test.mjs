@@ -365,3 +365,21 @@ test("configure answers failed when the readback after its write fails, never th
   assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
   assert.match(reply.error.message, /couldn't read the profile's extensions/);
 });
+
+test("the Web Store fast path answers failed when Chromium's list can't be read, and Load Unpacked reports a refused sheet", async () => {
+  const { list, gates, folders } = await setup();
+  list.push(row("abcdefghijklmnopabcdefghijklmnop"));
+  await refreshExtensions("");
+  gates.listFails = true;
+  assert.equal((await call("extensions.install", { webStore: "abcdefghijklmnopabcdefghijklmnop" })).error?.code, "failed");
+  gates.listFails = false;
+  folders.set("/tmp/q/ext", { id: "qqq" });
+  const first = await loadFromSettings("/tmp/q/ext");
+  gates.install = gate().shut;
+  void confirmInstall(first.key);
+  await settle();
+  stub.chosenExtensionFolder.next = "/tmp/q/ext";
+  assert.equal(await loadUnpacked(SETTINGS_WINDOW_ID, ""), false, "a sheet refused while another install runs isn't reported as shown");
+  stub.chosenExtensionFolder.next = null;
+  gates.install = null;
+});

@@ -197,3 +197,19 @@ test("a sync.now queued behind a running pass starts nothing once control turns 
   });
   S().updateSettings({ cliControl: true });
 });
+
+test("a sync.now that waited behind a pass reports nothing ran when sync locked meanwhile", async () => {
+  await heldPasses(async (held, running) => {
+    const queued = sync.syncNow();
+    for (let i = 0; i < 10; i++) await tick();
+    const keepLocked = sync.useSync.subscribe((st) => st.status !== "locked" && sync.useSync.setState({ status: "locked" }));
+    sync.useSync.setState({ status: "locked" });
+    held.release();
+    await running;
+    const ran = await queued;
+    keepLocked();
+    assert.equal(ran, false);
+    assert.equal(held.passes, 1, "no second pass started");
+  });
+  sync.useSync.setState({ status: "updated" });
+});

@@ -250,3 +250,47 @@ test("frames: origins far off every display are refused, sizes and coordinates a
     done();
   }
 });
+
+test("a bookmark shared by profiles on the same data reports its change for each of them", async () => {
+  await setup();
+  useBrowser.setState({ bookmarksReady: { "": true } });
+  S().addBookmark({ profileId: "default", url: "https://seed.example/", title: "Seed" });
+  const work = await ok("profiles.create", { name: "Work" });
+  useBrowser.setState((st) => ({ profiles: { ...st.profiles, [work.id]: { ...st.profiles[work.id], dataId: st.profiles.default?.dataId ?? "default" } } }));
+  const conn = ++nextConnection;
+  await call("subscribe", { events: ["bookmarks.changed"] }, conn);
+  const from = stub.controlSocket.broadcasts.length;
+  S().addBookmark({ profileId: "default", url: "https://shared.example/", title: "Shared" });
+  await wait(10);
+  const profiles = stub.controlSocket.broadcasts.slice(from).filter((b) => b.connections.includes(conn)).map((b) => JSON.parse(b.line).data.profile);
+  assert.deepEqual(profiles.sort(), ["default", work.id].sort());
+  stub.emitControlClose(conn);
+});
+
+test("on a platform without WebKit, settings.reset puts the WebKit-only settings back, and other values for them stay refused", async () => {
+  await setup();
+  const { PLATFORM_FEATURES } = await import("../../lib/platformFeatures.ts");
+  const had = PLATFORM_FEATURES.webKit;
+  PLATFORM_FEATURES.webKit = false;
+  try {
+    const reset = await ok("settings.reset", { keys: ["websiteEngines", "protectedVideoInWebKit", "newTabUrl"] });
+    assert.deepEqual(reset.values.websiteEngines, DEFAULT_SETTINGS.websiteEngines);
+    assert.notEqual(await code("settings.set", { values: { websiteEngines: { "netflix.com": "webkit" } } }), undefined);
+    assert.notEqual(await code("settings.set", { values: { protectedVideoInWebKit: !DEFAULT_SETTINGS.protectedVideoInWebKit } }), undefined);
+  } finally {
+    PLATFORM_FEATURES.webKit = had;
+  }
+});
+
+test("windows.setMaximized off doesn't report success for a window that is really full screen", async () => {
+  const { windowId, done } = await geometrySetup();
+  try {
+    await ok("windows.geometry", { window: windowId });
+    stub.windows.geometry.get(windowId).fullScreen = true;
+    const reply = await call("windows.setMaximized", { window: windowId, on: false });
+    assert.equal(reply.error?.code, "failed", JSON.stringify(reply));
+  } finally {
+    stub.windows.geometry.get(windowId).fullScreen = false;
+    done();
+  }
+});
