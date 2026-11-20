@@ -617,13 +617,38 @@ is a list both the app's tests and the CLI's tests refuse.
 The control socket's protocol 4 adds `plugins`, `plugins.enable` (`{"waiting": true}` once the sheet is up),
 `plugins.disable`, `plugins.remove` and `plugins.call` (`{"plugin", "tool", "input"?}`).
 
+### Act leases
+
+A plugin that browses with its own credential (`docs/cli.md` › Plugin credentials) acts only with the person's
+approval, and the engine enforces it with an act lease (`docs/cli.md` › Act leases). The app grants one right before
+an approved act and releases it when the act ends: `withActLease({kind, owner, tab, credential, expectedDocument},
+run)` in `state/plugins/actLeases.ts`, where `expectedDocument` is the engine's document id captured with the approval
+card (`actDocumentOf`), so a page that loaded a new document since approval is refused. The engine holds the leased
+tab visible from before the grant until the lease has ended and its last action returned, so a background tab renders
+as visible only while the AI acts on it; if the tab can't be held visible, the grant is refused and the act doesn't
+run. A `read` step runs with no lease. An `act` step asks `engine.cliActLease` first; if the engine refuses, the step
+doesn't run and its answer says why. The step answers only once the engine confirmed the release; if it can't confirm
+it, the app revokes the activity's credential (`cleanup: "revoked"`), and the activity needs a new one before its next
+step. `startActLeases()` ends a lease at once when its tab loads a new document (a new URL or navigation number),
+moves to another profile or closes, and `endActLeasesOf(owner)` ends every lease of an activity when it stops. Whether
+the engine has leases at all comes from its status (`cliControlStatus.actLeases`), never from an error's text; on an
+engine without them, or when that status can't be read, the act is refused. A plugin never gets `DOM.focus` or
+`Page.captureScreenshot`: it focuses a field by clicking it.
+
+Drift: the engine refuses input at its final delivery check, so a command still waiting there (for example on hit
+testing) is refused when the lease ends. Input already forwarded past that check still arrives: Chromium's browser
+queues, IPC and renderer queues, and anything the page itself schedules in response to input it already received. The
+daemon's plugin-mode rule keeps at most one input command in flight (one `Input.dispatch*`/`insertText` outstanding,
+waiting for each reply). That bounds commands in flight, not downstream events or page effects. Each command's events
+carry the grant captured when it was admitted, so older pending input can't ride a newer grant.
+
 ## Code
 
 - `lib/pluginManifest.ts`: parsing, migration, checks and the schema; `lib/pluginManifest.test.mjs`.
 - `state/plugins/`: the registry (`store.ts`), saved state (`savedState.ts`), turning on and off (`lifecycle.ts`),
   settings defaults (`defaults.ts`), the helper channel (`channel.ts`, `channelMethods.ts`), tools (`tools.ts`),
   command bar entries (`commands.ts`), page tabs (`pages.ts`, `pageNames.ts`), consent copy (`consent.ts`), socket methods
-  (`socketMethods.ts`).
+  (`socketMethods.ts`), act leases (`actLeases.ts`, `actLeases.test.mjs`).
 - `platform/plugins.ts` binds `ArdiaPlugins` (`packages/shell/ios/PluginsModule.swift`, `PluginFolder.swift`,
   `PluginProcess.swift`, `PluginCore/` (`PluginSandbox`, `PluginFiles`, `PluginProcessTree`, `PluginRuns`, `PluginLifecycle`,
   `PluginPageMessages`, `PluginPageOutbox`, `PluginPageGate`, `PluginPageOffline`, `PluginPageData`; tested by `packages/shell/plugin-tests`, run by `swift test` in `packages/shell`, and `PluginPageData` in a fresh process by `scripts/pluginPageData.test.mjs`), `PluginPageView.swift`, `PluginSchemeHandler.swift`).
