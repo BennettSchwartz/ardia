@@ -266,13 +266,30 @@ final class PhonePages {
     let page = try require(pageID)
     guard let webView = page.webView, !webView.bounds.isEmpty else { return nil }
     let generation = visuals.generation(pageID)
+    let hostBounds = webView.superview?.bounds ?? webView.bounds
+    let margined = webView.frame.width < hostBounds.width - 0.5
+    let wanted = CGFloat(maxWidth ?? 600)
     let configuration = WKSnapshotConfiguration()
     configuration.afterScreenUpdates = false
-    configuration.snapshotWidth = NSNumber(value: Double(min(CGFloat(maxWidth ?? 600), webView.bounds.width)))
-    guard let image = try? await webView.takeSnapshot(configuration: configuration) else { return nil }
+    configuration.snapshotWidth = NSNumber(value: Double(min(margined ? wanted * webView.bounds.width / hostBounds.width : wanted, webView.bounds.width)))
+    guard let shot = try? await webView.takeSnapshot(configuration: configuration) else { return nil }
+    let image = margined ? Self.withSideMargins(shot, page: webView.frame, screen: hostBounds.size, color: page.underPageBackgroundColor ?? webView.underPageBackgroundColor ?? .black) : shot
     guard let written = await PageSnapshots.write(pageID, image: image, isPrivate: page.isPrivate, quality: quality ?? 82) else { return nil }
     if tabIDs[pageID] == page.id { visuals.captured(pageID, generation: generation) }
     return written
+  }
+
+  static func withSideMargins(_ shot: UIImage, page: CGRect, screen: CGSize, color: UIColor) -> UIImage {
+    let scale = shot.size.width / page.width
+    let canvas = CGSize(width: screen.width * scale, height: shot.size.height)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = shot.scale
+    format.opaque = true
+    return UIGraphicsImageRenderer(size: canvas, format: format).image { context in
+      color.setFill()
+      context.fill(CGRect(origin: .zero, size: canvas))
+      shot.draw(in: CGRect(x: page.minX * scale, y: 0, width: shot.size.width, height: shot.size.height))
+    }
   }
 
   func answer(_ pageID: String, requestID: String, answer: PageRequest.Answer?) -> Bool {
