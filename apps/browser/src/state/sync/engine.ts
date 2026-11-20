@@ -93,7 +93,7 @@ export const syncWritesOpen = () => doc.enabled && !stopping && !["starting", "l
 
 export async function syncNow(stillWanted: () => void = () => {}): Promise<boolean> {
   while (cycle) await cycle.catch(() => {});
-  if (stopping || !doc.enabled) return false;
+  if (stopping || !doc.enabled || useSync.getState().status === "locked") return false;
   stillWanted();
   await runCycle({ forcePasswords: true });
   return true;
