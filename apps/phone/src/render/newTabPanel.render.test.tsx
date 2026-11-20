@@ -14,6 +14,7 @@ import { useStageBar } from "../state/search/stageBar";
 import { currentTabs, useTabs } from "../state/tabs/store";
 import * as telemetry from "../state/telemetry/telemetry";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { IncognitoEyes } from "../components/ui/IncognitoEyes";
 
 const mockFaceTaken = { then: (taken: () => void) => taken() };
 const mockStage = { present: jest.fn(() => mockFaceTaken), holdLift: jest.fn(), releaseLift: jest.fn(), close: jest.fn(), finish: jest.fn() };
@@ -92,7 +93,7 @@ onIPhone("the new-tab panel's field is the standard Search field with the mic an
   expect(flat(host(root, "completingField")).minHeight).toBe(browseLayout.searchFieldHeight - floatingPanelLayout.fieldEdge * 2);
   expect(flat(host(root, "completingField")).fontSize).toBeUndefined();
   expect(capsule.findAll((node) => node.props.accessibilityLabel === "Activate Incognito")).not.toHaveLength(0);
-  expect(capsule.findAll((node) => node.type === Symbol && node.props.name === "eyeglassesThin")).toHaveLength(1);
+  expect(capsule.findAll((node) => node.type === IncognitoEyes)).toHaveLength(1);
   expect(host(root, "trayIncognitoPlate")).toBeUndefined();
   act(() => root.root.findAll((node) => node.props.testID === "trayIncognito" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(useTabs.getState().incognito).toBe(true);

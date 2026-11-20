@@ -206,17 +206,20 @@ onAndroid("Incognito takes the dark scheme of the same colours: its chip, its ca
   const root = deck();
   const chip = pressable(root, "materialDeckIncognito")!;
   expect(chip.props.accessibilityLabel).toBe("Incognito, 2 tabs");
+  expect(chip.props.accessibilityRole).toBe("switch");
+  expect(chip.props.accessibilityState).toEqual({ checked: false });
   expect(flat(chip)).toMatchObject({ height: 32, backgroundColor: DARK.surfaceContainerHighest });
   expect((flat(chip).height as number) + chip.props.hitSlop.top + chip.props.hitSlop.bottom).toBe(48);
   expect(chip.props.android_ripple).toBeDefined();
-  const fills = cards(root).map((card) => flat(card).backgroundColor);
-  expect(fills).toContain(DARK.surfaceContainerLow);
-  expect(fills).toContain(LIGHT.surfaceContainerLow);
-  expect(flat(host(root, "materialCardIncognitoIcon")).backgroundColor).toBe(DARK.surfaceContainerHighest);
+  expect(cards(root).map((card) => flat(card).backgroundColor)).toEqual(Array(4).fill(LIGHT.surfaceContainerLow));
+  expect(host(root, "materialCardIncognitoIcon")).toBeUndefined();
   expect(flat(host(root, "materialDeckBackdrop")).backgroundColor).toBe(LIGHT.surface);
   unmount(root);
   withPrivates(2, true);
   const incognito = deck();
+  expect(cards(incognito).map((card) => flat(card).backgroundColor)).toEqual(Array(2).fill(DARK.surfaceContainerLow));
+  expect(flat(host(incognito, "materialCardIncognitoIcon")).backgroundColor).toBe(DARK.surfaceContainerHighest);
+  expect(flat(pressable(incognito, "materialDeckIncognito")!)).toMatchObject({ backgroundColor: DARK.inverseSurface });
   expect(flat(host(incognito, "materialDeckBackdrop")).backgroundColor).toBe("#000000");
   expect(flat(host(incognito, "materialDeckTopBar")).backgroundColor).toBe("#000000");
   expect(flat(host(incognito, "materialDeckBottomRow")).backgroundColor).toBe("#000000");
@@ -226,6 +229,27 @@ onAndroid("Incognito takes the dark scheme of the same colours: its chip, its ca
   expect(flat(fab).backgroundColor).toBeUndefined();
   for (const title of hosts(incognito, "deckHeaderTitle")) expect(flat(title).color).toBe(DARK.onSurface);
   unmount(incognito);
+});
+
+onAndroid("the Incognito chip is a switch: a tap shows only the Incognito tabs, a second tap only the others, and it shows with no Incognito tabs too", () => {
+  withPrivates(2);
+  const root = deck();
+  expect(cards(root)).toHaveLength(4);
+  act(() => pressable(root, "materialDeckIncognito")!.props.onPress());
+  act(() => jest.advanceTimersByTime(1000));
+  expect(useTabs.getState().incognito).toBe(true);
+  expect(cards(root)).toHaveLength(2);
+  expect(telemetry.countUsage).toHaveBeenCalledWith("deck_incognito_switches");
+  act(() => pressable(root, "materialDeckIncognito")!.props.onPress());
+  act(() => jest.advanceTimersByTime(1000));
+  expect(useTabs.getState().incognito).toBe(false);
+  expect(cards(root)).toHaveLength(4);
+  unmount(root);
+  withPrivates(0);
+  const none = deck();
+  const chip = pressable(none, "materialDeckIncognito")!;
+  expect(chip.props.accessibilityLabel).toBe("Incognito");
+  unmount(none);
 });
 
 onAndroid("a scheme change re-themes the open deck: cards, top app bar, search, FAB and the Incognito chip", () => {

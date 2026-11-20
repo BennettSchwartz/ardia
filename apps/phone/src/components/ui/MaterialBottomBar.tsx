@@ -143,7 +143,7 @@ export function MaterialAddressContent({ address, scheme, testID }: { address: R
   return (
     <>
       {address.isPrivate ? (
-        <Symbol name="eyeglassesThin" size={materialSize.icon} color={scheme.onSurfaceVariant} />
+        <Symbol name="eyes" size={materialSize.icon} color={scheme.onSurfaceVariant} />
       ) : address.insecure ? (
         <NotSecureLock testID="materialBarNotSecure" size={FIELD_ICON} color={scheme.error} />
       ) : address.pageUrl ? (

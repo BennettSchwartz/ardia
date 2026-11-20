@@ -1,4 +1,5 @@
 import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { IncognitoEyes } from "../ui/IncognitoEyes";
 import { countRender } from "../../state/app/interactionPerf";
 import { AppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SheetScrollContext, SheetScrollView, sheetPullTranslation, type SheetScroll } from "../ui/Sheet";
@@ -922,7 +923,7 @@ function IncognitoToggle() {
     >
       <View testID="trayIncognitoGlyph" style={styles.incognitoGlyph}>
         {on ? <Animated.View testID="trayIncognitoPlate" entering={modeToggleIn} exiting={modeToggleOut} style={styles.incognitoPlate} /> : null}
-        <Symbol name="eyeglassesThin" size={INCOGNITO_GLYPH} color={on ? tabsInk.onDark : theme.foregroundTertiary} />
+        <IncognitoEyes size={INCOGNITO_GLYPH} color={on ? tabsInk.onDark : theme.foregroundTertiary} />
       </View>
     </Pressable>
   );

@@ -5,6 +5,7 @@ import { DeckBar } from "../components/tabs/DeckBar";
 import { IncognitoChip } from "../components/tabs/DeckChrome";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { ConfirmSheet, DesignProvider, IncognitoSpecs, Symbol, SystemGlyph } from "../components/ui";
+import { IncognitoEyes } from "../components/ui/IncognitoEyes";
 import { deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import { designFor, type Design } from "../lib/design";
 import { haptics } from "../state/app/haptics";
@@ -247,12 +248,12 @@ test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-p
 
 const incognitoSwitch = (root: Root) => root.root.findAll((node) => node.props.accessibilityLabel === "Incognito" && node.props.accessibilityRole === "switch" && typeof node.props.onPress === "function")[0];
 
-test("the bar's left button is an Incognito switch: Arc Search's open eyes, 30 points, drawn on 48-point glass, read as a switch with a hint, on both phones and only in the redesign", () => {
+test("the bar's left button is an Incognito switch: Arc Search's two solid eyes, 30 points, drawn on 48-point glass, read as a switch with a hint, on both phones and only in the redesign", () => {
   const root = deck();
   const toggle = incognitoSwitch(root)!;
   expect(toggle.props.accessibilityState).toMatchObject({ checked: false });
   expect(toggle.props.accessibilityHint).toBe("Shows your Incognito tabs.");
-  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyes" && node.props.size === 30)).toHaveLength(1);
+  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === IncognitoEyes && node.props.size === 30)).toHaveLength(1);
   expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === IncognitoSpecs)).toHaveLength(0);
   expect(root.root.findAll((node) => node.type === SystemGlyph && node.props.systemName === "eyes")).toHaveLength(0);
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true)).toHaveLength(0);
@@ -265,7 +266,7 @@ test("the bar's left button is an Incognito switch: Arc Search's open eyes, 30 p
   unmount(original);
 });
 
-test("a tap on the switch shows only the Incognito tabs, fills the whole switch and closes its eyes, the plus makes Incognito tabs, and a second tap brings the normal deck back; only the switch to Incognito is counted", () => {
+test("a tap on the switch shows only the Incognito tabs, fills the whole switch and turns its eyes to the switch's ink, the plus makes Incognito tabs, and a second tap brings the normal deck back; only the switch to Incognito is counted", () => {
   withPrivateTabs(2);
   const root = deck();
   expect(hosts(root, "deckCard")).toHaveLength(9);
@@ -277,7 +278,7 @@ test("a tap on the switch shows only the Incognito tabs, fills the whole switch 
   expect(incognitoSwitch(root)!.props.accessibilityHint).toBe("Shows your tabs.");
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true).length).toBeGreaterThan(0);
   expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
-  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyesClosed")).toHaveLength(1);
+  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === IncognitoEyes)).toHaveLength(1);
   expect(pressable(root, "New Incognito Tab")).toBeDefined();
   expect(counted.mock.calls.filter(([name]) => name === "deck_incognito_switches")).toHaveLength(1);
   act(() => incognitoSwitch(root)!.props.onPress());

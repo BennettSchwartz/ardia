@@ -4,6 +4,7 @@ import Animated, { useAnimatedStyle, useSharedValue } from "react-native-reanima
 import { withAlpha } from "../../lib/color";
 import type { MaterialScheme } from "../../lib/material/schemes";
 import { haptics } from "../../state/app/haptics";
+import { switchDeckIncognito } from "../../state/browse/store";
 import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen } from "../../state/tabs/hooks";
 import { noteDeckBarTop, watchDeckBar } from "../../state/toasts/store";
@@ -97,11 +98,9 @@ export function MaterialDeckTopBar({ safeTop, safeSide, incognito, privateCount,
           </Text>
         )}
       </View>
-      {privateCount > 0 ? (
-        <MenuTrigger items={incognitoItems} {...menu} place={{ top: below, right: side + materialSize.touchTarget }}>
-          {({ onPress }) => <IncognitoChip count={privateCount} onPress={onPress ?? noop} />}
-        </MenuTrigger>
-      ) : null}
+      <MenuTrigger items={incognitoItems} {...menu} trigger="longPress" disabled={menu.disabled || privateCount === 0} place={{ top: below, right: side + materialSize.touchTarget }}>
+        {({ onLongPress }) => <IncognitoChip count={privateCount} on={incognito} onPress={switchDeckIncognito} onLongPress={onLongPress} />}
+      </MenuTrigger>
       <MenuTrigger items={moreItems} {...menu} place={{ top: below, right: side }}>
         {({ onPress }) => <MaterialIconButton testID="materialDeckMore" icon="ellipsis" label="More" scheme={scheme} turned onPress={onPress ?? noop} />}
       </MenuTrigger>
@@ -109,22 +108,26 @@ export function MaterialDeckTopBar({ safeTop, safeSide, incognito, privateCount,
   );
 }
 
-function IncognitoChip({ count, onPress }: { count: number; onPress: () => void }) {
+function IncognitoChip({ count, on, onPress, onLongPress }: { count: number; on: boolean; onPress: () => void; onLongPress?: () => void }) {
   const dark = useDeckScheme(true);
+  const fill = on ? dark.inverseSurface : dark.surfaceContainerHighest;
+  const glyph = on ? dark.inverseOnSurface : dark.onSurface;
   return (
     <Pressable
       testID="materialDeckIncognito"
-      accessibilityRole="button"
-      accessibilityLabel={`Incognito, ${count} ${count === 1 ? "tab" : "tabs"}`}
-      accessibilityHint="Shows the option to close incognito tabs."
-      android_ripple={ripple(dark)}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      accessibilityLabel={count > 0 ? `Incognito, ${count} ${count === 1 ? "tab" : "tabs"}` : "Incognito"}
+      accessibilityHint={on ? "Shows your tabs." : count > 0 ? "Shows your Incognito tabs. Touch and hold to close them." : "Shows your Incognito tabs."}
+      android_ripple={ripple(dark, glyph)}
       hitSlop={{ top: (materialSize.touchTarget - MATERIAL_DECK.chipHeight) / 2, bottom: (materialSize.touchTarget - MATERIAL_DECK.chipHeight) / 2 }}
       onPressIn={haptics.barPress}
       onPress={onPress}
-      style={[styles.chip, { backgroundColor: dark.surfaceContainerHighest }]}
+      onLongPress={onLongPress}
+      style={[styles.chip, { backgroundColor: fill }]}
     >
-      <Symbol name="eyes" size={MATERIAL_DECK.chipGlyph} color={dark.onSurface} />
-      <Text style={[materialType.labelLarge, styles.count, { color: dark.onSurface }]}>{count}</Text>
+      <Symbol name="eyes" size={MATERIAL_DECK.chipGlyph} color={glyph} />
+      {count > 0 ? <Text style={[materialType.labelLarge, styles.count, { color: glyph }]}>{count}</Text> : null}
     </Pressable>
   );
 }
