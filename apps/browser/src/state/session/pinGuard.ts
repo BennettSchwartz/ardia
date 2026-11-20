@@ -3,7 +3,7 @@ import { isIncognitoProfile, pinKeyOf } from "../browser/model";
 import { parkWindowPins } from "../pins/parkedPins";
 import { isRegularWindow } from "../windows/small";
 import { isFields } from "../../lib/decode";
-import { readDocument, writeDocument } from "../../platform/documents";
+import { readDocument, saveDocument } from "../../platform/documents";
 import type { ParkedPins } from "../browser/types";
 
 export const PINS_BACKUP_DOCUMENT = "pins-backup.json";
@@ -94,41 +94,74 @@ export function withPinBackup(existing: PinBackup[], previous: PinState, dropped
   return { version: PINS_BACKUP_VERSION, backups: [...existing, { at, dropped: kept, pins }].slice(-MAX_PIN_BACKUPS) };
 }
 
-function keepPinBackup(previous: PinState, dropped: Map<string, number>): boolean {
+export const PIN_BACKUP_RETRY_MS = 2_000;
+export const MAX_PIN_BACKUP_RETRY_MS = 60_000;
+
+export type PinCheck = { hold: false; kept: number; commit: () => void } | { hold: true };
+const NOTHING: PinCheck = { hold: false, kept: 0, commit: () => {} };
+const HOLD: PinCheck = { hold: true };
+
+function landPinBackup(previous: PinState, dropped: Map<string, number>): Promise<void> {
   try {
-    writeDocument(PINS_BACKUP_DOCUMENT, JSON.stringify(withPinBackup(parsePinBackups(readDocument(PINS_BACKUP_DOCUMENT)), previous, dropped, Date.now())));
-    return true;
-  } catch {
-    return false;
+    return saveDocument(PINS_BACKUP_DOCUMENT, JSON.stringify(withPinBackup(parsePinBackups(readDocument(PINS_BACKUP_DOCUMENT)), previous, dropped, Date.now())));
+  } catch (error) {
+    return Promise.reject(error);
   }
 }
 
-export type PinCheck = { kept: number; commit: () => void };
-const NOTHING: PinCheck = { kept: 0, commit: () => {} };
+export type PinGuard = ((s: PinState) => PinCheck) & { landed: () => Promise<void> };
 
-export function pinGuard(initial: PinState): (s: PinState) => PinCheck {
+export function pinGuard(initial: PinState, saveAgain: (delay: number) => void): PinGuard {
   let saved = initial;
   let sourcesSaved = pinSources(saved);
   let censusSaved: PinCensus | null = null;
-  let backedUp: PinState | null = null;
-  return (s) => {
+  let landedFor: PinState | null = null;
+  let landed = new Map<string, number>();
+  let landing: Promise<void> | null = null;
+  let failures = 0;
+  let retryAt = 0;
+  const check = (s: PinState): PinCheck => {
     const sources = pinSources(s);
     if (sources.every((v, i) => v === sourcesSaved[i])) return NOTHING;
     const census = pinCensus(s);
     const dropped = droppedPins(censusSaved ?? pinCensus(saved), census, s.profiles);
-    let kept = 0;
-    if (dropped.size && backedUp !== saved) {
-      if (!keepPinBackup(saved, dropped)) return NOTHING;
-      backedUp = saved;
-      kept = [...dropped.values()].reduce((a, n) => a + n, 0);
+    if (landedFor !== saved) landed = new Map();
+    const missing = new Map([...dropped].filter(([p]) => !landed.has(p)));
+    if (missing.size) {
+      if (landing || Date.now() < retryAt) return HOLD;
+      const baseline = saved;
+      landing = landPinBackup(baseline, missing).then(
+        () => {
+          landing = null;
+          failures = 0;
+          retryAt = 0;
+          if (landedFor !== baseline) landed = new Map();
+          landedFor = baseline;
+          for (const [p, n] of missing) landed.set(p, n);
+          saveAgain(0);
+        },
+        () => {
+          landing = null;
+          failures++;
+          const delay = Math.min(MAX_PIN_BACKUP_RETRY_MS, PIN_BACKUP_RETRY_MS * 2 ** (failures - 1));
+          retryAt = Date.now() + delay;
+          saveAgain(delay);
+        },
+      );
+      return HOLD;
     }
+    const kept = [...dropped.keys()].reduce((a, p) => a + (landed.get(p) ?? 0), 0);
     return {
+      hold: false,
       kept,
       commit: () => {
         saved = s;
         sourcesSaved = sources;
         censusSaved = census;
+        landed = new Map();
+        landedFor = null;
       },
     };
   };
+  return Object.assign(check, { landed: () => landing ?? Promise.resolve() });
 }
