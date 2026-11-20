@@ -32,7 +32,9 @@ extension WebKitTab: ArdiaPasskeyPage {
     answer(reply, nil)
   }
 
-  func passkeyEmit(_ name: String, payload: [String: Any]) { emit(name, payload) }
+  func passkeyEmit(_ name: String, payload: [String: Any]) {
+    if name == "passkeyRequest" { emit("passkeyRequest", payload) } else { emit("passkeyRequestEnded", payload) }
+  }
 
   static func passkeyKey(_ nonce: String, _ pageId: Int) -> String { "\(nonce):\(pageId)" }
 

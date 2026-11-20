@@ -71,7 +71,7 @@ public class PasswordsModule: Module {
       let generation = try args.int("generation")
       let providers = try args.dicts("providers").compactMap { entry -> PasskeyProviderEntry? in
         guard let profile = entry["profile"] as? String, let group = entry["group"] as? String else { return nil }
-        return PasskeyProviderEntry(profile: profile, groupId: group, create: entry["create"] as? Bool ?? true)
+        return PasskeyProviderEntry(profile: profile, groupId: group, create: entry["create"] as? Bool ?? true, groupName: entry["groupName"] as? String ?? profile)
       }
       PasskeyCoordinator.shared.setProviders(providers, generation: generation)
       ArdiaWebView.pushPasskeyConfigEverywhere()

@@ -91,6 +91,19 @@ export function fieldProviderSet(s: ProviderState, plugins: readonly ManagerPlug
 
 export const fieldProviders = (s: ProviderState, plugins: readonly ManagerPlugin[]) => fieldProviderSet(s, plugins).providers;
 
+export type PasskeyProviderEntry = { profile: string; group: string; groupName: string; create: boolean };
+
+export function passkeyProviderSet(s: ProviderState, plugins: readonly ManagerPlugin[]): PasskeyProviderEntry[] {
+  const byEngine = new Map<string, PasskeyProviderEntry>();
+  for (const id of Object.keys(s.profiles).sort()) {
+    const provider = managerPluginOf(plugins, profilePasswordManager(s, plugins, id))?.spec.passkeyProvider;
+    if (!provider || provider.store !== "host") continue;
+    const profile = engineProfile(s, id);
+    if (!byEngine.has(profile)) byEngine.set(profile, { profile, group: profile, groupName: s.profiles[id]?.name || profile, create: provider.create });
+  }
+  return [...byEngine.values()].sort((a, b) => (a.profile < b.profile ? -1 : a.profile > b.profile ? 1 : 0));
+}
+
 export function passwordManagerProfileCounts(s: ChoiceState, plugins: readonly ManagerPlugin[]): Record<string, string> {
   const counts: Record<PasswordManagerKind, number> = { ardia: 0, none: 0, plugin: 0 };
   for (const id of Object.keys(s.profiles)) counts[choiceKind(profilePasswordManager(s, plugins, id))]++;

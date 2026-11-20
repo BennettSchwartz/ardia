@@ -189,10 +189,10 @@ const PASSWORD_FIXTURE = readFileSync(new URL("../../../../tests/fixtures/plugin
 test("a password manager declares how it fills, which fields get the key, and what else it offers", () => {
   const { manifest, problems: found } = readManifest(PASSWORD_FIXTURE);
   assert.deepEqual(found, []);
-  assert.deepEqual(manifest.passwordManager, { fill: "system", fields: ["login", "oneTimeCode"], verificationCodeSetup: "system", passkeys: "system" });
+  assert.deepEqual(manifest.passwordManager, { fill: "system", fields: ["login", "oneTimeCode"], verificationCodeSetup: "system", passkeys: "system", passkeyProvider: null });
   assert.deepEqual(contributionsOf(manifest), ["passwordManager"]);
   const minimal = readManifest(JSON.stringify({ ...JSON.parse(PASSWORD_FIXTURE), passwordManager: { fill: "system", fields: ["oneTimeCode"] } }));
-  assert.deepEqual(minimal.manifest.passwordManager, { fill: "system", fields: ["oneTimeCode"], verificationCodeSetup: null, passkeys: null });
+  assert.deepEqual(minimal.manifest.passwordManager, { fill: "system", fields: ["oneTimeCode"], verificationCodeSetup: null, passkeys: null, passkeyProvider: null });
   assert.equal(readManifest(FIXTURE).manifest.passwordManager, null);
 });
 
@@ -206,10 +206,36 @@ test("fill: tool is reserved and refused by name, and every other shape is repor
   assert.ok(problems(doc({ fill: "system", fields: ["login"], passkeys: "own" })).includes("plugin.json: passwordManager.passkeys must be system"));
 });
 
+test("passkeyProvider makes Ardia's own store answer, with its import sources and whether sites may save", () => {
+  const doc = (passkeyProvider) => ({ ...JSON.parse(PASSWORD_FIXTURE), passwordManager: { fill: "system", fields: ["login"], passkeyProvider } });
+  const read = (provider) => readManifest(JSON.stringify(doc(provider)));
+  assert.deepEqual(read({ store: "host", import: ["appleCredentialExchange"] }).manifest.passwordManager.passkeyProvider, {
+    store: "host",
+    import: ["appleCredentialExchange"],
+    create: true,
+  });
+  assert.deepEqual(read({ store: "host", create: false }).manifest.passwordManager.passkeyProvider, { store: "host", import: [], create: false });
+  assert.deepEqual(problems(doc({ store: "plugin" })), ["plugin.json: passwordManager.passkeyProvider.store: plugin isn't available yet; use host"]);
+  assert.deepEqual(problems(doc({ store: "cloud" })), ["plugin.json: passwordManager.passkeyProvider.store must be host"]);
+  assert.deepEqual(problems(doc({ store: "host", import: ["appleCredentialExchange", "appleCredentialExchange"] })), [
+    "plugin.json: passwordManager.passkeyProvider.import has appleCredentialExchange twice",
+  ]);
+  assert.ok(problems(doc({ store: "host", import: ["csv"] }))[0].includes("passkeyProvider.import[0] must be appleCredentialExchange"));
+  assert.ok(problems(doc({ store: "host", create: "yes" }))[0].includes("passkeyProvider.create must be true or false"));
+  assert.ok(problems(doc({ store: "host", sync: true }))[0].includes("passkeyProvider.sync isn't a key"));
+  assert.ok(problems(doc("host"))[0].includes("passkeyProvider must be an object"));
+  assert.equal(read({ store: "plugin" }).manifest, null);
+});
+
 test("the schema holds passwordManager to the same shape the app reads", () => {
   const schema = pluginSchema([], { untabbedEvents: [], approvedSettings: [] }).properties.passwordManager;
   assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ["fill", "fields"]);
   assert.deepEqual(schema.properties.fill.enum, ["system"]);
   assert.deepEqual(schema.properties.fields.items.enum, ["login", "oneTimeCode"]);
+  const provider = schema.properties.passkeyProvider;
+  assert.equal(provider.additionalProperties, false);
+  assert.deepEqual(provider.required, ["store"]);
+  assert.deepEqual(provider.properties.store.enum, ["host"]);
+  assert.deepEqual(provider.properties.import.items.enum, ["appleCredentialExchange"]);
 });

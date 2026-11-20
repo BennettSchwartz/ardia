@@ -1,6 +1,6 @@
 import { JSON_SCHEMA_DIALECT, schemaJson, type JsonSchema } from "./jsonSchema";
 import { RESERVED_PAGE_NAMES } from "./pluginNames";
-import { PASSWORD_FIELD_COUNT, PASSWORD_FIELDS, PASSWORD_FILLS } from "./pluginPasswordManager";
+import { PASSWORD_FIELD_COUNT, PASSWORD_FIELDS, PASSKEY_IMPORTS, PASSKEY_STORES, PASSWORD_FILLS } from "./pluginPasswordManager";
 import { KEY_PATTERN, LIMITS, MANIFEST_VERSION, NAME_PATTERN, PLUGIN_PERMISSIONS, SPLIT_SIDES, SYMBOL_PATTERN, VERSION_PATTERN } from "./pluginManifest";
 
 export const PLUGIN_SCHEMA_FILE = "plugin.schema.json";
@@ -99,6 +99,22 @@ export function pluginSchema(eventNames: readonly string[], rules: PluginRules):
             fields: { type: "array", minItems: PASSWORD_FIELD_COUNT[0], maxItems: PASSWORD_FIELD_COUNT[1], uniqueItems: true, items: { enum: [...PASSWORD_FIELDS] } },
             verificationCodeSetup: { enum: ["system"], description: "Offer to set up two-factor codes a page shows in the app macOS uses for otpauth links" },
             passkeys: { enum: ["system"], description: "Show the host's passkey status on the plugin's Settings page" },
+            passkeyProvider: {
+              ...closed(
+                {
+                  store: { enum: [...PASSKEY_STORES], description: "host: Ardia's own device-only passkey store answers sites. plugin is reserved and refused for now" },
+                  import: {
+                    type: "array",
+                    uniqueItems: true,
+                    items: { enum: [...PASSKEY_IMPORTS] },
+                    description: "Where the host may copy passkeys from. appleCredentialExchange: Passwords › File › Export All Items to App…",
+                  },
+                  create: { type: "boolean", description: "Let sites save new passkeys to the store (default true)" },
+                },
+                ["store"],
+              ),
+              description: "Makes Ardia answer passkey sign-ins for profiles using this password manager (Mac only)",
+            },
           },
           ["fill", "fields"],
         ),

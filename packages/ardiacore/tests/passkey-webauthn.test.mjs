@@ -9,7 +9,7 @@ import { test } from "node:test";
 const path = (name) => fileURLToPath(new URL(name, import.meta.url));
 const swiftc = process.env.SWIFTC || "swiftc";
 
-const passkeySources = ["PasskeyWebAuthn.swift", "PasskeyRelyingParty.swift", "PasskeyStore.swift", "PasskeyAuthenticator.swift", "PasskeyCoordinator.swift"].map((f) => path(`../ios/${f}`));
+const passkeySources = ["PasskeyWebAuthn.swift", "PasskeyRelyingParty.swift", "PasskeyStore.swift", "PasskeyAuthenticator.swift", "PasskeyCoordinator.swift", "PasskeyImport.swift"].map((f) => path(`../ios/${f}`));
 
 function runSwiftChecks(name) {
   const dir = mkdtempSync(join(tmpdir(), `ardia-${name}-`));
@@ -33,3 +33,4 @@ const darwinOnly = { skip: process.platform !== "darwin" };
 test("passkey encoding, key import and relying-party rules", darwinOnly, () => runSwiftChecks("passkey-webauthn"));
 test("passkey store and authenticator: plans, assertions, registration, scoping", darwinOnly, () => runSwiftChecks("passkey-authenticator"));
 test("passkey coordinator: origin and document binding, prompts, abort, withdrawal", darwinOnly, () => runSwiftChecks("passkey-coordinator"));
+test("passkey import keeps only valid passkeys from a Credential Exchange export", darwinOnly, () => runSwiftChecks("passkey-import"));

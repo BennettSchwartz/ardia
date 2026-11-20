@@ -16,6 +16,7 @@ const chromiumView = files(/^ArdiaWebView.*\.mm$/).map(native);
 const chromiumEmitters = files(/\.mm$/).map(native);
 const webKitTab = files(/^WebKitTab.*\.swift$/).map(native);
 const pageScript = native("page_script.js");
+const passkeyWrapper = native("passkey_wrapper.js");
 const messageReceivers = ["ArdiaWebView+PageMessages.mm", "ArdiaWebView+Peek.mm"].map(native);
 
 const WEBKIT_ONLY_EVENTS = new Set(["mediaFault", "focusRestore"]);
@@ -81,6 +82,6 @@ test("the popup's streaming-site list is PROTECTED_VIDEO_SITES, https only, subd
 
 test("every kind native sends into a frame has a page-script handler, and every handler has a sender", () => {
   const called = collect(chromiumView, /kind:@"([A-Za-z]+)"/g);
-  const handled = collect([pageScript], /\bhandlers\.([A-Za-z]+) =/g);
+  const handled = new Set([...collect([pageScript], /\bhandlers\.([A-Za-z]+) =/g), ...collect([passkeyWrapper], /^ {4}(passkey[A-Za-z]+): /gm)]);
   assert.deepEqual(sorted(handled), sorted(called));
 });

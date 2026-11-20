@@ -5,6 +5,7 @@ struct PasskeyProviderEntry: Equatable {
   let profile: String
   let groupId: String
   let create: Bool
+  var groupName = ""
 }
 
 @objc(ArdiaPasskeyCoordinator)
@@ -50,6 +51,7 @@ public final class PasskeyCoordinator: NSObject {
   }
   var record: (String) -> Void = { _ in }
   var autoAnswer: String?
+  var providersChanged: ([PasskeyProviderEntry], Int) -> Void = { _, _ in }
   var requiresVisiblePage = true
 
   private lazy var authenticator: PasskeyAuthenticator? = makeAuthenticator()
@@ -74,6 +76,7 @@ public final class PasskeyCoordinator: NSObject {
     guard next >= generation else { return }
     generation = next
     providers = Dictionary(entries.map { ($0.profile, $0) }, uniquingKeysWith: { first, _ in first })
+    providersChanged(entries, next)
     for (id, request) in pending where providers[request.policy.profile] != request.entry {
       finish(id, reply: ["fallThrough": true], reason: "withdrawn")
     }

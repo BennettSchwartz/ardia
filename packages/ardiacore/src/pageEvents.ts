@@ -1,6 +1,7 @@
 import { toAppUrl } from "@ardia/core";
 import type { NativeSyntheticEvent } from "react-native";
 import type { ExternalAppRequest } from "./permissions";
+import type { PasskeyRequestEvent } from "./passwords";
 import type {
   ActivateRequest,
   AppBadge,
@@ -69,6 +70,8 @@ type NativeEvents = {
   onMediaFault: MediaFault;
   onActivateRequest: ActivateRequest;
   onDisplayMediaRequest: DisplayMediaRequest;
+  onPasskeyRequest: PasskeyRequestEvent;
+  onPasskeyRequestEnded: { id: string; reason: string };
   onWindowClose: object;
   onCommand: PageCommand;
   onPageFocus: object;
@@ -127,6 +130,8 @@ const PAGE_EVENTS = {
   onMediaFault: "mediaFault",
   onActivateRequest: "activateRequest",
   onDisplayMediaRequest: "displayMediaRequest",
+  onPasskeyRequest: "passkeyRequest",
+  onPasskeyRequestEnded: "passkeyRequestEnded",
   onWindowClose: "windowClose",
   onCommand: "command",
   onPageFocus: "focus",
@@ -182,6 +187,8 @@ const unwrap: { [K in Handlers]: (e: NativeEvents[K]) => Parameters<NonNullable<
   onMediaFault: (e) => [e],
   onActivateRequest: (e) => [e],
   onDisplayMediaRequest: (e) => [e],
+  onPasskeyRequest: (e) => [e],
+  onPasskeyRequestEnded: (e) => [e],
   onWindowClose: () => [],
   onCommand: (e) => [e],
   onPageFocus: () => [],

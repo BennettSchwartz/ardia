@@ -36,6 +36,7 @@ import { copyLinkToSelection, searchSelection, setPageSelection } from "../../st
 import { shareFromPage } from "../../state/site/share";
 import { useAutoPictureInPicture } from "../../state/media/pip";
 import { requestDisplayMedia } from "../../state/media/screenShare";
+import { answerPasskeyRequest } from "../../state/site/passkeyRequests";
 import { setNowPlaying, setPictureInPictureState } from "../../state/media/media";
 import { noteScroll } from "../../state/windows/toolbarAutoHide";
 import { closeWebNotification, showWebNotification } from "../../state/site/webNotifications";
@@ -254,6 +255,7 @@ function EngineWebView({ tabId, visible, selected = true, warm, peekOf, engine }
       onPictureInPictureSkip={notePictureInPictureClickSkip}
       onMediaFault={noteWebKitMediaFault}
       onDisplayMediaRequest={(request) => requestDisplayMedia(tabId, request)}
+      onPasskeyRequest={(request) => void answerPasskeyRequest(tabId, request)}
       onOpenWindow={onOpenWindow}
       onStatus={(status, fromBottom) => {
         const statusAtTop = !!status && fromBottom !== null && fromBottom < STATUS_FLIP_BAND;

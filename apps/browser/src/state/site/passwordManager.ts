@@ -1,4 +1,4 @@
-import { setFieldProviders, showSystemPanel, type FieldProviderHint, type FieldProviderOpened, type VerificationCodeFound } from "../../platform/passwordProviders";
+import { setFieldProviders, setPasskeyProviders, showSystemPanel, type FieldProviderHint, type FieldProviderOpened, type VerificationCodeFound } from "../../platform/passwordProviders";
 import { offerPanelHint, panelHintReported } from "./panelHints";
 import { PLATFORM_FEATURES } from "../../lib/platformFeatures";
 import { warnFor } from "../telemetry/consoleConsent";
@@ -15,6 +15,7 @@ import {
   managerPluginOf,
   managerPlugins,
   neverChosenProfiles,
+  passkeyProviderSet,
   passwordManagerProfileCounts,
   pluginChoice,
   profilePasswordManager,
@@ -174,6 +175,7 @@ function pushProviders(plugins: readonly ManagerPlugin[], consent: ConsentToken 
     clearTimeout(retry);
     target.confirm();
   };
+  if (PLATFORM_FEATURES.systemPasswordManagers) void setPasskeyProviders(sent, passkeyProviderSet(browser(), plugins)).catch(() => {});
   void setFieldProviders(sent, providers).then(
     (reply) => {
       if (!reply.answered && !bareNoted) {

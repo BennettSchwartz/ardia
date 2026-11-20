@@ -1,3 +1,4 @@
+import type { PasskeyRequestEvent } from "./passwords";
 import type { ViewProps } from "react-native";
 import type { ExternalAppRequest } from "./permissions";
 import type { FaviconImage } from "./favicons";
@@ -223,6 +224,8 @@ export type WebViewProps = ViewProps & {
   onMediaFault?: (fault: MediaFault) => void;
   onActivateRequest?: (request: ActivateRequest) => void;
   onDisplayMediaRequest?: (request: DisplayMediaRequest) => void;
+  onPasskeyRequest?: (request: PasskeyRequestEvent) => void;
+  onPasskeyRequestEnded?: (ended: { id: string; reason: string }) => void;
   onWindowClose?: () => void;
   onCommand?: (command: PageCommand) => void;
   onPageFocus?: () => void;

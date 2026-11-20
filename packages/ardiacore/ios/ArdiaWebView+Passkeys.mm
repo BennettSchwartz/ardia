@@ -107,7 +107,10 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
 }
 
 - (void)passkeyEmit:(NSString *)name payload:(NSDictionary<NSString *, id> *)payload {
-  [self emit:name payload:payload];
+  if ([name isEqualToString:@"passkeyRequest"])
+    [self emit:@"passkeyRequest" payload:payload];
+  else
+    [self emit:@"passkeyRequestEnded" payload:payload];
 }
 
 @end
