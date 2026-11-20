@@ -11,7 +11,7 @@ const appDir = process.env.RATCHET_APP_DIR ? resolve(process.env.RATCHET_APP_DIR
 const repo = resolve(appDir, "../..");
 const ceilingsFile = join(here, "ratchet.json");
 
-export const JOURNEYS = ["startup", "launch", "idle", "typing", "switchTabs", "scroll", "hover", "pageLoad", "openClose"];
+export const JOURNEYS = ["startup", "launch", "idle", "typing", "switchTabs", "scroll", "hover", "pageLoad", "openClose", "nodeChurn"];
 const OPTIONS = '{"seconds":5}';
 
 const EXACT_SHARE = 1;
@@ -24,7 +24,7 @@ const MIN_RUNS = 6;
 const COUNTERS = ["renders", "mounts", "storeUpdates", "storeKeys", "listenerCalls", "tasks", "timers", "writes", "writeBytes", "commitTasks"];
 const FAN_OUT = ["subNotified", "selectorCalls"];
 const SCALARS = ["commits", "hostUpdates"];
-const TOTALS = new Set([...COUNTERS, ...SCALARS, ...FAN_OUT, "firstCommitMounts"]);
+const TOTALS = new Set([...COUNTERS, ...SCALARS, ...FAN_OUT, "firstCommitMounts", "nativeNodesLeft"]);
 
 const add = (into, key, value) => {
   into[key] = (into[key] ?? 0) + value;
@@ -71,6 +71,10 @@ export function flatten(result, prefix = "") {
     ran.add("openClose");
     flattenStats(out, "open", result.openClose.openStats);
     flattenStats(out, "close", result.openClose.closeStats);
+  }
+  if (typeof result.nodeChurn?.left === "number") {
+    ran.add("nodeChurn");
+    out["nodeChurn.nativeNodesLeft"] = result.nodeChurn.left;
   }
   if (result.pageLoad?.runs) {
     ran.add("pageLoad");
@@ -246,11 +250,7 @@ function lower(files, micro, instr) {
   console.log(`\nlowered ${diff.length} ceilings in ${ceilingsFile}`);
 }
 
-function init(files, microRuns, instr, { adopt = false } = {}) {
-  const reports = files.map(readJson);
-  const { values, runs, ran } = collect(reports);
-  if (runs < MIN_RUNS) throw new Error(`init needs at least ${MIN_RUNS} runs to tell a steady count from a wobbling one; got ${runs}`);
-  const rev = reportRevisions(reports);
+export function ceilingsFrom(values) {
   const exact = {};
   const noisy = {};
   const dropped = [];
@@ -263,6 +263,15 @@ function init(files, microRuns, instr, { adopt = false } = {}) {
     } else if (isTotal(key) && (max - lowerMedian(v)) / max <= NOISY_SPREAD) noisy[key] = Math.ceil(max * (1 + NOISY_MARGIN));
     else if (isTotal(key)) dropped.push({ key, v });
   }
+  return { exact, noisy, dropped };
+}
+
+function init(files, microRuns, instr, { adopt = false } = {}) {
+  const reports = files.map(readJson);
+  const { values, runs, ran } = collect(reports);
+  if (runs < MIN_RUNS) throw new Error(`init needs at least ${MIN_RUNS} runs to tell a steady count from a wobbling one; got ${runs}`);
+  const rev = reportRevisions(reports);
+  const { exact, noisy, dropped } = ceilingsFrom(values);
   const micro = {};
   if (microRuns.length) {
     const runsM = microRuns;
