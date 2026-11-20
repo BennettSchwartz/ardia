@@ -9,9 +9,7 @@ import { ToolbarRowContext } from "../ui/toolbarRowContext";
 import { activate } from "../../state/tabs/actions";
 import { toggleSidebar } from "../../state/windows/actions";
 import { openBarFromAddress } from "../../state/omnibox/barState";
-import { useIsBookmarked, useSettings, useTab, useTabLive, useTabsShown } from "../../state/browser/hooks";
-import { useBrowser } from "../../state/browser/store";
-import { sidebarSideOf, tabLayoutOf } from "../../state/browser/model";
+import { useIsBookmarked, useSettings, useTab, useTabLive, useTabsPlace, useTabsShown } from "../../state/browser/hooks";
 import type { Tab } from "../../state/browser/types";
 import { Button, ContextMenuArea, Divider, FadeLabel, ink, monoFace, sidebarFont, sidebarPoints, space, Symbol, Text, useHover, WindowDragRegion } from "../ui";
 import { type ToolbarGeometry } from "../window/geometry";
@@ -62,7 +60,8 @@ export const insecureLevel = (p: PageState) =>
   p.security && (p.security.level === "insecure" || p.security.level === "certificateError") ? p.security.level : null;
 
 function useTabsToggleIcon(windowId: string) {
-  return useBrowser((s) => (tabLayoutOf(s, windowId) === "top" ? "rectangle.topthird.inset.filled" : sidebarSideOf(s, windowId) === "right" ? "sidebar.right" : "sidebar.left"));
+  const place = useTabsPlace(windowId);
+  return place === "top" ? "rectangle.topthird.inset.filled" : place === "right" ? "sidebar.right" : "sidebar.left";
 }
 
 const TOOLBAR_HINTS = ["toggleSidebar", "openSplitPane", ...NAV_HINTS] as const;
