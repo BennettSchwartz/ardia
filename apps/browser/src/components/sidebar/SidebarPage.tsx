@@ -8,7 +8,7 @@ import { SidebarTextScope } from "./SidebarTextScope";
 import { ThemeScope } from "../window/ThemeScope";
 import { PageProfileContext, useSettings, useWindowId } from "../../state/browser/hooks";
 import { newTab } from "../../state/tabs/actions";
-import { useSidebarCells } from "../../state/sidebar/hooks";
+import { sidebarListLengthNow, useSidebarCells } from "../../state/sidebar/hooks";
 import { useSidebarField, useSidebarPart } from "../../state/sidebar/chrome";
 import { SIDEBAR_PLAYER_GROWTH, SIDEBAR_PLAYER_HEIGHT, SidebarPlayer, usePlayerMotion, useSidebarPlayerTab } from "../media/SidebarPlayer";
 import { usePageStyle } from "../../state/windows/profilePager";
@@ -24,7 +24,7 @@ import { useAddressBarInSidebar, usePageFrameInset, useToolbarLightsCenter } fro
 import { useToolbarRow } from "../toolbar/useToolbarRow";
 import { startsOffScreen } from "../../state/sidebar/geometry";
 import { toggleNewTabBar } from "../../state/omnibox/newTabBar";
-import { DOCK_SHARE, DOCKED_ROW_PAD, dockedAfter, GLOW_ROOM, pageLayout, tilesFitDock, type SidebarGeometry } from "./pageLayout";
+import { clearlyOverflows, DOCK_SHARE, DOCKED_ROW_PAD, dockedAfter, GLOW_ROOM, pageLayout, tilesFitDock, type SidebarGeometry } from "./pageLayout";
 import { noteNewTabDocked } from "../../state/telemetry/sidebarScrollCounts";
 import { PageRows } from "./PageRows";
 import { NewTabRow } from "./NewTabRow";
@@ -82,6 +82,11 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
     if (!dragging) fixedBeforeDrag.current = fits;
   });
   const [dockedNow, setDockedNow] = useState(false);
+  const [dockGuessed, setDockGuessed] = useState(false);
+  if (!dockGuessed && canDock && height > 0) {
+    setDockGuessed(true);
+    if (clearlyOverflows(sidebarListLengthNow(windowId, profileId), height)) setDockedNow(true);
+  }
   const docked = canDock && dockedNow;
   const { dockFixed, capped } = pageLayout({
     tiles: tiles.length,
