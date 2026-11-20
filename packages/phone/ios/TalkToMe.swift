@@ -1,7 +1,8 @@
+import AppleArchive
 import ArdiaBrowser
 import ArdiaTalk
 import AVFoundation
-import BackgroundAssets
+import CryptoKit
 import Foundation
 import Observation
 import System
@@ -12,8 +13,6 @@ import UIKit
 final class TalkToMe {
   static let shared = TalkToMe()
 
-  static let assetPackID = "talk-to-me-phonon-31m-en"
-  static let modelsManifest: FilePath = "TalkToMe/bundle.json"
   static let onKey = "ArdiaTalkToMeOn"
   static let voiceKey = "ArdiaTalkToMeVoice"
   static let speedKey = "ArdiaTalkToMeSpeed"
@@ -75,7 +74,7 @@ final class TalkToMe {
   @ObservationIgnored private var speaker: TalkSpeaker?
   @ObservationIgnored private var loading: Task<TalkSpeaker, Error>?
   @ObservationIgnored private var downloadTask: Task<Void, Never>?
-  @ObservationIgnored private var downloadProgress: Progress?
+  @ObservationIgnored private var downloadID: UUID?
   @ObservationIgnored private let proximity = ProximityFeed()
   @ObservationIgnored private var blocks: [String] = []
   @ObservationIgnored private var answer = ""
@@ -116,25 +115,18 @@ final class TalkToMe {
 
   func refresh() {
     guard downloadTask == nil else { return }
-    if case .failed = download, overrideDirectory() == nil { return }
     if let override = overrideDirectory() {
       download = .ready(bytes: Self.folderSize(override))
       return
     }
-    guard Self.offersAssetPack else {
-      download = .absent(bytes: nil)
-      return
-    }
-    if AssetPackManager.shared.assetPackIsAvailableLocally(withID: Self.assetPackID) {
-      download = .ready(bytes: Self.packDirectory().flatMap(Self.folderSize))
+    if case .failed = download { return }
+    if let installed = VoiceDownload.installed() {
+      download = .ready(bytes: Self.folderSize(installed))
       if isOn, speaker == nil { prepareSpeaker() }
       return
     }
-    download = .absent(bytes: nil)
-    Task {
-      guard let pack = try? await AssetPackManager.shared.manifest.assetPack(withID: Self.assetPackID), case .absent = download else { return }
-      download = .absent(bytes: pack.downloadSize)
-    }
+    VoiceDownload.removeOutdated()
+    download = .absent(bytes: VoiceDownload.bytes)
     if isOn { startDownloadIfNeeded() }
   }
 
@@ -148,17 +140,18 @@ final class TalkToMe {
 
   func startDownload() {
     guard downloadTask == nil, overrideDirectory() == nil else { return }
+    let id = UUID()
+    downloadID = id
     download = .downloading(0)
-    downloadTask = Task { await runDownload() }
+    downloadTask = Task { await runDownload(id) }
   }
 
   func cancelDownload() {
-    downloadProgress?.cancel()
     downloadTask?.cancel()
     downloadTask = nil
-    downloadProgress = nil
+    downloadID = nil
     isOn = false
-    download = .absent(bytes: nil)
+    download = .absent(bytes: VoiceDownload.bytes)
     refresh()
   }
 
@@ -167,57 +160,50 @@ final class TalkToMe {
     loading?.cancel()
     loading = nil
     speaker = nil
+    downloadTask?.cancel()
+    downloadTask = nil
+    downloadID = nil
     isOn = false
     if overrideDirectory() != nil {
       overrideRemoved = true
-      download = .absent(bytes: nil)
+      download = .absent(bytes: VoiceDownload.bytes)
       return
     }
-    Task {
-      try? await AssetPackManager.shared.remove(assetPackWithID: Self.assetPackID)
-      download = .absent(bytes: nil)
-      refresh()
-    }
+    VoiceDownload.remove()
+    download = .absent(bytes: VoiceDownload.bytes)
   }
 
-  private func runDownload() async {
-    let manager = AssetPackManager.shared
-    let updates = Task { [weak self] in
-      for await update in manager.statusUpdates(forAssetPackWithID: Self.assetPackID) {
-        guard let self else { return }
-        if case .downloading(_, let progress) = update {
-          self.downloadProgress = progress
-          if case .downloading = self.download { self.download = .downloading(progress.fractionCompleted) }
-        }
-      }
-    }
-    defer { updates.cancel() }
+  private func runDownload(_ id: UUID) async {
+    let started = ContinuousClock.now
     do {
-      guard let pack = try await manager.manifest.assetPack(withID: Self.assetPackID) else { throw ManagedBackgroundAssetsError.assetPackNotFound(withID: Self.assetPackID) }
-      try await manager.ensureLocalAvailability(of: pack)
+      try await VoiceDownload.fetch { [weak self] fraction in
+        Task { @MainActor in self?.downloaded(fraction, of: id) }
+      }
       try Task.checkCancellation()
+      guard downloadID == id else { return }
+      guard let installed = VoiceDownload.installed() else { throw VoiceDownload.Problem.noModels }
+      NSLog("TALKTOME voice installed after %@", "\(ContinuousClock.now - started)")
       downloadTask = nil
-      downloadProgress = nil
-      download = .ready(bytes: Self.packDirectory().flatMap(Self.folderSize))
+      downloadID = nil
+      download = .ready(bytes: Self.folderSize(installed))
       BrowseForMeHost.shared.countTalkToMe("voice_downloads")
       if isOn { prepareSpeaker() }
     } catch {
-      guard !Task.isCancelled, downloadTask != nil else { return }
+      guard !Task.isCancelled, downloadID == id else { return }
       downloadTask = nil
-      downloadProgress = nil
-      if (error as NSError).domain == NSCocoaErrorDomain, (error as NSError).code == NSUserCancelledError {
-        download = .absent(bytes: nil)
-        return
-      }
+      downloadID = nil
+      NSLog("TALKTOME download failed: %@", String(describing: error))
       BrowseForMeHost.shared.countTalkToMe("download_failed")
       download = .failed(Self.downloadProblem(error))
     }
   }
 
+  private func downloaded(_ fraction: Double, of id: UUID) {
+    guard downloadID == id, case .downloading = download else { return }
+    download = .downloading(fraction)
+  }
+
   static func downloadProblem(_ error: Error) -> String {
-    if let managed = error as? ManagedBackgroundAssetsError, case .assetPackNotFound = managed {
-      return String(localized: "The voice downloads in App Store and TestFlight builds only.")
-    }
     if (error as? URLError) != nil || (error as NSError).domain == NSURLErrorDomain {
       return String(localized: "Couldn’t download the voice. Check your connection and try again.")
     }
@@ -492,35 +478,17 @@ final class TalkToMe {
 
   private func overrideDirectory() -> URL? {
     guard !overrideRemoved else { return nil }
-    return Self.testBuildModels() ?? Self.sideloadedModels()
+    return Self.testBuildModels()
   }
 
   static func testBuildModels() -> URL? {
     guard PhoneTestBuild.isOn, let path = UserDefaults.standard.string(forKey: modelsOverrideKey), !path.isEmpty else { return nil }
-    return holdingModels(URL(fileURLWithPath: path, isDirectory: true))
-  }
-
-  static func sideloadedModels() -> URL? {
-    guard Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil,
-          let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-    return holdingModels(support.appending(path: "TalkToMe", directoryHint: .isDirectory))
-  }
-
-  static func holdingModels(_ url: URL) -> URL? {
-    FileManager.default.fileExists(atPath: url.appending(path: "bundle.json").path) ? url : nil
+    let url = URL(fileURLWithPath: path, isDirectory: true)
+    return FileManager.default.fileExists(atPath: url.appending(path: "bundle.json").path) ? url : nil
   }
 
   private func modelsDirectory() -> URL? {
-    overrideDirectory() ?? Self.packDirectory()
-  }
-
-  static var offersAssetPack: Bool {
-    Bundle.main.object(forInfoDictionaryKey: "BAHasManagedAssetPacks") as? Bool == true
-  }
-
-  static func packDirectory() -> URL? {
-    guard offersAssetPack, AssetPackManager.shared.assetPackIsAvailableLocally(withID: assetPackID) else { return nil }
-    return try? AssetPackManager.shared.url(for: modelsManifest).deletingLastPathComponent()
+    overrideDirectory() ?? VoiceDownload.installed()
   }
 
   static func folderSize(_ url: URL) -> Int? {
@@ -535,5 +503,189 @@ final class TalkToMe {
 
   static func size(_ bytes: Int) -> String {
     ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+  }
+}
+
+enum VoiceDownload {
+  static let url = URL(string: "https://github.com/ardia-browser/ardia-voices/releases/download/phonon-31m-en-v0.7.1/phonon-31m-en.aar")!
+  static let bytes = 132_936_282
+  static let sha256 = "f72408f24f92dd92682819709aaca0d525d5f2fcea26243be90063e9d9df6579"
+
+  enum Problem: Error {
+    case status(Int)
+    case wrongSize(Int)
+    case wrongHash
+    case unreadable
+    case noModels
+  }
+
+  static let folderName = "TalkToMe"
+  static let markerName = "voice.sha256"
+  static let incomingPrefix = "TalkToMe-incoming-"
+
+  static var support: URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+  }
+
+  static var folder: URL {
+    support.appending(path: folderName, directoryHint: .isDirectory)
+  }
+
+  static func installed() -> URL? {
+    let folder = folder
+    guard FileManager.default.fileExists(atPath: folder.appending(path: "bundle.json").path),
+          let marker = try? String(contentsOf: folder.appending(path: markerName), encoding: .utf8),
+          marker.trimmingCharacters(in: .whitespacesAndNewlines) == sha256 else { return nil }
+    return folder
+  }
+
+  static func removeOutdated() {
+    guard installed() == nil, FileManager.default.fileExists(atPath: folder.path) else { return }
+    try? FileManager.default.removeItem(at: folder)
+  }
+
+  static func remove() {
+    try? FileManager.default.removeItem(at: folder)
+    removeIncoming()
+  }
+
+  static func removeIncoming() {
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: support.path)) ?? []
+    for name in names where name.hasPrefix(incomingPrefix) {
+      try? FileManager.default.removeItem(at: support.appending(path: name, directoryHint: .isDirectory))
+    }
+  }
+
+  static func fetch(progress: @escaping @Sendable (Double) -> Void) async throws {
+    let incoming = support.appending(path: incomingPrefix + UUID().uuidString, directoryHint: .isDirectory)
+    removeIncoming()
+    try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+    try excludeFromBackup(incoming)
+    defer { try? FileManager.default.removeItem(at: incoming) }
+    let archive = incoming.appending(path: url.lastPathComponent)
+    try await VoiceTransfer(destination: archive, progress: progress).run(url)
+    let work = Task.detached(priority: .userInitiated) { try install(archive, in: incoming) }
+    try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+  }
+
+  static func install(_ archive: URL, in incoming: URL) throws {
+    do {
+      try verify(archive)
+    } catch {
+      try? FileManager.default.removeItem(at: archive)
+      throw error
+    }
+    try Task.checkCancellation()
+    let unpacked = incoming.appending(path: "unpacked", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
+    try extract(archive, to: unpacked)
+    try? FileManager.default.removeItem(at: archive)
+    let staged = unpacked.appending(path: folderName, directoryHint: .isDirectory)
+    guard FileManager.default.fileExists(atPath: staged.appending(path: "bundle.json").path) else { throw Problem.noModels }
+    try Data(sha256.utf8).write(to: staged.appending(path: markerName))
+    try Task.checkCancellation()
+    if FileManager.default.fileExists(atPath: folder.path) {
+      _ = try FileManager.default.replaceItemAt(folder, withItemAt: staged)
+    } else {
+      try FileManager.default.moveItem(at: staged, to: folder)
+    }
+    try excludeFromBackup(folder)
+  }
+
+  static func verify(_ archive: URL) throws {
+    let size = (try? archive.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? -1
+    guard size == bytes else { throw Problem.wrongSize(size) }
+    let handle = try FileHandle(forReadingFrom: archive)
+    defer { try? handle.close() }
+    var hash = SHA256()
+    while let chunk = try handle.read(upToCount: 4 << 20), !chunk.isEmpty {
+      try Task.checkCancellation()
+      hash.update(data: chunk)
+    }
+    let digest = hash.finalize().map { String(format: "%02x", $0) }.joined()
+    guard digest == sha256 else { throw Problem.wrongHash }
+  }
+
+  static func extract(_ archive: URL, to destination: URL) throws {
+    guard let file = ArchiveByteStream.fileStream(path: FilePath(archive.path), mode: .readOnly, options: [], permissions: FilePermissions(rawValue: 0o644)) else { throw Problem.unreadable }
+    defer { try? file.close() }
+    guard let decompressed = ArchiveByteStream.decompressionStream(readingFrom: file) else { throw Problem.unreadable }
+    defer { try? decompressed.close() }
+    guard let decoded = ArchiveStream.decodeStream(readingFrom: decompressed) else { throw Problem.unreadable }
+    defer { try? decoded.close() }
+    guard let extracted = ArchiveStream.extractStream(extractingTo: FilePath(destination.path), flags: [.ignoreOperationNotPermitted]) else { throw Problem.unreadable }
+    _ = try ArchiveStream.process(readingFrom: decoded, writingTo: extracted)
+    try extracted.close()
+  }
+
+  static func excludeFromBackup(_ url: URL) throws {
+    var url = url
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try url.setResourceValues(values)
+  }
+}
+
+final class VoiceTransfer: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+  private let destination: URL
+  private let progress: @Sendable (Double) -> Void
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<Void, Error>?
+  private var moved: Result<Void, Error>?
+  private var reported = -1.0
+
+  init(destination: URL, progress: @escaping @Sendable (Double) -> Void) {
+    self.destination = destination
+    self.progress = progress
+  }
+
+  func run(_ url: URL) async throws {
+    let configuration = URLSessionConfiguration.default
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.urlCache = nil
+    let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    let task = session.downloadTask(with: url)
+    try await withTaskCancellationHandler {
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        lock.withLock { self.continuation = continuation }
+        task.resume()
+        if Task.isCancelled { task.cancel() }
+      }
+    } onCancel: {
+      task.cancel()
+    }
+  }
+
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+    let total = totalBytesExpectedToWrite > 0 ? Double(totalBytesExpectedToWrite) : Double(VoiceDownload.bytes)
+    let fraction = min(1, Double(totalBytesWritten) / total)
+    let report = lock.withLock {
+      guard fraction - reported >= 0.005 || fraction == 1 else { return false }
+      reported = fraction
+      return true
+    }
+    if report { progress(fraction) }
+  }
+
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+    let result = Result<Void, Error> {
+      if let status = (downloadTask.response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) { throw VoiceDownload.Problem.status(status) }
+      try? FileManager.default.removeItem(at: destination)
+      try FileManager.default.moveItem(at: location, to: destination)
+    }
+    lock.withLock { moved = result }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    session.finishTasksAndInvalidate()
+    let (continuation, moved) = lock.withLock {
+      defer { self.continuation = nil }
+      return (self.continuation, self.moved)
+    }
+    if let error {
+      continuation?.resume(throwing: error)
+    } else {
+      continuation?.resume(with: moved ?? .failure(VoiceDownload.Problem.unreadable))
+    }
   }
 }

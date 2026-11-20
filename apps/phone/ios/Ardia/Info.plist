@@ -8,12 +8,6 @@
 	<string>$(ARDIA_RELEASE_VERSION)</string>
 	<key>ArdiaTestBuild</key>
 	<string>$(ARDIA_TEST_BUILD)</string>
-	<key>BAAppGroupID</key>
-	<string>group.com.ardia.browser.ios</string>
-	<key>BAHasManagedAssetPacks</key>
-	<true/>
-	<key>BAUsesAppleHosting</key>
-	<true/>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>com.ardia.browser.ios.sync</string>
