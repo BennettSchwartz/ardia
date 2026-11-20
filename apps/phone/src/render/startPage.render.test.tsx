@@ -1,4 +1,4 @@
-import { Platform, StyleSheet } from "react-native";
+import { FlatList, Platform, StyleSheet } from "react-native";
 import { getAnimatedStyle } from "react-native-reanimated";
 import { act } from "react-test-renderer";
 import { StartScreen } from "../components/search/StartScreen";
@@ -16,7 +16,8 @@ import { dismissSearch, presentSearch } from "../state/search/store";
 import { OFF_STATUS, useSync, type PinnedTile, type SyncedProfile } from "../state/sync/store";
 import * as telemetry from "../state/telemetry/telemetry";
 import { useTabs } from "../state/tabs/store";
-import { renderSurface, unmount, withTabs } from "../../test/render/harness";
+import { renderSurface, unmount, updateSurface, withTabs } from "../../test/render/harness";
+import { StartSpaces } from "../components/search/StartSpaces";
 
 const mockMotion = { reduced: false };
 jest.mock("../state/app/systemLook", () => ({ ...jest.requireActual("../state/app/systemLook"), useReduceMotion: () => mockMotion.reduced }));
@@ -388,4 +389,16 @@ test("the original start page has no veil, and the native backdrop is asked for 
   expect(host(native, "themeVeil")).toBeUndefined();
   expect(native.root.findAll((node) => node.type === lookModule.ProfileBackdrop).map((node) => node.props.themed)).toEqual([true]);
   unmount(native);
+});
+
+test("when the page width changes with the same space selected, the pager moves to that space at the new width", () => {
+  withSpaces([profile("work", "Work"), profile("home", "Home")], "home");
+  const scrolled = jest.spyOn(FlatList.prototype, "scrollToOffset").mockImplementation(() => {});
+  const spaces = (width: number) => <StartSpaces geometry={{ width, height: 678, safeSide: 0, barCenterY: 620 }} dark={false} incognito={false} />;
+  const root = renderSurface(spaces(466));
+  scrolled.mockClear();
+  updateSurface(root, spaces(951));
+  expect(scrolled).toHaveBeenCalledWith({ offset: 951, animated: false });
+  scrolled.mockRestore();
+  unmount(root);
 });

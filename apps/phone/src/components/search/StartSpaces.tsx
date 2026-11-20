@@ -60,8 +60,11 @@ export function StartSpaces({ geometry, dark, incognito }: { geometry: StartGeom
     spaces.findIndex((p) => p.syncId === current?.syncId),
   );
   const pagerIndex = useRef(index);
+  const pagerWidth = useRef(geometry.width);
   useEffect(() => {
-    if (pagerIndex.current === index) return;
+    const widthChanged = pagerWidth.current !== geometry.width;
+    pagerWidth.current = geometry.width;
+    if (pagerIndex.current === index && !widthChanged) return;
     pagerIndex.current = index;
     pager.current?.scrollToOffset({ offset: index * geometry.width, animated: false });
   }, [index, geometry.width]);
