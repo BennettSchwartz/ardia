@@ -110,9 +110,9 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const bottom = pageTone?.bottom ?? theme.surface;
   const barDark = design === "redesigned" && !pageTone?.bottom ? theme.dark : isDarkColor(bottom);
   useSystemBars(isDarkColor(top), barDark);
-  const collapse = useBarCollapse(tab.id, tab.isPrivate, finding, design === "redesigned");
-  const duoBar = useMemo(() => (duoStrip && squeeze ? { stripLeft: duoStrip.centerX - DUO_BAR.button / 2 - controlsSpan.left, squeeze, progress: collapse.fold.progress, collapsed: collapse.collapsed } : null), [duoStrip?.centerX, controlsSpan.left, squeeze?.marginLeft, squeeze?.marginRight, collapse.fold.progress, collapse.collapsed]);
-  const folds = duoBar === null;
+  const collapse = useBarCollapse(tab.id, tab.isPrivate, finding, design === "redesigned", squeeze !== null);
+  const duoBar = useMemo(() => (duoStrip ? { stripLeft: duoStrip.centerX - DUO_BAR.button / 2 - controlsSpan.left, squeeze, progress: collapse.fold.progress, collapsed: collapse.collapsed } : null), [duoStrip?.centerX, controlsSpan.left, squeeze?.marginLeft, squeeze?.marginRight, collapse.fold.progress, collapse.collapsed]);
+  const folds = squeeze === null;
   const staged = design === "redesigned" && searchStageIsNative();
   useEffect(() => (staged && !collapse.hidden ? reportBarPill() : undefined), [staged, collapse.hidden]);
   const underBar = usePageUnderBars();
@@ -260,8 +260,9 @@ function PageStack({ pulledTab, barTop, children }: { pulledTab: string | null; 
   return children;
 }
 
-function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, folds: boolean) {
-  const collapses = usePreferences((p) => p.collapsesBottomBar);
+function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, folds: boolean, squeezes: boolean) {
+  const chosen = usePreferences((p) => p.collapsesBottomBar);
+  const collapses = chosen || squeezes;
   const direction = useNavigation(tabId, (n) => n?.scrollDirection ?? "up");
   const page = useNavigation(tabId, (n) => n?.url ?? null);
   const reduceMotion = useReduceMotion();
@@ -277,9 +278,9 @@ function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, fol
   const hidden = finding || (!folds && scrolledAway);
   const wasCollapsed = useRef(collapsed);
   useEffect(() => {
-    if (android && collapsed && !wasCollapsed.current && !isPrivate) countUsage("bottom_bar_collapses");
+    if ((android || squeezes) && collapsed && !wasCollapsed.current && !isPrivate) countUsage("bottom_bar_collapses");
     wasCollapsed.current = collapsed;
-  }, [collapsed, tabId, isPrivate]);
+  }, [collapsed, tabId, isPrivate, squeezes]);
   const fold = useBarFold(collapsed, reduceMotion);
   const hide = useSharedValue(0);
   useEffect(() => {

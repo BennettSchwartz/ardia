@@ -27,7 +27,7 @@ export type DuoSqueeze = { marginLeft: number; marginRight: number };
 
 export function duoSqueeze(width: number, layout: BottomBarLayout): DuoSqueeze | null {
   const { span, strip } = layout;
-  if (!strip) return null;
+  if (!strip || width < DUO_BAR.openFrom) return null;
   const half = DUO_BAR.button / 2;
   return { marginLeft: strip.centerX - half - span.left, marginRight: width - span.right - (strip.centerX + half) };
 }

@@ -11,18 +11,17 @@ import { storeNavigation, usePages, type PageState } from "../state/pages/store"
 import { setPreference } from "../state/settings/store";
 import { currentTabs, useTabs } from "../state/tabs/store";
 import type { BrowserTab } from "../state/tabs/tabModels";
+import * as telemetry from "../state/telemetry/telemetry";
 import { renderSurface, unmount, withTabs } from "../../test/render/harness";
 
 const safeArea = require("react-native-safe-area-context") as { useSafeAreaInsets: () => { top: number; bottom: number; left: number; right: number } };
 
 const PORTRAIT = Dimensions.get("window");
 
-const POSES = [
-  { name: "closed", width: 466, height: 678, hinge: "closed", stripX: 418, controlsLeft: 0, squeeze: { marginLeft: 370, marginRight: -72 } },
-  { name: "open", width: 951, height: 669, hinge: "fullyOpen", stripX: 903, controlsLeft: 431, squeeze: { marginLeft: 424, marginRight: -72 } },
-] as const satisfies readonly { name: string; width: number; height: number; hinge: ScreenHinge; stripX: number; controlsLeft: number; squeeze: { marginLeft: number; marginRight: number } }[];
+const OPEN = { name: "open", width: 951, height: 669, hinge: "fullyOpen", stripX: 903, controlsLeft: 431, squeeze: { marginLeft: 424, marginRight: -72 } } as const;
+const CLOSED = { name: "closed", width: 466, height: 678, hinge: "closed" } as const;
 
-type Pose = (typeof POSES)[number];
+type Pose = { width: number; height: number; hinge: ScreenHinge };
 
 function onDuo(pose: Pose) {
   Dimensions.set({ window: { ...PORTRAIT, width: pose.width, height: pose.height }, screen: { ...PORTRAIT, width: pose.width, height: pose.height } });
@@ -37,7 +36,7 @@ beforeEach(() => {
   usePages.setState({ tones: {}, lastTones: {}, heldTones: {} });
   usePageUi.setState({ findOpen: false, menuOpen: false });
   useBrowse.setState({ surface: "browsing", sheet: null, deckEntrance: null, frozenOrder: null, opening: null });
-  setPreference("collapsesBottomBar", true);
+  setPreference("collapsesBottomBar", false);
 });
 
 afterEach(() => {
@@ -80,9 +79,11 @@ const glyphOf = (node: ReactTestInstance) => {
 };
 const pageMenu = (root: Root) => root.root.findAll((node) => typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Page Menu") && typeof node.props.onPress === "function")[0]!;
 
-for (const pose of POSES) {
-  test(`on the ${pose.name} Duo, scrolling down squeezes the capsule into a 48 ··· circle on the bar's line in the strip at ${pose.stripX}, Tabs and + rise a step, and no host pill shows`, () => {
-    onDuo(pose);
+for (const chosen of [false, true]) {
+  test(`on the open Duo, with Collapse Bottom Bar ${chosen ? "on" : "off"}, scrolling down squeezes the capsule into a 48 ··· circle on the bar's line in the strip at 903, Tabs and + rise a step, no host pill shows, and the collapse is counted`, () => {
+    setPreference("collapsesBottomBar", chosen);
+    onDuo(OPEN);
+    const counted = jest.spyOn(telemetry, "countUsage").mockImplementation(() => undefined);
     const tab = currentTabs().open[0]!;
     const root = page(tab);
     expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginLeft ?? 0)).toBe(0);
@@ -94,21 +95,57 @@ for (const pose of POSES) {
     expect(host(root, "hostPill")).toBeUndefined();
     expect(host(root, "hostPillFold")).toBeUndefined();
     const centre = shown(host(root, "floatingBarCentre")!);
-    expect(centre.marginLeft).toBeCloseTo(pose.squeeze.marginLeft, 3);
-    expect(centre.marginRight).toBeCloseTo(pose.squeeze.marginRight, 3);
-    expect(pose.controlsLeft + 24 + pose.squeeze.marginLeft).toBe(pose.stripX - 24);
+    expect(centre.marginLeft).toBeCloseTo(OPEN.squeeze.marginLeft, 3);
+    expect(centre.marginRight).toBeCloseTo(OPEN.squeeze.marginRight, 3);
+    expect(OPEN.controlsLeft + 24 + OPEN.squeeze.marginLeft).toBe(OPEN.stripX - 24);
     expect(shown(host(root, "floatingBarAddressFade")!).opacity).toBeCloseTo(0, 3);
     expect(host(root, "floatingBarAddressFade")!.props.accessibilityElementsHidden).toBe(true);
     expect(lifted(host(root, "floatingBarStrip")!)).toBeCloseTo(-55, 3);
     expect(host(root, "floatingBarFold")!.props.pointerEvents).toBe("box-none");
     expect(StyleSheet.flatten(host(root, "floatingBarFold")!.props.style)?.opacity).toBeUndefined();
     expect(pageMenu(root).props.accessibilityLabel).toMatch(/^Page Menu, \S/);
+    expect(counted.mock.calls.filter(([field]) => field === "bottom_bar_collapses")).toHaveLength(1);
+    scrolled(tab, "up");
+    settle();
+    expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginLeft ?? 0)).toBeCloseTo(0, 3);
     unmount(root);
   });
 }
 
-test("collapsed on the Duo, the ··· circle opens the page menu and leaves the bar collapsed, and its label carries the site", async () => {
-  onDuo(POSES[0]);
+test("on the closed Duo with Collapse Bottom Bar off, scrolling down never collapses the bar, and nothing squeezes", () => {
+  onDuo(CLOSED);
+  const tab = currentTabs().open[0]!;
+  const root = page(tab);
+  scrolled(tab, "down");
+  settle();
+  expect(host(root, "hostPillFold")?.props.pointerEvents ?? "none").toBe("none");
+  expect(host(root, "floatingBarFold")!.props.pointerEvents).toBe("box-none");
+  expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginLeft ?? 0)).toBe(0);
+  expect(lifted(host(root, "floatingBarStrip")!)).toBeCloseTo(0, 3);
+  expect(pageMenu(root).props.accessibilityLabel).toBe("Page Menu");
+  unmount(root);
+});
+
+test("on the closed Duo with Collapse Bottom Bar on, scrolling down folds the bar, strip buttons and all, into the host pill as on any iPhone, with no ··· circle", () => {
+  setPreference("collapsesBottomBar", true);
+  onDuo(CLOSED);
+  const tab = currentTabs().open[0]!;
+  const root = page(tab);
+  scrolled(tab, "down");
+  settle();
+  expect(host(root, "hostPill")).toBeDefined();
+  const fold = host(root, "floatingBarFold")!;
+  expect(fold.props.pointerEvents).toBe("none");
+  expect(shown(fold).opacity).toBeCloseTo(0, 3);
+  expect(fold.findAll((node) => node.props.testID === "floatingBarStrip").length).toBeGreaterThan(0);
+  expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginLeft ?? 0)).toBe(0);
+  expect(lifted(host(root, "floatingBarStrip")!)).toBeCloseTo(0, 3);
+  expect(host(root, "floatingBarMoreNotSecure")).toBeUndefined();
+  expect(pageMenu(root).props.accessibilityLabel).toBe("Page Menu");
+  unmount(root);
+});
+test("collapsed on the open Duo, the ··· circle opens the page menu and leaves the bar collapsed, and its label carries the site", async () => {
+  onDuo(OPEN);
   const tab = { ...currentTabs().open[0]!, url: "https://www.swift.org/" };
   useTabs.setState((state) => ({ open: state.open.map((t) => (t.id === tab.id ? tab : t)) }));
   const root = page(tab);
@@ -121,12 +158,12 @@ test("collapsed on the Duo, the ··· circle opens the page menu and leaves the
   });
   expect(usePageUi.getState().menuOpen).toBe(true);
   settle();
-  expect(shown(host(root, "floatingBarCentre")!).marginLeft).toBeCloseTo(370, 3);
+  expect(shown(host(root, "floatingBarCentre")!).marginLeft).toBeCloseTo(OPEN.squeeze.marginLeft, 3);
   unmount(root);
 });
 
-test("collapsed on the Duo, an insecure page shows the red open lock in the circle in place of the dots, and says Not Secure", () => {
-  onDuo(POSES[0]);
+test("collapsed on the open Duo, an insecure page shows the red open lock in the circle in place of the dots, and says Not Secure", () => {
+  onDuo(OPEN);
   const tab = { ...currentTabs().open[0]!, url: "http://plain.example/" };
   useTabs.setState((state) => ({ open: state.open.map((t) => (t.id === tab.id ? tab : t)) }));
   const root = page(tab);
@@ -138,7 +175,8 @@ test("collapsed on the Duo, an insecure page shows the red open lock in the circ
   unmount(root);
 });
 
-test("with no hinge, scrolling down still folds the bar into the host pill", () => {
+test("with no hinge, scrolling down still folds the bar into the host pill with Collapse Bottom Bar on, and never collapses with it off", () => {
+  setPreference("collapsesBottomBar", true);
   const tab = currentTabs().open[0]!;
   const root = page(tab);
   scrolled(tab, "down");
@@ -148,4 +186,11 @@ test("with no hinge, scrolling down still folds the bar into the host pill", () 
   expect(host(root, "floatingBarFold")!.props.pointerEvents).toBe("none");
   expect(pageMenu(root).props.accessibilityLabel).toBe("Page Menu");
   unmount(root);
+  setPreference("collapsesBottomBar", false);
+  const other = page(tab);
+  scrolled(tab, "down");
+  settle();
+  expect(host(other, "hostPillFold")?.props.pointerEvents ?? "none").toBe("none");
+  expect(host(other, "floatingBarFold")!.props.pointerEvents).toBe("box-none");
+  unmount(other);
 });

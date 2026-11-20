@@ -31,7 +31,7 @@ type Props = {
   onMore: () => void;
 };
 
-export type DuoBar = { stripLeft: number; squeeze: DuoSqueeze; progress: SharedValue<number>; collapsed: boolean };
+export type DuoBar = { stripLeft: number; squeeze: DuoSqueeze | null; progress: SharedValue<number>; collapsed: boolean };
 
 export type BarAddress = { host: string; insecure: boolean; isPrivate: boolean; iconUrl: string | null; pageUrl: string | null };
 
@@ -79,7 +79,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
   const idle = useSharedValue(0);
   const progress = duo?.progress ?? idle;
   const squeeze = duo?.squeeze ?? null;
-  const squeezed = duo?.collapsed ?? false;
+  const squeezed = squeeze !== null && (duo?.collapsed ?? false);
   const shut = (value: number) => {
     "worklet";
     return Math.min(Math.max(value, 0), 1);
@@ -88,7 +88,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
   const addressFade = useAnimatedStyle(() => (squeeze ? { opacity: 1 - shut(progress.value) } : {}), [squeeze]);
   const dotsFade = useAnimatedStyle(() => (squeeze && address.insecure ? { opacity: 1 - shut(progress.value) } : {}), [squeeze, address.insecure]);
   const lockFade = useAnimatedStyle(() => ({ opacity: shut(progress.value) }));
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: -DUO_PLUS_ABOVE * shut(progress.value) }] }));
+  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: squeeze ? -DUO_PLUS_ABOVE * shut(progress.value) : 0 }] }), [squeeze]);
   const leading = (
     <Animated.View testID="floatingBarLeading" collapsable={false} style={back.leading} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
       <FloatingTabsButton tab={tab} order={order} roles={roles} dark={dark} testID="floatingBarTabs" glass={back.sidesGlass} glyphs={back.leadingGlyphs} ghost={!handed} onTabs={onTabs} onTabsMenu={onTabsMenu} onStep={onStep} />
@@ -104,7 +104,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     <View testID="floatingBar" style={styles.row} pointerEvents="box-none">
       {inStrip ? null : leading}
       <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={[styles.addressSlot, centreSqueeze]} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, inStrip ? styles.squeezes : null]}>
+      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
         <Animated.View testID="floatingBarCentreGlyphs" nativeID={ids?.face} collapsable={false} style={[styles.addressRow, back.centreGlyphs]}>
         <PullGlyphs style={styles.addressRow}>
         <Animated.View testID="floatingBarAddressFade" collapsable={false} style={[styles.addressFade, addressFade]} pointerEvents={squeezed ? "none" : "box-none"} importantForAccessibility={squeezed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={squeezed}>
@@ -131,7 +131,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
           <Animated.View style={[styles.menuGlyph, dotsFade]}>
             <Symbol name="ellipsis" size={floatingBarLayout.menuSymbol} color={ink.foreground} />
           </Animated.View>
-          {inStrip && address.insecure ? (
+          {squeeze && address.insecure ? (
             <Animated.View style={[styles.menuGlyph, styles.menuLock, lockFade]}>
               <NotSecureLock testID="floatingBarMoreNotSecure" size={floatingBarLayout.siteIcon} color={ink.notSecure} />
             </Animated.View>

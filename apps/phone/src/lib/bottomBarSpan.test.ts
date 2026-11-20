@@ -35,16 +35,20 @@ test("a strip on the leading side mirrors it all", () => {
   assert.equal(bottomBarLayout(466, { left: 0, right: 60 }, "closed", 24).strip!.centerX, 466 - 36);
 });
 
-test("collapsed, the capsule squeezes into a 48 circle on the bar's line in the strip, and Tabs and + rise one step each, 55 then 110 above the line", () => {
-  const closed = bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24);
-  assert.deepEqual(duoSqueeze(466, closed), { marginLeft: 370, marginRight: -72 });
-  assert.equal(24 + 370, 418 - 24);
-  assert.equal(466 - 96 + 72, 418 + 24);
+test("only the open Duo squeezes: its capsule goes into a 48 circle on the bar's line in the strip, and Tabs and + rise one step each, 55 then 110 above the line", () => {
   const open = bottomBarLayout(951, { left: 0, right: 84 }, "fullyOpen", 24);
   assert.deepEqual(duoSqueeze(951, open), { marginLeft: 424, marginRight: -72 });
   assert.equal(455 + 424, 903 - 24);
-  const mirrored = bottomBarLayout(466, { left: 84, right: 0 }, "closed", 24);
-  assert.deepEqual(duoSqueeze(466, mirrored), { marginLeft: -72, marginRight: 370 });
-  assert.equal(duoSqueeze(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24)), null);
+  assert.equal(951 - 96 + 72, 903 + 24);
+  const mirrored = bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24);
+  assert.deepEqual(duoSqueeze(951, mirrored), { marginLeft: -72, marginRight: 424 });
   assert.equal(DUO_PLUS_ABOVE * 2, 110);
+});
+
+test("the closed Duo and a phone with no hinge never squeeze", () => {
+  assert.equal(duoSqueeze(466, bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24)), null);
+  assert.equal(duoSqueeze(466, bottomBarLayout(466, { left: 84, right: 0 }, "closed", 24)), null);
+  assert.equal(duoSqueeze(599, bottomBarLayout(599, { left: 0, right: 84 }, "fullyOpen", 24)), null);
+  assert.equal(duoSqueeze(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24)), null);
+  assert.equal(duoSqueeze(1032, bottomBarLayout(1032, { left: 0, right: 0 }, "none", 24)), null);
 });
