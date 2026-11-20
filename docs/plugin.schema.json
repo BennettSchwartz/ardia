@@ -313,6 +313,36 @@
             "system"
           ],
           "description": "Show the host's passkey status on the plugin's Settings page"
+        },
+        "passkeyProvider": {
+          "type": "object",
+          "properties": {
+            "store": {
+              "enum": [
+                "host"
+              ],
+              "description": "host: Ardia's own device-only passkey store answers sites. plugin is reserved and refused for now"
+            },
+            "import": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "appleCredentialExchange"
+                ]
+              },
+              "description": "Where the host may copy passkeys from. appleCredentialExchange: Passwords › File › Export All Items to App…"
+            },
+            "create": {
+              "type": "boolean",
+              "description": "Let sites save new passkeys to the store (default true)"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "store"
+          ],
+          "description": "Makes Ardia answer passkey sign-ins for profiles using this password manager (Mac only)"
         }
       },
       "additionalProperties": false,

@@ -384,6 +384,14 @@ declare one, and each group of profiles that shares browser data picks at most o
 - `passkeys` (`system`): the plugin's Settings page shows whether Ardia may use the passkeys saved on this Mac, with
   macOS's access request. It says plainly when the build lacks Apple's browser passkey entitlement (every build today).
 
+- `passkeyProvider` (optional, Mac only): Ardia's own passkey store answers passkey sign-ins for profiles using this
+  plugin, in Chromium and WebKit pages. `{"store": "host", "import": ["appleCredentialExchange"], "create": true}`.
+  `store` is `host` (`plugin`, a plugin with its own vault, is reserved and refused for now: "passwordManager.passkeyProvider.store:
+  plugin isn't available yet; use host"). `import` lists where the host may copy passkeys from; `appleCredentialExchange`
+  is Passwords › File › Export All Items to App…, a one-time copy into this Mac's keychain, never synced. `create`
+  (default true) lets sites save new passkeys there. The plugin never gets the keys, the sites or the accounts; Ardia
+  checks every request's origin itself and asks for Touch ID or the Mac password on each use (#2854).
+
 The plugin never sees a secret and never runs code in a page: the key, field detection and code detection are Ardia's
 own page script, switched on per profile from the manifest.
 

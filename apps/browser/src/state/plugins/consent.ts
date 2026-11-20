@@ -20,6 +20,16 @@ function passwordManagerLines(m: PluginManifest, context: ConsentContext): Conse
   lines.push({ icon: "key", text: `Shows a key in ${fields} fields on every site. It opens macOS's Passwords panel there, which fills the field; the plugin never sees what's filled` });
   if (pm.verificationCodeSetup) lines.push({ icon: "qrcode", text: "Offers to set up two-factor codes a page shows in the app macOS uses for them" });
   if (pm.passkeys) lines.push({ icon: "person.badge.key", text: `Shows whether Ardia may use passkeys saved on this ${PLATFORM_TERMS.computer}, and can ask macOS for access` });
+  const provider = pm.passkeyProvider;
+  if (provider) {
+    const saves = provider.create ? ", and save new ones there" : "";
+    lines.push({
+      icon: "person.badge.key.fill",
+      text: `Lets sites in profiles using ${m.title} sign in with passkeys Ardia keeps on this ${PLATFORM_TERMS.computer}${saves}. Each use asks for Touch ID or your password`,
+    });
+    if (provider.import.includes("appleCredentialExchange"))
+      lines.push({ icon: "square.and.arrow.down", text: "Can copy your passkeys from Apple Passwords into Ardia when you export them from the Passwords app" });
+  }
   return lines;
 }
 
