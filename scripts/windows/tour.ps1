@@ -2187,6 +2187,98 @@ function Open-Page($Session, $Stop, [string]$Address, [string]$TitlePattern) {
   return $loaded
 }
 
+function Send-Hover([int]$X, [int]$Y) {
+  [ArdiaTour]::SetCursorPos($X - 24, $Y) | Out-Null
+  for ($step = 0; $step -lt 6; $step++) {
+    Start-Sleep -Milliseconds 30
+    [ArdiaTour]::mouse_event(0x0001, 4, 0, 0, [UIntPtr]::Zero)
+  }
+}
+
+function Compare-Crop([string]$Before, [string]$After, [System.Drawing.Rectangle]$Box, [int]$Levels) {
+  $result = [pscustomobject]@{ Changed = 0; Total = 0; Problem = $null }
+  if (-not (Test-Path -LiteralPath $Before) -or -not (Test-Path -LiteralPath $After)) { $result.Problem = "a picture is missing"; return $result }
+  $a = [System.Drawing.Bitmap]::new($Before)
+  $b = [System.Drawing.Bitmap]::new($After)
+  try {
+    $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $left = [Math]::Max(0, $Box.Left - $screen.Left)
+    $top = [Math]::Max(0, $Box.Top - $screen.Top)
+    $right = [Math]::Min([Math]::Min($a.Width, $b.Width), $Box.Right - $screen.Left)
+    $bottom = [Math]::Min([Math]::Min($a.Height, $b.Height), $Box.Bottom - $screen.Top)
+    for ($y = $top; $y -lt $bottom; $y += 2) {
+      for ($x = $left; $x -lt $right; $x += 2) {
+        $p = $a.GetPixel($x, $y)
+        $q = $b.GetPixel($x, $y)
+        $result.Total++
+        if ([Math]::Max([Math]::Max([Math]::Abs($p.R - $q.R), [Math]::Abs($p.G - $q.G)), [Math]::Abs($p.B - $q.B)) -ge $Levels) { $result.Changed++ }
+      }
+    }
+  } finally {
+    $a.Dispose()
+    $b.Dispose()
+  }
+  return $result
+}
+
+function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [switch]$Judged) {
+  if (-not (Start-TourPages)) { throw "the tour's page server didn't start" }
+  $env:ARDIA_TEST = $Test
+  try { $session = Start-Ardia $Name -Onboarded -Settings @{ tabLayout = "top" } } finally { $env:ARDIA_TEST = "" }
+  $title = "Tabs on top: the address field hovered while a slow page loads, $Label"
+  $stop = Invoke-Stop $session $Name $title {
+    param($stop)
+    $slow = "127.0.0.1:$($script:TourPagesPort)/slow"
+    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com, rested the pointer on the page, moved it onto the address field, opened $slow (the tour's page server answers it after 3 s) from the command bar and moved onto the field again. Pictures: at rest, hovered, 900 ms into the slow load, and loaded."
+    $stop.Expected = $(if ($Judged) { "the hover pill draws on the field, and the load glow, which mounts inside the hovered field after its first mount, draws over the pill (#2197)." } else { "pictures only: how React Native Windows' own View draws the field, to compare with the default." })
+    if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
+    $loaded = Open-Page $session $stop "example.com" "example\.com"
+    $field = @(Find-Named $session.Main "example.com") | Sort-Object -Property Top | Select-Object -First 1
+    $stop.Facts.Add("page loaded: $loaded; address field found: $([bool]$field)")
+    if (-not $loaded -or -not $field) { $stop.Seen = "no"; return }
+    Focus-Window $session $session.Main $stop | Out-Null
+    $frame = Get-Frame $session.Main
+    $pictures = [ordered]@{}
+    $paths = @{}
+    foreach ($key in @("rest", "hovered", "loading", "loaded")) { $paths[$key] = $stop.Shot -replace '\.png$', "-$key.png" }
+    Send-Hover ([int]($frame.Left + $frame.Width / 2)) ([int]($frame.Top + $frame.Height * 2 / 3))
+    Start-Sleep -Milliseconds 700
+    $pictures.rest = Measure-Screen $paths.rest $session.Main
+    Send-Hover $field.X $field.Y
+    Start-Sleep -Milliseconds 600
+    $pictures.hovered = Measure-Screen $paths.hovered $session.Main
+    Send-Chord @(0x11) 0x4C
+    Start-Sleep -Milliseconds 600
+    Send-Text $slow
+    Start-Sleep -Milliseconds 300
+    Send-Key 0x0D 0
+    Send-Key 0x0D 2
+    Send-Hover $field.X $field.Y
+    Start-Sleep -Milliseconds 900
+    $pictures.loading = Measure-Screen $paths.loading $session.Main
+    $titled = Wait-Title $session "tour slow" 10000
+    Start-Sleep -Milliseconds 800
+    $pictures.loaded = Measure-Screen $paths.loaded $session.Main
+    foreach ($entry in $pictures.GetEnumerator()) { $stop.Facts.Add("$($entry.Key): saved $([bool]$entry.Value.Saved)$(if ($entry.Value.Problem) { ", $($entry.Value.Problem)" })") }
+    $box = [System.Drawing.Rectangle]::new($field.Left - 40, $field.Top - 8, $field.Width + 48, $field.Height + 16)
+    $pill = Compare-Crop $paths.rest $paths.hovered $box 6
+    $glow = Compare-Crop $paths.hovered $paths.loading $box 12
+    $stop.Facts.Add("the field box $($box.Left),$($box.Top) $($box.Width)x$($box.Height): $($pill.Changed) of $($pill.Total) sampled pixels changed by 6 levels or more when hovered, $($glow.Changed) of $($glow.Total) by 12 or more when the slow load began$(if ($pill.Problem) { "; $($pill.Problem)" })")
+    $stop.Facts.Add("the slow page loaded: $titled")
+    Send-Escape
+    $saved = @($pictures.Values | Where-Object { -not $_.Saved }).Count -eq 0
+    $drawn = $pill.Total -gt 0 -and $pill.Changed * 10 -ge $pill.Total -and $glow.Changed * 50 -ge $glow.Total
+    Set-Seen $stop ($saved -and $titled -and (-not $Judged -or $drawn))
+  }
+  if ($stop.Seen -ne "yes") { $script:Required.Add("$($stop.Number) $title") }
+  Stop-Ardia $session
+}
+
+function Invoke-UrlFieldTour {
+  Invoke-UrlFieldStop "url-field-raw" "rawBackgrounds=1" "drawn by React Native Windows' own View"
+  Invoke-UrlFieldStop "url-field-backed" "" "with the default backed View" -Judged
+}
+
 function Invoke-PagesTour {
   $session = Start-Ardia "pages" -Onboarded
   Invoke-Stop $session "page-loads" "A page loads in a tab" {
@@ -2336,6 +2428,7 @@ $pages = @{
   "/peeked" = "<!doctype html><meta charset=utf-8><title>tour peeked</title><style>html,body{margin:0;height:100%;background:#2a7}</style>"
   "/taba" = "<!doctype html><meta charset=utf-8><title>tour tab a</title><style>html,body{margin:0;height:100%;background:#3366cc}a{position:absolute;left:20px;top:20px;width:320px;height:60px;display:block;background:#cde;font:20px sans-serif}</style><a href='/typed'>peek this</a><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='a got '+keys}});</script>"
   "/tabb" = "<!doctype html><meta charset=utf-8><title>tour tab b</title><style>html,body{margin:0;height:100%;background:#c0392b}</style>"
+  "/slow" = "<!doctype html><meta charset=utf-8><title>tour slow</title><style>html,body{margin:0;height:100%;background:#fff}</style>"
   "/typed" = "<!doctype html><meta charset=utf-8><title>tour typed</title><style>html,body{margin:0;height:100%;background:#2a7}</style><script>let keys='';addEventListener('keydown',e=>{if(e.key.length===1){keys+=e.key;document.title='peek got '+keys}});</script>"
 }
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
@@ -2350,6 +2443,7 @@ while ($true) {
     while ($line = $reader.ReadLine()) { }
     $path = if ($request) { ($request.Split(" ")[1]) -replace '\?.*$', '' } else { "" }
     $text = $pages[$path]
+    if ($path -eq "/slow") { Start-Sleep -Milliseconds 3000 }
     $status = if ($text) { "200 OK" } else { "404 Not Found" }
     $body = [System.Text.Encoding]::UTF8.GetBytes([string]$text)
     $head = [System.Text.Encoding]::ASCII.GetBytes("HTTP/1.1 $status`r`nContent-Type: text/html; charset=utf-8`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n")
@@ -2786,6 +2880,7 @@ $tours = @(
 
 if (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $App) "chrome.dll")) {
   $tours += @{ Name = "pages"; Run = { Invoke-PagesTour } }
+  $tours += @{ Name = "url-field"; Run = { Invoke-UrlFieldTour }; Required = $true }
   $tours += @{ Name = "first-run"; Run = { Invoke-FirstRunTour }; Required = $true }
   $tours += @{ Name = "typing"; Run = { Invoke-TypingTour }; Required = $true }
   $tours += @{ Name = "peek"; Run = { Invoke-PeekTour "peek-light" @{ appearance = "light" } "light" } }
