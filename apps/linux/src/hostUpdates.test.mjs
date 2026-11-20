@@ -345,6 +345,9 @@ test("restarting from Settings before a browser window claims the update still c
   const browser = harness({ engine });
   await browser.updater.check(true);
   assert.deepEqual([browser.seen.ready.map((r) => r.version), engine.restarts], [["0.2.46"], 0], "Check for Updates while ready says it's ready and never restarts");
+  const offline = harness({ engine, status: 503 });
+  await offline.updater.check(true);
+  assert.deepEqual([offline.seen.ready.map((r) => r.version), offline.seen.told, offline.seen.requests], [["0.2.46"], [], 0], "a ready update is shown before GitHub is asked, so a failed check can't hide it");
   await settings.updater.methods.checkForUpdates();
   assert.equal(engine.restarts, 1);
   assert.deepEqual(engine.claims, [1]);

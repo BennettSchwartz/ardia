@@ -809,7 +809,8 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
     `notNewer` failure, so the next try downloads afresh.
   - `claimOutcome(run)` is true once for a finished run. Only that window counts it and says so: the window that
     started the run claims it as it finishes, otherwise the browser window that runs scheduled checks claims it on its
-    second look (every 30 s). Settings never claims a ready run, so a browser window shows the ready toast.
+    second look (every 30 s). Settings claims a ready run only when the user restarts from it, so otherwise a browser window shows
+    the ready toast.
   - `restart` restarts through Chromium's own restart; an AppImage relaunches `$APPIMAGE`.
   - The helper verifies the release's signature as root before it installs anything (Packaging and installing ›
     Self-update helper), so the browser is never trusted with what gets installed.
