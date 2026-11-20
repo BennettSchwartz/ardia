@@ -6,6 +6,8 @@ final class PluginCertificateCache {
   private let queue = DispatchQueue(label: "ardia.plugins.certificates", qos: .userInitiated, attributes: .concurrent)
   private let lock = NSLock()
   private var cached: (key: [String: String], identities: [String: PluginSandbox.SourceIdentity], value: PluginSandbox.Certificates)?
+  private var inFlight: [[String: String]: [(PluginSandbox.Certificates) -> Void]] = [:]
+  private(set) var loadsStarted = 0
   private let system: String
 
   init(system: String = PluginSandbox.systemCertificates) {
@@ -43,11 +45,26 @@ final class PluginCertificateCache {
     target.asyncAfter(deadline: .now() + limit) {
       if answer.claim() { then(.timedOut) }
     }
-    queue.async { [self] in
-      let value = load(key)
+    let deliver = { (value: PluginSandbox.Certificates) in
       target.async {
         if answer.claim() { then(.ready(value)) }
       }
+    }
+    lock.lock()
+    if inFlight[key] != nil {
+      inFlight[key]?.append(deliver)
+      lock.unlock()
+      return
+    }
+    inFlight[key] = [deliver]
+    loadsStarted += 1
+    lock.unlock()
+    queue.async { [self] in
+      let value = load(key)
+      lock.lock()
+      let waiting = inFlight.removeValue(forKey: key) ?? []
+      lock.unlock()
+      for answer in waiting { answer(value) }
     }
   }
 }

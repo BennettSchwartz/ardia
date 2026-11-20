@@ -53,8 +53,8 @@ struct PluginSandbox {
   }
 
   static func carriesCredentials(_ value: String) -> Bool {
-    guard let url = URL(string: value.contains("://") ? value : "http://\(value)") else { return value.contains("@") }
-    return url.user != nil || url.password != nil || (url.host == nil && value.contains("@"))
+    guard let url = URL(string: value.contains("://") ? value : "http://\(value)") else { return value.contains("@") || value.contains("?") || value.contains("#") }
+    return url.user != nil || url.password != nil || url.query != nil || url.fragment != nil || (url.host == nil && value.contains("@"))
   }
 
   static func derLength(_ der: Data) -> Int? {

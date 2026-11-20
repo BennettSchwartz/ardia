@@ -519,7 +519,7 @@ settings only once it is saved, so a failed save changes nothing.
   environment is only `PATH` (above), `HOME` (`PluginData/<name>/home`), `TMPDIR` (`PluginData/<name>/tmp`), `LANG`,
   `ARDIA_PLUGIN_NAME`, `ARDIA_PLUGIN_FD=3` and `ARDIA_PLUGIN_PROTOCOL=1`. A helper with `network` also gets the proxy
   settings Ardia itself was started with (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`, `ALL_PROXY` in either case), except a
-  proxy whose address carries a user name or password, which is dropped with one line in Ardia's log (an authenticated
+  proxy whose address carries a user name or password, a query or a fragment (where a token could ride), which is dropped with one line in Ardia's log (an authenticated
   proxy is a follow-up the person would choose per plugin), and certificate settings that follow each tool's own
   meaning: `SSL_CERT_FILE` and `GIT_SSL_CAINFO` replace a tool's roots, so they point at
   `PluginData/<name>/certificates.pem` (the system roots plus the extra ones, only when the system roots could be read;
@@ -534,8 +534,8 @@ settings only once it is saved, so a failed save changes nothing.
   helper with `network`, each file's device, inode, size, and modification and status-change times are checked there, and a file that
   changed, was replaced or was deleted is read again (a failed read is never kept, and a root whose file is gone
   disappears, together with `extra-certificates.pem` when no extra roots are left). The start waits for that, up to
-  3 s, then goes on on Ardia's plugin queue; past that it gets the system roots (`/etc/ssl/cert.pem`) directly. Each preparation reads on its own, so a file stuck on a stalled disk can't hold up later
-  starts, and a start still waiting when Ardia closes its plugins is cancelled, never launched. With no
+  3 s, then goes on on Ardia's plugin queue; past that it gets the system roots (`/etc/ssl/cert.pem`) directly. Preparations for the same settings share one read and different settings read apart, so a file stuck on a stalled
+  disk holds up only the starts that need it, each until its own deadline, and a start still waiting when Ardia closes its plugins is cancelled, never launched. With no
   extra roots configured it gets them directly as well, and staged bundles are removed. The bundles are written through the already-open data folder, to a private file
   renamed into place. The Keychain's trust settings are out of the helper's reach, so a root kept only in the Keychain
   isn't trusted; `/etc/ssl/cert.pem` is a static bundle that macOS updates with the system, not your Keychain, and it is the

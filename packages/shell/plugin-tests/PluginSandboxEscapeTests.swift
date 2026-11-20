@@ -568,11 +568,13 @@ final class PluginSandboxEscapeTests: XCTestCase {
     let given = [
       "HTTPS_PROXY": "http://proxy.example:3128", "no_proxy": "localhost", "HTTP_PROXY": "http://user:pass@proxy.example:3128",
       "all_proxy": "socks5://alice@proxy.example:1080", "ANTHROPIC_AUTH_TOKEN": "secret", "OPENAI_API_KEY": "secret",
+      "https_proxy": "http://proxy.example:8080/?token=secret", "ALL_PROXY": "proxy.example:1080#secret",
     ]
     XCTAssertEqual(PluginSandbox.networkEnvironment(from: given, network: false), PluginSandbox.NetworkEnvironment(), "without network a helper gets none of it")
     let carried = PluginSandbox.networkEnvironment(from: given, network: true)
     XCTAssertEqual(Set(carried.variables), ["HTTPS_PROXY=http://proxy.example:3128", "no_proxy=localhost"])
-    XCTAssertEqual(Set(carried.droppedProxies), ["HTTP_PROXY", "all_proxy"], "proxies with a user name or password are dropped")
+    XCTAssertEqual(Set(carried.droppedProxies), ["HTTP_PROXY", "all_proxy", "https_proxy", "ALL_PROXY"], "proxies with a user name, a password, a query or a fragment are dropped")
+    XCTAssertFalse(carried.variables.contains { $0.contains("secret") })
   }
 
   func testCertificatesKeepOnlyWholeX509BlocksAndExtrasStaySeparate() throws {
@@ -651,6 +653,34 @@ final class PluginSandboxEscapeTests: XCTestCase {
       let certificate = SecCertificateCreateWithData(nil, Data(base64Encoded: Self.body(block))! as CFData)!
       return SecCertificateCopySubjectSummary(certificate) as String? ?? "?"
     }
+  }
+
+  func testPreparationsForTheSameSettingsShareOneLoad() throws {
+    let a = try makeCertificate("Ardia Share A")
+    let b = try makeCertificate("Ardia Share B")
+    let system = "\(root)/system.pem"
+    try a.pem.write(toFile: system, atomically: true, encoding: .utf8)
+    let corporate = "\(root)/many.pem"
+    try String(repeating: b.pem, count: (PluginSandbox.certificateSourceLimit / b.pem.utf8.count) - 1).write(toFile: corporate, atomically: true, encoding: .utf8)
+    let cache = PluginCertificateCache(system: system)
+    let target = DispatchQueue(label: "test.share")
+    let all = DispatchGroup()
+    var answers: [PluginSandbox.PreparedCertificates] = []
+    for _ in 0..<5 {
+      all.enter()
+      cache.prepare(for: ["NODE_EXTRA_CA_CERTS": corporate], within: 10, deliverOn: target) {
+        answers.append($0)
+        all.leave()
+      }
+    }
+    XCTAssertEqual(all.wait(timeout: .now() + 20), .success)
+    XCTAssertEqual(cache.loadsStarted, 1, "five starts waiting together share one read")
+    XCTAssertEqual(Set(answers.map { answer -> [String] in
+      guard case .ready(let ready) = answer else { return [] }
+      return names(ready.extra)
+    }), [["Ardia Share B"]])
+    _ = prepared(cache, ["NODE_EXTRA_CA_CERTS": corporate])
+    XCTAssertEqual(cache.loadsStarted, 2, "a later start reads again (and reuses the cache when nothing changed)")
   }
 
   func testTheCertificateCacheRereadsChangedSourcesForgetsRemovedRootsAndNeverCachesAFailure() throws {
