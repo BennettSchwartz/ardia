@@ -1,7 +1,7 @@
 import { useDefaultBrowser } from "../state/settings/defaultBrowser";
 import { Dimensions, Platform, StyleSheet } from "react-native";
 import { act, type ReactTestInstance } from "react-test-renderer";
-import "../platform/copy";
+import { selectPlatformCopy } from "../platform/copy";
 import { PageMenu } from "../components/browsing/PageMenu";
 import * as pageActions from "../state/page/actions";
 import { usePages } from "../state/pages/store";
@@ -10,6 +10,8 @@ import { useBrowse } from "../state/browse/store";
 import { useTabs } from "../state/tabs/store";
 import { selectedTab } from "../state/tabs/tabsState";
 import { renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+
+beforeAll(() => selectPlatformCopy());
 
 const onIos = Platform.OS === "ios" ? test : test.skip;
 const onAndroid = Platform.OS === "android" ? test : test.skip;

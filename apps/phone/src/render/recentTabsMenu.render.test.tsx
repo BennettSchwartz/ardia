@@ -1,11 +1,13 @@
 import { Platform } from "react-native";
 import { act } from "react-test-renderer";
-import "../platform/copy";
+import { selectPlatformCopy } from "../platform/copy";
 import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { FloatingMenu, type MenuItem } from "../components/ui";
 import { useBrowse } from "../state/browse/store";
 import { currentTabs, useTabs } from "../state/tabs/store";
 import { renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+
+beforeAll(() => selectPlatformCopy());
 
 beforeEach(() => {
   jest.useFakeTimers();

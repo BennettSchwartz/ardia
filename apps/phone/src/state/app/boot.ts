@@ -1,4 +1,4 @@
-import "../../platform/copy";
+import { selectPlatformCopy } from "../../platform/copy";
 import type { ImportOutcome } from "../legacy/importer";
 import { importOldApp, startWithoutOldApp } from "../legacy/upgrade";
 import { keepWaitingLinks, listenForLinks } from "../links/links";
@@ -12,6 +12,7 @@ let begin: (() => void) | null = null;
 export function bootApp(start: () => void) {
   if (begin) return;
   begin = start;
+  selectPlatformCopy();
   listenForLinks();
   if (launchArguments().isDemo) finish("none");
   else void attempt();

@@ -1,11 +1,13 @@
 import { ActionSheetIOS, Platform } from "react-native";
 import { act } from "react-test-renderer";
-import "../platform/copy";
+import { selectPlatformCopy } from "../platform/copy";
 import { SyncPage } from "../components/sync/SyncPage";
 import * as syncActions from "../state/sync/actions";
 import { useSync } from "../state/sync/store";
 import { NOW, status, view } from "../../test/syncFixture";
 import { pressButton, renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+
+beforeAll(() => selectPlatformCopy());
 
 const onIos = Platform.OS === "ios" ? test : test.skip;
 const onAndroid = Platform.OS === "android" ? test : test.skip;

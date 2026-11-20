@@ -1,7 +1,7 @@
 import { useDefaultBrowser } from "../state/settings/defaultBrowser";
 import { Dimensions, StyleSheet } from "react-native";
 import { act, type ReactTestRenderer } from "react-test-renderer";
-import "../platform/copy";
+import { selectPlatformCopy } from "../platform/copy";
 import { pages } from "../platform/pages";
 import { PageMenu } from "../components/browsing/PageMenu";
 import { DesignProvider } from "../components/ui";
@@ -17,6 +17,8 @@ import { OFF_STATUS, useSync, type SyncedProfile } from "../state/sync/store";
 import * as telemetry from "../state/telemetry/telemetry";
 import { useTabs } from "../state/tabs/store";
 import { pressButton, renderSurface, textOf, unmount, withTabs } from "../../test/render/harness";
+
+beforeAll(() => selectPlatformCopy());
 
 const realWindow = Dimensions.get("window");
 

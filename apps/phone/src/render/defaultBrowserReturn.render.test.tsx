@@ -1,11 +1,13 @@
 import { AppState, Dimensions, Linking, Platform, StyleSheet } from "react-native";
 import { act } from "react-test-renderer";
-import "../platform/copy";
+import { selectPlatformCopy } from "../platform/copy";
 import { DefaultBrowserPage, DefaultBrowserSteps } from "../components/settings/DefaultBrowserPage";
 import { AppIcon } from "../components/ui";
 import { defaultBrowser } from "../platform/defaultBrowser";
 import { useDefaultBrowser } from "../state/settings/defaultBrowser";
 import { pressButton, renderSurface, textOf, unmount } from "../../test/render/harness";
+
+beforeAll(() => selectPlatformCopy());
 
 const onIos = Platform.OS === "ios" ? test : test.skip;
 const onAndroid = Platform.OS === "android" ? test : test.skip;
