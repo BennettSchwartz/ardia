@@ -9,7 +9,7 @@ $lab = @{ Tile = 48; Slot = 64; Left = 24; Top = 96; Rounds = 3; RoundMs = 1600;
 $probes = @("marker", "raw background+zIndex", "background+zIndex", "background", "background with a child below zero", "setNativeProps background")
 $captureMs = 30000
 $labMs = $lab.Rounds * $lab.RoundMs + 2500
-$shotAtMs = $lab.RoundMs + 1500
+$shotAfterSecondMarkMs = 400
 $whiteAt = 220
 $darkBelow = 30
 $shownWithinMs = 100
@@ -115,7 +115,7 @@ public static class ArdiaBackedCheck {
     return owner == process;
   }
 
-  public static Run Capture(string app, string arguments, int milliseconds, int afterWindowMs, int tiles, int left, int slot, int tile, int[] tops, long shotAtMs) {
+  public static Run Capture(string app, string arguments, int milliseconds, int afterWindowMs, int tiles, int left, int slot, int tile, int[] tops, long shotAfterSecondMarkMs, int whiteAt, int darkBelow) {
     SetProcessDPIAware();
     Run run = new Run();
     Stopwatch clock = Stopwatch.StartNew();
@@ -129,8 +129,9 @@ public static class ArdiaBackedCheck {
     int width = 0, x0 = 0;
     int[] ys = new int[tops.Length];
     int[] xs = new int[tiles];
-    long[] shotsAt = new long[] { shotAtMs };
-    int nextShot = 0;
+    int rises = 0;
+    bool lit = false;
+    long shotDue = -1;
     IntPtr shotMemory = CreateCompatibleDC(screen);
     Point probe = new Point();
     try {
@@ -158,9 +159,8 @@ public static class ArdiaBackedCheck {
           previous = SelectObject(memory, section);
         }
         long at = clock.ElapsedMilliseconds;
-        if (nextShot < shotsAt.Length && at - run.WindowMs >= shotsAt[nextShot]) {
+        if (shotDue >= 0 && at >= shotDue && run.Shots.Count == 0) {
           run.Shots.Add(Whole(window, screen, shotMemory, at - run.WindowMs, (uint)run.Process.Id));
-          nextShot++;
           continue;
         }
         Sample sample = new Sample();
@@ -180,6 +180,12 @@ public static class ArdiaBackedCheck {
           }
         }
         run.Samples.Add(sample);
+        int mark = sample.Values[0];
+        if (mark >= whiteAt && !lit) {
+          lit = true;
+          rises++;
+          if (rises == 2) shotDue = at + shotAfterSecondMarkMs;
+        } else if (mark < darkBelow) lit = false;
         Thread.Sleep(2);
       }
     } catch {
@@ -203,16 +209,24 @@ New-Item -ItemType Directory -Force -Path $data | Out-Null
 Set-Content -LiteralPath (Join-Path $data "onboarding.json") -Value '{"completedAt":1700000000000,"version":1}' -Encoding utf8NoBOM
 $log = Join-Path $Out "backed-check.log"
 Remove-Item -Force -ErrorAction SilentlyContinue $log
+$config = Join-Path $Out "backed-check-config"
+Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $config
+New-Item -ItemType Directory -Force -Path $config | Out-Null
+$kept = @{}
+foreach ($name in @("ARDIA_DATA_DIR", "ARDIA_CONFIG_DIR", "ARDIA_BACKGROUND", "ARDIA_TEST")) { $kept[$name] = [Environment]::GetEnvironmentVariable($name) }
 $env:ARDIA_DATA_DIR = $data
+$env:ARDIA_CONFIG_DIR = $config
 $env:ARDIA_BACKGROUND = ""
 $env:ARDIA_TEST = "backedLab=1"
 try {
-  $run = [ArdiaBackedCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $labMs, $probes.Count, $lab.Left, $lab.Slot, $lab.Tile, [int[]]@($lab.Top), $shotAtMs)
+  $run = [ArdiaBackedCheck]::Capture($App, "--log-file=`"$log`"", $captureMs, $labMs, $probes.Count, $lab.Left, $lab.Slot, $lab.Tile, [int[]]@($lab.Top), $shotAfterSecondMarkMs, $whiteAt, $darkBelow)
 } finally {
-  $env:ARDIA_TEST = ""
-  $env:ARDIA_DATA_DIR = ""
+  foreach ($name in $kept.Keys) { [Environment]::SetEnvironmentVariable($name, $kept[$name]) }
 }
-if ($run.Process -and -not $run.Process.HasExited) { Stop-Process -Id $run.Process.Id -Force -ErrorAction SilentlyContinue }
+if ($run.Process -and -not $run.Process.HasExited) {
+  Stop-Process -Id $run.Process.Id -Force -ErrorAction SilentlyContinue
+  $run.Process.WaitForExit(10000) | Out-Null
+}
 
 Add-Type -AssemblyName System.Drawing
 foreach ($shot in @($run.Shots)) {
@@ -224,13 +238,13 @@ foreach ($shot in @($run.Shots)) {
   $bitmap.UnlockBits($locked)
   $bitmap.Save((Join-Path $Out "backed-check.png"), [System.Drawing.Imaging.ImageFormat]::Png)
   $bitmap.Dispose()
-  Write-Host "backed check: picture at $($shot.Ms) ms after the window, during round 2, in front: $($shot.Front)"
+  Write-Host "backed check: picture at $($shot.Ms) ms after the window, $shotAfterSecondMarkMs ms after round 2's marker, in front: $($shot.Front)"
 }
 
-$all = @($run.Samples)
-$samples = @($all | Where-Object { $_.Ours })
-Write-Host "backed check: window at $($run.WindowMs) ms, scale $($run.Scale), $($samples.Count) of $($all.Count) samples with our window at the lab"
-if ($samples.Count -lt 100) { return @("backed check: only $($samples.Count) samples showed our window at the lab (in front at the picture: $(@($run.Shots | Select-Object -First 1).Front))") }
+$samples = @($run.Samples)
+$ours = @($samples | Where-Object { $_.Ours }).Count
+Write-Host "backed check: window at $($run.WindowMs) ms, scale $($run.Scale), $ours of $($samples.Count) samples with our window at the lab"
+if ($ours -lt 100) { return @("backed check: only $ours samples showed our window at the lab (in front at the picture: $(@($run.Shots | Select-Object -First 1).Front))") }
 
 $intervals = @()
 $on = $null
@@ -241,6 +255,10 @@ foreach ($sample in $samples) {
 }
 $problems = @()
 if ($intervals.Count -lt $lab.Rounds) { $problems += "backed check: the marker showed $($intervals.Count) rounds, not $($lab.Rounds)" }
+if ($intervals.Count) {
+  $covered = @($samples | Where-Object { -not $_.Ours -and $_.Ms -ge $intervals[0][0] -and $_.Ms -le $intervals[-1][1] }).Count
+  if ($covered) { return @("backed check: another window covered the lab in $covered samples during the rounds, so they can't be judged") }
+}
 
 for ($p = 1; $p -lt $probes.Count; $p++) {
   $notes = @()

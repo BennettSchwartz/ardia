@@ -2195,19 +2195,19 @@ function Send-Hover([int]$X, [int]$Y) {
   }
 }
 
-function Compare-Crop([string]$Before, [string]$After, [System.Drawing.Rectangle]$Box, [int]$Levels) {
+function Compare-Rows([string]$Before, [string]$After, [int]$Left, [int]$Right, [int[]]$Rows, [int]$Levels) {
   $result = [pscustomobject]@{ Changed = 0; Total = 0; Problem = $null }
   if (-not (Test-Path -LiteralPath $Before) -or -not (Test-Path -LiteralPath $After)) { $result.Problem = "a picture is missing"; return $result }
   $a = [System.Drawing.Bitmap]::new($Before)
   $b = [System.Drawing.Bitmap]::new($After)
   try {
     $screen = [System.Windows.Forms.SystemInformation]::VirtualScreen
-    $left = [Math]::Max(0, $Box.Left - $screen.Left)
-    $top = [Math]::Max(0, $Box.Top - $screen.Top)
-    $right = [Math]::Min([Math]::Min($a.Width, $b.Width), $Box.Right - $screen.Left)
-    $bottom = [Math]::Min([Math]::Min($a.Height, $b.Height), $Box.Bottom - $screen.Top)
-    for ($y = $top; $y -lt $bottom; $y += 2) {
-      for ($x = $left; $x -lt $right; $x += 2) {
+    $width = [Math]::Min($a.Width, $b.Width)
+    $height = [Math]::Min($a.Height, $b.Height)
+    foreach ($row in $Rows) {
+      $y = $row - $screen.Top
+      if ($y -lt 0 -or $y -ge $height) { continue }
+      for ($x = [Math]::Max(0, $Left - $screen.Left); $x -lt [Math]::Min($width, $Right - $screen.Left); $x += 2) {
         $p = $a.GetPixel($x, $y)
         $q = $b.GetPixel($x, $y)
         $result.Total++
@@ -2221,6 +2221,8 @@ function Compare-Crop([string]$Before, [string]$After, [System.Drawing.Rectangle
   return $result
 }
 
+function Format-Rows($Compared) { return "$($Compared.Changed) of $($Compared.Total)$(if ($Compared.Problem) { " ($($Compared.Problem))" })" }
+
 function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [switch]$Judged) {
   if (-not (Start-TourPages)) { throw "the tour's page server didn't start" }
   $env:ARDIA_TEST = $Test
@@ -2229,15 +2231,18 @@ function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [swit
   $stop = Invoke-Stop $session $Name $title {
     param($stop)
     $slow = "127.0.0.1:$($script:TourPagesPort)/slow"
-    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com, rested the pointer on the page, moved it onto the address field, opened $slow (the tour's page server answers it after 3 s) from the command bar and moved onto the field again. Pictures: at rest, hovered, 900 ms into the slow load, and loaded."
-    $stop.Expected = $(if ($Judged) { "the hover pill draws on the field, and the load glow, which mounts inside the hovered field after its first mount, draws over the pill (#2197)." } else { "pictures only: how React Native Windows' own View draws the field, to compare with the default." })
+    $stop.Did = "Launched with tabs on top$(if ($Test) { " and ARDIA_TEST $Test" }), opened example.com, rested the pointer on the page, moved it onto the address field, opened $slow (the tour's page server answers it after 3 s) from the command bar, waited for the bar to close and moved onto the field again. Pictures: at rest, hovered, 900 ms into the slow load, and loaded."
+    $stop.Expected = $(if ($Judged) { "the hover pill draws along the rows just above and below the address text, and the load glow, which mounts inside the hovered field after its first mount, draws over the pill on the row below (#2197)." } else { "pictures only: how React Native Windows' own View draws the field, to compare with the default." })
     if (-not (Test-Usable $session)) { $stop.Seen = "no"; return }
     $loaded = Open-Page $session $stop "example.com" "example\.com"
-    $field = @(Find-Named $session.Main "example.com") | Sort-Object -Property Top | Select-Object -First 1
-    $stop.Facts.Add("page loaded: $loaded; address field found: $([bool]$field)")
+    $named = @(Find-Named $session.Main "example.com")
+    $topmost = @($named | Sort-Object -Property Top | Select-Object -First 1)
+    $field = if ($topmost.Count) { @($named | Where-Object { [Math]::Abs($_.Top - $topmost[0].Top) -le 40 }) | Sort-Object -Property Height -Descending | Select-Object -First 1 } else { $null }
+    $stop.Facts.Add("page loaded: $loaded; address field found: $([bool]$field) among $($named.Count) elements named example.com")
     if (-not $loaded -or -not $field) { $stop.Seen = "no"; return }
     Focus-Window $session $session.Main $stop | Out-Null
     $frame = Get-Frame $session.Main
+    $scale = [Math]::Max(1, [ArdiaTour]::GetDpiForWindow($session.Main) / 96.0)
     $pictures = [ordered]@{}
     $paths = @{}
     foreach ($key in @("rest", "hovered", "loading", "loaded")) { $paths[$key] = $stop.Shot -replace '\.png$', "-$key.png" }
@@ -2249,25 +2254,33 @@ function Invoke-UrlFieldStop([string]$Name, [string]$Test, [string]$Label, [swit
     $pictures.hovered = Measure-Screen $paths.hovered $session.Main
     Send-Chord @(0x11) 0x4C
     Start-Sleep -Milliseconds 600
-    Send-Text $slow
-    Start-Sleep -Milliseconds 300
+    Send-Address $slow
     Send-Key 0x0D 0
     Send-Key 0x0D 2
+    Start-Sleep -Milliseconds 350
     Send-Hover $field.X $field.Y
-    Start-Sleep -Milliseconds 900
+    Start-Sleep -Milliseconds 550
     $pictures.loading = Measure-Screen $paths.loading $session.Main
     $titled = Wait-Title $session "tour slow" 10000
     Start-Sleep -Milliseconds 800
     $pictures.loaded = Measure-Screen $paths.loaded $session.Main
     foreach ($entry in $pictures.GetEnumerator()) { $stop.Facts.Add("$($entry.Key): saved $([bool]$entry.Value.Saved)$(if ($entry.Value.Problem) { ", $($entry.Value.Problem)" })") }
-    $box = [System.Drawing.Rectangle]::new($field.Left - 40, $field.Top - 8, $field.Width + 48, $field.Height + 16)
-    $pill = Compare-Crop $paths.rest $paths.hovered $box 6
-    $glow = Compare-Crop $paths.hovered $paths.loading $box 12
-    $stop.Facts.Add("the field box $($box.Left),$($box.Top) $($box.Width)x$($box.Height): $($pill.Changed) of $($pill.Total) sampled pixels changed by 6 levels or more when hovered, $($glow.Changed) of $($glow.Total) by 12 or more when the slow load began$(if ($pill.Problem) { "; $($pill.Problem)" })")
+    $spansField = $field.Height -ge 20 * $scale
+    $above = if ($spansField) { $field.Top + [int](2 * $scale) } else { $field.Top - [int](2 * $scale) }
+    $below = if ($spansField) { $field.Top + $field.Height - 1 - [int](2 * $scale) } else { $field.Top + $field.Height + [int](1 * $scale) }
+    $left = $field.Left + [int](12 * $scale)
+    $right = $field.Left + $field.Width - [int](12 * $scale)
+    $stop.Facts.Add("the element used sits at $($field.Left),$($field.Top) $($field.Width)x$($field.Height), scale $scale, so it's taken as $(if ($spansField) { "the whole field" } else { "the address text" })")
+    $pill = Compare-Rows $paths.rest $paths.hovered $left $right @($above, $below) 4
+    $stillHovered = Compare-Rows $paths.rest $paths.loading $left $right @($above) 4
+    $glow = Compare-Rows $paths.hovered $paths.loading $left $right @($below) 12
+    $stop.Facts.Add("rows $above and $below from x $left to $right, against the picture at rest: hovered changed $(Format-Rows $pill) pixels by 4 levels or more; loading changed $(Format-Rows $stillHovered) on the row above")
+    $stop.Facts.Add("the row below, loading against hovered: $(Format-Rows $glow) pixels changed by 12 levels or more")
     $stop.Facts.Add("the slow page loaded: $titled")
     Send-Escape
     $saved = @($pictures.Values | Where-Object { -not $_.Saved }).Count -eq 0
-    $drawn = $pill.Total -gt 0 -and $pill.Changed * 10 -ge $pill.Total -and $glow.Changed * 50 -ge $glow.Total
+    $mostly = { param($compared, $share) $compared.Total -gt 0 -and $compared.Changed -ge $compared.Total * $share }
+    $drawn = (& $mostly $pill 0.8) -and (& $mostly $stillHovered 0.8) -and (& $mostly $glow 0.1)
     Set-Seen $stop ($saved -and $titled -and (-not $Judged -or $drawn))
   }
   if ($stop.Seen -ne "yes") { $script:Required.Add("$($stop.Number) $title") }
