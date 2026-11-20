@@ -92,11 +92,9 @@ extension PasskeyCoordinator {
 
   static func openPasswordsApp() -> Bool {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Passwords") else { return false }
-    if LaunchConfig.shared.background {
-      NSLog("[passkeys] background: would open %@", url.path)
-      return true
-    }
-    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = !LaunchConfig.shared.background
+    NSWorkspace.shared.openApplication(at: url, configuration: configuration) { _, _ in }
     return true
   }
 
