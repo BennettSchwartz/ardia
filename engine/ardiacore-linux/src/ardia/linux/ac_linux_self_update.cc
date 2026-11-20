@@ -99,15 +99,6 @@ std::string Text(std::string_view text) {
   return std::string(text);
 }
 
-base::Value Failed(std::string_view reason) {
-  return base::Value(base::DictValue().Set("ok", false).Set("reason", Text(reason)));
-}
-
-void Answer(Done done, base::Value value) {
-  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(done), true, std::move(value)));
-}
-
 base::FilePath HelperPath() {
   return ardiacore::LinuxPackage().directory.Append(Text(policy::kHelperName));
 }
@@ -275,12 +266,26 @@ policy::InstallOutcome RunInstall(base::FilePath helper, Kind kind, base::FilePa
   if (!run.launched) return {false, Text(policy::kInstallReason)};
   policy::InstallOutcome outcome = policy::InstallOutcomeFor(version, run.timed_out, run.exit_code,
                                                              policy::LastLine(run.output), through_pkexec);
-  if (outcome.ok) {
-    base::DeletePathRecursively(directory);
-  } else {
+  if (outcome.ok || policy::DiscardsDownload(outcome.detail)) base::DeletePathRecursively(directory);
+  if (!outcome.ok) {
     LOG(WARNING) << "ardia-update install failed: " << outcome.detail << " (exit " << run.exit_code << ")";
   }
   return outcome;
+}
+
+bool RealDirectory(const base::FilePath& path) {
+  struct stat info;
+  return lstat(path.value().c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+}
+
+bool Missing(const base::FilePath& path) {
+  struct stat info;
+  return lstat(path.value().c_str(), &info) != 0 && errno == ENOENT;
+}
+
+bool EnsureRealDirectory(const base::FilePath& path) {
+  if (Missing(path) && !base::CreateDirectory(path)) return false;
+  return RealDirectory(path);
 }
 
 struct Prepared {
@@ -307,7 +312,7 @@ std::optional<policy::Package> CompleteDownload(const base::FilePath& directory,
 Prepared PrepareDirectory(base::FilePath updates, std::string version, Kind kind) {
   base::ScopedBlockingCall blocking(FROM_HERE, base::BlockingType::MAY_BLOCK);
   Prepared prepared;
-  if (updates.empty() || !base::CreateDirectory(updates)) {
+  if (updates.empty() || !EnsureRealDirectory(updates)) {
     prepared.reason = Text(policy::kDiskReason);
     return prepared;
   }
@@ -315,7 +320,8 @@ Prepared PrepareDirectory(base::FilePath updates, std::string version, Kind kind
                                base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES |
                                    base::FileEnumerator::SHOW_SYM_LINKS);
   for (base::FilePath entry = entries.Next(); !entry.empty(); entry = entries.Next()) {
-    if (entry.BaseName().value() != version) base::DeletePathRecursively(entry);
+    const std::string name = entry.BaseName().value();
+    if (name != version && policy::ValidVersion(name)) base::DeletePathRecursively(entry);
   }
   const base::FilePath directory = updates.Append(version);
   if (base::IsLink(directory)) base::DeleteFile(directory);
@@ -383,7 +389,7 @@ constexpr base::TaskTraits kFileTraits = {base::MayBlock(), base::TaskPriority::
 
 class PackageDownload {
  public:
-  using Finish = base::OnceCallback<void(base::Value)>;
+  using Finish = base::OnceCallback<void(std::string reason)>;
 
   PackageDownload(std::string version, Kind kind, base::FilePath updates, Finish finish)
       : version_(std::move(version)),
@@ -404,7 +410,7 @@ class PackageDownload {
   enum class Step { kManifest, kSignature, kPackage };
 
   void OnPrepared(Prepared prepared) {
-    if (!prepared.reason.empty()) return Fail(prepared.reason);
+    if (!prepared.reason.empty()) return Complete(prepared.reason);
     if (prepared.complete) return Succeed();
     Fetch(Step::kManifest, policy::ManifestName(version_), policy::kMaxManifestBytes);
   }
@@ -473,16 +479,14 @@ class PackageDownload {
     Succeed();
   }
 
-  void Succeed() {
-    Complete(base::Value(base::DictValue().Set("ok", true).Set("dir", directory_.value())));
-  }
+  void Succeed() { Complete(std::string()); }
 
   void Fail(std::string_view reason) {
     base::ThreadPool::PostTask(FROM_HERE, kFileTraits, base::BindOnce(&RemoveDirectory, directory_));
-    Complete(Failed(reason));
+    Complete(Text(reason));
   }
 
-  void Complete(base::Value result) {
+  void Complete(std::string result) {
     weak_factory_.InvalidateWeakPtrs();
     if (finish_) {
       base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
@@ -520,25 +524,19 @@ class Service {
         base::BindOnce(&Service::KindRead, weak_factory_.GetWeakPtr()));
   }
 
-  void Download(std::string version, Done done) {
-    if (!policy::ValidVersion(version)) return Answer(std::move(done), Failed(policy::kVersionReason));
-    if (downloading_ || installing_) return Answer(std::move(done), Failed(policy::kBusyReason));
-    const base::FilePath updates = UpdatesDirectory();
-    if (updates.empty()) return Answer(std::move(done), Failed(policy::kDiskReason));
-    downloading_ = true;
-    InstallKind(base::BindOnce(&Service::DownloadWithKind, weak_factory_.GetWeakPtr(), std::move(version),
-                               updates, std::move(done)));
+  void Status(Done done) {
+    InstallKind(base::BindOnce(&Service::AnswerStatus, weak_factory_.GetWeakPtr(), std::move(done)));
   }
 
-  void Install(std::string version, Done done) {
-    if (!policy::ValidVersion(version)) return Answer(std::move(done), Failed(policy::kVersionReason));
-    if (downloading_ || installing_) return Answer(std::move(done), Failed(policy::kBusyReason));
-    const base::FilePath updates = UpdatesDirectory();
-    if (updates.empty()) return Answer(std::move(done), Failed(policy::kMissingReason));
-    installing_ = true;
-    InstallKind(base::BindOnce(&Service::InstallWithKind, weak_factory_.GetWeakPtr(), std::move(version),
-                               updates.Append(version), std::move(done)));
+  void Update(std::string version, Done done) {
+    if (policy::BeginRun(state_, version)) {
+      const int run = state_.run;
+      InstallKind(base::BindOnce(&Service::DownloadWithKind, weak_factory_.GetWeakPtr(), run, std::move(version)));
+    }
+    Status(std::move(done));
   }
+
+  bool ClaimOutcome(int run) { return policy::ClaimOutcome(state_, run); }
 
   void Restart() {
     if (kind_ && *kind_ == "appimage") {
@@ -558,6 +556,19 @@ class Service {
                                                              base::BindOnce(std::move(reply), std::move(kind)));
   }
 
+  static base::Value Nullable(const std::string& text) {
+    return text.empty() ? base::Value() : base::Value(text);
+  }
+
+  void AnswerStatus(Done done, std::string kind) {
+    std::move(done).Run(true, base::Value(base::DictValue()
+                                              .Set("phase", Text(policy::PhaseName(state_.phase)))
+                                              .Set("version", Nullable(state_.version))
+                                              .Set("reason", Nullable(state_.reason))
+                                              .Set("kind", std::move(kind))
+                                              .Set("run", state_.run)));
+  }
+
   void KindRead(std::string kind) {
     if (kind != policy::kHelperFailed) kind_ = kind;
     std::vector<base::OnceCallback<void(std::string)>> waiting = std::move(kind_waiters_);
@@ -565,51 +576,49 @@ class Service {
     for (auto& reply : waiting) std::move(reply).Run(kind);
   }
 
-  void DownloadWithKind(std::string version, base::FilePath updates, Done done, std::string kind_line) {
+  void DownloadWithKind(int run, std::string version, std::string kind_line) {
     const std::optional<Kind> kind = policy::InstallableKind(kind_line);
-    if (!kind) {
-      downloading_ = false;
-      return Answer(std::move(done), Failed(policy::kKindReason));
-    }
+    if (!kind) return policy::Finished(state_, run, false, policy::kKindReason);
+    const base::FilePath updates = UpdatesDirectory();
+    if (updates.empty()) return policy::Finished(state_, run, false, policy::kDiskReason);
     download_ = std::make_unique<PackageDownload>(
-        std::move(version), *kind, std::move(updates),
-        base::BindOnce(&Service::DownloadFinished, weak_factory_.GetWeakPtr(), std::move(done)));
+        version, *kind, updates,
+        base::BindOnce(&Service::DownloadFinished, weak_factory_.GetWeakPtr(), run, version, *kind,
+                       updates.Append(version)));
     download_->Start();
   }
 
-  void DownloadFinished(Done done, base::Value result) {
+  void DownloadFinished(int run, std::string version, Kind kind, base::FilePath directory, std::string reason) {
     download_.reset();
-    downloading_ = false;
-    std::move(done).Run(true, std::move(result));
-  }
-
-  void InstallWithKind(std::string version, base::FilePath directory, Done done, std::string kind_line) {
-    const std::optional<Kind> kind = policy::InstallableKind(kind_line);
-    if (!kind) {
-      installing_ = false;
-      return Answer(std::move(done), Failed(policy::kKindReason));
-    }
+    if (!reason.empty()) return policy::Finished(state_, run, false, reason);
+    policy::Downloaded(state_, run);
     base::ThreadPool::PostTaskAndReplyWithResult(
         FROM_HERE,
         {base::MayBlock(), base::WithBaseSyncPrimitives(), base::TaskPriority::USER_VISIBLE,
          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-        base::BindOnce(&RunInstall, HelperPath(), *kind, std::move(directory), version, AppImagePath()),
-        base::BindOnce(&Service::InstallFinished, weak_factory_.GetWeakPtr(), std::move(done)));
+        base::BindOnce(&RunInstall, HelperPath(), kind, std::move(directory), version, AppImagePath()),
+        base::BindOnce(&Service::InstallFinished, weak_factory_.GetWeakPtr(), run));
   }
 
-  void InstallFinished(Done done, policy::InstallOutcome outcome) {
-    installing_ = false;
-    if (!outcome.ok) return std::move(done).Run(true, Failed(outcome.detail));
-    std::move(done).Run(true, base::Value(base::DictValue().Set("ok", true).Set("version", outcome.detail)));
+  void InstallFinished(int run, policy::InstallOutcome outcome) {
+    policy::Finished(state_, run, outcome.ok, outcome.detail);
   }
 
   std::optional<std::string> kind_;
   std::vector<base::OnceCallback<void(std::string)>> kind_waiters_;
   std::unique_ptr<PackageDownload> download_;
-  bool downloading_ = false;
-  bool installing_ = false;
+  policy::UpdateState state_;
   base::WeakPtrFactory<Service> weak_factory_{this};
 };
+
+std::optional<int> RunArgument(const base::ListValue& args) {
+  if (args.size() != 1) return std::nullopt;
+  if (args[0].is_int()) return args[0].GetInt();
+  if (!args[0].is_double()) return std::nullopt;
+  const double value = args[0].GetDouble();
+  if (value < 0 || value > 1e9 || value != static_cast<double>(static_cast<int>(value))) return std::nullopt;
+  return static_cast<int>(value);
+}
 
 std::optional<std::string> VersionArgument(const base::ListValue& args) {
   if (args.size() != 1 || !args[0].is_string()) return std::nullopt;
@@ -633,11 +642,17 @@ void Invoke(std::string_view method, const base::ListValue& args, Done done) {
         [](Done done, std::string kind) { std::move(done).Run(true, base::Value(std::move(kind))); },
         std::move(done)));
   }
-  if (method == "ArdiaUpdates.download" || method == "ArdiaUpdates.install") {
-    std::optional<std::string> version = VersionArgument(args);
-    if (!version) return Answer(std::move(done), Failed(policy::kVersionReason));
-    if (method == "ArdiaUpdates.download") return Service::Get().Download(std::move(*version), std::move(done));
-    return Service::Get().Install(std::move(*version), std::move(done));
+  if (method == "ArdiaUpdates.status") {
+    if (!args.empty()) return std::move(done).Run(false, base::Value("status takes no arguments"));
+    return Service::Get().Status(std::move(done));
+  }
+  if (method == "ArdiaUpdates.update") {
+    return Service::Get().Update(VersionArgument(args).value_or(std::string()), std::move(done));
+  }
+  if (method == "ArdiaUpdates.claimOutcome") {
+    const std::optional<int> run = RunArgument(args);
+    if (!run) return std::move(done).Run(false, base::Value("claimOutcome takes a run number"));
+    return std::move(done).Run(true, base::Value(Service::Get().ClaimOutcome(*run)));
   }
   if (method == "ArdiaUpdates.restart") {
     if (!args.empty()) return std::move(done).Run(false, base::Value("restart takes no arguments"));

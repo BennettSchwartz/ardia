@@ -37,8 +37,6 @@
     ["ArdiaCalendar.sources", 60000],
     ["ArdiaCalendar.objects", 120000],
     ["ArdiaCli.install", 330000],
-    ["ArdiaUpdates.download", 3720000],
-    ["ArdiaUpdates.install", 630000],
     ["ArdiaShell.fetchBangList", 75000],
   ]);
 

@@ -9,8 +9,9 @@
 
 namespace ardia::linux_self_update_policy {
 
-inline constexpr const char* kSelfUpdateCapabilities[] = {"ArdiaUpdates.installKind", "ArdiaUpdates.download",
-                                                          "ArdiaUpdates.install", "ArdiaUpdates.restart"};
+inline constexpr const char* kSelfUpdateCapabilities[] = {"ArdiaUpdates.installKind", "ArdiaUpdates.update",
+                                                          "ArdiaUpdates.status", "ArdiaUpdates.claimOutcome",
+                                                          "ArdiaUpdates.restart"};
 
 inline constexpr std::string_view kReleaseDownloads = "https://github.com/ardia-browser/ardia/releases/download/";
 inline constexpr std::string_view kRedirectHosts[] = {"github.com", "objects.githubusercontent.com",
@@ -46,8 +47,9 @@ inline constexpr std::string_view kMissingReason = "missing";
 inline constexpr std::string_view kPolkitReason = "polkit";
 inline constexpr std::string_view kTimeoutReason = "timeout";
 inline constexpr std::string_view kInstallReason = "install";
-inline constexpr std::string_view kHelperReasons[] = {"usage",    "missing",  "manifest", "signature", "notNewer",
-                                                      "kind",     "checksum", "install",  "busy"};
+inline constexpr std::string_view kHelperReasons[] = {"usage", "missing", "manifest", "signature", "notNewer",
+                                                      "kind",  "checksum", "install", "busy",     "timeout"};
+inline constexpr std::string_view kDiscardingReasons[] = {"signature", "checksum", "manifest", "notNewer"};
 
 enum class Kind { kDeb, kTarball, kAppImage };
 
@@ -213,6 +215,104 @@ inline ManifestRead PackageInManifest(std::string_view manifest, std::string_vie
   if (!found) return {std::nullopt, kKindReason};
   if (found->size > kMaxPackageBytes) return {std::nullopt, kTooLargeReason};
   return {std::move(found), ""};
+}
+
+inline int CompareNumbers(std::string_view a, std::string_view b) {
+  while (a.size() > 1 && a.front() == '0') a.remove_prefix(1);
+  while (b.size() > 1 && b.front() == '0') b.remove_prefix(1);
+  if (a.size() != b.size()) return a.size() < b.size() ? -1 : 1;
+  return a < b ? -1 : (a > b ? 1 : 0);
+}
+
+struct VersionParts {
+  std::string_view numbers[3];
+  std::optional<std::string_view> nightly;
+};
+
+inline std::optional<VersionParts> SplitVersion(std::string_view version) {
+  if (!ValidVersion(version)) return std::nullopt;
+  VersionParts parts;
+  const size_t dash = version.find('-');
+  std::string_view core = version.substr(0, dash);
+  for (int index = 0; index < 3; ++index) {
+    const size_t dot = core.find('.');
+    parts.numbers[index] = core.substr(0, dot);
+    core = dot == std::string_view::npos ? std::string_view() : core.substr(dot + 1);
+  }
+  if (dash != std::string_view::npos) parts.nightly = version.substr(version.rfind('.') + 1);
+  return parts;
+}
+
+inline std::optional<int> CompareVersions(std::string_view a, std::string_view b) {
+  const std::optional<VersionParts> left = SplitVersion(a);
+  const std::optional<VersionParts> right = SplitVersion(b);
+  if (!left || !right) return std::nullopt;
+  for (int index = 0; index < 3; ++index) {
+    if (const int order = CompareNumbers(left->numbers[index], right->numbers[index])) return order;
+  }
+  if (left->nightly && right->nightly) return CompareNumbers(*left->nightly, *right->nightly);
+  if (left->nightly) return -1;
+  if (right->nightly) return 1;
+  return 0;
+}
+
+inline bool DiscardsDownload(std::string_view reason) {
+  for (const std::string_view discarding : kDiscardingReasons) {
+    if (reason == discarding) return true;
+  }
+  return false;
+}
+
+enum class Phase { kIdle, kDownloading, kInstalling, kReady, kFailed };
+
+inline std::string_view PhaseName(Phase phase) {
+  switch (phase) {
+    case Phase::kIdle: return "idle";
+    case Phase::kDownloading: return "downloading";
+    case Phase::kInstalling: return "installing";
+    case Phase::kReady: return "ready";
+    case Phase::kFailed: return "failed";
+  }
+  return "";
+}
+
+struct UpdateState {
+  Phase phase = Phase::kIdle;
+  std::string version;
+  std::string reason;
+  int run = 0;
+  bool claimed = false;
+};
+
+inline bool Busy(const UpdateState& state) {
+  return state.phase == Phase::kDownloading || state.phase == Phase::kInstalling;
+}
+
+inline bool BeginRun(UpdateState& state, std::string_view version) {
+  if (Busy(state) || state.phase == Phase::kReady) return false;
+  if (!ValidVersion(version)) {
+    state = UpdateState{Phase::kFailed, "", std::string(kVersionReason), state.run + 1, false};
+    return false;
+  }
+  state = UpdateState{Phase::kDownloading, std::string(version), "", state.run + 1, false};
+  return true;
+}
+
+inline void Downloaded(UpdateState& state, int run) {
+  if (state.run == run && state.phase == Phase::kDownloading) state.phase = Phase::kInstalling;
+}
+
+inline void Finished(UpdateState& state, int run, bool ok, std::string_view reason) {
+  if (state.run != run || !Busy(state)) return;
+  state.phase = ok ? Phase::kReady : Phase::kFailed;
+  state.reason = ok ? "" : std::string(reason);
+}
+
+inline bool ClaimOutcome(UpdateState& state, int run) {
+  if (run <= 0 || run != state.run || state.claimed) return false;
+  if (state.phase != Phase::kReady && state.phase != Phase::kFailed) return false;
+  state.claimed = true;
+  return true;
 }
 
 struct Feed {

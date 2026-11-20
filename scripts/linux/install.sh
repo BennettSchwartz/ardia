@@ -16,7 +16,10 @@ renames, so a running Ardia keeps its files and a failed copy leaves the old
 install whole. Run as root without --destdir, it makes lib/ardia/chrome-sandbox
 setuid root, Chromium's sandbox where user namespaces are unavailable. The polkit policy always goes to DESTDIR/usr/share/polkit-1/actions,
 the only directory polkit reads actions from, whatever the prefix; its update
-action names PREFIX/lib/ardia/ardia-update.
+action names PREFIX/lib/ardia/ardia-update, and is left out unless every
+folder from / down to PREFIX/lib/ardia is owned by root and writable only by
+root (with --destdir: unless PREFIX is /usr), since it runs that helper as
+root without a password.
 Without --destdir it must run as root, and installed files are owned by root.
 On a host whose AppArmor reads the 4.0 ABI (Ubuntu 24.04 and later), an install
 without --destdir also writes /etc/apparmor.d/ardia and loads it, so the
@@ -108,8 +111,33 @@ if [[ -f "$source_root/$icon" ]]; then
   install -D -m 0644 "$source_root/$icon" "$target/$icon"
 fi
 
-sed "s|>/usr/lib/ardia/ardia-update<|>$prefix/lib/ardia/ardia-update<|" \
-  "$source_root/share/polkit-1/actions/dev.ardia.linux.policy" > "$launcher"
+update_action_is_safe() {
+  if [[ -n "$destdir" ]]; then
+    [[ "$prefix" == /usr ]]
+    return
+  fi
+  local runtime="$prefix/lib/ardia" folder uid mode
+  [[ "$(readlink -f -- "$runtime")" == "$runtime" ]] || return 1
+  [[ -f "$runtime/ardia-update" && ! -L "$runtime/ardia-update" ]] || return 1
+  [[ "$(stat -c '%u %a' -- "$runtime/ardia-update")" == "0 755" ]] || return 1
+  folder=$runtime
+  while :; do
+    [[ -d "$folder" && ! -L "$folder" ]] || return 1
+    read -r uid mode < <(stat -c '%u %a' -- "$folder")
+    [[ "$uid" == 0 ]] && (((8#$mode & 8#022) == 0)) || return 1
+    [[ "$folder" != / ]] || return 0
+    folder=$(dirname -- "$folder")
+  done
+}
+
+if update_action_is_safe; then
+  sed "s|>/usr/lib/ardia/ardia-update<|>$prefix/lib/ardia/ardia-update<|" \
+    "$source_root/share/polkit-1/actions/dev.ardia.linux.policy" > "$launcher"
+else
+  echo "install.sh: $prefix/lib/ardia or a folder above it isn't root-owned and writable only by root, so Ardia won't update itself there" >&2
+  sed '/<action id="dev.ardia.linux.update">/,/<\/action>/d' \
+    "$source_root/share/polkit-1/actions/dev.ardia.linux.policy" > "$launcher"
+fi
 install -D -m 0644 "$launcher" "$destdir/usr/share/polkit-1/actions/dev.ardia.linux.policy"
 
 if [[ -z "$destdir" && -e /etc/apparmor.d/abi/4.0 ]]; then

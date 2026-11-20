@@ -13,7 +13,7 @@ import { linuxCapabilities, unavailableCommands } from "./hostCapabilities";
 import { videoTourUrl } from "../../browser/src/state/onboarding/tour";
 import { showToast } from "../../browser/src/state/app/toasts";
 import { checkForUpdates, engineInfo, systemInfo } from "../../browser/src/platform/app";
-import { linuxUpdaterFor, updateMenuItem } from "./linuxUpdates";
+import { updateMenuItem } from "./linuxUpdates";
 import "./linkShareSurface";
 
 const hiddenCommands = () => {
@@ -38,7 +38,8 @@ export async function openAppMenu(windowId: string, button: HTMLElement) {
   ]));
   const focusOrder = [windowId, ...state.ui.focusOrder.filter((id) => id !== windowId)];
   const editTarget = currentEditTarget();
-  const items = appMenuItems(menuState({ ...state, ui: { ...state.ui, focusOrder } }), shortcuts, hiddenCommands(), { fullScreen: !!state.windows[windowId]?.fullScreen, edit: currentEditMenu(windowId, editTarget), updates: ardiaHost ? updateMenuItem(ardiaHost) : null });
+  const updates = ardiaHost ? await updateMenuItem(ardiaHost).catch(() => null) : null;
+  const items = appMenuItems(menuState({ ...state, ui: { ...state.ui, focusOrder } }), shortcuts, hiddenCommands(), { fullScreen: !!state.windows[windowId]?.fullScreen, edit: currentEditMenu(windowId, editTarget), updates });
   const { left, bottom } = button.getBoundingClientRect();
   const openedByPointer = !button.matches(":focus-visible");
   const id = await showMenu(items, undefined, { x: left, y: bottom + 4 });
@@ -46,7 +47,7 @@ export async function openAppMenu(windowId: string, button: HTMLElement) {
   const choice = id ? appMenuChoice(id) : null;
   if (!choice) return;
   if (choice.kind === "about") return showAbout(windowId);
-  if (choice.kind === "updates") return void (choice.restart || !ardiaHost ? checkForUpdates() : linuxUpdaterFor(ardiaHost).check(true)).catch(reportHostError);
+  if (choice.kind === "updates") return void checkForUpdates().catch(reportHostError);
   if (choice.kind === "edit") return runEdit(windowId, choice.action, editTarget).catch(reportHostError);
   if (choice.kind === "command") return emitCommand({ command: choice.command, arg: choice.arg, windowId });
   if (choice.action === "close") return void closeWindow(windowId).catch(reportHostError);

@@ -1,5 +1,5 @@
 import type { ArdiaHost } from "./host";
-import { AUR_UPDATE_COMMAND, linuxUpdater, readyToRestartIn, scheduleUpdateChecks, updatesAvailable, linuxSwitchesFetch, killSwitchesAvailable, type LinuxUpdater, type UpdateLocks } from "./hostUpdates.ts";
+import { AUR_UPDATE_COMMAND, linuxUpdater, scheduleUpdateChecks, updatesAvailable, linuxSwitchesFetch, killSwitchesAvailable, type LinuxUpdater, type UpdateLocks } from "./hostUpdates.ts";
 import { isLinuxUtility } from "./session.ts";
 import { refreshDocument } from "./shims/shellBase";
 import { systemInfo } from "../../browser/src/platform/app";
@@ -15,14 +15,6 @@ import { noteSwitchRefresh, noteUpdatePageOpened } from "../../browser/src/state
 const updaters = new WeakMap<ArdiaHost, LinuxUpdater>();
 const UPDATE_ICON = "arrow.down.circle";
 
-const appVersion = () => {
-  try {
-    return systemInfo().appVersion ?? null;
-  } catch {
-    return null;
-  }
-};
-
 const browserLocks = (): UpdateLocks | undefined => (typeof navigator === "undefined" ? undefined : (navigator as { locks?: UpdateLocks }).locks);
 
 export function linuxUpdaterFor(host: ArdiaHost): LinuxUpdater {
@@ -36,7 +28,13 @@ export function linuxUpdaterFor(host: ArdiaHost): LinuxUpdater {
   };
   const updater = linuxUpdater({
     host,
-    appVersion,
+    appVersion: () => {
+      try {
+        return systemInfo().appVersion ?? null;
+      } catch {
+        return null;
+      }
+    },
     read: readDocument,
     write: saveDocument,
     refresh: refreshDocument,
@@ -84,14 +82,20 @@ export function linuxUpdaterFor(host: ArdiaHost): LinuxUpdater {
       if (answer?.confirmed) copyText(AUR_UPDATE_COMMAND);
     },
     open,
+    showsToasts: browserWindow,
     locks: browserLocks(),
   });
   updaters.set(host, updater);
   return updater;
 }
 
-export const updateMenuItem = (host: ArdiaHost): "check" | "restart" | null =>
-  !updatesAvailable(host) || host.bootstrap.privateWindow ? null : readyToRestartIn(readDocument, appVersion()) ? "restart" : "check";
+const MENU_STATUS_WAIT_MS = 150;
+
+export const updateMenuItem = async (host: ArdiaHost): Promise<"check" | "restart" | null> => {
+  if (!updatesAvailable(host) || host.bootstrap.privateWindow) return null;
+  const late = new Promise<"check">((resolve) => setTimeout(() => resolve("check"), MENU_STATUS_WAIT_MS));
+  return Promise.race([linuxUpdaterFor(host).menuItem(), late]);
+};
 
 export function startLinuxUpdates(host: ArdiaHost, locks?: LockManager) {
   if (killSwitchesAvailable(host)) startKillSwitches(linuxSwitchesFetch(host, fetch.bind(globalThis)), noteSwitchRefresh);

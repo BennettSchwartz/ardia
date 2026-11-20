@@ -17,7 +17,8 @@ Installs a signed Ardia update for Linux.
                  for this kind of install when <V> is newer than lib/ardia/VERSION.
                  A .deb or tarball install runs it as root through pkexec; an
                  AppImage replaces the file APPIMAGE names, as its user. The last line on
-                 stdout is "installed <V>" or "failed <reason>".'
+                 stdout is "installed <V>" or "failed <reason>". Everything
+                 after the update folder is checked gets 9 minutes, then fails with timeout.'
 
 self=$(readlink -f -- "${BASH_SOURCE[0]}")
 libdir=${self%/*}
@@ -27,12 +28,18 @@ action_id=dev.ardia.linux.update
 max_package=536870912
 max_manifest=4096
 signature_size=64
+install_budget=540
+small_copy_seconds=60
 version_pattern='^([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(-nightly\.([0-9]{1,9}))?$'
 version_line_pattern='^version (.+)$'
 package_line_pattern='^(deb|tarball|appimage) ([^ ]+) ([0-9a-f]{64}) ([1-9][0-9]{0,9})$'
 manifest_name_pattern='^Ardia-(.+)-linux-update\.txt$'
 
 reported=0
+install_deadline=0
+left=0
+owner=""
+owner_group=""
 work=""
 staged=""
 appimage=""
@@ -168,8 +175,26 @@ detect_kind() {
   printf '%s' "$kind"
 }
 
+refresh_left() {
+  left=$((install_deadline - SECONDS))
+  ((left > 0)) || fail timeout "the install step ran out of its ${install_budget}s"
+}
+
+limited() {
+  local seconds=$1
+  shift
+  timeout --kill-after=15 "$seconds" "$@"
+}
+
+settle() {
+  local status=$1 reason=$2 message=$3
+  ((status != 0)) || return 0
+  ((status != 124 && status != 137)) || fail timeout "$message: past the deadline"
+  fail "$reason" "$message"
+}
+
 copy_in() {
-  local name=$1 cap=$2 destination=$3 oversize=$4 info type uid links size copied
+  local name=$1 cap=$2 destination=$3 oversize=$4 seconds=$5 info type uid links size copied
   local source="$dir/$name"
   info=$(stat -c '%F|%u|%h|%s' -- "$source" 2>/dev/null) || fail missing "no $name in the update folder"
   IFS='|' read -r type uid links size <<<"$info"
@@ -177,8 +202,13 @@ copy_in() {
   [[ "$uid" == "$owner" ]] || fail missing "$name is not owned by uid $owner"
   [[ "$links" == 1 ]] || fail missing "$name has other hard links"
   ((size <= cap)) || fail "$oversize" "$name is larger than $cap bytes"
-  timeout 900 dd if="$source" of="$destination" iflag=nofollow,nonblock,count_bytes count=$((cap + 1)) bs=1M status=none \
-    || fail missing "couldn't read $name"
+  local reader=(dd if="$source" "iflag=nofollow,nonblock,count_bytes" count=$((cap + 1)) bs=1M status=none)
+  if [[ "$EUID" == 0 && "$owner" != 0 ]]; then
+    reader=(setpriv --reuid="$owner" --regid="$owner_group" --clear-groups -- "${reader[@]}")
+  fi
+  local status=0
+  limited "$seconds" "${reader[@]}" >"$destination" || status=$?
+  settle "$status" missing "couldn't read $name"
   copied=$(stat -c %s -- "$destination")
   ((copied <= cap)) || fail "$oversize" "$name grew past $cap bytes"
 }
@@ -216,12 +246,12 @@ parse_manifest() {
 }
 
 install_deb() {
-  local expected=${version/-/\~} installed
-  (
-    umask 022
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends --no-remove \
-      -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 -- "$work/$package_name"
-  ) </dev/null >&2 || fail install "apt-get couldn't install $package_name"
+  local expected=${version/-/\~} installed status=0
+  refresh_left
+  limited "$left" env DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends --no-remove \
+    -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 -- "$work/$package_name" \
+    </dev/null >&2 || status=$?
+  settle "$status" install "apt-get couldn't install $package_name"
   installed=$(dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
   [[ "$installed" == "$expected" ]] || fail install "dpkg reports ardia $installed after the install, not $expected"
 }
@@ -231,16 +261,15 @@ install_tarball() {
   [[ "$libdir" == */lib/ardia && "$prefix" =~ ^/[A-Za-z0-9._/+-]+$ && "/$prefix/" != */../* ]] \
     || fail kind "$libdir is not <prefix>/lib/ardia"
   mkdir -- "$work/unpacked"
-  (
-    umask 022
-    tar -xJf "$work/$package_name" -C "$work/unpacked" --no-same-owner
-  ) </dev/null >&2 || fail install "couldn't unpack $package_name"
+  local status=0
+  refresh_left
+  limited "$left" tar -xJf "$work/$package_name" -C "$work/unpacked" --no-same-owner </dev/null >&2 || status=$?
+  settle "$status" install "couldn't unpack $package_name"
   local installer="$work/unpacked/ardia/install.sh"
   [[ -f "$installer" && ! -L "$installer" && -x "$installer" ]] || fail install "$package_name has no ardia/install.sh"
-  (
-    umask 022
-    "$installer" --prefix "$prefix"
-  ) </dev/null >&2 || fail install "install.sh failed"
+  refresh_left
+  limited "$left" "$installer" --prefix "$prefix" </dev/null >&2 || status=$?
+  settle "$status" install "install.sh failed"
 }
 
 install_appimage() {
@@ -257,6 +286,8 @@ run_install() {
   else
     owner=$EUID
   fi
+  owner_group=$(id -g -- "$owner" 2>/dev/null) || fail usage "uid $owner has no account"
+  [[ "$owner_group" =~ ^[0-9]{1,10}$ ]] || fail usage "uid $owner has no primary group"
   kind=$(detect_kind)
   case "$kind" in
     deb|tarball)
@@ -296,8 +327,11 @@ run_install() {
   local named_version=${BASH_REMATCH[1]}
   version_parts "$named_version" >/dev/null || fail manifest "the manifest's file name has a malformed version"
 
-  copy_in "$manifest_name" "$max_manifest" "$work/manifest" manifest
-  copy_in "$manifest_name.sig" "$signature_size" "$work/signature" signature
+  install_deadline=$((SECONDS + install_budget))
+  refresh_left
+  copy_in "$manifest_name" "$max_manifest" "$work/manifest" manifest "$((left < small_copy_seconds ? left : small_copy_seconds))"
+  refresh_left
+  copy_in "$manifest_name.sig" "$signature_size" "$work/signature" signature "$((left < small_copy_seconds ? left : small_copy_seconds))"
   [[ "$(stat -c %s -- "$work/signature")" == "$signature_size" ]] || fail signature "the signature is not $signature_size bytes"
   openssl pkeyutl -verify -pubin -inkey "$key" -rawin -in "$work/manifest" -sigfile "$work/signature" >/dev/null 2>&1 \
     || fail signature "the manifest's signature doesn't verify"
@@ -313,12 +347,15 @@ run_install() {
     staged=$(mktemp "$(dirname -- "$appimage")/.ardia-update-XXXXXX")
     destination=$staged
   fi
-  copy_in "$package_name" "$package_size" "$destination" checksum
+  refresh_left
+  copy_in "$package_name" "$package_size" "$destination" checksum "$left"
   [[ "$(stat -c %s -- "$destination")" == "$package_size" ]] || fail checksum "$package_name is not $package_size bytes"
   local digest
-  digest=$(sha256sum -- "$destination")
+  refresh_left
+  digest=$(limited "$left" sha256sum -- "$destination") || settle $? checksum "hashing $package_name"
   [[ "${digest%% *}" == "$package_digest" ]] || fail checksum "$package_name doesn't match the manifest's sha256"
 
+  umask 022
   case "$kind" in
     deb) install_deb ;;
     tarball) install_tarball ;;

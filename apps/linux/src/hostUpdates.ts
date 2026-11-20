@@ -5,6 +5,8 @@ import { SELF_UPDATE_METHODS } from "./hostCapabilities.ts";
 import { hostLaunchConfig } from "./hostLaunchConfig.ts";
 import { channelOf, compareVersions, isAppVersion, linuxReleases, newestRelease, type Release } from "./updateReleases.ts";
 import {
+  UPDATE_INSTALL_FAILURES,
+  UPDATE_DOWNLOAD_FAILURES,
   noteUpdateCheck,
   noteUpdateDownloadFailed,
   noteUpdateDownloadFinished,
@@ -19,37 +21,29 @@ import { consentToken, type ConsentToken } from "../../browser/src/state/telemet
 
 export const UPDATE_METHODS = ["updaterState", "checkForUpdates", "setAutomaticUpdateChecks", "setAutomaticUpdateDownloads", "setUpdateChannel"] as const;
 export const RELEASES_METHOD = "ArdiaUpdates.releases";
-export const [INSTALL_KIND_METHOD, DOWNLOAD_METHOD, INSTALL_METHOD, RESTART_METHOD] = SELF_UPDATE_METHODS;
+export const [, UPDATE_METHOD, STATUS_METHOD, CLAIM_METHOD, RESTART_METHOD] = SELF_UPDATE_METHODS;
 export const KILL_SWITCHES_METHOD = "ArdiaShell.fetchKillSwitches";
 export const UPDATE_PREFERENCES = "linux-updates.json";
 export const RELEASES_PAGE = "https://github.com/ardia-browser/ardia/releases";
 export const FIRST_CHECK_AFTER_MS = 30_000;
 export const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+export const WATCH_EVERY_MS = 30_000;
+export const FOLLOW_RUN_EVERY_MS = 2_000;
+export const FOLLOW_RUN_FOR_MS = 75 * 60 * 1000;
 export const UPDATE_CHECK_LOCK = "ardia.linux.update-checks";
-export const UPDATE_INSTALL_LOCK = "ardia.linux.update-install";
-export const UPDATE_WORK_STALE_MS = 30 * 60 * 1000;
+export const UPDATE_PREFERENCES_LOCK = "ardia.linux.update-preferences";
 export const AUR_UPDATE_COMMAND = "yay -Syu ardia-bin";
 
 export type InstallKind = UpdateInstallKind | "managed" | "unsupported";
-type Work = { version: string; phase: "downloading" | "installing"; at: number };
-type Preferences = {
-  automaticChecks: boolean;
-  automaticDownloads: boolean;
-  lastCheck: number | null;
-  channel: UpdateChannel | null;
-  notified: string | null;
-  installed: string | null;
-  failed: string | null;
-  work: Work | null;
-};
+type Phase = "idle" | "downloading" | "installing" | "ready" | "failed";
+export type EngineStatus = { phase: Phase; version: string | null; reason: string | null; kind: InstallKind; run: number };
+type Preferences = { automaticChecks: boolean; automaticDownloads: boolean; lastCheck: number | null; channel: UpdateChannel | null; notified: string | null; failed: string | null };
 type Fetched = { status: number; body: string };
 type SwitchCheck = NonNullable<Extract<UpdaterState, { available: true }>["switchCheck"]>;
-type Outcome = { ok: true } | { ok: false; reason: unknown };
-type FallbackFrom = "asked" | "automatic" | "accepted";
+type StartedFrom = "asked" | "automatic" | "accepted";
+type OwnRun = { release: Release; from: StartedFrom };
 
-export type UpdateLocks = {
-  request(name: string, options: { ifAvailable: true }, callback: (lock: unknown) => Promise<unknown>): Promise<unknown>;
-};
+export type UpdateLocks = { request(name: string, callback: () => Promise<unknown>): Promise<unknown> };
 
 export type UpdateDeps = {
   host: ArdiaHost;
@@ -64,28 +58,36 @@ export type UpdateDeps = {
   ready: (version: string, restart: () => void) => void;
   managed: (release: Release, current: string, asked: boolean) => Promise<void>;
   open: (url: string) => void;
+  showsToasts?: boolean;
   locks?: UpdateLocks;
+  wait?: (ms: number) => Promise<void>;
   now?: () => number;
 };
 
-const DEFAULTS: Preferences = { automaticChecks: true, automaticDownloads: true, lastCheck: null, channel: null, notified: null, installed: null, failed: null, work: null };
+const DEFAULTS: Preferences = { automaticChecks: true, automaticDownloads: true, lastCheck: null, channel: null, notified: null, failed: null };
 const INSTALLABLE: ReadonlySet<string> = new Set<UpdateInstallKind>(["deb", "tarball", "appimage"]);
+const PHASES: ReadonlySet<string> = new Set<Phase>(["idle", "downloading", "installing", "ready", "failed"]);
+const ONLY_INSTALL_FAILURES: ReadonlySet<string> = new Set(UPDATE_INSTALL_FAILURES.filter((reason) => !(UPDATE_DOWNLOAD_FAILURES as readonly string[]).includes(reason)));
 
 export const installs = (kind: InstallKind | null | undefined): kind is UpdateInstallKind => !!kind && INSTALLABLE.has(kind);
+export const updateBusy = (status: EngineStatus | null | undefined) => status?.phase === "downloading" || status?.phase === "installing";
+const finished = (status: EngineStatus) => status.run > 0 && (status.phase === "ready" || status.phase === "failed");
 
 export function readInstallKind(line: unknown): InstallKind {
   return line === "managed" || (typeof line === "string" && INSTALLABLE.has(line)) ? (line as InstallKind) : "unsupported";
 }
 
+export function readEngineStatus(answer: unknown): EngineStatus | null {
+  if (!answer || typeof answer !== "object") return null;
+  const { phase, version, reason, kind, run } = answer as Record<string, unknown>;
+  if (typeof phase !== "string" || !PHASES.has(phase) || typeof run !== "number" || !Number.isSafeInteger(run) || run < 0) return null;
+  return { phase: phase as Phase, version: isAppVersion(version) ? version : null, reason: typeof reason === "string" ? reason : null, kind: readInstallKind(kind), run };
+}
+
 const knownKinds = new WeakMap<ArdiaHost, InstallKind>();
 export const installsUpdates = (host: ArdiaHost | undefined) => !!host && installs(knownKinds.get(host));
 export const selfUpdateAvailable = (host: ArdiaHost) => SELF_UPDATE_METHODS.every((method) => hostSupports(method, host));
-
-function readWork(work: unknown): Work | null {
-  if (!work || typeof work !== "object") return null;
-  const { version, phase, at } = work as Partial<Work>;
-  return isAppVersion(version) && (phase === "downloading" || phase === "installing") && typeof at === "number" ? { version, phase, at } : null;
-}
+const releasePage = (version: string): Release => ({ version, url: `${RELEASES_PAGE}/tag/v${version}`, prerelease: channelOf(version) === "nightly" });
 
 function readPreferences(read: UpdateDeps["read"]): Preferences {
   try {
@@ -97,83 +99,52 @@ function readPreferences(read: UpdateDeps["read"]): Preferences {
       lastCheck: typeof saved.lastCheck === "number" ? saved.lastCheck : null,
       channel: saved.channel === "stable" || saved.channel === "nightly" ? saved.channel : null,
       notified: typeof saved.notified === "string" ? saved.notified : null,
-      installed: isAppVersion(saved.installed) ? saved.installed : null,
       failed: isAppVersion(saved.failed) ? saved.failed : null,
-      work: readWork(saved.work),
     };
   } catch {
     return { ...DEFAULTS };
   }
 }
 
-const succeeded = (answer: unknown): Outcome => {
-  if (answer && typeof answer === "object" && (answer as { ok?: unknown }).ok === true) return { ok: true };
-  const reason = answer && typeof answer === "object" ? (answer as { reason?: unknown }).reason : undefined;
-  return { ok: false, reason: typeof reason === "string" ? reason : "other" };
-};
-
-export function readyToRestart(saved: Pick<Preferences, "installed">, current: string | null): string | null {
-  return saved.installed && current && compareVersions(saved.installed, current) > 0 ? saved.installed : null;
-}
-
-export const readyToRestartIn = (read: UpdateDeps["read"], current: string | null) => readyToRestart(readPreferences(read), isAppVersion(current) ? current : null);
-
 export function linuxUpdater(deps: UpdateDeps) {
   const now = deps.now ?? Date.now;
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let checking = false;
   let switchCheck: SwitchCheck | null = null;
-  let readyShown: string | null = null;
-  let kindLookup: Promise<InstallKind | null> | null = null;
-  let saving: Promise<unknown> = Promise.resolve();
-  let downloadStarts: (() => void) | null = null;
+  let settledRun = 0;
+  let sightedRun = 0;
+  const installingRuns = new Set<number>();
   const preferences = async () => {
     await deps.refresh?.(UPDATE_PREFERENCES).catch(() => {});
     return readPreferences(deps.read);
   };
-  const remember = (patch: Partial<Preferences>): Promise<void> => {
-    const saved = saving.then(async () => {
+  const remember = async (patch: Partial<Preferences>): Promise<void> => {
+    const merge = async () => {
       await deps.write(UPDATE_PREFERENCES, JSON.stringify({ ...(await preferences()), ...patch }));
-    });
-    saving = saved.catch(() => {});
-    return saved;
+    };
+    await (deps.locks ? deps.locks.request(UPDATE_PREFERENCES_LOCK, merge) : merge());
   };
   const version = () => {
     const current = deps.appVersion();
     return isAppVersion(current) ? current : null;
   };
   const channel = (saved: Preferences, current: string | null): UpdateChannel => saved.channel ?? (current ? channelOf(current) : "stable");
-  const workUnderWay = (saved: Preferences, current: string | null) =>
-    saved.work && now() - saved.work.at < UPDATE_WORK_STALE_MS && (!current || compareVersions(saved.work.version, current) > 0) ? saved.work : null;
 
-  const installKind = (): Promise<InstallKind | null> =>
-    (kindLookup ??= !selfUpdateAvailable(deps.host)
-      ? Promise.resolve(null)
-      : invokeHost<unknown>(INSTALL_KIND_METHOD, { args: [] }, deps.host).then(
-          (line) => {
-            const kind = readInstallKind(line);
-            if (!installs(kind)) console.info(`[ardia linux] Ardia doesn't update itself here: ${typeof line === "string" ? line : "no answer"}`);
-            knownKinds.set(deps.host, kind);
-            return kind;
-          },
-          (error: unknown) => {
-            console.info(`[ardia linux] Ardia couldn't tell how it was installed: ${String(error)}`);
-            knownKinds.set(deps.host, "unsupported");
-            return "unsupported" as const;
-          },
-        ));
+  async function engineStatus(): Promise<EngineStatus | null> {
+    if (!selfUpdateAvailable(deps.host)) return null;
+    const status = readEngineStatus(await invokeHost<unknown>(STATUS_METHOD, { args: [] }, deps.host).catch(() => null));
+    if (status) {
+      knownKinds.set(deps.host, status.kind);
+      if (status.phase === "installing") installingRuns.add(status.run);
+    }
+    return status;
+  }
 
   async function restart(consent: ConsentToken | null) {
     noteUpdateRestart(consent);
     await invokeHost(RESTART_METHOD, { args: [] }, deps.host).catch((error: unknown) => console.info(`[ardia linux] Ardia couldn't restart: ${String(error)}`));
   }
   const restartToUpdate = () => void restart(consentToken());
-
-  const showReady = (wanted: UpdateChannel, ready: string, again: boolean) => {
-    switchCheck = { phase: "ready", channel: wanted, version: ready };
-    if (readyShown === ready && !again) return;
-    readyShown = ready;
-    deps.ready(ready, restartToUpdate);
-  };
 
   async function newest(wanted: UpdateChannel): Promise<Release | null> {
     const fetched = await invokeHost<Fetched>(RELEASES_METHOD, { args: [] }, deps.host);
@@ -187,77 +158,83 @@ export function linuxUpdater(deps: UpdateDeps) {
     return true;
   }
 
-  async function exclusively(run: () => Promise<boolean>): Promise<boolean | "busy"> {
-    if (!deps.locks) return run();
-    return (await deps.locks.request(UPDATE_INSTALL_LOCK, { ifAvailable: true }, (lock) => (lock ? run() : Promise.resolve("busy" as const)))) as boolean | "busy";
-  }
-
-  async function downloadAndInstall(release: Release, kind: UpdateInstallKind, wanted: UpdateChannel, consent: ConsentToken | null): Promise<boolean> {
-    const target = release.version;
-    const ready = readyToRestart(await preferences(), version());
-    if (ready && compareVersions(ready, target) >= 0) return true;
-    try {
-      switchCheck = { phase: "downloading", channel: wanted, version: target };
-      await remember({ work: { version: target, phase: "downloading", at: now() } });
-      downloadStarts?.();
-      noteUpdateDownloadStarted(consent);
-      const downloaded = succeeded(await invokeHost<unknown>(DOWNLOAD_METHOD, { args: [target] }, deps.host).catch(() => null));
-      if (!downloaded.ok) {
-        noteUpdateDownloadFailed(downloaded.reason, consent);
-        console.info(`[ardia linux] the update to ${target} didn't download: ${String(downloaded.reason)}`);
-        return false;
-      }
+  function countOutcome(status: EngineStatus, consent: ConsentToken | null) {
+    noteUpdateDownloadStarted(consent);
+    if (status.phase === "ready") {
       noteUpdateDownloadFinished(consent);
-      switchCheck = { phase: "installing", channel: wanted, version: target };
-      await remember({ work: { version: target, phase: "installing", at: now() } });
-      const installed = succeeded(await invokeHost<unknown>(INSTALL_METHOD, { args: [target] }, deps.host).catch(() => null));
-      if (!installed.ok) {
-        noteUpdateInstallFailed(installed.reason, consent);
-        console.info(`[ardia linux] the update to ${target} didn't install: ${String(installed.reason)}`);
-        return false;
-      }
-      noteUpdateInstalled(kind, consent);
-      await remember({ installed: target, notified: target, work: null });
-      return true;
-    } finally {
-      if ((await preferences()).work) await remember({ work: null });
+      if (installs(status.kind)) noteUpdateInstalled(status.kind, consent);
+      return;
+    }
+    if (installingRuns.has(status.run) || ONLY_INSTALL_FAILURES.has(status.reason ?? "")) {
+      noteUpdateDownloadFinished(consent);
+      noteUpdateInstallFailed(status.reason, consent);
+    } else {
+      noteUpdateDownloadFailed(status.reason, consent);
     }
   }
 
-  async function fallBack(release: Release, current: string, from: FallbackFrom, wanted: UpdateChannel, consent: ConsentToken | null) {
-    switchCheck = { phase: "found", channel: wanted, version: release.version };
-    if (from === "asked") {
+  async function fallBack(release: Release, from: StartedFrom, consent: ConsentToken | null) {
+    const current = version();
+    switchCheck = { phase: "found", channel: switchCheck?.channel ?? channelOf(release.version), version: release.version };
+    if (from === "asked" && current) {
       if (await deps.ask(release, current, true)) {
         noteUpdatePageOpened(consent);
         deps.open(release.url);
       }
       return;
     }
+    if ((await preferences()).failed === release.version) return;
     await remember({ notified: release.version, failed: release.version });
     deps.offer(release, true);
   }
 
-  async function selfUpdate(release: Release, current: string, kind: UpdateInstallKind, from: FallbackFrom, wanted: UpdateChannel, consent: ConsentToken | null) {
-    const outcome = await exclusively(() => downloadAndInstall(release, kind, wanted, consent));
-    if (outcome === "busy") return;
-    if (!outcome) return fallBack(release, current, from, wanted, consent);
-    const ready = readyToRestart(await preferences(), current) ?? release.version;
-    showReady(wanted, ready, from !== "automatic");
+  async function settle(status: EngineStatus, consent: ConsentToken | null, own: OwnRun | null) {
+    if (!finished(status) || status.run <= settledRun) return;
+    if (status.phase === "ready" && deps.showsToasts === false) return;
+    settledRun = status.run;
+    const claimed = (await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).catch(() => false)) === true;
+    if (!claimed) return;
+    countOutcome(status, consent);
+    const target = status.version ?? own?.release.version;
+    if (!target) return;
+    if (status.phase === "ready") return deps.ready(target, restartToUpdate);
+    console.info(`[ardia linux] the update to ${target} failed: ${status.reason ?? "unknown"}`);
+    await fallBack(own?.release.version === target ? own.release : releasePage(target), own?.from ?? "automatic", consent);
   }
 
-  async function deliver(release: Release, current: string, asked: boolean, saved: Preferences, wanted: UpdateChannel, consent: ConsentToken | null) {
-    const kind = await installKind();
-    if (kind === "managed") {
+  async function followRun(started: EngineStatus, own: OwnRun, consent: ConsentToken | null) {
+    const until = now() + FOLLOW_RUN_FOR_MS;
+    let status: EngineStatus | null = started;
+    while (status && updateBusy(status) && now() < until) {
+      await wait(FOLLOW_RUN_EVERY_MS);
+      status = (await engineStatus()) ?? status;
+    }
+    await settle(status, consent, own);
+  }
+
+  async function startRun(release: Release, from: StartedFrom, consent: ConsentToken | null) {
+    const started = readEngineStatus(await invokeHost<unknown>(UPDATE_METHOD, { args: [release.version] }, deps.host).catch(() => null));
+    if (!started) {
+      noteUpdateDownloadStarted(consent);
+      noteUpdateDownloadFailed("other", consent);
+      return fallBack(release, from, consent);
+    }
+    if (started.phase === "installing") installingRuns.add(started.run);
+    void followRun(started, { release, from }, consent).catch((error: unknown) => console.info(`[ardia linux] the update to ${release.version} stopped: ${String(error)}`));
+  }
+
+  async function deliver(release: Release, current: string, asked: boolean, saved: Preferences, consent: ConsentToken | null) {
+    const status = await engineStatus();
+    if (status?.kind === "managed") {
       if (asked) return deps.managed(release, current, true);
       if (await offeredOnce(release)) await deps.managed(release, current, false);
       return;
     }
-    if (installs(kind)) {
-      const ready = readyToRestart(await preferences(), current);
-      if (ready && compareVersions(ready, release.version) >= 0) return showReady(wanted, ready, asked);
+    if (status && installs(status.kind)) {
+      if (status.phase === "ready") return;
       if (!asked && saved.failed === release.version) return;
-      if (asked || saved.automaticDownloads) return selfUpdate(release, current, kind, asked ? "asked" : "automatic", wanted, consent);
-      if (await offeredOnce(release)) deps.offerInstall(release, () => installOffered(release, wanted));
+      if (asked || saved.automaticDownloads) return startRun(release, asked ? "asked" : "automatic", consent);
+      if (await offeredOnce(release)) deps.offerInstall(release, () => installOffered(release));
       return;
     }
     if (asked) {
@@ -279,7 +256,6 @@ export function linuxUpdater(deps: UpdateDeps) {
     try {
       const saved = await preferences();
       if (!asked && !saved.automaticChecks) return;
-      if (workUnderWay(saved, current) && installs(await installKind())) return;
       wanted = channel(saved, current);
       switchCheck = { phase: "checking", channel: wanted };
       let release: Release | null;
@@ -300,81 +276,70 @@ export function linuxUpdater(deps: UpdateDeps) {
         if (asked) await deps.tell("Ardia is up to date", `You have Ardia ${current}, the newest ${wanted === "nightly" ? "Nightly" : "Stable"} build for Linux.`);
         return;
       }
-      await deliver(release!, current, asked, saved, wanted, consent).catch((error: unknown) => console.info(`[ardia linux] the update to ${release!.version} stopped: ${String(error)}`));
+      await deliver(release!, current, asked, saved, consent).catch((error: unknown) => console.info(`[ardia linux] the update to ${release!.version} stopped: ${String(error)}`));
     } finally {
       checking = false;
     }
   }
 
-  async function acceptOffer(release: Release, wanted: UpdateChannel, consent: ConsentToken | null) {
-    const current = version();
-    if (checking || !current) return;
-    checking = true;
-    try {
-      const kind = await installKind();
-      if (installs(kind)) await selfUpdate(release, current, kind, "accepted", wanted, consent);
-    } catch (error) {
-      console.info(`[ardia linux] the update to ${release.version} stopped: ${String(error)}`);
-    } finally {
-      checking = false;
-    }
-  }
-  const installOffered = (release: Release, wanted: UpdateChannel) => void acceptOffer(release, wanted, consentToken());
-
-  const untilDownloadStarts = (run: () => Promise<void>) =>
-    new Promise<void>((resolve) => {
-      downloadStarts = resolve;
-      void run().finally(() => {
-        if (downloadStarts === resolve) downloadStarts = null;
-        resolve();
-      });
-    });
+  const installOffered = (release: Release) => {
+    const consent = consentToken();
+    void startRun(release, "accepted", consent).catch((error: unknown) => console.info(`[ardia linux] the update to ${release.version} stopped: ${String(error)}`));
+  };
 
   async function checkOrRestart(consent: ConsentToken | null) {
-    const pending = readyToRestart(await preferences(), version());
-    if (pending && installs(await installKind())) return restart(consent);
+    const status = await engineStatus();
+    if (status?.phase === "ready" && installs(status.kind)) return restart(consent);
     return check(true, consent);
+  }
+
+  async function watch(taken?: ConsentToken | null) {
+    const consent = taken === undefined ? consentToken() : taken;
+    const status = await engineStatus();
+    if (!status || !finished(status) || status.run <= settledRun) return;
+    if (sightedRun !== status.run) {
+      sightedRun = status.run;
+      return;
+    }
+    await settle(status, consent, null);
+  }
+
+  async function menuItem(): Promise<"check" | "restart"> {
+    const status = await engineStatus();
+    return status?.phase === "ready" && installs(status.kind) ? "restart" : "check";
   }
 
   const methods = {
     updaterState: async (): Promise<UpdaterState> => {
       const current = version();
       const saved = await preferences();
-      const selfUpdates = !!current && installs(await installKind());
+      const status = current ? await engineStatus() : null;
+      const selfUpdates = installs(status?.kind);
       const wanted = channel(saved, current);
-      const ready = selfUpdates ? readyToRestart(saved, current) : null;
-      const elsewhere = selfUpdates && !checking ? workUnderWay(saved, current) : null;
-      const shown: SwitchCheck | null = checking && switchCheck
-        ? switchCheck
-        : ready
-          ? { phase: "ready", channel: wanted, version: ready }
-          : elsewhere
-            ? { phase: elsewhere.phase, channel: wanted, version: elsewhere.version }
-            : switchCheck;
+      const busy = selfUpdates && updateBusy(status);
+      const engineCheck: SwitchCheck | null =
+        selfUpdates && status?.version && (busy || status.phase === "ready") ? { phase: status.phase as SwitchCheck["phase"], channel: wanted, version: status.version } : null;
       return {
         available: true,
         configured: !!current,
         automaticChecks: saved.automaticChecks,
         automaticDownloads: selfUpdates && saved.automaticDownloads,
-        canCheck: !checking && !elsewhere,
-        sessionInProgress: checking || !!elsewhere,
+        canCheck: !checking && !busy,
+        sessionInProgress: checking || busy,
         feedURL: RELEASES_PAGE,
         lastCheck: saved.lastCheck,
         version: current ?? deps.appVersion() ?? "",
         channel: wanted,
         buildChannel: current ? channelOf(current) : "stable",
-        switchCheck: shown,
+        switchCheck: checking && switchCheck ? switchCheck : (engineCheck ?? switchCheck),
       };
     },
-    checkForUpdates: () => {
-      const consent = consentToken();
-      return untilDownloadStarts(() => checkOrRestart(consent));
-    },
+    checkForUpdates: () => checkOrRestart(consentToken()),
     setAutomaticUpdateChecks: async (on: unknown) => remember({ automaticChecks: on === true }),
     setAutomaticUpdateDownloads: async (on: unknown) => remember({ automaticDownloads: on === true }),
     setUpdateChannel: async (next: unknown) => {
       await remember({ channel: next === "nightly" ? "nightly" : "stable", notified: null });
-      await untilDownloadStarts(() => check(true));
+      await check(true);
     },
   };
 
@@ -383,7 +348,7 @@ export function linuxUpdater(deps: UpdateDeps) {
     return !!version() && !launch.background && !launch.isolated && (await preferences()).automaticChecks;
   };
 
-  return { methods, check, checksByItself, installKind };
+  return { methods, check, checksByItself, watch, menuItem };
 }
 
 export type LinuxUpdater = ReturnType<typeof linuxUpdater>;
@@ -393,9 +358,11 @@ export function scheduleUpdateChecks(updater: LinuxUpdater, options: { locks?: {
   const run = () => void updater.checksByItself().then((checks) => {
     if (checks) return updater.check(false);
   });
+  const watch = () => void updater.watch().catch(() => {});
   const lead = () => new Promise<void>(() => {
     timers.setTimeout(run, FIRST_CHECK_AFTER_MS);
     timers.setInterval(run, CHECK_EVERY_MS);
+    timers.setInterval(watch, WATCH_EVERY_MS);
   });
   if (!options.locks) return;
   void options.locks.request(UPDATE_CHECK_LOCK, lead).catch(() => {});

@@ -41,7 +41,7 @@ export const CLI_INSTALL_METHODS = ["ArdiaCli.installedVersion", "ArdiaCli.insta
 
 export const USER_SCRIPTS_METHODS = ["ArdiaUserScripts.watch", "ArdiaUserScripts.read", "ArdiaUserScripts.readStatus", "ArdiaUserScripts.writeStatus"] as const;
 
-export const SELF_UPDATE_METHODS = ["ArdiaUpdates.installKind", "ArdiaUpdates.download", "ArdiaUpdates.install", "ArdiaUpdates.restart"] as const;
+export const SELF_UPDATE_METHODS = ["ArdiaUpdates.installKind", "ArdiaUpdates.update", "ArdiaUpdates.status", "ArdiaUpdates.claimOutcome", "ArdiaUpdates.restart"] as const;
 
 export const LINKS_FROM_OTHER_APPS = "ArdiaShell.onOpenURLs";
 export const DICTATION_METHOD = "ArdiaShell.startDictation";

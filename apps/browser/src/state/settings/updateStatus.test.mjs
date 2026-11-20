@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { checkNowControl, switchCheckLine, switchOutcome, updaterBusy } from "./updateStatus.ts";
+import { checkNowControl, switchCheckLine, switchOutcome, updateUnderWay, updaterBusy } from "./updateStatus.ts";
 
 const state = (switchCheck, extra = {}) => ({
   available: true,
@@ -80,4 +80,11 @@ test("an update that installs itself shows its download, its install and Restart
   assert.equal(updaterBusy(ready), false);
   assert.deepEqual(checkNowControl(ready), { title: "Restart to Update", checking: false, disabled: false, pressable: true });
   for (const phase of ["downloading", "installing", "ready"]) assert.equal(switchOutcome({ phase, channel: "nightly" }), "offered", phase);
+});
+
+test("Settings follows an update the engine is downloading or installing, and only that, at the update's pace", () => {
+  assert.equal(updateUnderWay(state({ phase: "downloading", channel: "stable", version: "0.2.48" })), true);
+  assert.equal(updateUnderWay(state({ phase: "installing", channel: "stable", version: "0.2.48" })), true);
+  for (const phase of ["checking", "found", "ready"]) assert.equal(updateUnderWay(state({ phase, channel: "stable" })), false, phase);
+  assert.equal(updateUnderWay({ available: false }), false);
 });

@@ -638,6 +638,10 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
     because polkit reads actions only from there. Without the policy Ardia can't ask for the system password, so saved
     passwords and card numbers stay hidden. The update action's `org.freedesktop.policykit.exec.path` names
     `/usr/lib/ardia/ardia-update`; for another prefix `install.sh` rewrites it to `<prefix>/lib/ardia/ardia-update`.
+    Because that action runs the helper as root without a password, `install.sh` keeps it only when every folder from
+    `/` down to `<prefix>/lib/ardia` is owned by root and writable by no one else and the helper is root's, mode 0755
+    (with `--destdir`, only for `--prefix /usr`); otherwise it installs the policy without it, says so, and that
+    install reports `unsupported noPolicy` and doesn't update itself.
 - **Debian package.** `package.py --deb <path> --version <version>` (`scripts/linux/linux_formats.py`) builds it from
   the staged tree with `dpkg-deb`, so it needs `dpkg-deb` and `readelf` (`apt install dpkg binutils`, Arch:
   `pacman -S dpkg binutils`):
@@ -695,15 +699,17 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   `ardia-update install <dir>` runs as root through `pkexec` for a `.deb` or tarball and as the user for an AppImage.
   It takes a lock (`/run/ardia-update.lock`, or the AppImage's folder), refuses a folder or file that isn't a regular,
   singly linked file owned by the calling user (`PKEXEC_UID`), copies the manifest (at most 4096 bytes) and its `.sig`
-  (64 bytes) into a fresh 0700 folder with `dd iflag=nofollow,nonblock`, verifies them with
+  (64 bytes) into a fresh 0700 folder, read by `dd iflag=nofollow,nonblock` running as the calling user (`setpriv`), so
+  root never opens a path the caller controls, verifies them with
   `openssl pkeyutl -verify -rawin` against `lib/ardia/linux-update.pem`, parses the manifest strictly (it must
   re-serialize byte for byte, and each package name must be exactly `Ardia-<V>-linux-x64.<deb|tar.xz|AppImage>`),
   requires `<V>` to be newer than `lib/ardia/VERSION` (a nightly sorts before its stable), then copies its package
-  (at most the manifest's size) and checks size and sha256. A `.deb` goes through `apt-get install --no-remove`, a
+  (at most the manifest's size, the same way) and checks size and sha256. Copying the package and installing it get 8
+  minutes together, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. A `.deb` goes through `apt-get install --no-remove`, a
   tarball through its own `install.sh --prefix <the helper's prefix>`, and an AppImage is staged as
   `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it. PATH is its own and the prefix comes from its own
   location, never from the caller. The last line on stdout is `installed <V>` or `failed <reason>` (`usage`,
-  `missing`, `manifest`, `signature`, `notNewer`, `kind`, `checksum`, `install`, `busy`).
+  `missing`, `manifest`, `signature`, `notNewer`, `kind`, `checksum`, `install`, `busy`, `timeout`).
 - **polkit action `dev.ardia.linux.update`.** `allow_active` is `yes` with no password, `allow_any` and
   `allow_inactive` are `no`, and `org.freedesktop.policykit.exec.path` limits it to the helper, which only installs
   a release signed with Ardia's key that is newer than the installed one.
@@ -783,20 +789,27 @@ pnpm --filter @ardia/linux acceptance -- <extracted>/ardia/bin/ardia
   `unsupported`), Check Now asks before opening the release page and an automatic check offers it once as a toast, and
   the toggle is hidden. An install pacman or rpm owns (`managed`, the AUR's `ardia-bin`) is told to update with its
   package manager. A failed download or install falls back to the release page once and isn't retried automatically.
-- **Self-update.** `ac_linux_self_update.cc` serves `ArdiaUpdates.installKind`, `download(version)`,
-  `install(version)` and `restart`; the rules are in `ac_linux_self_update_policy.h`.
+- **Self-update.** `ac_linux_self_update.cc` serves `ArdiaUpdates.installKind`, `update(version)`, `status()`,
+  `claimOutcome(run)` and `restart`; the rules are in `ac_linux_self_update_policy.h`. The engine owns each run, so it
+  carries on whatever window started it or closes.
   - `installKind` runs `<lib dir>/ardia-update kind` once per browser process (10 s) and answers its line,
     `unsupported noHelper` without the helper, or `unsupported helperFailed` (not cached).
-  - `download` fetches `Ardia-<V>-linux-update.txt`, its `.sig` and the package the manifest names for this kind from
-    the `v<V>` release into `<user data dir>/Updates/<V>/` (cookieless, no cache, traffic annotation
-    `ardia_linux_update_download`), removing other versions' folders. Redirects go only to https on github.com,
-    objects.githubusercontent.com and release-assets.githubusercontent.com. Caps: 4096 bytes for the manifest, 64 for
-    the signature, the manifest's size (at most 512 MiB) for the package, and the package size plus 64 MiB free.
-    Answers `{ok, dir}` or `{ok: false, reason}` (`version`, `kind`, `network`, `manifest`, `tooLarge`, `busy`,
-    `disk`).
-  - `install` runs `pkexec <helper> install <dir>` for a `.deb` or tarball, or the helper as the user with `APPIMAGE`
-    and `APPDIR` for an AppImage, with a clean environment and a 10 min deadline, and answers the helper's reason or
-    `polkit`, `timeout`, `kind`, `missing`, `busy`. A successful install deletes the folder.
+  - `status()` answers `{phase, version, reason, kind, run}`, phase `idle`, `downloading`, `installing`, `ready` or
+    `failed`. `ready` lasts until the restart: no newer run starts after it.
+  - `update(version)` starts a run unless one is busy or an update is ready, and answers the status at once. The run
+    downloads `Ardia-<V>-linux-update.txt`, its `.sig` and the package the manifest names for this kind from the `v<V>`
+    release into `<user data dir>/Updates/<V>/` (cookieless, no cache, traffic annotation `ardia_linux_update_download`;
+    `Updates` must be a real directory, and only version folders in it are pruned). Redirects go only to https on
+    github.com, objects.githubusercontent.com and release-assets.githubusercontent.com. Caps: 4096 bytes for the
+    manifest, 64 for the signature, the manifest's size (at most 512 MiB) for the package, and the package size plus
+    64 MiB free. Then it runs `pkexec <helper> install <dir>` for a `.deb` or tarball, or the helper as the user with
+    `APPIMAGE` and `APPDIR` for an AppImage, with a clean environment and a 10 min deadline (the helper's own is 9).
+    Failure reasons: `version`, `kind`, `network`, `manifest`, `tooLarge`, `busy`, `disk`, the helper's, `polkit`,
+    `timeout`, `missing`. A successful install deletes the folder, and so does a `signature`, `checksum`, `manifest` or
+    `notNewer` failure, so the next try downloads afresh.
+  - `claimOutcome(run)` is true once for a finished run. Only that window counts it and says so: the window that
+    started the run claims it as it finishes, otherwise the browser window that runs scheduled checks claims it on its
+    second look (every 30 s). Settings never claims a ready run, so a browser window shows the ready toast.
   - `restart` restarts through Chromium's own restart; an AppImage relaunches `$APPIMAGE`.
   - The helper verifies the release's signature as root before it installs anything (Packaging and installing ›
     Self-update helper), so the browser is never trusted with what gets installed.

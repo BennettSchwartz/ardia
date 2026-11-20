@@ -433,7 +433,11 @@ class PackagingTests(unittest.TestCase):
                 policy = destdir / 'usr/share/polkit-1/actions/dev.ardia.linux.policy'
                 source_policy = (REPO / 'scripts/linux/dev.ardia.linux.policy').read_text()
                 self.assertIn('>/usr/lib/ardia/ardia-update<', source_policy)
-                self.assertEqual(policy.read_text(), source_policy.replace('>/usr/lib/ardia/ardia-update<', f'>{prefix}/lib/ardia/ardia-update<'))
+                if prefix == '/usr':
+                    self.assertEqual(policy.read_text(), source_policy)
+                else:
+                    self.assertNotIn('dev.ardia.linux.update', policy.read_text())
+                    self.assertIn('<action id="dev.ardia.linux.reauthenticate">', policy.read_text())
                 self.assertEqual(policy.stat().st_mode & 0o777, 0o644)
                 installed = destdir / prefix.lstrip('/')
                 self.assertEqual(oct((installed / 'lib/ardia/ardia-update').stat().st_mode & 0o777), oct(0o755))

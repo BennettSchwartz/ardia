@@ -254,6 +254,12 @@ refusals() {
   chown 0:0 "$cases/valid/Ardia-$NEW-linux-x64.deb" "$cases/valid/Ardia-$NEW-linux-x64.tar.xz"
   expect "$kind refuses a package the user doesn't own" "failed missing" "$(as_pkexec "$helper" install "$cases/valid")"
   stage valid
+  chmod 0000 "$cases/valid/Ardia-$NEW-linux-x64.deb" "$cases/valid/Ardia-$NEW-linux-x64.tar.xz"
+  expect "$kind reads the user's files as the user (an unreadable package)" "failed missing" "$(as_pkexec "$helper" install "$cases/valid")"
+  stage valid
+  chmod 0000 "$cases/valid/Ardia-$NEW-linux-update.txt"
+  expect "$kind reads the user's files as the user (an unreadable manifest)" "failed missing" "$(as_pkexec "$helper" install "$cases/valid")"
+  stage valid
   chown 0:0 "$cases/valid"
   expect "$kind refuses a folder the user doesn't own" "failed missing" "$(as_pkexec "$helper" install "$cases/valid")"
   stage valid
@@ -281,6 +287,20 @@ swap_key
 expect "deb kind" deb "$(kind_of "$helper")"
 expect "an unprivileged kind ignores APPIMAGE outside an AppImage" deb "$(as_tester APPIMAGE=/home/tester/x.AppImage APPDIR=/tmp/elsewhere "$helper" kind)"
 refusals deb
+cp "$helper" /tmp/helper.aside
+sed -i 's/^install_budget=540$/install_budget=5/' "$helper"
+printf '#!/bin/sh\nsleep 300\n' > /usr/sbin/apt-get
+chmod 0755 /usr/sbin/apt-get
+stage valid
+started=$SECONDS
+expect "deb gives up on an apt-get that outlives the install budget" "failed timeout" "$(as_pkexec "$helper" install "$cases/valid")"
+elapsed=$((SECONDS - started))
+((elapsed < 40)) && ok "the timeout came after ${elapsed}s" || bad "the timeout took ${elapsed}s"
+running_sleeps=$(for cmdline in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$cmdline" 2>/dev/null; echo; done | grep -cx 'sleep 300 ' || true)
+((running_sleeps > 0)) && bad "the timed-out apt-get is still running" || ok "the timed-out apt-get was killed"
+rm /usr/sbin/apt-get
+cp /tmp/helper.aside "$helper"
+expect "deb left the install alone after the timeout" "$OLD" "$(installed_version)"
 stage valid
 expect "deb upgrade" "installed $NEW" "$(as_pkexec "$helper" install "$cases/valid")"
 expect "dpkg version after the upgrade" "${NEW/-/\~}" "$(dpkg-query -W -f='${Version}' ardia)"
@@ -314,6 +334,23 @@ expect "install.sh --prefix /opt/ardia points the update action there" "1" "$(gr
 expect "kind when the policy names another install" "unsupported noPolicy" "$(kind_of "$helper")"
 expect "kind of the /opt/ardia install" tarball "$(kind_of /opt/ardia/lib/ardia/ardia-update)"
 rm -rf /opt/ardia
+for unsafe in shared:1777 team:0775; do
+  folder=/srv/${unsafe%%:*}
+  mkdir -p "$folder"
+  chmod "${unsafe#*:}" "$folder"
+  /tmp/old/ardia/install.sh --prefix "$folder/ardia" 2>/dev/null
+  expect "install.sh --prefix under a ${unsafe#*:} folder leaves the update action out" "0" "$(grep -c 'dev.ardia.linux.update' /usr/share/polkit-1/actions/dev.ardia.linux.policy || true)"
+  expect "the policy keeps its reauthenticate action" "1" "$(grep -c 'dev.ardia.linux.reauthenticate' /usr/share/polkit-1/actions/dev.ardia.linux.policy)"
+  expect "kind of the install under a ${unsafe#*:} folder" "unsupported noPolicy" "$(kind_of "$folder/ardia/lib/ardia/ardia-update")"
+  rm -rf "$folder"
+done
+mkdir -p /srv/mine
+chown 1234:1234 /srv/mine
+chmod 0755 /srv/mine
+/tmp/old/ardia/install.sh --prefix /srv/mine/ardia 2>/dev/null
+expect "install.sh --prefix under a user's folder leaves the update action out" "0" "$(grep -c 'dev.ardia.linux.update' /usr/share/polkit-1/actions/dev.ardia.linux.policy || true)"
+expect "kind of the install under a user's folder" "unsupported noPolicy" "$(kind_of /srv/mine/ardia/lib/ardia/ardia-update)"
+rm -rf /srv/mine
 /tmp/old/ardia/install.sh --prefix /usr
 swap_key
 expect "install.sh --prefix /usr names /usr/lib/ardia/ardia-update" "1" "$(grep -c '>/usr/lib/ardia/ardia-update<' /usr/share/polkit-1/actions/dev.ardia.linux.policy)"

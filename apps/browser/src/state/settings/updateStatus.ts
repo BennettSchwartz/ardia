@@ -6,6 +6,8 @@ const CHANNEL_NAMES: Record<UpdateChannel, string> = { stable: "Stable", nightly
 
 export const FOLLOW_EVERY_MS = 400;
 export const FOLLOW_FOR_MS = 120_000;
+export const FOLLOW_UPDATE_EVERY_MS = 2_000;
+export const FOLLOW_UPDATE_FOR_MS = 75 * 60 * 1000;
 
 export type SwitchOutcome = "offered" | "upToDate" | "failed";
 
@@ -30,6 +32,11 @@ export function updaterBusy(state: UpdaterState | undefined): boolean {
   if (!state?.available) return false;
   const phase = state.switchCheck?.phase;
   return state.sessionInProgress || phase === "waiting" || phase === "checking" || phase === "downloading" || phase === "installing";
+}
+
+export function updateUnderWay(state: UpdaterState | undefined): boolean {
+  const phase = state?.available ? state.switchCheck?.phase : undefined;
+  return phase === "downloading" || phase === "installing";
 }
 
 export type CheckNowControl = { title: string; checking: boolean; disabled: boolean; pressable: boolean };

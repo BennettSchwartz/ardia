@@ -145,7 +145,7 @@ int main() {
   assert(outcome.ok && outcome.detail == "0.2.48");
   assert(InstallOutcomeFor(v, false, 0, "installed 0.2.49", true).detail == "install");
   assert(!InstallOutcomeFor(v, false, 1, "installed 0.2.48", true).ok);
-  for (const char* reason : {"usage", "missing", "manifest", "signature", "notNewer", "kind", "checksum", "install", "busy"}) {
+  for (const char* reason : {"usage", "missing", "manifest", "signature", "notNewer", "kind", "checksum", "install", "busy", "timeout"}) {
     const InstallOutcome failed = InstallOutcomeFor(v, false, 1, std::string("failed ") + reason, true);
     assert(!failed.ok && failed.detail == reason);
   }
@@ -159,8 +159,55 @@ int main() {
 
   assert(kMaxManifestBytes == 4096 && kSignatureBytes == 64 && kMaxPackageBytes == 512ull * 1024 * 1024);
   assert(kInstallDeadlineSeconds == 600);
+  assert(InstallOutcomeFor(v, false, 1, "failed timeout", true).detail == "timeout");
+  for (const char* reason : {"signature", "checksum", "manifest", "notNewer"}) assert(DiscardsDownload(reason));
+  for (const char* reason : {"polkit", "timeout", "busy", "install", "kind", "missing", "usage", "network", ""}) assert(!DiscardsDownload(reason));
+
+  assert(CompareVersions("0.2.48", "0.2.48") == 0);
+  assert(CompareVersions("0.2.47-nightly.9", "0.2.47") == -1);
+  assert(CompareVersions("0.2.47", "0.2.48-nightly.1") == -1);
+  assert(CompareVersions("0.2.48-nightly.10", "0.2.48-nightly.9") == 1);
+  assert(CompareVersions("0.10.0", "0.9.99") == 1);
+  assert(CompareVersions("1.0.0", "0.99.99") == 1);
+  assert(CompareVersions("0.2.048", "0.2.48") == 0);
+  assert(CompareVersions("0.2.48", "../0.2.48") == std::nullopt);
+
+  UpdateState state;
+  assert(state.phase == Phase::kIdle && state.run == 0 && !Busy(state));
+  assert(!ClaimOutcome(state, 0) && !ClaimOutcome(state, 1));
+  assert(BeginRun(state, "0.2.48"));
+  assert(state.phase == Phase::kDownloading && state.run == 1 && state.version == "0.2.48" && Busy(state));
+  assert(!BeginRun(state, "0.2.49") && state.run == 1 && state.version == "0.2.48");
+  assert(!BeginRun(state, "bad") && state.run == 1 && state.phase == Phase::kDownloading);
+  assert(!ClaimOutcome(state, 1));
+  Downloaded(state, 1);
+  assert(state.phase == Phase::kInstalling);
+  Finished(state, 7, false, "network");
+  assert(state.phase == Phase::kInstalling);
+  Finished(state, 1, false, "signature");
+  assert(state.phase == Phase::kFailed && state.reason == "signature");
+  assert(!ClaimOutcome(state, 2) && ClaimOutcome(state, 1) && !ClaimOutcome(state, 1));
+  assert(BeginRun(state, "0.2.48") && state.run == 2 && state.reason.empty() && !state.claimed);
+  Downloaded(state, 2);
+  Finished(state, 2, true, "");
+  assert(state.phase == Phase::kReady && state.version == "0.2.48");
+  assert(!BeginRun(state, "0.2.48") && !BeginRun(state, "0.2.47") && !BeginRun(state, "0.2.49") && state.run == 2 && state.phase == Phase::kReady);
+  assert(!BeginRun(state, "x") && state.phase == Phase::kReady && state.run == 2 && state.version == "0.2.48");
+  assert(ClaimOutcome(state, 2) && !ClaimOutcome(state, 2));
+  UpdateState failing;
+  assert(BeginRun(failing, "0.2.49") && failing.run == 1 && failing.phase == Phase::kDownloading);
+  Finished(failing, 1, false, "kind");
+  assert(!BeginRun(failing, "../x") && failing.phase == Phase::kFailed && failing.reason == "version" && failing.run == 2 && failing.version.empty());
+  assert(ClaimOutcome(failing, 2) && !ClaimOutcome(failing, 1));
+  assert(PhaseName(Phase::kIdle) == "idle" && PhaseName(Phase::kDownloading) == "downloading" && PhaseName(Phase::kInstalling) == "installing" &&
+         PhaseName(Phase::kReady) == "ready" && PhaseName(Phase::kFailed) == "failed");
+
   assert(std::string(kSelfUpdateCapabilities[0]) == "ArdiaUpdates.installKind");
-  assert(std::string(kSelfUpdateCapabilities[3]) == "ArdiaUpdates.restart");
+  assert(std::string(kSelfUpdateCapabilities[1]) == "ArdiaUpdates.update");
+  assert(std::string(kSelfUpdateCapabilities[2]) == "ArdiaUpdates.status");
+  assert(std::string(kSelfUpdateCapabilities[3]) == "ArdiaUpdates.claimOutcome");
+  assert(std::string(kSelfUpdateCapabilities[4]) == "ArdiaUpdates.restart");
+  assert(sizeof(kSelfUpdateCapabilities) / sizeof(kSelfUpdateCapabilities[0]) == 5);
 }
 '''
 
@@ -187,7 +234,9 @@ class SelfUpdatePolicyTests(unittest.TestCase):
                        'policy::kMaxManifestBytes', 'policy::kSignatureBytes', 'checked.package->size', 'net::ERR_INSUFFICIENT_RESOURCES ? policy::kTooLargeReason',
                        'cookies_allowed: NO', '"ardia_linux_update_download"', 'system_network_context_manager()', 'SetTimeoutDuration(',
                        'policy::DownloadUrl(version_, name, linux_updates::UpdateFeed())', 'chrome::DIR_USER_DATA', 'policy::kUpdatesFolder',
-                       'if (entry.BaseName().value() != version) base::DeletePathRecursively(entry);']:
+                       'if (name != version && policy::ValidVersion(name)) base::DeletePathRecursively(entry);',
+                       'if (updates.empty() || !EnsureRealDirectory(updates))', 'lstat(path.value().c_str(), &info) == 0 && S_ISDIR(info.st_mode)',
+                       'if (outcome.ok || policy::DiscardsDownload(outcome.detail)) base::DeletePathRecursively(directory);']:
             self.assertIn(needle, source)
         for absent in ['GetDefaultStoragePartition', 'Profile', 'Authorization', 'CredentialsMode::kInclude']:
             self.assertNotIn(absent, source)
@@ -209,6 +258,16 @@ class SelfUpdatePolicyTests(unittest.TestCase):
                        'if (!isolated) return std::optional<linux_self_update_policy::Feed>();',
                        'linux_self_update_policy::FeedOverride(', 'linux_self_update_policy::ReleasesUrl(*UpdateFeed())']:
             self.assertIn(needle, updates)
+
+    def test_the_engine_owns_the_run_and_windows_only_start_observe_and_claim_it(self):
+        source = (LINUX / 'ac_linux_self_update.cc').read_text()
+        for needle in ['if (policy::BeginRun(state_, version))', 'policy::Downloaded(state_, run);', 'policy::Finished(state_, run, outcome.ok, outcome.detail);',
+                       'return policy::ClaimOutcome(state_, run);', '.Set("phase", Text(policy::PhaseName(state_.phase)))', '.Set("run", state_.run)',
+                       'method == "ArdiaUpdates.status"', 'method == "ArdiaUpdates.update"', 'method == "ArdiaUpdates.claimOutcome"']:
+            self.assertIn(needle, source)
+        for gone in ['"ArdiaUpdates.download"', '"ArdiaUpdates.install"']:
+            self.assertNotIn(gone, source)
+            self.assertNotIn(gone, (LINUX / 'ac_linux_self_update_policy.h').read_text())
 
     def test_the_host_advertises_and_routes_the_update_calls(self):
         host = (LINUX / 'ac_linux_host.cc').read_text()
