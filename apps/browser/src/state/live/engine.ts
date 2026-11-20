@@ -56,27 +56,28 @@ function queueFollowUp(folderId: string, allowed: () => boolean) {
   followUps.set(folderId, earlier && earlier !== allowed ? () => earlier() || allowed() : allowed);
 }
 
-export function refreshFolder(folderId: string, interactive = false): Promise<void> {
-  return refreshFolderWhile(folderId, interactive, always);
+export function refreshFolder(folderId: string, interactive = false, consent?: ConsentToken | null): Promise<void> {
+  return refreshFolderWhile(folderId, interactive, always, consent);
 }
 
-export function refreshFolderWhile(folderId: string, interactive: boolean, allowed: () => boolean): Promise<void> {
+export function refreshFolderWhile(folderId: string, interactive: boolean, allowed: () => boolean, given?: ConsentToken | null): Promise<void> {
+  const consent = given === undefined ? consentToken() : given;
   const running = inflight.get(folderId);
   if (running) {
-    if (passGuards.get(folderId) !== allowed) return running.catch(() => undefined).then(() => (allowed() ? refreshFolderWhile(folderId, interactive, allowed) : undefined));
+    if (passGuards.get(folderId) !== allowed) return running.catch(() => undefined).then(() => (allowed() ? refreshFolderWhile(folderId, interactive, allowed, consent) : undefined));
     if (fetchingWith.has(folderId) && settingsOf(live().folders[folderId]) !== fetchingWith.get(folderId)) queueFollowUp(folderId, allowed);
     return running;
   }
   passGuards.set(folderId, allowed);
-  const task = during("liveFolders", () => runUntilCurrent(folderId, interactive, allowed)).finally(() => [inflight, fetchingWith, followUps, passGuards].forEach((m) => m.delete(folderId)));
+  const task = during("liveFolders", () => runUntilCurrent(folderId, interactive, allowed, consent)).finally(() => [inflight, fetchingWith, followUps, passGuards].forEach((m) => m.delete(folderId)));
   inflight.set(folderId, task);
   return task;
 }
 
-async function runUntilCurrent(folderId: string, interactive: boolean, allowed: () => boolean) {
+async function runUntilCurrent(folderId: string, interactive: boolean, allowed: () => boolean, consent: ConsentToken | null) {
   for (let guard: (() => boolean) | undefined = allowed; guard && live().folders[folderId]; ) {
     passGuards.set(folderId, guard);
-    await run(folderId, interactive, guard);
+    await run(folderId, interactive, guard, consent);
     fetchingWith.delete(folderId);
     guard = followUps.get(folderId);
     followUps.delete(folderId);
@@ -108,9 +109,8 @@ function staleRun(folderId: string, folder: LiveFolder, allowed: () => boolean):
   return true;
 }
 
-async function run(folderId: string, interactive: boolean, allowed: () => boolean) {
+async function run(folderId: string, interactive: boolean, allowed: () => boolean, consent: ConsentToken | null) {
   if (!live().folders[folderId] || !allowed()) return;
-  const consent = consentToken();
   const claim = claimRefresh(folderId);
   let fence = claim ? await claim : undefined;
   if (fence === null) return;
@@ -178,7 +178,7 @@ async function run(folderId: string, interactive: boolean, allowed: () => boolea
   const succeeded = new Set(folder.sources.filter((id) => !failed.some((f) => f.source === id)));
   fetchedSources.set(folderId, succeeded);
   applyFetch(folderId, order(next), gone, Date.now(), quiet, fence, succeeded);
-  markCompletedTabs(folderId, gone, ids);
+  markCompletedTabs(folderId, gone, ids, consent);
   const warned = firstFailure ? null : folder.sources.map((source) => ({ source, error: SOURCES[source].warning?.() ?? null })).find((w) => w.error);
   const problem = firstFailure ?? warned;
   if (problem) setStatus(folderId, { state: "error", error: describe(problem.source, problem.error) });
@@ -298,7 +298,7 @@ export function syncLiveHomes() {
 
 const ended = (state: CompletionState | undefined) => state === "merged" || state === "closed";
 
-function markCompletedTabs(folderId: string, gone: Record<string, CompletionState>, listed: Set<string>) {
+function markCompletedTabs(folderId: string, gone: Record<string, CompletionState>, listed: Set<string>, consent: ConsentToken | null) {
   const s = useBrowser.getState();
   const hidden = new Set((live().hidden[folderId] ?? []).map((it) => it.id));
   for (const t of Object.values(s.tabs)) {
@@ -307,16 +307,15 @@ function markCompletedTabs(folderId: string, gone: Record<string, CompletionStat
     if (ended(gone[ref.itemId]) && !hidden.has(ref.itemId) && !ref.completed) s.updateTab(t.id, { liveItem: { ...ref, completed: true } });
     else if (ref.completed && listed.has(ref.itemId)) s.updateTab(t.id, { liveItem: { folderId, itemId: ref.itemId } });
   }
-  closeCompletedTabs();
+  closeCompletedTabs(consent);
 }
-
 
 const inUse = (s: BrowserState, id: string) => {
   const media = useMedia.getState();
   return liveOf(id).playingAudio || !!media.pipOpen[id] || isPlaying(media.sessions[id]) || capturing(usePages.getState().pages[id]?.mediaAccess) || !!media.tabShares[id] || Object.values(media.tabShares).some((share) => share.capturedTabId === id);
 };
 
-function closeCompletedTabs() {
+function closeCompletedTabs(consent?: ConsentToken | null) {
   const s = useBrowser.getState();
   const { folders, items } = live();
   const shown = shownTabIds(s);
@@ -325,7 +324,7 @@ function closeCompletedTabs() {
     .map((t) => t.id);
   if (!tabs.length) return;
   s.closeTabs(tabs);
-  noteLiveCompletedTabsClosed(tabs.length);
+  noteLiveCompletedTabsClosed(tabs.length, consent);
 }
 
 let started = false;
@@ -379,7 +378,7 @@ export function startLiveEngine() {
   onLiveChange((id, now, was) => {
     if (was.playingAudio && !now.playingAudio && useBrowser.getState().tabs[id]) closeCompletedTabs();
   });
-  whenCaptureEndsUnderHiddenCompleted(closeCompletedTabs);
+  whenCaptureEndsUnderHiddenCompleted(() => closeCompletedTabs());
   useMedia.subscribe((m, prev) => {
     if (m.pipOpen !== prev.pipOpen || m.sessions !== prev.sessions || m.tabShares !== prev.tabShares) closeCompletedTabs();
   });
@@ -392,7 +391,8 @@ export function startLiveEngine() {
       const folderId = s.tabs[before]?.liveItem?.folderId;
       if (!folderId || Date.now() - (lastNudge.get(folderId) ?? 0) < 20_000) continue;
       lastNudge.set(folderId, Date.now());
-      setTimeout(() => void refreshFolder(folderId), 3000);
+      const consent = consentToken();
+      setTimeout(() => void refreshFolder(folderId, false, consent), 3000);
     }
   });
 }
