@@ -66,13 +66,26 @@ test("a tab switch wakes no settings or split subscriber, and a split or a pin w
 
 test("per-row hooks subscribe by key, not to the whole store", () => {
   const src = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
-  assert.match(src("../media/media.ts"), /export const usePinnedWithMediaControls = \(tabId: string \| undefined\) =>\n\s*useKeyed\(watchTabRecord,/);
+  const pinned = src("../media/media.ts");
+  const pinnedHook = pinned.slice(pinned.indexOf("export function usePinnedWithMediaControls"), pinned.indexOf("\n}", pinned.indexOf("export function usePinnedWithMediaControls")));
+  assert.match(pinnedHook, /useKeyed\(watchTabRecord, tabId,/);
+  assert.match(pinnedHook, /useKeyed\(watchSettings, tabId == null \? null : ALL,/);
+  assert.doesNotMatch(pinnedHook, /useBrowser\(/);
   assert.match(src("../windows/card.ts"), /export const useInSplit = \(tabId: string\) => useKeyed\(watchSplits,/);
-  assert.match(src("../../components/sidebar/TabPressArea.tsx"), /const inSplit = useInSplit\(tab\.id\);/);
+  assert.match(src("../../components/sidebar/TabPressArea.tsx"), /const inSplit = useInSplit\(props\.tab\.id\);/);
   const layout = src("../windows/layout.ts");
   for (const hook of ["useMinimalism", "useAddressBarInSidebar", "usePageFrameInset"]) {
     const body = layout.slice(layout.indexOf(hook), layout.indexOf("\n}", layout.indexOf(hook)));
     assert.match(body, /useWindowSettings\(windowId,/, `${hook} reads through useWindowSettings`);
   }
   assert.match(src("../app/theme.ts"), /export function useSelectedTopApp\(\) \{\n\s*return useSettings\(/);
+});
+
+test("a tab's row flags carry its split, so the row reads no split state of its own", async () => {
+  const { rowFlags, IN_SPLIT } = await import("../sidebar/rowState.ts");
+  const { w, ids } = session();
+  assert.equal(rowFlags(S(), w, ids[1]) & IN_SPLIT, 0);
+  S().createSplit([ids[1], ids[2]]);
+  assert.ok(rowFlags(S(), w, ids[1]) & IN_SPLIT);
+  assert.equal(rowFlags(S(), w, ids[3]) & IN_SPLIT, 0);
 });

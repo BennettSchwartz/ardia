@@ -111,7 +111,7 @@ test("the redesign drops the old bar and chip for main's header and bottom bar",
   unmount(root);
 });
 
-test("the redesigned cards stack as Arc Search's: two thirds of the screen wide and tall, centred a little under the screen's middle, with 20-point corners; the original keeps its own band", () => {
+test("the redesigned cards stack as Arc Search's: two thirds of the screen wide and tall, centred a little under the screen's middle, with 20-point corners; the original keeps its own band, and on Android the bar sits 4 points above the gesture bar", () => {
   const { width, height } = Dimensions.get("window");
   const original = deck("original");
   const before = cardCentres(original);
@@ -125,6 +125,8 @@ test("the redesigned cards stack as Arc Search's: two thirds of the screen wide 
   expect(arc.cardWidth).toBeCloseTo(width * DECK_ARC.cardWidthRatio, 5);
   expect(StyleSheet.flatten(hosts(root, "deckCard")[0]!.props.style)).toMatchObject({ width: arc.cardWidth, height: arc.cardHeight });
   expect(arc.cardCorner).toBe(20);
+  const barLift = redesignedBarCenterFromBottom(SAFE_BOTTOM, Platform.OS) - (Math.max(SAFE_BOTTOM, 20) + 11);
+  expect(barLift).toBe(Platform.OS === "android" ? 17 : 0);
   unmount(root);
 });
 

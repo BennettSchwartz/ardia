@@ -5,7 +5,7 @@ import { create } from "zustand";
 import { useShallow } from "zustand/react/shallow";
 import { webviews } from "../../platform/webviews";
 import { useBrowser } from "../browser/store";
-import { useKeyed, watchTabRecord } from "../browser/keyedWatch";
+import { ALL, useKeyed, watchSettings, watchTabRecord } from "../browser/keyedWatch";
 import type { BrowserState } from "../browser/store";
 import { activeTabId } from "../browser/model";
 import { peekTabId } from "../peek/peek";
@@ -225,7 +225,7 @@ export function hasPlayer(m: Pick<Store, "sessions" | "dismissed">, tabId: strin
 function isHiddenPlayerTab(s: BrowserState, tabId: string): boolean {
   const tab = s.tabs[tabId];
   const w = tab && s.windows[tab.windowId];
-  return !!w && !isTabShown(s, tabId, s.settings.playingNowAcrossProfiles ? w.profileId : tab.profileId);
+  return !!w && s.settings.sidebarMediaControls && !isTabShown(s, tabId, s.settings.playingNowAcrossProfiles ? w.profileId : tab.profileId);
 }
 
 let hiddenBefore = new Set<string>();
@@ -352,5 +352,11 @@ export const useHiddenPlayerTabs = (windowId: string, profileId: string, session
 
 export const sidebarPlayerCandidates = (m: Pick<Store, "leftPaused">, hidden: string[]) => hidden.filter((id) => !m.leftPaused[id]);
 
-export const usePinnedWithMediaControls = (tabId: string | undefined) =>
-  useKeyed(watchTabRecord, tabId, () => !!tabId && !!useBrowser.getState().tabs[tabId]?.pin);
+export const pinnedWithMediaControls = (s: BrowserState, tabId: string | undefined) => !!tabId && !!s.tabs[tabId]?.pin && s.settings.sidebarMediaControls;
+
+export function usePinnedWithMediaControls(tabId: string | undefined): boolean {
+  const read = () => pinnedWithMediaControls(useBrowser.getState(), tabId);
+  const byTab = useKeyed(watchTabRecord, tabId, read);
+  const bySetting = useKeyed(watchSettings, tabId == null ? null : ALL, read);
+  return byTab && bySetting;
+}
