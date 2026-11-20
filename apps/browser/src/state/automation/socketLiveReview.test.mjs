@@ -196,3 +196,25 @@ test("a refresh that control left mid-fetch says the hidden items were already s
     assert.match(reply.error?.message ?? "", /hidden items were already shown again/, JSON.stringify(reply));
   });
 });
+
+test("a live folder made by a client that hung up right after the answer still fills", async () => {
+  const held = gated();
+  S().hydrate({});
+  await controlOn();
+  S().createWindow({ url: "https://a.example/" });
+  const { fetch } = SOURCES.github;
+  SOURCES.github.fetch = async () => (await held.gate, [pr("first", 1)]);
+  setAccount("github", { login: "me", name: null, avatar: null, connectedAt: 1 });
+  try {
+    const made = await ok("live.create", { kind: "pullRequests" });
+    stub.emitControlClose(23);
+    await settle();
+    held.open();
+    await until(() => live().items[made.id]?.length === 1);
+    assert.deepEqual(live().items[made.id].map((it) => it.id), ["first"]);
+    await ok("live.remove", { folder: made.id });
+  } finally {
+    SOURCES.github.fetch = fetch;
+    setAccount("github", null);
+  }
+});

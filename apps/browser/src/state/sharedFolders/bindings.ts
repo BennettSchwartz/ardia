@@ -1,10 +1,12 @@
-import { resolveSharedFolder, type ResolvedSharedFolder } from "../../platform/sharedFolders";
+import { resolveSharedFolder, SHARED_FOLDER_REFUSED, type ResolvedSharedFolder } from "../../platform/sharedFolders";
 import { boundFolders, sharedFolderOf, upgradeFolder, type SharedFolder } from "./store";
 
 export async function upgradeLegacy(profileId: string, key: string): Promise<SharedFolder | undefined> {
   const was = sharedFolderOf(profileId, key);
   if (!was || was.identity) return was;
-  const found = await resolveSharedFolder(was.path).catch(() => null);
+  let refused = false;
+  const found = await resolveSharedFolder(was.path).catch((error: unknown) => ((refused = (error as { code?: unknown })?.code === SHARED_FOLDER_REFUSED), null));
+  if (refused) return undefined;
   if (found) upgradeFolder(profileId, key, was, found);
   return sharedFolderOf(profileId, key);
 }

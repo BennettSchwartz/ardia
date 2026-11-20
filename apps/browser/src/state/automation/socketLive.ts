@@ -100,15 +100,17 @@ function sourcesFor(kind: LiveFolderKind, given: unknown): LiveSourceId[] {
   return sources;
 }
 
-function create(params: Record<string, unknown>, call: SocketCall) {
+function create(params: Record<string, unknown>) {
   const profile = profileArg(params.profile);
   const kind = params.kind as LiveFolderKind;
   const name = params.name !== undefined ? nameOf(params.name) : undefined;
   const sources = sourcesFor(kind, params.sources);
-  const folderId = newProfileLiveFolder(profile, kind, sources, { name, allowed: call.serving });
+  const folderId = newProfileLiveFolder(profile, kind, sources, { name, allowed: controlStillOn });
   expect(!!live().folders[folderId], "the live folder wasn't made.");
   return folderRow(live().folders[folderId]!);
 }
+
+const controlStillOn = () => now().settings.cliControl;
 
 function nameOf(value: unknown): string {
   const name = (value as string).trim();
@@ -128,7 +130,7 @@ function update(params: Record<string, unknown>, call: SocketCall) {
   if (params.sources !== undefined) patch.sources = sourcesFor(folder.kind, params.sources);
   if (!Object.keys(patch).length) throw new OpError("bad_request", "live.update needs something to change.");
   updateFolder(folder.id, patch);
-  if (patch.filters || patch.sources) void refreshFolderWhile(folder.id, false, call.serving);
+  if (patch.filters || patch.sources) void refreshFolderWhile(folder.id, false, controlStillOn);
   return folderRow(live().folders[folder.id]!);
 }
 
