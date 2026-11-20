@@ -68,7 +68,7 @@ inline constexpr int64_t kPersonBusyMicroseconds = 500000;
 inline bool PersonBusy(bool hidden,
                        bool person_input_seen,
                        int64_t microseconds_since_person_input) {
-  return !hidden && person_input_seen &&
+  return !hidden && person_input_seen && microseconds_since_person_input >= 0 &&
          microseconds_since_person_input < kPersonBusyMicroseconds;
 }
 

@@ -44,6 +44,7 @@ struct VisibleHold {
 struct PluginSession {
   std::string credential_id;
   base::WeakPtr<content::WebContents> contents;
+  bool departed = false;
 };
 
 using PluginHoldKey = std::pair<std::string, const content::WebContents*>;
@@ -66,6 +67,23 @@ std::map<const void*, PluginSession>& PluginSessions() {
 std::map<PluginHoldKey, PluginHold>& PluginHolds() {
   static base::NoDestructor<std::map<PluginHoldKey, PluginHold>> holds;
   return *holds;
+}
+
+int& HeldPluginCaptures() {
+  static int held = 0;
+  return held;
+}
+
+base::ScopedClosureRunner CountedCapture(content::WebContents* contents) {
+  base::ScopedClosureRunner capture = contents->IncrementCapturerCount(
+      gfx::Size(), kStayHidden, kStayAwake, kIsActivity);
+  ++HeldPluginCaptures();
+  return base::ScopedClosureRunner(base::BindOnce(
+      [](base::ScopedClosureRunner inner) {
+        --HeldPluginCaptures();
+        inner.RunAndReset();
+      },
+      std::move(capture)));
 }
 
 uint64_t NextHoldId() {
@@ -95,12 +113,26 @@ bool IsTabTarget(content::DevToolsAgentHost* host) {
 bool HasPluginSession(const std::string& credential_id,
                       const content::WebContents* contents) {
   for (const auto& [session, attached] : PluginSessions()) {
-    if (attached.credential_id == credential_id &&
+    if (!attached.departed && attached.credential_id == credential_id &&
         attached.contents.get() == contents) {
       return true;
     }
   }
   return false;
+}
+
+PluginTabHold PluginHoldAllowed(const std::string& credential_id,
+                                content::WebContents* contents) {
+  if (!PluginCredentialLive(credential_id)) {
+    return PluginTabHold::kNoCredential;
+  }
+  if (!PluginTabInScope(credential_id, contents)) {
+    return PluginTabHold::kOutOfScope;
+  }
+  if (!HasPluginSession(credential_id, contents)) {
+    return PluginTabHold::kNoSession;
+  }
+  return PluginTabHold::kOk;
 }
 
 void ReleaseLater(base::ScopedClosureRunner capture) {
@@ -204,24 +236,41 @@ PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
     }
     return PluginTabHold::kOk;
   }
-  if (!PluginCredentialLive(credential_id)) {
-    return PluginTabHold::kNoCredential;
+  const PluginTabHold allowed = PluginHoldAllowed(credential_id, contents);
+  if (allowed != PluginTabHold::kOk || held != PluginHolds().end()) {
+    return allowed;
   }
-  if (!PluginTabInScope(credential_id, contents)) {
-    return PluginTabHold::kOutOfScope;
+  PluginHolds().insert_or_assign(key, PluginHold{contents->GetWeakPtr(), {}});
+  base::ScopedClosureRunner capture = CountedCapture(contents);
+  auto reserved = PluginHolds().find(key);
+  const PluginTabHold still = PluginHoldAllowed(credential_id, contents);
+  if (reserved == PluginHolds().end() || reserved->second.capture ||
+      !reserved->second.contents || still != PluginTabHold::kOk) {
+    if (reserved != PluginHolds().end() && !reserved->second.capture) {
+      PluginHolds().erase(reserved);
+    }
+    return still != PluginTabHold::kOk ? still : PluginTabHold::kNoSession;
   }
-  if (!HasPluginSession(credential_id, contents)) {
-    return PluginTabHold::kNoSession;
-  }
-  if (held != PluginHolds().end()) {
-    return PluginTabHold::kOk;
-  }
+  reserved->second.capture = std::move(capture);
   ++PluginTotalsSoFar().holds;
-  PluginHolds().insert_or_assign(
-      key, PluginHold{contents->GetWeakPtr(),
-                      contents->IncrementCapturerCount(
-                          gfx::Size(), kStayHidden, kStayAwake, kIsActivity)});
   return PluginTabHold::kOk;
+}
+
+void PluginTabDeparted(const std::string& credential_id,
+                       content::WebContents* contents) {
+  if (!contents) {
+    return;
+  }
+  for (auto& [session, attached] : PluginSessions()) {
+    if (attached.credential_id == credential_id &&
+        attached.contents.get() == contents) {
+      attached.departed = true;
+    }
+  }
+  auto node = PluginHolds().extract(PluginHoldKey(credential_id, contents));
+  if (!node.empty()) {
+    base::ScopedClosureRunner capture = std::move(node.mapped().capture);
+  }
 }
 
 void ReleasePluginTabVisibleHolds(const std::string& credential_id) {
@@ -237,11 +286,7 @@ void ReleasePluginTabVisibleHolds(const std::string& credential_id) {
 }
 
 int PluginTabVisibleHoldCount() {
-  int live = 0;
-  for (const auto& [key, hold] : PluginHolds()) {
-    live += hold.contents && hold.capture;
-  }
-  return live;
+  return HeldPluginCaptures();
 }
 
 void InstallCliVisibleTabs() {

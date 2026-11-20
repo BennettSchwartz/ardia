@@ -25,7 +25,8 @@ background tab reports visibilityState hidden and refuses its wheels (page hidde
 (engine.cliPluginCredential {id, tabId, visible}) turns on; with it the tab reports visible, still in the background, and
 a wheel scrolls it; turning it off hides the tab again; a second on or off changes nothing; a hold on another window's
 tab, on a tab it has no session with, or for an unknown credential is refused; it drops when the last session on the
-tab detaches and on revoke; and the owner token still makes a tab visible when it attaches. A plugin gets exactly its allowlist: the
+tab detaches, at once when the tab leaves the window (a hold after it comes back is refused while the old session
+is still detaching), and on revoke; and the owner token still makes a tab visible when it attaches. A plugin gets exactly its allowlist: the
 plain-data DOM and accessibility reads work; DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and
 Emulation.setFocusEmulationEnabled are refused (Ardia.dispatchClick focuses a field, a wheel scrolls); its moves and
 wheels, keys and text never focus the page (only Ardia.dispatchClick does), and clicks, moves and wheels go
@@ -316,6 +317,22 @@ try {
   const p4b = (await plugin.send("Target.attachToTarget", { targetId: visTarget.targetId, flatten: true })).result?.sessionId;
   const reheld = await hold("t4", true);
   check("plugin: a fresh session on the tab can take the hold again (it lasts until the revoke)", !!p4b && reheld?.visible === true, JSON.stringify(reheld));
+  const tabIn = (tab, win) => until(`${tab} in ${win}`, async () =>
+    ((await appEval(`return ac.engine.call("tabs.strips")`))?.strips ?? []).some((s) => s.appWindow === win && s.tabs.some((t) => t.key === tab)) || null, 8000).then(() => true, () => false);
+  const p4bDetached = () => plugin.events.some((e) => e.method === "Target.detachedFromTarget" && e.params?.sessionId === p4b);
+  const holdsBeforeMove = await tabHolds();
+  await appEval(`ac.actions.moveTabToWindow("t4", "w2"); return true`);
+  const droppedOnLeave = await until("the hold to drop as the tab leaves", async () => ((await tabHolds()) === holdsBeforeMove - 1 ? true : null), 3000).catch(() => false);
+  const detachedAtDrop = p4bDetached();
+  await appEval(`ac.actions.moveTabToWindow("t4", "w1"); return true`);
+  const backInWindow = await tabIn("t4", "w1");
+  const reacquired = await hold("t4", true);
+  const detachedAtReacquire = p4bDetached();
+  check("plugin: when its tab leaves the window the hold drops at once, before the session's detach, and a hold after the tab comes back is refused while the old session is still detaching", droppedOnLeave === true && !detachedAtDrop && backInWindow && /no attached session/.test(reacquired?.error ?? "") && !detachedAtReacquire && (await tabHolds()) === holdsBeforeMove - 1, `dropped ${droppedOnLeave} detached at drop ${detachedAtDrop} back ${backInWindow} ${JSON.stringify(reacquired)} detached at re-hold ${detachedAtReacquire}`);
+  await until("the old session's detach", async () => p4bDetached() || null, 12000).catch(() => null);
+  const p4c = (await plugin.send("Target.attachToTarget", { targetId: visTarget.targetId, flatten: true })).result?.sessionId;
+  const heldAgain = await hold("t4", true);
+  check("plugin: a fresh session after the return takes the hold again", !!p4c && heldAgain?.visible === true, JSON.stringify(heldAgain));
 
   const allowed = [
     ["DOM.getDocument", {}],

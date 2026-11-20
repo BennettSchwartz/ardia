@@ -883,7 +883,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
    while (!injectors_.empty())
      (*injectors_.begin())->Cleanup();
    // TODO(dgozman): cleanup touch callbacks as well?
-@@ -2346,4 +2488,420 @@
+@@ -2346,4 +2488,425 @@
    return view->GetRootView();
  }
  
@@ -919,11 +919,14 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +
 +constexpr base::TimeDelta kArdiaAckDeadline = base::Seconds(5);
 +
-+bool ArdiaPersonBusy(RenderWidgetHostImpl* widget) {
-+  if (!widget) {
++bool ArdiaPersonBusy(RenderFrameHostImpl* host) {
++  WebContentsImpl* contents =
++      host ? WebContentsImpl::FromRenderFrameHostImpl(host) : nullptr;
++  RenderWidgetHostImpl* widget = host ? host->GetRenderWidgetHost() : nullptr;
++  if (!contents || !widget) {
 +    return false;
 +  }
-+  const base::TimeTicks last = widget->ArdiaLastPersonInput();
++  const base::TimeTicks last = contents->ArdiaLastPersonInput();
 +  return ardia::PersonBusy(widget->IsHidden(), !last.is_null(),
 +                           (base::TimeTicks::Now() - last).InMicroseconds());
 +}
@@ -1106,7 +1109,7 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    std::move(done).Run("ardia: page hidden");
 +    return;
 +  }
-+  if (wheel && ArdiaPersonBusy(widget_host)) {
++  if (wheel && ArdiaPersonBusy(host_)) {
 +    std::move(done).Run("ardia: busy");
 +    return;
 +  }
@@ -1210,10 +1213,12 @@ diff --git a/content/browser/devtools/protocol/input_handler.cc b/content/browse
 +    run->Fail("ardia: page hidden");
 +    return;
 +  }
-+  if (is_wheel &&
-+      (ArdiaPersonBusy(widget_host) ||
-+       (host_ && ArdiaPersonBusy(host_->GetRenderWidgetHost())))) {
++  if (is_wheel && ArdiaPersonBusy(host_)) {
 +    run->Fail("ardia: busy");
++    return;
++  }
++  if (is_wheel && widget_host->IsIgnoringWebInputEvents(*events.front())) {
++    run->Fail("ardia: the page isn't taking input right now");
 +    return;
 +  }
 +  const gfx::PointF screen_point =
@@ -1452,16 +1457,31 @@ diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/
    for (auto& mouse_event_callback : mouse_event_callbacks_) {
      if (mouse_event_callback.Run(mouse_event)) {
        return;
-@@ -1748,10 +1760,25 @@ void RenderWidgetHostImpl::ForwardMouseEventWithLatencyInfo(
+@@ -1748,10 +1760,43 @@ void RenderWidgetHostImpl::ForwardMouseEventWithLatencyInfo(
    {
      input::ScopedDispatchToRendererCallback dispatch_callback(
          GetRenderInputRouter()->GetDispatchToRendererCallback());
 +    auto on_ack = base::BindOnce(&RenderWidgetHostImpl::OnMouseEventAck,
 +                                 weak_factory_.GetWeakPtr());
 +    if (ardia_ack) {
++      auto dispatched =
++          base::MakeRefCounted<base::RefCountedData<bool>>(false);
++      dispatch_callback.callback = base::BindOnce(
++          [](scoped_refptr<base::RefCountedData<bool>> dispatched,
++             input::DispatchToRendererCallback original,
++             const WebInputEvent& event,
++             input::DispatchToRendererResult result) {
++            dispatched->data =
++                result == input::DispatchToRendererResult::kDispatched;
++            if (original) {
++              std::move(original).Run(event, result);
++            }
++          },
++          dispatched, std::move(dispatch_callback.callback));
 +      on_ack = base::BindOnce(
 +          [](base::WeakPtr<RenderWidgetHostImpl> self,
 +             base::OnceCallback<void(int)> ack,
++             scoped_refptr<base::RefCountedData<bool>> dispatched,
 +             const input::MouseEventWithLatencyInfo& event,
 +             blink::mojom::InputEventResultSource source,
 +             blink::mojom::InputEventResultState state) {
@@ -1469,10 +1489,13 @@ diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/
 +              self->OnMouseEventAck(event, source, state);
 +            }
 +            std::move(ack).Run(
-+                source != blink::mojom::InputEventResultSource::kBrowser ? 2
-+                                                                         : 1);
++                !dispatched->data ? 0
++                : source != blink::mojom::InputEventResultSource::kBrowser
++                    ? 2
++                    : 1);
 +          },
-+          weak_factory_.GetWeakPtr(), std::move(ardia_ack));
++          weak_factory_.GetWeakPtr(), std::move(ardia_ack),
++          std::move(dispatched));
 +    }
      input_router()->SendMouseEvent(
 -        mouse_with_latency,
@@ -1482,7 +1505,7 @@ diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/
 +        mouse_with_latency, std::move(on_ack), dispatch_callback.callback);
    }
  }
-@@ -2957,6 +2984,15 @@ void RenderWidgetHostImpl::NotifyObserversOfInputEventWithSource(
+@@ -2957,6 +3002,9 @@ void RenderWidgetHostImpl::NotifyObserversOfInputEventWithSource(
      bool dispatched_to_renderer) {
    for (auto& observer : input_event_observers_) {
      observer.OnInputEvent(*this, event, source);
@@ -1491,14 +1514,8 @@ diff --git a/content/browser/renderer_host/render_widget_host_impl.cc b/content/
 +    }
    }
    if (dispatched_to_renderer) {
-+    if (!(event.GetModifiers() & WebInputEvent::kFromDebugger) &&
-+        (event.GetType() == WebInputEvent::Type::kMouseWheel ||
-+         WebInputEvent::IsTouchEventType(event.GetType()) ||
-+         WebInputEvent::IsKeyboardEventType(event.GetType()))) {
-+      ardia_last_person_input_ = event.TimeStamp();
-+    }
      delegate_->DidReceiveInputEvent(this, event);
-@@ -3233,11 +3269,11 @@ void RenderWidgetHostImpl::StartDragging(
+@@ -3233,11 +3281,11 @@ void RenderWidgetHostImpl::StartDragging(
      }
    }
  
@@ -1577,23 +1594,51 @@ diff --git a/content/browser/renderer_host/input/touch_emulator_impl.h b/content
 diff --git a/content/browser/renderer_host/render_widget_host_impl.h b/content/browser/renderer_host/render_widget_host_impl.h
 --- a/content/browser/renderer_host/render_widget_host_impl.h
 +++ b/content/browser/renderer_host/render_widget_host_impl.h
-@@ -344,5 +344,11 @@
+@@ -344,5 +344,8 @@
                           ui::mojom::DragOperation operation,
                           base::OnceClosure callback) override;
    void DragSourceSystemDragEnded() override;
 +  void ArdiaExpectMouseAck(base::OnceCallback<void(int)> ack) {
 +    ardia_next_mouse_ack_ = std::move(ack);
 +  }
-+  base::TimeTicks ArdiaLastPersonInput() const {
-+    return ardia_last_person_input_;
-+  }
    void FilterDropData(DropData* drop_data) override;
    void SetCursor(const ui::Cursor& cursor) override;
-@@ -1423,5 +1429,7 @@
+@@ -1423,5 +1426,6 @@
    // Indicates whether the page is hidden or not. Need to call
    // process_->UpdateClientPriority when this value changes.
    bool is_hidden_ = true;
 +  base::OnceCallback<void(int)> ardia_next_mouse_ack_;
-+  base::TimeTicks ardia_last_person_input_;
  
    // Records the latest time when |this| widget's visibility state changes from
+diff --git a/content/browser/web_contents/web_contents_impl.cc b/content/browser/web_contents/web_contents_impl.cc
+--- a/content/browser/web_contents/web_contents_impl.cc
++++ b/content/browser/web_contents/web_contents_impl.cc
+@@ -11340,5 +11340,12 @@ void WebContentsImpl::DidReceiveInputEvent(
+                          WindowOpenDisposition::kCurrentTab);
+   }
+ 
++  if (!(event.GetModifiers() & blink::WebInputEvent::kFromDebugger) &&
++      (event.GetType() == blink::WebInputEvent::Type::kMouseWheel ||
++       blink::WebInputEvent::IsTouchEventType(event.GetType()) ||
++       blink::WebInputEvent::IsKeyboardEventType(event.GetType()))) {
++    ardia_last_person_input_ = event.TimeStamp();
++  }
++
+   HandleUserInteractionForInputEvent(render_widget_host, event);
+ }
+diff --git a/content/browser/web_contents/web_contents_impl.h b/content/browser/web_contents/web_contents_impl.h
+--- a/content/browser/web_contents/web_contents_impl.h
++++ b/content/browser/web_contents/web_contents_impl.h
+@@ -1015,4 +1015,7 @@
+       RenderViewHostImpl* render_view_host) override;
+   void DidReceiveInputEvent(RenderWidgetHostImpl* render_widget_host,
+                             const blink::WebInputEvent& event) override;
++  base::TimeTicks ArdiaLastPersonInput() const {
++    return ardia_last_person_input_;
++  }
+   void SimulateUserInteraction(RenderWidgetHostImpl* render_widget_host,
+@@ -2614,3 +2617,4 @@
+   base::TimeTicks last_interaction_time_;
++  base::TimeTicks ardia_last_person_input_;
+ 
+   // See description above setter.

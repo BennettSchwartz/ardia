@@ -17,6 +17,9 @@ PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
                                       content::WebContents* contents,
                                       bool on);
 
+void PluginTabDeparted(const std::string& credential_id,
+                       content::WebContents* contents);
+
 void ReleasePluginTabVisibleHolds(const std::string& credential_id);
 
 int PluginTabVisibleHoldCount();

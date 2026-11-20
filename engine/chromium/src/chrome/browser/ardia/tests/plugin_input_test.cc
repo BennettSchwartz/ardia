@@ -399,8 +399,8 @@ int main() {
          "busy: a hidden widget never answers busy", "");
   Expect(!ardia::PersonBusy(false, false, 0),
          "busy: a widget with no person input never answers busy", "");
-  Expect(ardia::PersonBusy(false, true, -1000),
-         "busy: a person input stamped after now still defers", "");
+  Expect(!ardia::PersonBusy(false, true, -1000),
+         "busy: a person input stamped after now is stale", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

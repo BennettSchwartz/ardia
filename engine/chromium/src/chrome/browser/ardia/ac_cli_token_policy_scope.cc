@@ -18,6 +18,7 @@
 #include "chrome/browser/ardia/ac_cli_plugin_credentials.h"
 #include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
+#include "chrome/browser/ardia/ac_cli_visible_tabs.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_process_host.h"
@@ -118,7 +119,18 @@ void TokenClient::WatchTab(const std::string& session) {
   }
 }
 
+void TokenClient::DepartTabOf(const std::string& session) {
+  content::DevToolsAgentHost* host = HostOf(session);
+  content::WebContents* contents = host ? host->GetWebContents() : nullptr;
+  if (contents && !PluginTabInScope(scope_->credential_id, contents)) {
+    PluginTabDeparted(scope_->credential_id, contents);
+  }
+}
+
 void TokenClient::TabLeftWindow(const std::string& session) {
+  content::DevToolsAgentHost* host = HostOf(session);
+  PluginTabDeparted(scope_->credential_id,
+                    host ? host->GetWebContents() : nullptr);
   if (session.empty()) {
     root_left_ = true;
   } else {
@@ -229,6 +241,7 @@ void TokenClient::DetachOutOfScope(const std::string& session) {
   if (detaching_.contains(session) || !targets_.contains(session)) {
     return;
   }
+  DepartTabOf(session);
   for (const std::string& gone : Subtree(session)) {
     for (const auto& [key, method] : outstanding_) {
       if (key.first == gone && method != kInternalCommand && to_client_) {
@@ -266,6 +279,7 @@ void TokenClient::CloseOutOfScope() {
   if (wedged_ || draining_) {
     return;
   }
+  DepartTabOf(std::string());
   for (const auto& [key, method] : outstanding_) {
     if (method != kInternalCommand && to_client_) {
       to_client_.Run(OutOfScopeReply(key.second, key.first));

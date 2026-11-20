@@ -159,6 +159,7 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   bool RootInScope();
   void WatchTab(const std::string& session);
   void TabLeftWindow(const std::string& session);
+  void DepartTabOf(const std::string& session);
   void DetachOutOfScope(const std::string& session);
   void CloseOutOfScope();
   void CheckScope();
