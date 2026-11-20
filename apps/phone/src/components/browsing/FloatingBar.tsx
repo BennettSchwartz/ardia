@@ -31,7 +31,7 @@ type Props = {
   onMore: () => void;
 };
 
-export type DuoBar = { stripLeft: number; squeeze: DuoSqueeze | null; progress: SharedValue<number>; collapsed: boolean };
+export type DuoBar = { stripLeft: number; stripTop: number; squeeze: DuoSqueeze | null; progress: SharedValue<number>; collapsed: boolean };
 
 export type BarAddress = { host: string; insecure: boolean; isPrivate: boolean; iconUrl: string | null; pageUrl: string | null };
 
@@ -88,7 +88,6 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
   const addressFade = useAnimatedStyle(() => (squeeze ? { opacity: 1 - shut(progress.value) } : {}), [squeeze]);
   const dotsFade = useAnimatedStyle(() => (squeeze && address.insecure ? { opacity: 1 - shut(progress.value) } : {}), [squeeze, address.insecure]);
   const lockFade = useAnimatedStyle(() => ({ opacity: shut(progress.value) }));
-  const lift = useAnimatedStyle(() => ({ transform: [{ translateY: squeeze ? -DUO_PLUS_ABOVE * shut(progress.value) : 0 }] }), [squeeze]);
   const leading = (
     <Animated.View testID="floatingBarLeading" collapsable={false} style={back.leading} pointerEvents={back.sidesShown ? "box-none" : "none"} importantForAccessibility={back.sidesShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.sidesShown}>
       <FloatingTabsButton tab={tab} order={order} roles={roles} dark={dark} testID="floatingBarTabs" glass={back.sidesGlass} glyphs={back.leadingGlyphs} ghost={!handed} onTabs={onTabs} onTabsMenu={onTabsMenu} onStep={onStep} />
@@ -149,7 +148,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
       {inStrip ? null : trailing}
     </View>
     {inStrip ? (
-      <Animated.View testID="floatingBarStrip" pointerEvents="box-none" style={[styles.strip, { left: duo.stripLeft, top: -DUO_PLUS_ABOVE }, lift]}>
+      <Animated.View testID="floatingBarStrip" pointerEvents="box-none" style={[styles.strip, { left: duo.stripLeft, top: duo.stripTop }]}>
         {trailing}
         {leading}
       </Animated.View>

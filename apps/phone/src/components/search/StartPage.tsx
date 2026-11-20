@@ -12,7 +12,7 @@ import { GlassCircleButton } from "../tabs/ChromeButtons";
 import { PlusMenuButton } from "../tabs/DeckBottomBar";
 import { StartSpaces, startBarCenterY, type StartGeometry } from "./StartSpaces";
 import { useBottomBarLayout } from "../ui/useBottomBarLayout";
-import { barSpanCenter, besideStrip, DUO_BAR, DUO_PLUS_ABOVE } from "../../lib/bottomBarSpan";
+import { barSpanCenter, besideStrip, DUO_BAR } from "../../lib/bottomBarSpan";
 
 export function StartPage() {
   const insets = useSafeAreaInsets();
@@ -45,7 +45,7 @@ export function StartPage() {
       testID="startBarPlus"
       dark={dark}
       incognito={incognito}
-      place={strip ? { bottom: height - barTop - startLayout.barCircle + DUO_PLUS_ABOVE, ...besideStrip(strip, width, tabsLayout.menuWidth, space.l) } : { bottom: height - barTop + space.s, left: plusMenuLeft, width: tabsLayout.menuWidth }}
+      place={strip ? { bottom: height - barTop - strip.plus - DUO_BAR.button, ...besideStrip(strip, width, tabsLayout.menuWidth, space.l) } : { bottom: height - barTop + space.s, left: plusMenuLeft, width: tabsLayout.menuWidth }}
       menusShown={!trayUp}
     />
   );
@@ -56,17 +56,17 @@ export function StartPage() {
       <Animated.View testID="startContent" {...hidden} style={[StyleSheet.absoluteFill, contentStyle]}>
         <StartSpaces geometry={geometry} dark={dark} incognito={incognito} />
       </Animated.View>
-      <Animated.View testID="startBar" {...hidden} style={[styles.bar, { top: barTop, paddingLeft: barSpan.left, paddingRight: barSpan.right }, barStyle]}>
+      <Animated.View testID="startBar" {...hidden} style={[styles.bar, { top: barTop, paddingLeft: barSpan.left, paddingRight: barSpan.right }, strip?.ends ? styles.barEnds : null, barStyle]}>
         {strip ? null : tabs}
         {strip ? null : plus}
         <GlassCircleButton icon="gearshape" label="Settings" testID="startBarSettings" dark={dark} incognito={incognito} onPress={() => openSettings()} />
       </Animated.View>
       {strip ? (
         <>
-          <Animated.View testID="startStripPlus" {...hidden} style={[styles.strip, { left: stripX, top: barTop - DUO_PLUS_ABOVE }, barStyle]}>
+          <Animated.View testID="startStripPlus" {...hidden} style={[styles.strip, { left: stripX, top: barTop + strip.plus }, barStyle]}>
             {plus}
           </Animated.View>
-          <Animated.View testID="startStripTabs" {...hidden} style={[styles.strip, { left: stripX, top: barTop }, barStyle]}>
+          <Animated.View testID="startStripTabs" {...hidden} style={[styles.strip, { left: stripX, top: barTop + strip.tabs }, barStyle]}>
             {tabs}
           </Animated.View>
         </>
@@ -77,5 +77,6 @@ export function StartPage() {
 
 const styles = StyleSheet.create({
   bar: { position: "absolute", left: 0, right: 0, height: startLayout.barCircle, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: startLayout.barGap },
+  barEnds: { justifyContent: "flex-end" },
   strip: { position: "absolute", width: DUO_BAR.button, height: DUO_BAR.button, alignItems: "center", justifyContent: "center" },
 });

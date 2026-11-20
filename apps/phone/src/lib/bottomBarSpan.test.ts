@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { barSpanCenter, besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoSqueeze } from "./bottomBarSpan.ts";
+import { besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoSqueeze } from "./bottomBarSpan.ts";
 
 test("with no hinge every bottom bar pads by the larger side inset plus its own side, on both sides, and nothing goes to a strip", () => {
   assert.deepEqual(bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), { span: { left: 24, right: 24 }, strip: null });
@@ -9,40 +9,41 @@ test("with no hinge every bottom bar pads by the larger side inset plus its own 
   assert.deepEqual(bottomBarLayout(1032, { left: 0, right: 0 }, "none", 24), { span: { left: 24, right: 24 }, strip: null });
 });
 
-test("on the closed Duo the capsule runs from 24 to 12 short of the strip, 24 to 370 on its 466 screen, and Tabs and + stack in the strip 48 from the edge, + 55 above", () => {
+const CLOSED_STRIP = { side: "right", centerX: 418, plus: -55, tabs: 0, ends: false };
+const OPEN_STRIP = { side: "right", centerX: 903, plus: -110, tabs: -55, ends: true } as const;
+
+test("on the closed Duo the capsule runs from 24 to 12 short of the strip, 24 to 370 on its 466 screen, and Tabs and + stack in the strip 48 from the edge, Tabs on the bar's line and + 55 above", () => {
   const { span, strip } = bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24);
   assert.deepEqual(span, { left: 24, right: 96 });
   assert.equal(466 - span.left - span.right, 346);
-  assert.deepEqual(strip, { side: "right", centerX: 418 });
+  assert.deepEqual(strip, CLOSED_STRIP);
   assert.equal(DUO_PLUS_ABOVE, 55);
   assert.deepEqual(besideStrip(strip!, 466, 250, 16), { right: 80, width: 250 });
   assert.deepEqual(besideStrip(strip!, 466, 400, 16), { right: 80, width: 370 });
 });
 
-test("on the open Duo the capsule is 400 wide ending 12 short of the strip, 455 to 855 on 951, with the same strip buttons", () => {
+test("on the open Duo three fixed slots stack in the strip at 903, + 110 and Tabs 55 above the bar's line, and the 400-wide capsule ends at the bottom slot's right edge, 527 to 927 on 951", () => {
   const { span, strip } = bottomBarLayout(951, { left: 0, right: 84 }, "fullyOpen", 24);
-  assert.deepEqual(span, { left: 455, right: 96 });
+  assert.deepEqual(span, { left: 527, right: 24 });
   assert.equal(951 - span.left - span.right, 400);
-  assert.equal(barSpanCenter(951, span), 655);
-  assert.deepEqual(strip, { side: "right", centerX: 903 });
-  assert.deepEqual(bottomBarLayout(600, { left: 0, right: 200 }, "fullyOpen", 24).span, { left: 24, right: 212 });
+  assert.equal(951 - span.right, 903 + 24);
+  assert.deepEqual(strip, OPEN_STRIP);
+  assert.deepEqual(bottomBarLayout(600, { left: 0, right: 200 }, "fullyOpen", 24).span, { left: 176, right: 24 });
 });
 
 test("a strip on the leading side mirrors it all", () => {
-  assert.deepEqual(bottomBarLayout(466, { left: 84, right: 0 }, "closed", 24), { span: { left: 96, right: 24 }, strip: { side: "left", centerX: 48 } });
-  assert.deepEqual(bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24), { span: { left: 96, right: 455 }, strip: { side: "left", centerX: 48 } });
-  assert.deepEqual(besideStrip({ side: "left", centerX: 48 }, 466, 250, 16), { left: 80, width: 250 });
+  assert.deepEqual(bottomBarLayout(466, { left: 84, right: 0 }, "closed", 24), { span: { left: 96, right: 24 }, strip: { ...CLOSED_STRIP, side: "left", centerX: 48 } });
+  assert.deepEqual(bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24), { span: { left: 24, right: 527 }, strip: { ...OPEN_STRIP, side: "left", centerX: 48 } });
+  assert.deepEqual(besideStrip({ ...CLOSED_STRIP, side: "left", centerX: 48 }, 466, 250, 16), { left: 80, width: 250 });
   assert.equal(bottomBarLayout(466, { left: 0, right: 60 }, "closed", 24).strip!.centerX, 466 - 36);
 });
 
-test("only the open Duo squeezes: its capsule goes into a 48 circle on the bar's line in the strip, and Tabs and + rise one step each, 55 then 110 above the line", () => {
+test("only the open Duo squeezes, and only the capsule's left edge moves: right into the bottom slot's circle", () => {
   const open = bottomBarLayout(951, { left: 0, right: 84 }, "fullyOpen", 24);
-  assert.deepEqual(duoSqueeze(951, open), { marginLeft: 424, marginRight: -72 });
-  assert.equal(455 + 424, 903 - 24);
-  assert.equal(951 - 96 + 72, 903 + 24);
+  assert.deepEqual(duoSqueeze(951, open), { marginLeft: 352, marginRight: 0 });
+  assert.equal(527 + 352, 903 - 24);
   const mirrored = bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24);
-  assert.deepEqual(duoSqueeze(951, mirrored), { marginLeft: -72, marginRight: 424 });
-  assert.equal(DUO_PLUS_ABOVE * 2, 110);
+  assert.deepEqual(duoSqueeze(951, mirrored), { marginLeft: 0, marginRight: 352 });
 });
 
 test("the closed Duo and a phone with no hinge never squeeze", () => {

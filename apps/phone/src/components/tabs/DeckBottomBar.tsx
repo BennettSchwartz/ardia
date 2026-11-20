@@ -147,7 +147,9 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, width, layout, in
   }, [lift]);
   const riseStyle = useAnimatedStyle(() => ({ transform: [{ translateY: rise.value }] }));
   const { span, strip } = layout;
-  const plusPlace = strip ? { bottom: deckHeight - centerY - deckChromeLayout.barCircle / 2, ...besideStrip(strip, width, tabsLayout.menuWidth, deckChromeLayout.menuGap) } : { bottom: deckHeight - centerY + deckChromeLayout.barCircle / 2 + deckChromeLayout.menuGap, right: span.right, width: tabsLayout.menuWidth };
+  const plusTop = strip ? (strip.ends ? strip.plus : strip.tabs) : 0;
+  const plusPlace = strip ? { bottom: deckHeight - centerY - deckChromeLayout.barCircle / 2 - plusTop, ...besideStrip(strip, width, tabsLayout.menuWidth, deckChromeLayout.menuGap) } : { bottom: deckHeight - centerY + deckChromeLayout.barCircle / 2 + deckChromeLayout.menuGap, right: span.right, width: tabsLayout.menuWidth };
+  const incognitoSwitch = <IncognitoSwitch incognito={incognito} dark={dark} {...fade} />;
   const plus = <PlusMenuButton width={deckChromeLayout.barCircle} label={incognito ? "New Incognito Tab" : "New Tab"} testID="deckBarPlus" dark={dark} place={plusPlace} menusShown={menusShown} onMenu={onMenu} {...fade} />;
   const measure = () =>
     row.current?.measureInWindow((_x, y, _width, height) => {
@@ -160,11 +162,12 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, width, layout, in
   return (
     <Animated.View pointerEvents="box-none" style={[styles.place, rest, riseStyle]}>
       <View ref={row} testID="deckBottomBar" onLayout={measure} pointerEvents="box-none" style={[styles.bar, { paddingLeft: span.left, paddingRight: span.right }]}>
-        <IncognitoSwitch incognito={incognito} dark={dark} {...fade} />
+        {strip?.ends ? null : incognitoSwitch}
         <SearchTabsField search={search} style={styles.searchHit} {...fade} />
         {strip ? null : plus}
       </View>
-      {strip ? <View testID="deckStripPlus" pointerEvents="box-none" style={[styles.strip, { left: strip.centerX - DUO_BAR.button / 2 }]}>{plus}</View> : null}
+      {strip ? <View testID="deckStripPlus" pointerEvents="box-none" style={[styles.strip, { left: strip.centerX - DUO_BAR.button / 2, top: plusTop }]}>{plus}</View> : null}
+      {strip?.ends ? <View testID="deckStripIncognito" pointerEvents="box-none" style={[styles.strip, { left: strip.centerX - DUO_BAR.button / 2, top: strip.tabs }]}>{incognitoSwitch}</View> : null}
     </Animated.View>
   );
 }
@@ -174,7 +177,7 @@ const styles = StyleSheet.create({
   centered: { alignItems: "center", justifyContent: "center" },
   switchOn: { position: "absolute", width: deckChromeLayout.barCircle, height: deckChromeLayout.barCircle, borderRadius: capsule(deckChromeLayout.barCircle) },
   bar: { height: deckChromeLayout.barCircle, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.barGap },
-  strip: { position: "absolute", top: 0, width: DUO_BAR.button, height: DUO_BAR.button },
+  strip: { position: "absolute", width: DUO_BAR.button, height: DUO_BAR.button },
   searchHit: { flex: 1, height: deckChromeLayout.barCircle },
   search: { flex: 1, paddingLeft: deckChromeLayout.searchLead },
   searchRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.searchSpacing },

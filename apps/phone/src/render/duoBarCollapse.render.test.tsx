@@ -18,7 +18,7 @@ const safeArea = require("react-native-safe-area-context") as { useSafeAreaInset
 
 const PORTRAIT = Dimensions.get("window");
 
-const OPEN = { name: "open", width: 951, height: 669, hinge: "fullyOpen", stripX: 903, controlsLeft: 431, squeeze: { marginLeft: 424, marginRight: -72 } } as const;
+const OPEN = { name: "open", width: 951, height: 669, hinge: "fullyOpen", stripX: 903, controlsLeft: 503, controlsRight: 0, squeeze: { marginLeft: 352, marginRight: 0 } } as const;
 const CLOSED = { name: "closed", width: 466, height: 678, hinge: "closed" } as const;
 
 type Pose = { width: number; height: number; hinge: ScreenHinge };
@@ -71,6 +71,7 @@ const settle = () => {
 const host = (root: Root, testID: string) => root.root.findAll((node) => node.props.testID === testID && typeof node.type === "string")[0];
 const animatedOf = (node: ReactTestInstance) => (node.props.style ? getAnimatedStyle(node) : {});
 const shown = (node: ReactTestInstance) => ({ ...StyleSheet.flatten(node.props.style), ...animatedOf(node) }) as { opacity?: number; marginLeft?: number; marginRight?: number; left?: number; top?: number; transform?: Record<string, number>[] };
+const flat = (node: ReactTestInstance) => StyleSheet.flatten(node.props.style) as { top?: number; left?: number };
 const lifted = (node: ReactTestInstance) => (Object.assign({}, ...(shown(node).transform ?? [])) as { translateY?: number }).translateY ?? 0;
 const glyphOf = (node: ReactTestInstance) => {
   let glyph: ReactTestInstance | null = node.parent;
@@ -80,7 +81,7 @@ const glyphOf = (node: ReactTestInstance) => {
 const pageMenu = (root: Root) => root.root.findAll((node) => typeof node.props.accessibilityLabel === "string" && node.props.accessibilityLabel.startsWith("Page Menu") && typeof node.props.onPress === "function")[0]!;
 
 for (const chosen of [false, true]) {
-  test(`on the open Duo, with Collapse Bottom Bar ${chosen ? "on" : "off"}, scrolling down squeezes the capsule into a 48 ··· circle on the bar's line in the strip at 903, Tabs and + rise a step, no host pill shows, and the collapse is counted`, () => {
+  test(`on the open Duo, with Collapse Bottom Bar ${chosen ? "on" : "off"}, the capsule grows out of the strip's bottom slot at 903 and squeezes back into its ··· on scroll, + and Tabs never move, no host pill shows, and the collapse is counted`, () => {
     setPreference("collapsesBottomBar", chosen);
     onDuo(OPEN);
     const counted = jest.spyOn(telemetry, "countUsage").mockImplementation(() => undefined);
@@ -88,10 +89,14 @@ for (const chosen of [false, true]) {
     const root = page(tab);
     expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginLeft ?? 0)).toBe(0);
     expect(Math.abs(shown(host(root, "floatingBarCentre")!).marginRight ?? 0)).toBe(0);
-    expect(lifted(host(root, "floatingBarStrip")!)).toBeCloseTo(0, 3);
+    const strip = host(root, "floatingBarStrip")!;
+    const placed = { ...flat(strip), lift: lifted(strip) };
+    expect(placed).toMatchObject({ top: -110, lift: 0 });
+    expect(OPEN.width - OPEN.controlsRight - 24).toBe(OPEN.stripX + 24);
     expect(pageMenu(root).props.accessibilityLabel).toBe("Page Menu");
     scrolled(tab, "down");
     settle();
+    expect({ ...flat(host(root, "floatingBarStrip")!), lift: lifted(host(root, "floatingBarStrip")!) }).toEqual(placed);
     expect(host(root, "hostPill")).toBeUndefined();
     expect(host(root, "hostPillFold")).toBeUndefined();
     const centre = shown(host(root, "floatingBarCentre")!);
@@ -100,7 +105,8 @@ for (const chosen of [false, true]) {
     expect(OPEN.controlsLeft + 24 + OPEN.squeeze.marginLeft).toBe(OPEN.stripX - 24);
     expect(shown(host(root, "floatingBarAddressFade")!).opacity).toBeCloseTo(0, 3);
     expect(host(root, "floatingBarAddressFade")!.props.accessibilityElementsHidden).toBe(true);
-    expect(lifted(host(root, "floatingBarStrip")!)).toBeCloseTo(-55, 3);
+    expect(OPEN.controlsLeft + 24 + centre.marginLeft!).toBeCloseTo(OPEN.stripX - 24, 3);
+    expect(OPEN.width - OPEN.controlsRight - 24 - centre.marginRight!).toBeCloseTo(OPEN.stripX + 24, 3);
     expect(host(root, "floatingBarFold")!.props.pointerEvents).toBe("box-none");
     expect(StyleSheet.flatten(host(root, "floatingBarFold")!.props.style)?.opacity).toBeUndefined();
     expect(pageMenu(root).props.accessibilityLabel).toMatch(/^Page Menu, \S/);

@@ -2,7 +2,7 @@ export type BarSpan = { left: number; right: number };
 
 export type ScreenHinge = "none" | "closed" | "partiallyOpen" | "fullyOpen";
 
-export type DuoStrip = { side: "left" | "right"; centerX: number };
+export type DuoStrip = { side: "left" | "right"; centerX: number; plus: number; tabs: number; ends: boolean };
 
 export type BottomBarLayout = { span: BarSpan; strip: DuoStrip | null };
 
@@ -17,17 +17,19 @@ export function bottomBarLayout(width: number, insets: { left: number; right: nu
   }
   const stripLeft = insets.left > insets.right;
   const inset = stripLeft ? insets.left : insets.right;
-  const near = inset + DUO_BAR.stripGap;
-  const far = width < DUO_BAR.openFrom ? side : Math.max(side, width - near - DUO_BAR.openWidth);
   const fromEdge = Math.max(DUO_BAR.button / 2, Math.min(DUO_BAR.axis, inset - DUO_BAR.button / 2));
-  return stripLeft ? { span: { left: near, right: far }, strip: { side: "left", centerX: fromEdge } } : { span: { left: far, right: near }, strip: { side: "right", centerX: width - fromEdge } };
+  const open = width >= DUO_BAR.openFrom;
+  const near = open ? fromEdge - DUO_BAR.button / 2 : inset + DUO_BAR.stripGap;
+  const far = open ? Math.max(side, width - near - DUO_BAR.openWidth) : side;
+  const slots = open ? { plus: -2 * DUO_PLUS_ABOVE, tabs: -DUO_PLUS_ABOVE, ends: true } : { plus: -DUO_PLUS_ABOVE, tabs: 0, ends: false };
+  return stripLeft ? { span: { left: near, right: far }, strip: { side: "left", centerX: fromEdge, ...slots } } : { span: { left: far, right: near }, strip: { side: "right", centerX: width - fromEdge, ...slots } };
 }
 
 export type DuoSqueeze = { marginLeft: number; marginRight: number };
 
 export function duoSqueeze(width: number, layout: BottomBarLayout): DuoSqueeze | null {
   const { span, strip } = layout;
-  if (!strip || width < DUO_BAR.openFrom) return null;
+  if (!strip?.ends) return null;
   const half = DUO_BAR.button / 2;
   return { marginLeft: strip.centerX - half - span.left, marginRight: width - span.right - (strip.centerX + half) };
 }
