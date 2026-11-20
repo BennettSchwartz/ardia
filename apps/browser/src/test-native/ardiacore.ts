@@ -214,9 +214,22 @@ function addHistoryVisits(profile: string, { pages, toleranceMs = 1000 }: { page
   return { added };
 }
 
+export const ENGINE_REQUEST_LIMIT_BYTES = 8 * 1024 * 1024;
+export const historyImportRequestBytes: number[] = [];
+export const refusedHistoryImports = { next: 0 };
+export const heldHistoryImports: { reply: Promise<void> | null } = { reply: null };
+export const heldHistoryQueries: { reply: Promise<void> | null } = { reply: null };
+
 function importHistoryRows(profile: string, { rows }: { rows: { u: string; t: string; l: number }[] }) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ rows })).length;
+  historyImportRequestBytes.push(bytes);
+  if (bytes > ENGINE_REQUEST_LIMIT_BYTES) throw Object.assign(new Error("Invalid or oversized engine request"), { code: "ERR_ENGINE" });
+  if (refusedHistoryImports.next > 0) {
+    refusedHistoryImports.next--;
+    throw Object.assign(new Error("no history"), { code: "ERR_ENGINE" });
+  }
   for (const r of rows) if (!chromeHistory(profile).has(r.u)) chromeHistory(profile).set(r.u, { title: r.t, visits: [r.l] });
-  return {};
+  return heldHistoryImports.reply ? heldHistoryImports.reply.then(() => ({})) : {};
 }
 
 export const historyDeletes = { failNext: false };
@@ -604,7 +617,10 @@ const fakeModules = {
     setAllowed: () => null,
   }),
   ArdiaHistory: domain("history", {
-    query: ({ profile, ...args }) => queryHistory(profile, args),
+    query: ({ profile, ...args }) => {
+      const read = queryHistory(profile, args);
+      return heldHistoryQueries.reply ? heldHistoryQueries.reply.then(() => read) : read;
+    },
     add: ({ profile, ...args }) => addHistoryVisits(profile, args),
     import: ({ profile, ...args }) => importHistoryRows(profile, args),
     deleteUrls: ({ profile, ...args }) => deleteHistoryUrls(profile, args),
