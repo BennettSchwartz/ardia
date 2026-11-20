@@ -708,9 +708,12 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   re-serialize byte for byte, and each package name must be exactly `Ardia-<V>-linux-x64.<deb|tar.xz|AppImage>`),
   requires `<V>` to be newer than `lib/ardia/VERSION` (a nightly sorts before its stable), then copies its package
   (at most the manifest's size, the same way) and checks size and sha256. Everything from its start to the post-install version check shares
-  one 9-minute deadline, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. A `.deb` goes through `apt-get install --no-remove`, a
+  one 9-minute deadline, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. Run
+  as root, it re-runs itself under a 9.5-minute `timeout` watchdog too, since the browser can't signal a root process,
+  so a step outside that deadline (a `stat` that stalls) still ends. A `.deb` goes through `apt-get install --no-remove`, a
   tarball through its own `install.sh --prefix <the helper's prefix>`, and an AppImage is staged as
-  `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it. PATH is its own and the prefix comes from its own
+  `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it, unless `$APPIMAGE` changed after the browser that
+  called the helper started (another instance already replaced it, so this one's version check is stale). PATH is its own and the prefix comes from its own
   location, never from the caller. The last line on stdout is `installed <V>` or `failed <reason>` (`usage`,
   `missing`, `manifest`, `signature`, `notNewer`, `kind`, `checksum`, `install`, `busy`, `timeout`).
 - **polkit action `dev.ardia.linux.update`.** `allow_active` is `yes` with no password, `allow_any` and

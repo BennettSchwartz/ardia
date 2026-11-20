@@ -29,6 +29,8 @@ max_package=536870912
 max_manifest=4096
 signature_size=64
 install_budget=540
+watchdog_seconds=570
+start_time_slack=2
 small_copy_seconds=60
 version_pattern='^([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(-nightly\.([0-9]{1,9}))?$'
 version_line_pattern='^version (.+)$'
@@ -94,6 +96,16 @@ installed_version() {
   IFS= read -r line <"$file" || [[ -n "$line" ]] || return 1
   version_parts "$line" >/dev/null || return 1
   printf '%s' "$line"
+}
+
+parent_started_at() {
+  local stat ticks boot
+  stat=$(cat "/proc/$PPID/stat" 2>/dev/null) || return 1
+  read -r -a stat <<<"${stat##*) }"
+  ticks=$(getconf CLK_TCK 2>/dev/null) || return 1
+  boot=$(awk '$1 == "btime" { print $2 }' /proc/stat 2>/dev/null) || return 1
+  [[ "${stat[19]:-}" =~ ^[0-9]+$ && "$ticks" =~ ^[1-9][0-9]*$ && "$boot" =~ ^[0-9]+$ ]] || return 1
+  printf '%d' "$((boot + stat[19] / ticks))"
 }
 
 appimage_target() {
@@ -367,6 +379,10 @@ run_install() {
     tarball) install_tarball ;;
     appimage)
       chmod 0755 -- "$staged"
+      local launched changed
+      launched=$(parent_started_at) || fail install "couldn't tell when Ardia started"
+      changed=$(stat -c %Z -- "$appimage") || fail install "couldn't stat $appimage"
+      ((changed <= launched + start_time_slack)) || fail notNewer "$appimage changed after this Ardia started"
       install_appimage
       ;;
   esac
@@ -382,8 +398,12 @@ case "${1:-}" in
     printf '%s\n' "$(detect_kind)"
     ;;
   install)
+    if [[ "$EUID" == 0 && "${ARDIA_UPDATE_WATCHED:-}" != 1 ]]; then
+      exec timeout --kill-after=15 "$watchdog_seconds" env ARDIA_UPDATE_WATCHED=1 "$self" "$@"
+    fi
     trap on_exit EXIT
-    trap 'exit 1' INT TERM HUP
+    trap 'exit 1' INT HUP
+    trap 'fail timeout "the install ran past its ${watchdog_seconds}s watchdog"' TERM
     (($# == 2)) || fail usage "install takes one folder"
     run_install "$2"
     ;;

@@ -17,8 +17,9 @@ AppImage as a non-root user, and checks every refusal: a bad signature, the
 wrong key, an older or equal version, checksum and size mismatches,
 symlinked, hard-linked, FIFO and foreign-owned files, a manifest naming
 another version'"'"'s file, a path or shell metacharacters, a bad version
-string, a concurrent run and a relative folder, and that the reads it makes as
-the user hold no descriptor to its private copies. In archlinux (default) it
+string, a concurrent run, a relative folder and an AppImage replaced after
+Ardia started, that the reads it makes as the user hold no descriptor to its
+private copies, and that its watchdog stops a stalled step. In archlinux (default) it
 installs the AUR PKGBUILD built from the OLD tarball and checks kind is
 managed.
 
@@ -309,6 +310,19 @@ running_sleeps=$(for cmdline in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$cmdline
 ((running_sleeps > 0)) && bad "the timed-out apt-get is still running" || ok "the timed-out apt-get was killed"
 rm /usr/sbin/apt-get
 cp /tmp/helper.aside "$helper"
+sed -i 's/^watchdog_seconds=570$/watchdog_seconds=5/' "$helper"
+mv /usr/bin/find /usr/bin/find.real
+printf '#!/bin/sh\nexec sleep 301\n' > /usr/bin/find
+chmod 0755 /usr/bin/find
+stage valid
+started=$SECONDS
+expect "deb's watchdog stops a step the install budget doesn't cover" "failed timeout" "$(as_pkexec "$helper" install "$cases/valid")"
+elapsed=$((SECONDS - started))
+((elapsed < 40)) && ok "the watchdog fired after ${elapsed}s" || bad "the watchdog took ${elapsed}s"
+mv /usr/bin/find.real /usr/bin/find
+running_sleeps=$(for cmdline in /proc/[0-9]*/cmdline; do tr '\0' ' ' < "$cmdline" 2>/dev/null; echo; done | grep -cx 'sleep 301 ' || true)
+((running_sleeps > 0)) && bad "the stalled step is still running" || ok "the stalled step was killed"
+cp /tmp/helper.aside "$helper"
 expect "deb left the install alone after the timeout" "$OLD" "$(installed_version)"
 stage valid
 expect "deb upgrade" "installed $NEW" "$(as_pkexec "$helper" install "$cases/valid")"
@@ -417,6 +431,11 @@ sleep 1
 expect "appimage refuses a concurrent run" "failed busy" "$(app_install "$cases/valid")"
 kill "$holder"
 wait "$holder" 2>/dev/null || true
+stage valid
+replaced_after_launch=$(timeout 300 bash -c 'sleep 5; touch -c "$1"; shift; exec "$@"' _ "$apps/Ardia.AppImage" \
+  setpriv --reuid=1234 --regid=1234 --clear-groups env -i HOME=/home/tester PATH=/usr/bin:/bin APPIMAGE="$apps/Ardia.AppImage" \
+  APPDIR="$mnt/squashfs-root" "$inner" install "$cases/valid" 2>>/tmp/helper.log | tail -n 1 || true)
+expect "appimage refuses to replace an AppImage that changed after Ardia started" "failed notNewer" "$replaced_after_launch"
 expect "the refusals left the AppImage alone" "$old_sum" "$(sha256sum < "$apps/Ardia.AppImage")"
 expect "the refusals left no staged AppImage" "" "$(find "$apps" -name '.ardia-update-*')"
 stage valid
