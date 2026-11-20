@@ -1,6 +1,6 @@
 import type { BrowserState } from "../browser/store";
 import type { SplitView } from "../browser/types";
-import { splitOf, splitTabIds } from "../splits/splits";
+import { MAX_SPLIT_PANES, splitOf, splitTabIds } from "../splits/splits";
 import { eligibleKind, isEligibleTab, shownPage } from "./automationWindows";
 import type { MethodSpec } from "./socketCatalog";
 import { id, ids, obj, oneOf, TAB, text, WINDOW } from "./socketSchema";
@@ -81,7 +81,7 @@ function openPeek(params: Record<string, unknown>) {
 
 export const SPLIT_METHODS: MethodSpec[] = [
   { name: "splits.list", mutates: false, description: "Split views and their panes", params: obj({ window: WINDOW }), result: "[split]", run: listSplits },
-  { name: "splits.create", mutates: true, description: "Show tabs of one window side by side", params: obj({ tabs: ids("2 to 4 tab ids of one window", 4), orientation: oneOf(ORIENTATIONS, "Side by side (horizontal) or stacked (vertical)") }, ["tabs"]), result: "split", run: createSplit },
+  { name: "splits.create", mutates: true, description: "Show tabs of one window side by side", params: obj({ tabs: { ...ids(`2 to ${MAX_SPLIT_PANES} tab ids of one window`, MAX_SPLIT_PANES), minItems: 2 }, orientation: oneOf(ORIENTATIONS, "Side by side (horizontal) or stacked (vertical)") }, ["tabs"]), result: "split", run: createSplit },
   {
     name: "splits.separate",
     mutates: true,
