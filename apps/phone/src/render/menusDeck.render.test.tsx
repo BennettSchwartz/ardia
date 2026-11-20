@@ -207,7 +207,7 @@ nativeTest("the Incognito pill's menu is Close Incognito Tabs, which asks with a
   const root = deck();
   const pill = menuAround(root, "Incognito, 2 tabs");
   expect(pill.props.trigger).toBe("tap");
-  expect(items(pill)).toEqual([{ id: "0", title: "Close Incognito Tabs", destructive: true }]);
+  expect(items(pill)).toEqual([{ id: "0", title: "Close Incognito Tabs", systemImage: "xmark", destructive: true }]);
   choose(pill, "Close Incognito Tabs");
   await act(async () => undefined);
   expect(mockNative.sheets[0]).toMatchObject({ title: "Close Incognito Tabs?", message: "Their pages, cookies and history are cleared." });

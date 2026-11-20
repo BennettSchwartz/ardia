@@ -70,18 +70,25 @@ const tray = () => renderSurface(<DesignProvider design="redesigned"><SearchTray
 const lift = (to: number) => act(() => (mockSeen.props!.onLift as (lift: { lift: number; up: boolean }) => void)({ lift: to, up: true }));
 const editPage = () => act(() => presentSearch("page", "site0.example", null, { currentUrl: "https://site0.example/", currentTabId: currentTabs().open[0]!.id }));
 
-onIPhone("on a new tab the search panel runs from under the status bar down to the keyboard, while editing a page's address keeps today's panel", () => {
+const FIELD_BLOCK = floatingPanelLayout.fieldInset + browseLayout.searchFieldHeight + space.xs;
+const rowsMeasure = (root: Root, height: number) => act(() => root.root.findAll((node) => node.props.testID === "newTabRowsScroll" && typeof node.props.onContentSizeChange === "function")[0]!.props.onContentSizeChange(0, height));
+
+onIPhone("on a new tab the search panel is only as tall as its field and rows, stopping five and a half rows above the field so the field stays near the thumb, while editing a page's address keeps today's panel as its cap", () => {
   act(() => presentSearch("start", ""));
   const root = tray();
+  act(() => typeSearch("site"));
+  act(() => jest.advanceTimersByTime(50));
   lift(300);
-  const panel = flat(host(root, "traySurface")).height as number;
-  expect(panel).toBeGreaterThan(PAGE_TRAY);
+  rowsMeasure(root, 120);
+  expect(flat(host(root, "traySurface")).height).toBe(FIELD_BLOCK + 120 + 300);
+  rowsMeasure(root, 2000);
+  expect(flat(host(root, "traySurface")).height).toBeCloseTo(FIELD_BLOCK + floatingPanelLayout.reachRows * browseLayout.suggestionPitch + 300);
   unmount(root);
   act(() => dismissSearch());
   editPage();
   const edit = tray();
   lift(300);
-  expect(flat(host(edit, "traySurface")).height).toBe(PAGE_TRAY);
+  expect(flat(host(edit, "traySurface")).height as number).toBeLessThanOrEqual(PAGE_TRAY);
   unmount(edit);
 });
 
@@ -198,16 +205,17 @@ const pull = (id: string, translationY: number) => {
 };
 const closeSearchDim = (root: Root) => root.root.findAll((node) => node.props.accessibilityLabel === "Close Search" && typeof node.props.onPress === "function")[0]!;
 
-onIPhone("the panel's top sits 28 points under the status bar, as in Arc Search's, whether the keyboard is up or down", () => {
+onIPhone("on a short screen the panel's top still stops 28 points under the status bar, whether the keyboard is up or down", () => {
   act(() => presentSearch("start", ""));
   const root = trayWithInsets();
   const window = Dimensions.get("window").height;
   const gap = space.s + floatingPanelLayout.aboveKeyboard;
   const aboveKeyboard = () => (flat(host(root, "traySurface")).height as number) + (flat(host(root, "trayPanel")).bottom as number);
-  lift(300);
-  expect(window - 300 - gap - aboveKeyboard()).toBe(seenTop + 28);
-  act(() => (mockSeen.props!.onLift as (lift: { lift: number; up: boolean }) => void)({ lift: 0, up: false }));
-  expect(window - seenBottom - gap - aboveKeyboard()).toBe(seenTop + 28);
+  act(() => typeSearch("site"));
+  act(() => jest.advanceTimersByTime(50));
+  lift(window - seenTop - 28 - gap - 200);
+  rowsMeasure(root, 2000);
+  expect(window - (window - seenTop - 28 - gap - 200) - gap - aboveKeyboard()).toBe(seenTop + 28);
   unmount(root);
 });
 

@@ -17,7 +17,7 @@ export function DeckEmpty({ centerY, showsArchive, onArchive, searching = false,
       {words.detail ? <Text style={[font.subheadline, styles.centered, { color: theme.secondaryLabel }]}>{words.detail}</Text> : null}
       {showsArchive && !searching && !incognito ? (
         <Pressable accessibilityRole="button" onPress={onArchive} style={styles.archive}>
-          <Text style={[font.subheadline, styles.bold, { color: theme.formAccent }]}>Open Archive</Text>
+          <Text style={[font.subheadline, styles.bold, { color: theme.spaceAccentInk }]}>Open Archive</Text>
         </Pressable>
       ) : null}
     </View>

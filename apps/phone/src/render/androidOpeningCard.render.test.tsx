@@ -361,7 +361,7 @@ test("the covering card lays out in the screen's own shape on whole pixels, so o
   expect(px(frame.height)).toBeCloseTo(Math.round(px(frame.height)), 6);
   expect(px(frame.left)).toBeCloseTo(Math.round(px(frame.left)), 6);
   expect(px(frame.top)).toBeCloseTo(Math.round(px(frame.top)), 6);
-  expect([Math.round(px(frame.width)), Math.round(px(frame.height))]).toEqual([756, 1680]);
+  expect([Math.round(px(frame.width)), Math.round(px(frame.height))]).toEqual([612, 1360]);
   expect(px(frame.width) * frame.scale).toBeCloseTo(1080, 6);
   expect(px(frame.height) * frame.scale).toBeCloseTo(2400, 6);
   expect(px(frame.left) + px(frame.width) / 2).toBeCloseTo(540, 6);

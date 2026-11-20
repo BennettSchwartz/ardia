@@ -4,7 +4,7 @@ import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { FloatingBar } from "../components/browsing/FloatingBar";
 import { SearchTray } from "../components/search/SearchTray";
 import { StartScreen } from "../components/search/StartScreen";
-import { TabDeck } from "../components/tabs/TabDeck";
+import { archiveFloatsOverDeck, TabDeck } from "../components/tabs/TabDeck";
 import { deckArchiveBottom, deckHeaderBottom } from "../components/tabs/DeckHeader";
 import { DesignProvider } from "../components/ui";
 import { deckGeometry } from "../lib/deckGeometry";
@@ -51,13 +51,14 @@ const hosts = (root: Root, id: string) => root.root.findAll((node) => node.props
 const flat = (node: ReactTestInstance) => StyleSheet.flatten(node.props.style) ?? {};
 const redesigned = (node: React.ReactNode) => renderSurface(<DesignProvider design="redesigned">{node}</DesignProvider>);
 
-test("an iPhone 17 Pro on its side gets main's landscape deck: a 520.3 by 240 card centred at 209, leading 127.8, spacing 422.1, the bar at 361", () => {
+test("an iPhone 17 Pro on its side gets the redesign's smaller deck: a 477.1 by 220.1 card centred on the screen at 209, leading 187.4, spacing 281.2, the bar at 361", () => {
   const g = deckGeometry(852, 393, 0, 21, 59, "ios", "redesigned", deckHeaderBottom());
-  expect(g.cardWidth).toBeCloseTo(520.3, 1);
-  expect(g.cardHeight).toBeCloseTo(240, 1);
+  expect(g.cardWidth).toBeCloseTo(477.1, 1);
+  expect(g.cardHeight).toBeCloseTo(220.1, 1);
   expect(g.cardCenterY).toBeCloseTo(209, 1);
-  expect(g.focusLeading).toBeCloseTo(127.8, 1);
-  expect(g.spacing).toBeCloseTo(422.1, 1);
+  expect(g.focusLeading).toBeCloseTo(187.4, 1);
+  expect(g.focusLeading + g.cardWidth / 2).toBeCloseTo(852 / 2, 6);
+  expect(g.spacing).toBeCloseTo(281.2, 1);
   expect(g.barCenterY).toBe(361);
   expect(g.safeSide).toBe(59);
 });
@@ -194,12 +195,14 @@ test("turning to landscape is counted once a launch, and a portrait window never
   forgetLandscapeCount();
 });
 
-test("in landscape the archive capsule shrinks the deck's cards to main's 407.6 by 188 on iPhone (smaller on Android, whose deck bar sits where the browsing bar does), as main's geometry takes the capsule's bottom as the chrome; in portrait on a 402 by 874 iPhone they go from 279.6 to 273.2", () => {
+test("in landscape the archive capsule shrinks the deck's cards to main's 407.6 by 188 on iPhone (smaller on Android, whose deck bar sits where the browsing bar does), as main's geometry takes the capsule's bottom as the chrome; in portrait on a 402 by 874 iPhone the capsule clears the 225.1-point cards and floats over the deck", () => {
   const archive = deckGeometry(852, 393, 0, 21, 59, "ios", "redesigned", deckArchiveBottom());
   expect(archive.cardWidth).toBeCloseTo(407.6, 1);
   expect(archive.cardHeight).toBeCloseTo(188, 1);
-  expect(deckGeometry(402, 874, 62, 34, 0, "ios", "redesigned", deckHeaderBottom()).cardWidth).toBeCloseTo(279.6, 1);
-  expect(deckGeometry(402, 874, 62, 34, 0, "ios", "redesigned", deckArchiveBottom()).cardWidth).toBeCloseTo(273.2, 1);
+  const portrait = deckGeometry(402, 874, 62, 34, 0, "ios", "redesigned", deckHeaderBottom());
+  expect(portrait.cardWidth).toBeCloseTo(225.1, 1);
+  expect(archiveFloatsOverDeck(portrait)).toBe(true);
+  expect(archiveFloatsOverDeck(deckGeometry(852, 393, 0, 21, 59, "ios", "redesigned", deckHeaderBottom()))).toBe(false);
   act(() => browse.useBrowse.setState({ surface: "deck", sheet: null, deckEntrance: null, frozenOrder: null, opening: null, leaving: null }));
   act(() => useArchiveCard.setState({ showing: true }));
   const root = redesigned(<TabDeck />);

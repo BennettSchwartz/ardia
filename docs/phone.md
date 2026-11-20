@@ -2190,7 +2190,7 @@ simulator, the list under "The iPhone redesign".
 
 **2. Onboarding** (a fresh install, or a lab build launched with `ArdiaOnboarding`)
 - [ ] Go forward and back through every step. Expect: each step slides 60 points with a fade both ways; leaving the welcome crossfades the backdrop; each step ticks and the last gives a success haptic; the keyboard goes down between steps.
-- [ ] On the sync step. Expect: a Mac window with a QR code and a phone scanning it, not a symbol. Tap Connect to Your Mac: the connect screen slides up from the bottom; Cancel slides it down. Connect: the phone in the picture turns plum, its viewfinder shrinks away as a checkmark grows in, and the subtitle crossfades to "Connected."
+- [ ] On the sync step. Expect: a Mac window with a QR code and a phone scanning it, not a symbol. Tap Connect to Your Mac: the connect screen slides up from the bottom; Cancel slides it down. Connect: the phone in the picture turns plum, its viewfinder shrinks away as a checkmark grows in, and the subtitle crossfades from "Your Mac’s tabs, right here. End-to-end encrypted." to "Your Mac’s tabs are here, end-to-end encrypted."
 - [ ] **Android:** on the welcome, tap Continue at once. Expect: the default-browser step still shows.
 - [ ] **Android:** mid-onboarding, change the system font size so the activity is recreated (step 44). Expect: the same step comes back.
 - [ ] **iPhone:** the default-browser step. Expect: it shows only when SwiftUI's would (offered, and not asked within 100 days); with the entitlement off, as in test builds, it never shows.

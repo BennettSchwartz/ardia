@@ -47,7 +47,7 @@ import { useSearchFromDockedMenu, useSearchOpen, useSearchSession } from "../../
 import { cancelSearch } from "../../state/browse/store";
 import { useTab } from "../../state/tabs/hooks";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { capsule, ConfirmDialog, FloatingMenu, font, MaterialIconButton, menuLayout, PressScale, Sheet, space, Symbol, tabsMotion, Toggle, useDesign, useTheme, type SymbolName } from "../ui";
+import { ConfirmDialog, FloatingMenu, font, MaterialIconButton, menuLayout, PressScale, shape, Sheet, smoothCorners, space, Symbol, tabsMotion, Toggle, useDesign, useTheme, type SymbolName } from "../ui";
 import { MaterialPageMenu, MaterialPageMenuItems, MaterialSiteSettingsContent, MaterialSiteSettingsHeader } from "./MaterialPageMenu";
 import { countSearchExpansion, MaterialSearchField, MaterialSearchResults, useMaterialSheetSearch } from "../search/MaterialSearchView";
 import { barAddress } from "./FloatingBar";
@@ -308,7 +308,7 @@ function NavigationCapsule({ tabId }: { tabId: string }) {
         key={shown}
         entering={TITLE_IN}
         exiting={TITLE_OUT}
-        style={[font.body, styles.centered, feedback ? styles.feedback : null, { color: feedback ? theme.formAccent : theme.label }]}
+        style={[font.body, styles.centered, feedback ? styles.feedback : null, { color: feedback ? theme.spaceAccentInk : theme.label }]}
         numberOfLines={below ? 3 : 1}
       >
         {shown}
@@ -495,7 +495,7 @@ function ZoomRow({ percent, canZoomOut, canZoomIn, enabled, stacked }: { percent
     <View>
       <View testID="menuZoom" style={stacked ? styles.zoomStacked : styles.row}>
         {stacked ? <View style={styles.zoomHeading}>{heading}</View> : heading}
-        <View style={[styles.zoom, { backgroundColor: theme.tertiaryFill, borderRadius: capsule(menuLayout.zoomButton.height) }]}>
+        <View style={[styles.zoom, { backgroundColor: theme.tertiaryFill }]}>
           {zoomButton("minus", "Zoom Out", canZoomOut, zoomOut)}
           <Pressable accessibilityRole="button" accessibilityLabel="Reset Zoom" accessibilityValue={{ text: percent }} disabled={!enabled} onPress={resetZoom} style={styles.zoomReset}>
             <Text style={[font.subheadline, styles.digits, styles.medium, { color: theme.label }]}>{percent}</Text>
@@ -531,7 +531,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     minHeight: menuLayout.capsuleHeight,
-    borderRadius: capsule(menuLayout.capsuleHeight),
+    borderRadius: shape.card,
+    ...smoothCorners,
     paddingHorizontal: space.xs,
   },
   capsuleButton: { minWidth: 44, minHeight: menuLayout.capsuleHeight, alignItems: "center", justifyContent: "center" },
@@ -543,20 +544,21 @@ const styles = StyleSheet.create({
   tiles: { flexDirection: "row", gap: space.s },
   tile: {
     minHeight: menuLayout.tileHeight,
-    borderRadius: menuLayout.innerRadius,
+    borderRadius: shape.card,
+    ...smoothCorners,
     alignItems: "center",
     justifyContent: "center",
     gap: space.xs + 2,
     paddingVertical: space.m,
   },
   medium: { fontWeight: "500" },
-  group: { borderRadius: menuLayout.innerRadius, overflow: "hidden" },
+  group: { borderRadius: shape.card, ...smoothCorners, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", minHeight: menuLayout.rowHeight, paddingHorizontal: space.l, gap: space.m },
   icon: { width: menuLayout.iconSlot, alignItems: "center" },
   rowTitle: { flex: 1, paddingVertical: space.s },
   divider: { height: StyleSheet.hairlineWidth, marginLeft: space.l + menuLayout.iconSlot + space.m },
   digits: { fontVariant: ["tabular-nums"] },
-  zoom: { flexDirection: "row", alignItems: "center", overflow: "hidden" },
+  zoom: { flexDirection: "row", alignItems: "center", overflow: "hidden", borderRadius: shape.control, ...smoothCorners },
   zoomStacked: { paddingHorizontal: space.l, paddingVertical: space.m, gap: space.s, alignItems: "flex-start" },
   zoomHeading: { flexDirection: "row", alignItems: "center", gap: space.m, alignSelf: "stretch" },
   zoomButton: { width: menuLayout.zoomButton.width, height: menuLayout.zoomButton.height, alignItems: "center", justifyContent: "center" },

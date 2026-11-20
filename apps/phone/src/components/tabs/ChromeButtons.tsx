@@ -2,7 +2,8 @@ import { StyleSheet, type ViewProps } from "react-native";
 import { haptics } from "../../state/app/haptics";
 import Animated, { useAnimatedStyle, type SharedValue } from "react-native-reanimated";
 import { newIncognitoTab, newRegularTab, newTab, reopenLastClosed } from "../../state/browse/store";
-import { capsule, ChromeSurface, PressScale, rolesFor, startLayout, Symbol, SystemGlyph, type MenuItem, type SymbolName } from "../ui";
+import { ChromeSurface, PressScale, rolesFor, smoothCorners, startLayout, Symbol, SystemGlyph, type MenuItem, type SymbolName } from "../ui";
+import { deckLook } from "./deckLook";
 
 const CIRCLE_SYSTEM_NAMES: Partial<Record<SymbolName, string>> = {
   ellipsis: "ellipsis",
@@ -43,7 +44,7 @@ export function GlassCircleButton({ icon, label, testID, diameter = startLayout.
   const size = { width: diameter, height: diameter };
   return (
     <PressScale label={label} onPress={onPress} onPressIn={haptics.barPress} style={[styles.centered, size]}>
-      <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(diameter)} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
+      <ChromeSurface testID={testID} shape="rounded" cornerRadius={deckLook.buttonCorner} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
         <FadingGlyphs testID={`${testID}Glyph`} pointerEvents="none" fade={glyphFade}>
           {CIRCLE_SYSTEM_NAMES[icon] ? (
             <SystemGlyph systemName={CIRCLE_SYSTEM_NAMES[icon]} pointSize={CIRCLE_SYSTEM_GLYPH} weight="medium" name={icon} size={startLayout.circleGlyph} color={rolesFor(dark).label} />
@@ -60,7 +61,7 @@ export function GlassPlusButton({ width, label, testID, dark, incognito = false,
   const size = { width, height: startLayout.barPlus.height };
   return (
     <PressScale label={label} hint="Touch and hold for more options." onPress={onPress} onLongPress={onLongPress} onPressIn={haptics.barPress} style={size}>
-      <ChromeSurface testID={testID} shape="capsule" cornerRadius={capsule(size.height)} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
+      <ChromeSurface testID={testID} shape="rounded" cornerRadius={deckLook.buttonCorner} incognito={incognito} dark={dark} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
         <FadingGlyphs testID={`${testID}Glyph`} pointerEvents="none" fade={glyphFade}>
           <SystemGlyph systemName="plus" pointSize={PLUS_SYSTEM_GLYPH} weight="medium" name="plus" size={startLayout.plusGlyph} color={rolesFor(dark).label} />
         </FadingGlyphs>
@@ -70,5 +71,5 @@ export function GlassPlusButton({ width, label, testID, dark, incognito = false,
 }
 
 const styles = StyleSheet.create({
-  centered: { alignItems: "center", justifyContent: "center" },
+  centered: { alignItems: "center", justifyContent: "center", ...smoothCorners },
 });

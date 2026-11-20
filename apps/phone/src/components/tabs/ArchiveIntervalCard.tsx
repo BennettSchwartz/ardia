@@ -5,10 +5,11 @@ import { dismissArchiveCard, hideArchiveCardSoon } from "../../state/browse/arch
 import { setArchiveInterval } from "../../state/settings/actions";
 import { usePreferences } from "../../state/settings/hooks";
 import { AUTO_ARCHIVE_INTERVALS, autoArchiveTitle, type AutoArchiveInterval } from "../../state/tabs/tabModels";
-import { archiveCardLayout, capsule, ChromeSurface, deckChromeLayout, deckChromeMotion, FloatingMenu, screenReaderActions, font, ink, radius, shadowRadius, space, Symbol, tabsLayout, tabsMotion, useTheme, useReduceMotion, type MenuItem, SystemGlyph } from "../ui";
+import { archiveCardLayout, ChromeSurface, smoothCorners, deckChromeLayout, deckChromeMotion, FloatingMenu, screenReaderActions, font, ink, radius, shadowRadius, space, Symbol, tabsLayout, tabsMotion, useTheme, useReduceMotion, type MenuItem, SystemGlyph } from "../ui";
 import { MenuTrigger } from "../ui/MenuTrigger";
 
 import { ArchiveTile } from "./ArchiveTile";
+import { deckLook } from "./deckLook";
 
 const INTERVALS = Object.keys(AUTO_ARCHIVE_INTERVALS) as AutoArchiveInterval[];
 
@@ -85,7 +86,7 @@ export function ArchiveCapsule({ centerY, safeSide, sideInset }: { centerY: numb
       testID="archiveCapsulePlace"
       style={[styles.capsulePlace, { top: centerY - deckChromeLayout.archiveHeight / 2, paddingHorizontal: safeSide + sideInset }]}
     >
-      <ChromeSurface testID="archiveCapsule" shape="capsule" cornerRadius={capsule(deckChromeLayout.archiveHeight)} interactive={false} dark={theme.dark} style={styles.capsule}>
+      <ChromeSurface testID="archiveCapsule" shape="rounded" cornerRadius={deckLook.archiveCorner} interactive={false} dark={theme.dark} style={[styles.capsule, { boxShadow: theme.dark ? deckLook.archiveShadowDark : deckLook.archiveShadow }]}>
         <View {...screenReaderActions([{ name: "dismiss", label: "Dismiss", run: () => dismissArchiveCard() }])} style={styles.capsuleRow}>
           <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={deckChromeLayout.archiveTextMinScale} style={[styles.capsuleText, { color: theme.headerText }]}>
             Archive inactive tabs
@@ -93,8 +94,8 @@ export function ArchiveCapsule({ centerY, safeSide, sideInset }: { centerY: numb
           <MenuTrigger items={intervalItems(interval)} trigger="tap" fixedOrder place={{ right: safeSide + sideInset, width: tabsLayout.menuWidth }}>
             {({ onPress }) => (
               <Pressable accessibilityRole="button" accessibilityLabel={`Archive inactive tabs, ${title}`} onPress={onPress} style={styles.capsulePicker}>
-                <Text style={[styles.capsuleChoice, { color: theme.formAccent }]}>{title}</Text>
-                <SystemGlyph testID="archiveCapsuleChevrons" systemName="chevron.up.chevron.down" pointSize={11} weight="semibold" fitted name="chevronUpChevronDown" size={deckChromeLayout.archiveChevron} color={theme.formAccent} />
+                <Text style={[styles.capsuleChoice, { color: theme.spaceAccentInk }]}>{title}</Text>
+                <SystemGlyph testID="archiveCapsuleChevrons" systemName="chevron.up.chevron.down" pointSize={11} weight="semibold" fitted name="chevronUpChevronDown" size={deckChromeLayout.archiveChevron} color={theme.spaceAccentInk} />
               </Pressable>
             )}
           </MenuTrigger>
@@ -161,7 +162,7 @@ const styles = StyleSheet.create({
   },
   label: { flexDirection: "row", alignItems: "center", gap: space.m },
   capsulePlace: { position: "absolute", left: 0, right: 0, alignItems: "center" },
-  capsule: { width: "100%", maxWidth: deckChromeLayout.archiveMaxWidth, minHeight: deckChromeLayout.archiveHeight, justifyContent: "center" },
+  capsule: { ...smoothCorners, width: "100%", maxWidth: deckChromeLayout.archiveMaxWidth, minHeight: deckChromeLayout.archiveHeight, justifyContent: "center" },
   capsuleRow: { flexDirection: "row", alignItems: "center", gap: deckChromeLayout.archiveSpacing, minHeight: deckChromeLayout.archiveHeight, paddingLeft: deckChromeLayout.archiveLead, paddingRight: deckChromeLayout.archiveTrail },
   capsuleText: { flex: 1, fontSize: deckChromeLayout.archiveText },
   capsuleChoice: { fontSize: deckChromeLayout.archiveText },

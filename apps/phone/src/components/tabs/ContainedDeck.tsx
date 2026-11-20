@@ -39,7 +39,7 @@ type CardFeed = {
 
 type Feeds = Record<string, CardFeed>;
 
-const STACK_DEPTH = -2.5;
+const STACK_DEPTH = -5;
 
 export const deviceGrid = (g: DeckGeometry, ratio: number): DeviceGrid => ({ ratio, spacing: Math.round(g.spacing * ratio), focus: Math.round(g.focusLeading * ratio) });
 
@@ -74,7 +74,8 @@ export function containedPlacement(g: DeckGeometry, grid: DeviceGrid, now: Conta
   const shade = (value: number) => (exact ? value : opacityStep(value));
   const offsetPx = containedOffsetPx(grid, now.scroll);
   const left = p.x - g.cardWidth / 2;
-  const xPx = exact ? left * ratio - offsetPx : relative >= 0 && Math.floor(slotAt) === slotAt ? grid.focus + grid.spacing * slotAt : Math.round(left * ratio) - offsetPx;
+  const linear = relative >= 0 && (g.rightReach <= 0 || relative <= 1);
+  const xPx = exact ? left * ratio - offsetPx : linear && Math.floor(slotAt) === slotAt ? grid.focus + grid.spacing * slotAt : Math.round(left * ratio) - offsetPx;
   const x = xPx / ratio;
   const cardLeft = p.x - (g.cardWidth * p.scale) / 2;
   const top = p.y - (g.cardHeight * p.scale) / 2;

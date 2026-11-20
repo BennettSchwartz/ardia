@@ -54,6 +54,7 @@ import { MaterialBarPill, useMaterialBarFold, useMaterialBarRegistration, useMat
 import { useMaterialTheme } from "../ui/materialTheme";
 import { HostPill, useBarFold } from "./HostPill";
 import { hostPillLayout } from "./hostPillTokens";
+import { BarBase } from "./BarBase";
 import { FindBar } from "./FindBar";
 import { MaterialFindBar } from "./MaterialFindBar";
 import { PageMenu } from "./PageMenu";
@@ -116,8 +117,10 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   useDemoMotion(pager, width);
   const failed = useNavigation(tab.id, (n) => n?.failure != null);
   const pageTone = failed ? null : shownTone(tone, tab.themeColorHex);
-  const top = pageTone?.top ?? theme.surface;
-  const bottom = pageTone?.bottom ?? theme.surface;
+  const underBar = usePageUnderBars();
+  const blankPage = underBar ? theme.pageSurface : theme.surface;
+  const top = pageTone?.top ?? blankPage;
+  const bottom = pageTone?.bottom ?? blankPage;
   const barDark = (design === "redesigned" || design === "material") && !pageTone?.bottom ? theme.dark : isDarkColor(bottom);
   useSystemBars(isDarkColor(top), barDark);
   const barSlotHeight = barHeight(insets.bottom, design);
@@ -126,7 +129,6 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const folds = squeeze === null;
   const staged = design === "redesigned" && searchStageIsNative();
   useEffect(() => (staged && !collapse.hidden ? reportBarPill() : undefined), [staged, collapse.hidden]);
-  const underBar = usePageUnderBars();
   const layout = underBar ? { pageBottom: 0, toneBottom: design === "material" ? 0 : barSlotHeight } : pageInsets(collapse.collapses, barSlotHeight, browseLayout.pageOverlap);
   const fullscreen = usePages((s) => s.fullscreen[tab.id] ?? false);
   const coveredBottom = design === "material" ? materialCoveredBottom(collapse.collapses, barSlotHeight, fullscreen || finding || searching) : obscuredBottom({ follows: Platform.OS === "android", bar: barSlotHeight, pill: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2 + hostPillLayout.height, collapsed: collapse.collapsed, cleared: fullscreen || finding || searching });
@@ -196,10 +198,11 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
             <PageCover key={`${tab.id}:cover`} tab={tab} />
             <PageFailureView key={`${tab.id}:failure`} tabId={tab.id} />
           </View>
+          {underBar ? <Animated.View testID="pageStatusStrip" pointerEvents="none" style={[styles.statusOver, { height: insets.top }, statusStyle]} /> : null}
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: tabsInk.pagerBlack }, pager.dim]} pointerEvents="none" />
         </Animated.View>
-        {left ? <PagerNeighbour pager={pager} tab={left} side={-1} width={width} statusHeight={insets.top} hasLeft hasRight={right !== null} /> : null}
-        {right ? <PagerNeighbour pager={pager} tab={right} side={1} width={width} statusHeight={insets.top} hasLeft={left !== null} hasRight /> : null}
+        {left ? <PagerNeighbour pager={pager} tab={left} side={-1} width={width} statusHeight={insets.top} statusOver={underBar} hasLeft hasRight={right !== null} /> : null}
+        {right ? <PagerNeighbour pager={pager} tab={right} side={1} width={width} statusHeight={insets.top} statusOver={underBar} hasLeft={left !== null} hasRight /> : null}
         <View style={[styles.loading, { top: insets.top }]} pointerEvents="none">
           <PageLoadingLine tabId={tab.id} color={theme.accent} />
         </View>
@@ -213,6 +216,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
             accessibilityElementsHidden={barBlocked}
             style={[styles.bar, { height: barHeight(insets.bottom, design) }, underBar ? null : barStyle, finding && design === "material" ? styles.replacedBar : collapse.style]}
           >
+            {design === "redesigned" && underBar ? <BarBase color={bottom} controlTop={barCenterFromBottom(insets.bottom, design) + floatingBarLayout.control / 2} control={floatingBarLayout.control} fold={collapse.fold.progress} foldDrop={floatingBarLayout.control - hostPillLayout.height} /> : null}
             {design === "redesigned" ? (
               <Animated.View style={[styles.controls, { bottom: barCenterFromBottom(insets.bottom, design) - floatingBarLayout.control / 2, ...controlsSpan }, pulls ? barShift : null]} pointerEvents="box-none">
                 <Animated.View
@@ -417,6 +421,7 @@ const styles = StyleSheet.create({
   outgoing: { overflow: "hidden" },
   page: { flex: 1 },
   loading: { position: "absolute", left: 0, right: 0 },
+  statusOver: { position: "absolute", left: 0, right: 0, top: 0 },
   bar: { position: "absolute", left: 0, right: 0, bottom: 0 },
   replacedBar: { opacity: 0 },
   controls: { position: "absolute", left: 0, right: 0 },

@@ -18,6 +18,7 @@ import {
   ArdiaLogo,
   browseLayout,
   capsule,
+  controlRadius,
   ChromeSurface,
   Favicon,
   font,
@@ -33,6 +34,7 @@ import {
   tabsCurve,
   tabsLayout,
   useReduceMotion,
+  useTheme,
   type MenuItem,
   type SymbolName,
 } from "../ui";
@@ -225,17 +227,18 @@ function PinnedTileButton({ tile, width, profileId, dark, incognito, menuPlace }
 
 function TileIcon({ tile, isFolder, dark }: { tile: PinnedTile; isFolder: boolean; dark: boolean }) {
   const roles = rolesFor(dark);
+  const folderInk = useTheme().spaceAccentInk;
   const systemSymbol = Platform.OS === "ios" && settingsUIAvailable() ? (isFolder ? "folder.fill" : spaceSymbol(tile.icon)) : null;
   if (systemSymbol)
     return (
       <Host matchContents style={isFolder ? { opacity: startLayout.folderInkOpacity } : undefined}>
-        <SystemImage systemName={systemSymbol as never} size={startLayout.tileIcon * (isFolder ? startLayout.folderIconShare : startLayout.symbolIconShare)} color={isFolder ? roles.formAccent : PlatformColor("secondaryLabel")} modifiers={isFolder ? undefined : [systemFont({ weight: "medium" })]} />
+        <SystemImage systemName={systemSymbol as never} size={startLayout.tileIcon * (isFolder ? startLayout.folderIconShare : startLayout.symbolIconShare)} color={isFolder ? folderInk : PlatformColor("secondaryLabel")} modifiers={isFolder ? undefined : [systemFont({ weight: "medium" })]} />
       </Host>
     );
   if (isFolder)
     return (
       <View style={{ opacity: startLayout.folderInkOpacity }}>
-        <Symbol name="folderFill" size={startLayout.tileIcon * startLayout.folderIconShare} color={roles.formAccent} />
+        <Symbol name="folderFill" size={startLayout.tileIcon * startLayout.folderIconShare} color={folderInk} />
       </View>
     );
   const symbol = symbolOf(tile.icon);
@@ -327,7 +330,7 @@ function SyncInvitation({ y, dark, incognito }: { y: number; dark: boolean; inco
   return (
     <View testID="startSyncInvitation" pointerEvents="box-none" style={[styles.switcherRow, { top: y - startLayout.barCircle / 2, minHeight: startLayout.barCircle }]}>
       <Pressable accessibilityRole="button" accessibilityLabel="Sync With Your Mac" accessibilityHint="Brings your Mac’s spaces, tabs and pinned sites." onPress={() => openSettings({ page: "syncConnect" })}>
-        <ChromeSurface shape="capsule" cornerRadius={capsule(startLayout.barCircle)} incognito={incognito} dark={dark} style={styles.invitation}>
+        <ChromeSurface shape="rounded" cornerRadius={controlRadius(startLayout.barCircle)} incognito={incognito} dark={dark} style={styles.invitation}>
           <Text style={[font.body, styles.headline, { color: roles.headerText }]}>Sync With Your Mac</Text>
         </ChromeSurface>
       </Pressable>

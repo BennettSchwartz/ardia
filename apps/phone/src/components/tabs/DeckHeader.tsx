@@ -9,7 +9,8 @@ import { useSelectedProfile, useSyncStatus, useSyncView } from "../../state/sync
 import { useCanReopen, useIncognito } from "../../state/tabs/hooks";
 import { prepareArchive } from "../../state/tabs/store";
 import { countUsage } from "../../state/telemetry/telemetry";
-import { browseLayout, capsule, deckChromeInk, deckChromeLayout, deckChromeMotion, font, IncognitoSpecs, menuLook, tabsInk, tabsLayout, useTheme, type MenuItem } from "../ui";
+import { browseLayout, deckChromeInk, deckChromeLayout, deckChromeMotion, font, IncognitoSpecs, menuLook, tabsInk, tabsLayout, useTheme, smoothCorners, type MenuItem } from "../ui";
+import { deckLook } from "./deckLook";
 import { MenuTrigger, nativeMenus, spaceSystemImage } from "../ui/MenuTrigger";
 import { SpaceTitle, spaceMenuSymbol } from "../search/StartSpaces";
 import { FadingGlyphs, GlassCircleButton, type ChromeFade } from "./ChromeButtons";
@@ -38,9 +39,9 @@ function joinMenuGroups(groups: readonly MenuItem[][], ruled: boolean = menuGrou
 
 export function deckMoreMenuItems({ syncEnabled, canReopen, hasTabs, onCloseAll }: { syncEnabled: boolean; canReopen: boolean; hasTabs: boolean; onCloseAll: () => void }): MenuItem[] {
   return joinMenuGroups([
-    [{ label: "Archive", onPress: openArchive }, ...(syncEnabled ? [{ label: "Spaces From Your Mac", onPress: openSpaces }] : [])],
-    [{ label: "New Incognito Tab", onPress: newIncognitoTab }, ...(canReopen ? [{ label: "Reopen Closed Tab", onPress: reopenLastClosed }] : []), ...(hasTabs ? [{ label: "Close All Tabs", destructive: true, onPress: onCloseAll }] : [])],
-    [{ label: "Settings", onPress: () => openSettings() }],
+    [{ label: "Archive", icon: "archivebox", onPress: openArchive }, ...(syncEnabled ? [{ label: "Spaces From Your Mac", icon: "macAndPhone" as const, onPress: openSpaces }] : [])],
+    [{ label: "New Incognito Tab", icon: "eyes", onPress: newIncognitoTab }, ...(canReopen ? [{ label: "Reopen Closed Tab", icon: "arrowUturnBackward" as const, onPress: reopenLastClosed }] : []), ...(hasTabs ? [{ label: "Close All Tabs", icon: "xmark" as const, destructive: true, onPress: onCloseAll }] : [])],
+    [{ label: "Settings", icon: "gearshape", onPress: () => openSettings() }],
   ]);
 }
 
@@ -75,7 +76,7 @@ export function DeckHeader({ safeTop, safeSide, sideInset, privateCount, hasTabs
   };
   const menu = { trigger: "tap" as const, fixedOrder: true, haptic: menuOpenedHaptic, disabled: !menusShown, onOpen: opened, onClose: closed };
   const moreItems = deckMoreMenuItems({ syncEnabled, canReopen, hasTabs, onCloseAll });
-  const pillItems: MenuItem[] = [{ label: "Close Incognito Tabs", destructive: true, onPress: onCloseIncognito }];
+  const pillItems: MenuItem[] = [{ label: "Close Incognito Tabs", icon: "xmark", destructive: true, onPress: onCloseIncognito }];
   return (
     <View testID="deckHeader" pointerEvents="box-none" style={[styles.row, { top: safeTop + deckChromeLayout.headerCenter - browseLayout.hitTarget / 2, paddingHorizontal: side }]}>
       <FadingGlyphs testID="deckSwitcher" fade={glyphFade} style={styles.switcher}>
@@ -126,7 +127,7 @@ function IncognitoPill({ count, onPress }: { count: number; onPress: () => void 
       onPress={onPress}
       style={styles.pillHit}
     >
-      <View pointerEvents="none" style={[styles.pill, { backgroundColor: tabsInk.incognitoCard, borderRadius: capsule(deckChromeLayout.pillHeight) }]}>
+      <View pointerEvents="none" style={[styles.pill, { backgroundColor: tabsInk.incognitoCard, borderRadius: deckLook.buttonCorner }]}>
         <IncognitoSpecs size={deckChromeLayout.pillSpecs} color={deckChromeInk.pill} />
         <Text style={[font.subheadline, styles.count]}>{count}</Text>
       </View>
@@ -156,6 +157,6 @@ const styles = StyleSheet.create({
   spacer: { flex: 1 },
   fallback: { fontWeight: "600" },
   pillHit: { minHeight: browseLayout.hitTarget, justifyContent: "center" },
-  pill: { flexDirection: "row", alignItems: "center", gap: deckChromeLayout.pillSpacing, height: deckChromeLayout.pillHeight, paddingHorizontal: deckChromeLayout.pillPadding },
+  pill: { ...smoothCorners, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.pillSpacing, height: deckChromeLayout.pillHeight, paddingHorizontal: deckChromeLayout.pillPadding },
   count: { fontWeight: "600", fontVariant: ["tabular-nums"], color: deckChromeInk.pill },
 });

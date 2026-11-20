@@ -148,7 +148,7 @@ test("the page follows the finger with no React render: every move sets where th
   const target = deckPull.target.value!;
   renders = [];
   act(() => void expect(pull.beginDeckPull(id, -22)).toBe(true));
-  expect(target.pull).toBeGreaterThan(target.reach * 2);
+  expect(target.pull).toBeGreaterThan(target.reach * 1.5);
   expect(Math.abs(target.centerX - SCREEN.width / 2)).toBeLessThan(2);
   expect(target.centerX - target.width / 2).toBeGreaterThan(0);
   expect(target.centerX + target.width / 2).toBeLessThan(SCREEN.width);

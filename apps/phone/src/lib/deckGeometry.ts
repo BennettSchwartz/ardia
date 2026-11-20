@@ -11,6 +11,7 @@ export type DeckGeometry = {
   focusLeading: number;
   spacing: number;
   leftReach: number;
+  rightReach: number;
   cardCenterY: number;
   barCenterY: number;
   tabButtonX: number;
@@ -27,11 +28,11 @@ export const DECK = {
   topReserve: 12,
   launcherStartWidth: 22,
   launcherStartRadius: 4,
-  cardRadius: 13,
+  cardRadius: 16,
   displayCornerRadius: 55,
 } as const;
 
-export const DECK_REDESIGN = { barReserve: 67, chromeGap: 21, minSafeBottom: 20, barAboveSafeBottom: 11 } as const;
+export const DECK_REDESIGN = { barReserve: 67, chromeGap: 21, minSafeBottom: 20, barAboveSafeBottom: 11, cardWidthRatio: 0.56, stepRatio: 0.33, pileEdge: 8 } as const;
 
 export const BUTTON_NAVIGATION_INSET = 32;
 const BAR_HALF_HEIGHT = 22;
@@ -71,9 +72,11 @@ export function deckGeometry(width: number, height: number, safeTop: number, saf
   const bandBottom = redesigned ? h - barCenter + DECK_REDESIGN.barAboveSafeBottom - DECK_REDESIGN.barReserve + 24 : h - barCenter + BAR_GAP - DECK.barReserve + 24;
   const band = Math.max(bandBottom - bandTop, 120);
   const aspect = h / w;
-  const cardWidth = Math.min(w * DECK.cardWidthRatio, band / aspect);
-  const focusLeading = w * DECK.focusLeadingRatio;
-  const spacing = Math.min(cardWidth, w * DECK.stepRatio);
+  const cardWidth = Math.min(w * (redesigned ? DECK_REDESIGN.cardWidthRatio : DECK.cardWidthRatio), band / aspect);
+  const focusLeading = redesigned ? (w - cardWidth) / 2 : w * DECK.focusLeadingRatio;
+  const spacing = Math.min(cardWidth, w * (redesigned ? DECK_REDESIGN.stepRatio : DECK.stepRatio));
+  const leftReach = redesigned ? Math.max(focusLeading - safeSide - DECK_REDESIGN.pileEdge, 8) : reach(Math.min(DECK.leftPeek, focusLeading - 6), spacing);
+  const rightReach = redesigned ? Math.max(w - safeSide - DECK_REDESIGN.pileEdge - focusLeading - spacing, 8) : 0;
   return {
     width: w,
     height: h,
@@ -84,7 +87,8 @@ export function deckGeometry(width: number, height: number, safeTop: number, saf
     cardHeight: cardWidth * aspect,
     focusLeading,
     spacing,
-    leftReach: reach(Math.min(DECK.leftPeek, focusLeading - 6), spacing),
+    leftReach,
+    rightReach,
     cardCenterY: bandTop + band / 2,
     barCenterY: h - barCenter,
     tabButtonX: safeSide + 16 + 17.5,
@@ -103,14 +107,16 @@ export function deckMorphFrom(was: DeckGeometry, now: DeckGeometry): DeckMorph {
 
 export function deckLeading(g: DeckGeometry, relative: number): number {
   "worklet";
-  if (relative >= 0) return g.focusLeading + g.spacing * relative;
-  return g.focusLeading - g.leftReach * (1 - Math.exp((relative * g.spacing) / g.leftReach));
+  if (relative < 0) return g.focusLeading - g.leftReach * (1 - Math.exp((relative * g.spacing) / g.leftReach));
+  if (g.rightReach <= 0 || relative <= 1) return g.focusLeading + g.spacing * relative;
+  return g.focusLeading + g.spacing + g.rightReach * (1 - Math.exp((-(relative - 1) * g.spacing) / g.rightReach));
 }
 
 export function deckVisibleWidth(g: DeckGeometry, relative: number, isLast: boolean): number {
   "worklet";
-  if (isLast) return g.cardWidth;
-  return Math.min(g.cardWidth, Math.max(0, deckLeading(g, relative + 1) - deckLeading(g, relative)));
+  const leading = deckLeading(g, relative);
+  const covered = isLast ? g.cardWidth : Math.min(g.cardWidth, Math.max(0, deckLeading(g, relative + 1) - leading));
+  return g.rightReach > 0 ? Math.min(covered, Math.max(0, g.width - leading)) : covered;
 }
 
 export function swiftRound(value: number): number {
@@ -257,7 +263,12 @@ export const lerp = (from: number, to: number, t: number) => {
   return from + (to - from) * t;
 };
 
-export const DECK_HEADER = { titleHidden: 52, titleShown: 84, iconFade: 12, inset: 8, edge: 16, maxFontScale: 1.35, trailingFade: 14 } as const;
+export const DECK_HEADER = { titleHidden: 52, titleShown: 84, iconFade: 12, inset: 8, edge: 16, maxFontScale: 1.35, trailingFade: 14, wholeHidden: 60, wholeShown: 80 } as const;
+
+export function deckHeaderReveal(available: number): number {
+  "worklet";
+  return Math.min(Math.max((available - DECK_HEADER.wholeHidden) / (DECK_HEADER.wholeShown - DECK_HEADER.wholeHidden), 0), 1);
+}
 
 export function deckHeaderPlacement(cardLeft: number, visible: number): { available: number; left: number } {
   "worklet";

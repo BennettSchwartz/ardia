@@ -1,3 +1,5 @@
+import { shape } from "../ui/tokens";
+
 export const hostPillLayout = {
   glassMs: 200,
   foldSettleMs: 300,
@@ -12,3 +14,5 @@ export const hostPillLayout = {
   maxTextScale: 1.35,
   collapsedScale: 0.62,
 } as const;
+
+export const hostPillCorner = shape.field * hostPillLayout.collapsedScale;

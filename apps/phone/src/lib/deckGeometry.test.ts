@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DECK_REDESIGN,
+  deckHeaderReveal,
   deckMorphFrom,
   DECK_CHROME_FROM,
   deckChromeOpacity,
@@ -248,12 +250,34 @@ test("in the redesign the cards sit under main's header, about 24 points lower, 
   assert.equal(header.barCenterY, 874 - 34 - 11);
   assert.equal(header.cardCenterY, (62 + 48 + 21 + 20 + (874 - 34 - 67 + 24)) / 2);
   assert.equal(header.cardCenterY - original.cardCenterY, 24);
-  assert.equal(header.cardWidth, original.cardWidth);
+  assert.ok(Math.abs(header.cardWidth - 402 * DECK_REDESIGN.cardWidthRatio) < 1e-9, "the redesign's cards are smaller than main's, so three or four read at once");
+  assert.ok(header.cardWidth < original.cardWidth);
   const archive = deckGeometry(402, 874, 62, 34, 0, "ios", "redesigned", 100);
   assert.equal(archive.cardCenterY - header.cardCenterY, 26);
   const homeButton = deckGeometry(375, 667, 20, 0, 0, "ios", "redesigned", 48);
   assert.equal(homeButton.barCenterY, 667 - 20 - 11);
   assert.deepEqual(deckGeometry(412, 915, 48, 24, 0, "android", "original", 48), pixel7);
+});
+
+test("in the redesign the focused card sits centred, the cards on either side pile up 8 points in from the screen's edges instead of being sliced by them, and each card's strip ends at the screen", () => {
+  const g = deckGeometry(402, 874, 62, 34, 0, "ios", "redesigned", 48);
+  assert.ok(Math.abs(deckLeading(g, 0) + g.cardWidth / 2 - 201) < 1e-9);
+  assert.equal(deckLeading(g, 1), g.focusLeading + g.spacing);
+  for (let relative = -12; relative <= 12; relative += 0.25) {
+    const leading = deckLeading(g, relative);
+    assert.ok(leading >= DECK_REDESIGN.pileEdge - 1e-9 && leading <= 402 - DECK_REDESIGN.pileEdge + 1e-9, `card at ${relative} starts on screen`);
+    assert.ok(deckLeading(g, relative + 0.25) > leading, "cards keep their order");
+    assert.ok(leading + deckVisibleWidth(g, relative, relative === 12) <= 402 + 1e-9, `card at ${relative} shows no more than the screen holds`);
+  }
+  const slope = (relative: number) => (deckLeading(g, relative + 1e-4) - deckLeading(g, relative - 1e-4)) / 2e-4;
+  assert.ok(Math.abs(slope(1) - g.spacing) < 0.01 && Math.abs(slope(0) - g.spacing) < 0.01, "a pan moves the cards without a jolt where the piles begin");
+  assert.ok(deckVisibleWidth(g, 0, false) > 120 && deckVisibleWidth(g, 1, false) > 88, "the focused card and the one after it have room for a title");
+});
+
+test("a redesigned card's header shows its icon and title together, only once a title fits", () => {
+  assert.equal(deckHeaderReveal(56), 0);
+  assert.equal(deckHeaderReveal(70), 0.5);
+  assert.equal(deckHeaderReveal(84), 1);
 });
 
 test("the deck chrome is fully opaque the moment its motion settles, even when a spring stops a hair short of 1, since UIKit draws no glass under a view that is even slightly transparent", () => {

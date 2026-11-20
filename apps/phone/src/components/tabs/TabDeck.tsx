@@ -46,6 +46,7 @@ import {
   deckMorphFrom,
   NO_DECK_MORPH,
   type DeckMorph,
+  type DeckGeometry,
 } from "../../lib/deckGeometry";
 import {
   beginOpeningTab,
@@ -90,6 +91,7 @@ import { ArchiveCapsule, ArchiveIntervalCard } from "./ArchiveIntervalCard";
 import { DeckBottomBar } from "./DeckBottomBar";
 import { useBottomBarLayout } from "../ui/useBottomBarLayout";
 import { deckArchiveBottom, DeckHeader, deckHeaderBottom } from "./DeckHeader";
+import { deckLook } from "./deckLook";
 import { DeckEmpty, IncognitoChip } from "./DeckChrome";
 import { MaterialDeckCard } from "./MaterialDeckCard";
 import { MaterialDeckBackdrop, MaterialDeckChrome, MaterialDeckEmpty } from "./MaterialDeckChrome";
@@ -175,10 +177,11 @@ export const TabDeck = memo(function TabDeck() {
     [width, height, insets.top, insets.bottom, safeSide, design],
   );
   const archiveGeometry = useMemo(() => deckGeometry(width, height, insets.top, insets.bottom, safeSide, Platform.OS, design, deckArchiveBottom(), DECK_SCREEN_CORNER()), [width, height, insets.top, insets.bottom, safeSide, design]);
-  const archiveResizes = redesigned && archiveGeometry.cardWidth < headerGeometry.cardWidth - ARCHIVE_RESIZE_SLACK;
+  const archiveFloats = redesigned && archiveFloatsOverDeck(headerGeometry);
+  const archiveResizes = redesigned && !archiveFloats && archiveGeometry.cardWidth < headerGeometry.cardWidth - ARCHIVE_RESIZE_SLACK;
   const g = archiveResizes && archiveLaid && !grid ? archiveGeometry : headerGeometry;
   useEffect(() => labTrace(`PAGELAB deck frame ${Math.round(width)}x${Math.round(height)} window ${Math.round(window.width)}x${Math.round(window.height)} insets ${insets.top}/${insets.bottom}`), [width, height, window.width, window.height, insets.top, insets.bottom]);
-  const archiveShift = redesigned && !archiveResizes ? archiveGeometry.cardCenterY - headerGeometry.cardCenterY : 0;
+  const archiveShift = redesigned && !archiveResizes && !archiveFloats ? archiveGeometry.cardCenterY - headerGeometry.cardCenterY : 0;
   const [deckHeight, setDeckHeight] = useState(height);
   const shownSpace = useShownSpace();
   const [needle, setNeedle] = useState("");
@@ -1048,7 +1051,7 @@ export const TabDeck = memo(function TabDeck() {
     const tab = tabs.get(order[index] ?? "");
     const closeCard = () => close(index, 0);
     if (!tab) return [{ label: "Close Tab", destructive: true, onPress: closeCard }];
-    return deckCardMenu(tab, { devices: sendTargetsFor(tab), pinned: isTabPinned(tab), syncEnabled, spaces: redesigned ? spaceMoveTargets(tab) : [], icons: material }, closeCard);
+    return deckCardMenu(tab, { devices: sendTargetsFor(tab), pinned: isTabPinned(tab), syncEnabled, spaces: redesigned ? spaceMoveTargets(tab) : [], icons: true }, closeCard);
   };
 
   const ask = (confirmation: Confirmation) => confirmInSheet(confirmation, () => setConfirmation(confirmation));
@@ -1386,6 +1389,8 @@ const HANDOVER_CAP_MS = 250;
 const DRAWN_CAP_MS = 200;
 const COVER_LOST_MS = DRAWN_CAP_MS + 300;
 const ARCHIVE_RESIZE_SLACK = 0.5;
+
+export const archiveFloatsOverDeck = (g: DeckGeometry) => g.safeTop + deckArchiveBottom() + deckLook.archiveClearance <= g.cardCenterY - g.cardHeight / 2 - tabsLayout.headerGap - tabsLayout.headerHeight;
 const HANDED_OVER_AWAY = 100_000;
 const CARD_LANDED = 0.02;
 const DECK_SCREEN_CORNER = iPhoneOr(() => DECK.displayCornerRadius, () => screenCornerRadius(DECK.displayCornerRadius));

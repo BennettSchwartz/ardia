@@ -107,9 +107,9 @@ test("the redesigned start page has no deck bar, and no logo on iPhone; its own 
   const bar = style(root, "startBar");
   expect(bar.top + bar.height / 2).toBe(BAR_CENTER_Y);
   expect(bar).toMatchObject({ height: 48, paddingLeft: 24, paddingRight: 24 });
-  expect(style(root, "startBarTabs")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
-  expect(style(root, "startBarSettings")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
-  expect(style(root, "startBarPlus")).toMatchObject({ width: 77, height: 48, borderRadius: 24 });
+  expect(style(root, "startBarTabs")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
+  expect(style(root, "startBarSettings")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
+  expect(style(root, "startBarPlus")).toMatchObject({ width: 77, height: 48, borderRadius: 12 });
   unmount(root);
 });
 
@@ -140,14 +140,14 @@ test("the space's switcher is centred at 0.44 of the screen's height, a plain he
   unmount(root);
 });
 
-test("pinned tiles sit 45 points under the switcher, four to a row, 52 tall with 14-point corners, 8 apart and 20 in from the sides, icon only", () => {
+test("pinned tiles sit 45 points under the switcher, four to a row, 52 tall with 12-point corners, 8 apart and 20 in from the sides, icon only", () => {
   withSpaces([profile("work", "Work", Array.from({ length: 6 }, (_, i) => tile(i)))]);
   const root = start();
   expect(style(root, "startTiles").top).toBeCloseTo(SWITCHER_Y + 45, 5);
   expect(style(root, "startTiles")).toMatchObject({ paddingHorizontal: 20, gap: 8 });
   expect(hosts(root, "startTileRow").map((row) => row.findAll((node) => node.props.testID === "startTile" && typeof node.type === "string").length)).toEqual([4, 2]);
   const width = (WIDTH - 40 - 3 * 8) / 4;
-  for (const face of hosts(root, "startTile")) expect(StyleSheet.flatten(face.props.style)).toMatchObject({ width, height: 52, borderRadius: 14 });
+  for (const face of hosts(root, "startTile")) expect(StyleSheet.flatten(face.props.style)).toMatchObject({ width, height: 52, borderRadius: 12 });
   expect(hosts(root, "startTiles")[0]!.findAll((node) => node.type === "Text")).toHaveLength(0);
   unmount(root);
 });

@@ -92,18 +92,18 @@ test("the original menu is unchanged: icon rows and tiles, no glass capsules, Pr
   expect(textOf(root)).toContain("Find on Page");
   expect(textOf(root)).toContain("Reader");
   expect(textOf(root)).not.toContain("Print");
-  expect(host(root, "sheetFill")).toBeUndefined();
+  expect(StyleSheet.flatten(host(root, "sheetFill")!.props.style).backgroundColor).toBe("#F2F2F7");
   await pressButton(root, "Site Settings");
   expect(usePageUi.getState().menuPage).toBe("siteSettings");
   expect(useSettingsNav.getState().open).toBe(false);
   unmount(root);
 });
 
-test("the redesign has main's word rows in main's order, without icons, in main's groups, with the Library's rows on both phones", async () => {
+test("the redesign has main's word rows in main's order, each with its icon, in main's groups, with the Library's rows on both phones", async () => {
   const root = await openMenu("redesigned");
   expect(wordRows(root)).toEqual(["Find on Page", "Print", "History", "Bookmarks", "Downloads", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Block Ads and Trackers", "Site Settings", "Open in Default Browser"]);
   expect(hosts(root, (id) => id === "pageMenuGroup")).toHaveLength(4);
-  for (const row of hosts(root, (id) => id.startsWith("pageMenuRow:") || id.startsWith("menuToggle:"))) expect(symbolsIn(row)).toHaveLength(0);
+  for (const row of hosts(root, (id) => id.startsWith("pageMenuRow:") || id.startsWith("menuToggle:"))) expect(symbolsIn(row)).toHaveLength(1);
   unmount(root);
 });
 
@@ -136,19 +136,19 @@ test("the redesign puts Send under Find and above Print, as main's first group",
   unmount(root);
 });
 
-test("the redesign's Reader, Copy Link and Share are icon-only glass capsules in one row under the navigation capsule", async () => {
+test("the redesign's Reader, Copy Link and Share are rounded tiles with an icon and a label, in one row under the navigation bar, on a grouped sheet", async () => {
   const root = await openMenu("redesigned");
   const capsules = hosts(root, (id) => id.startsWith("pageMenuAction:"));
   expect(capsules.map((node) => node.props.testID)).toEqual(["pageMenuAction:Reader", "pageMenuAction:Copy Link", "pageMenuAction:Share"]);
   for (const capsule of capsules) {
-    expect(textOf({ root: capsule } as never)).toBe("");
+    expect(textOf({ root: capsule } as never)).toBe(capsule.props.testID.slice("pageMenuAction:".length));
     expect(symbolsIn(capsule)).toHaveLength(1);
   }
   const nav = host(root, "pageMenuCapsule")!;
   for (const label of ["Back", "Forward", "Pin to Mac", "Reload"]) expect(nav.findAll((node) => node.props.accessibilityLabel === label).length).toBeGreaterThan(0);
   expect(textOf({ root: nav } as never)).toContain("Site 0");
   expect(host(root, "pageMenuCapsuleRow")!.findAll((node) => node.props.testID === "pageMenuTitle" && typeof node.type === "string")).toHaveLength(1);
-  expect(StyleSheet.flatten(host(root, "sheetFill")!.props.style).backgroundColor).toBe("#FFFFFF");
+  expect(StyleSheet.flatten(host(root, "sheetFill")!.props.style).backgroundColor).toBe("#F2F2F7");
   unmount(root);
 });
 

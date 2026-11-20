@@ -22,22 +22,23 @@ const textOfNode = (node: Root["root"]) => textOf({ root: node } as Root);
 
 const hostWithTestId = (root: Root, testID: string) => root.root.findAll((node) => node.props.testID === testID && typeof node.type === "string")[0]!;
 
-test("the welcome step shows the 104-point app icon, fixed at any text size, in a white frame 5 points wide with the frame's corner and the native apps' shadow", () => {
+test("the welcome step shows Ardia's own app icon large and upright, fixed at any text size, with no white photo frame, its own corner and the native apps' shadow", () => {
   showOnboarding();
   const root = renderSurface(<OnboardingView />);
   const frame = hostWithTestId(root, "welcomeIcon");
   const framed = StyleSheet.flatten(frame.props.style);
-  expect(framed.padding).toBe(5);
-  expect(framed.backgroundColor).toBe("#FFFFFF");
-  expect(framed.borderRadius).toBeCloseTo(104 * 0.225 + 5);
+  const side = Platform.OS === "ios" ? 132 : 104;
+  expect(framed.padding).toBeUndefined();
+  expect(framed.backgroundColor).toBeUndefined();
+  expect(framed.borderRadius).toBeCloseTo(side * 0.225);
   expect(framed.boxShadow).toBe("0px 12px 48px rgba(0, 0, 0, 0.18)");
   const icon = frame.findAll((node) => node.type === AppIcon)[0]!;
-  expect(icon.props.side).toBe(104);
+  expect(icon.props.side).toBe(side);
   expect(icon.props.scalesWithText).toBe(false);
-  expect(StyleSheet.flatten(hostWithTestId(root, "appIcon").props.style).width).toBe(104);
+  expect(StyleSheet.flatten(hostWithTestId(root, "appIcon").props.style).width).toBe(side);
   expect(frame.findAll((node) => node.props.source !== undefined && typeof node.type === "string").length).toBeGreaterThan(0);
   expect(framed.opacity).toBe(0);
-  expect(framed.transform).toEqual([{ rotate: "-18deg" }, { scale: 0.7 }]);
+  expect(framed.transform).toEqual([{ scale: 0.86 }]);
   unmount(root);
 });
 
@@ -51,13 +52,13 @@ test("the default browser step's art ends at the 60-point app icon with its shad
   unmount(root);
 });
 
-test("the welcome step's Get Started is the native apps' primary action: SwiftUI's capsule on iPhone and Compose's 14-point corners on Android, #0F182C with white text in light, and each platform's height (SwiftUI's 63⅓, Compose's 50)", () => {
+test("the welcome step's Get Started is the primary action: 16-point smooth corners in the space's accent with white text in light, not a navy capsule, and each platform's height (SwiftUI's 63⅓, Compose's 50)", () => {
   showOnboarding();
   const root = renderSurface(<OnboardingView />);
   const button = root.root.findAll((node) => typeof node.type === "string" && node.props.accessibilityRole === "button" && textOfNode(node) === "Get Started")[0]!;
   const style = StyleSheet.flatten(button.props.style);
-  expect(style.borderRadius).toBeCloseTo(Platform.OS === "ios" ? 190 / 6 : 14);
-  expect(style.backgroundColor).toBe("#0F182C");
+  expect(style.borderRadius).toBe(16);
+  expect(style.backgroundColor).toBe("#B25B6B");
   expect(style.minHeight).toBeCloseTo(Platform.OS === "ios" ? 190 / 3 : 50);
   const label = button.findAll((node) => typeof node.type === "string" && node.type === "Text")[0]!;
   expect(StyleSheet.flatten(label.props.style).color).toBe("#FFFFFF");

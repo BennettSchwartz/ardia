@@ -126,7 +126,7 @@ test("the redesigned cards sit 24 points lower than the original's on iPhone, ce
   unmount(root);
 });
 
-test("the header is centred 26 points under the safe top, 24 in from the sides like the bottom bar, and its ··· is a 44-point glass circle", () => {
+test("the header is centred 26 points under the safe top, 24 in from the sides like the bottom bar, and its ··· is a 44-point glass rounded square", () => {
   const root = deck();
   const header = style(root, "deckHeader");
   expect(header.top + header.height / 2).toBe(SAFE_TOP + 26);
@@ -134,7 +134,7 @@ test("the header is centred 26 points under the safe top, 24 in from the sides l
   expect(style(root, "deckBottomBar")).toMatchObject({ paddingLeft: header.paddingHorizontal, paddingRight: header.paddingHorizontal });
   const more = root.root.findAll((node) => Array.isArray(node.props.items) && node.props.place && node.props.items.some((item: { label?: string }) => item?.label === "Settings"))[0]!;
   expect(more.props.place).toMatchObject({ right: 24 });
-  expect(style(root, "deckHeaderMore")).toMatchObject({ width: 44, height: 44, borderRadius: 22 });
+  expect(style(root, "deckHeaderMore")).toMatchObject({ width: 44, height: 44, borderRadius: 12 });
   unmount(root);
 });
 
@@ -235,9 +235,9 @@ test("the bottom bar is the Incognito switch, the Search Tabs capsule and a 48-p
   if (Platform.OS === "android") expect(anchor).toMatchObject({ bottom: centerFromBottom - 24 });
   else expect((anchor.top as number) + 24).toBe(height - centerFromBottom);
   expect(host(root, "deckBarGrid")).toBeUndefined();
-  expect(style(root, "deckBarIncognito")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
-  expect(style(root, "deckBarPlus")).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
-  expect(style(root, "deckSearchTabs")).toMatchObject({ borderRadius: 24, paddingLeft: 13, paddingRight: 16 });
+  expect(style(root, "deckBarIncognito")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
+  expect(style(root, "deckBarPlus")).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
+  expect(style(root, "deckSearchTabs")).toMatchObject({ borderRadius: 12, borderCurve: "continuous", paddingLeft: 13, paddingRight: 16 });
   const pieces = ["deckBarIncognito", "deckSearchTabs", "deckBarPlus"];
   const shown = host(root, "deckBottomBar")!.findAll((node) => typeof node.type === "string" && pieces.includes(node.props.testID)).map((node) => node.props.testID);
   expect(shown.filter((id, at) => id !== shown[at - 1])).toEqual(pieces);
@@ -276,7 +276,7 @@ test("a tap on the switch shows only the Incognito tabs, fills the whole switch 
   expect(incognitoSwitch(root)!.props.accessibilityState).toMatchObject({ checked: true });
   expect(incognitoSwitch(root)!.props.accessibilityHint).toBe("Shows your tabs.");
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true).length).toBeGreaterThan(0);
-  expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
+  expect(StyleSheet.flatten(host(root, "deckBarIncognitoOn")!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 12 });
   expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyesClosed")).toHaveLength(1);
   expect(pressable(root, "New Incognito Tab")).toBeDefined();
   expect(counted.mock.calls.filter(([name]) => name === "deck_incognito_switches")).toHaveLength(1);
@@ -399,17 +399,17 @@ test("opening Search Tabs counts search_tabs_opened once per focus, and never wh
   unmount(privately);
 });
 
-test("the redesign's Archive card is main's slim capsule, 43 points tall, centred 78.5 under the safe top and 24 in from the sides like the header; the cards move 26 points down while it shows, and its x dismisses it", () => {
+test("the redesign's Archive card is a 43-point rounded rectangle centred 78.5 under the safe top and 24 in from the sides like the header, floating over the deck: the cards stay where they are while it shows, and its x dismisses it", () => {
   act(() => useArchiveCard.setState({ showing: true }));
   const root = deck();
   expect(host(root, "archiveCardPlace")).toBeUndefined();
   const place = style(root, "archiveCapsulePlace");
   expect(place.top + 43 / 2).toBe(SAFE_TOP + 78.5);
   expect(place.paddingHorizontal).toBe(24);
-  expect(style(root, "archiveCapsule")).toMatchObject({ minHeight: 43, borderRadius: 21.5, maxWidth: 560 });
+  expect(style(root, "archiveCapsule")).toMatchObject({ minHeight: 43, borderRadius: 16, borderCurve: "continuous", maxWidth: 560 });
   act(() => jest.advanceTimersByTime(1000));
   const shift = () => (getAnimatedStyle(host(root, "deckCards")!).transform as { translateY?: number }[]).find((step) => step.translateY !== undefined)!.translateY;
-  expect(shift()).toBeCloseTo(26, 1);
+  expect(shift()).toBeCloseTo(0, 1);
   act(() => pressable(root, "Dismiss").props.onPress());
   expect(useArchiveCard.getState().showing).toBe(false);
   act(() => jest.advanceTimersByTime(1000));

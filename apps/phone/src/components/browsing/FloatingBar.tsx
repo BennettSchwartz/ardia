@@ -7,7 +7,7 @@ import { haptics } from "../../state/app/haptics";
 import { TabsMenuTrigger } from "./tabsMenu";
 import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { capsule, chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, Symbol, type ColorRoles } from "../ui";
+import { chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, shape, smoothCorners, Symbol, type ColorRoles } from "../ui";
 import { TabStack } from "./BottomBar";
 import { barReturnedToPage } from "../../state/browse/deckPull";
 import { useDeckOwnsBar } from "../../state/browse/hooks";
@@ -64,7 +64,6 @@ export function barAddress(tab: BrowserTab): BarAddress {
 export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true, duo = null, onTabs, onTabsMenu, onStep, onAddress, onPlus, onMore }: Props) {
   const ink = dark ? chromeInk.dark : chromeInk.light;
   const address = barAddress(tab);
-  const size = floatingBarLayout.control;
   const returning = useBarReturn();
   const handed = useDeckOwnsBar();
   const wasHanded = useRef(handed);
@@ -103,7 +102,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     <View testID="floatingBar" style={styles.row} pointerEvents="box-none">
       {inStrip ? null : leading}
       <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={[styles.addressSlot, centreSqueeze]} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
+      <ChromeSurface testID="floatingBarAddress" shape="rounded" cornerRadius={shape.field} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
         <Animated.View testID="floatingBarCentreGlyphs" nativeID={ids?.face} collapsable={false} style={[styles.addressRow, back.centreGlyphs]}>
         <PullGlyphs style={styles.addressRow}>
         <Animated.View testID="floatingBarAddressFade" collapsable={false} style={[styles.addressFade, addressFade]} pointerEvents={squeezed ? "none" : "box-none"} importantForAccessibility={squeezed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={squeezed}>
@@ -167,7 +166,6 @@ type ButtonProps = { tab: BrowserTab; dark: boolean; testID: string; glass?: { s
 
 export function FloatingTabsButton({ tab, order, roles, dark, testID, glass, glyphs, ghost = false, onTabs, onTabsMenu, onStep }: ButtonProps & { order: BrowserTab[]; roles: ColorRoles; onTabs: () => void; onTabsMenu: () => void; onStep: (delta: -1 | 1) => void }) {
   const count = order.length;
-  const size = floatingBarLayout.control;
   return (
     <TabsMenuTrigger order={order} onTabsMenu={onTabsMenu}>
       {({ onLongPress, screenReaderActions }) => (
@@ -186,7 +184,7 @@ export function FloatingTabsButton({ tab, order, roles, dark, testID, glass, gly
           onLongPress={onLongPress}
           style={styles.circleHit}
         >
-          <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+          <ChromeSurface testID={testID} shape="rounded" cornerRadius={shape.control} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
             <PullGlyphs>
               <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
                 <TabStack tabs={order.slice(-2)} roles={roles} />
@@ -206,10 +204,9 @@ export function FloatingTabsButton({ tab, order, roles, dark, testID, glass, gly
 
 export function FloatingPlusButton({ tab, dark, testID, glass, glyphs, ghost = false, onPlus }: ButtonProps & { onPlus: () => void }) {
   const ink = dark ? chromeInk.dark : chromeInk.light;
-  const size = floatingBarLayout.control;
   return (
     <PressScale label="New Search" onPress={onPlus} onPressIn={haptics.barPress} style={styles.circleHit}>
-      <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+      <ChromeSurface testID={testID} shape="rounded" cornerRadius={shape.control} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
         <PullGlyphs>
           <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
             <Symbol name="plus" size={floatingBarLayout.plusSymbol} color={ink.foreground} />
@@ -239,9 +236,9 @@ const styles = StyleSheet.create({
   addressFade: { flex: 1, alignSelf: "stretch", flexDirection: "row" },
   menuGlyph: { alignItems: "center", justifyContent: "center" },
   menuLock: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0 },
-  circle: { width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
+  circle: { ...smoothCorners, width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
   addressSlot: { flex: 1, height: floatingBarLayout.control },
-  address: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },
+  address: { ...smoothCorners, flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },
   addressRow: { flex: 1, alignSelf: "stretch", flexDirection: "row", alignItems: "center" },
   addressHit: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center", gap: floatingBarLayout.addressSpacing, paddingLeft: floatingBarLayout.addressLead },
   host: { flexShrink: 1, fontSize: floatingBarLayout.hostText },

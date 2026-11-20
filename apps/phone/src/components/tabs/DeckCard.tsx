@@ -3,14 +3,14 @@ import { countRender } from "../../state/app/interactionPerf";
 import { PixelRatio, Platform, StyleSheet, Text, View, type StyleProp, type ViewInstance, type ViewStyle } from "react-native";
 import Animated, { useAnimatedStyle, useDerivedValue, useSharedValue, type SharedValue } from "react-native-reanimated";
 import { isUnseenReceived } from "../../lib/tabFace";
-import { DECK, DECK_HEADER, deckBarBand, deckFlyLift, deckHeaderIconReveal, deckLeaveFade, deckStatusStrip, deckHeaderLeading, deckHeaderPlacement, deckLeading, deckSlot, deckVisibleWidth, lerp, titleReveal, type DeckGeometry, type DeckLeaving, type DeckSlots } from "../../lib/deckGeometry";
+import { DECK, DECK_HEADER, deckBarBand, deckFlyLift, deckHeaderIconReveal, deckHeaderReveal, deckLeaveFade, deckStatusStrip, deckHeaderLeading, deckHeaderPlacement, deckLeading, deckSlot, deckVisibleWidth, lerp, titleReveal, type DeckGeometry, type DeckLeaving, type DeckSlots } from "../../lib/deckGeometry";
 import { pullTuck } from "../../lib/deckPull";
 import { useHeldPageTone } from "../../state/browse/deckHold";
 import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
 import { shownTone } from "../../lib/pageTone";
 import { snapshotPageTop } from "../../lib/shownSnapshots";
-import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, space, Symbol, IncognitoSpecs, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useTheme, isDarkColor, type MenuItem, type MotionCurve, type SymbolName } from "../ui";
+import { barHeight, FadeView, Favicon, font, iPhoneOr, motionReportsNearEnd, MotionView, screenReaderActions, smoothCorners, space, Symbol, IncognitoSpecs, TabFace, tabsInk, tabsLayout, tabsMotion, useDesign, usePageUnderBars, useTheme, isDarkColor, type MenuItem, type MotionCurve, type SymbolName } from "../ui";
 import { MenuTrigger, nativeMenus, spaceSystemImage, type MenuHandlers } from "../ui/MenuTrigger";
 import { hideArchiveCard } from "../../state/browse/archiveCard";
 import { OPENING_COVER_ID } from "../../state/browse/store";
@@ -276,14 +276,15 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
     };
   }, [g]);
   const titleWidth = useSharedValue(0);
+  const wholeHeader = design === "redesigned";
   const headerStyle = useAnimatedStyle(() => {
     const { pose: p, top, place } = placed.value;
     return {
       zIndex: placed.value.z + 1,
-      opacity: p.header * placed.value.headed * deckHeaderIconReveal(place.available, tabsLayout.faviconSize),
+      opacity: p.header * placed.value.headed * (wholeHeader ? deckHeaderReveal(place.available) : deckHeaderIconReveal(place.available, tabsLayout.faviconSize)),
       transform: [{ translateX: place.left + place.available - g.cardWidth }, { translateY: top }],
     };
-  });
+  }, [wholeHeader]);
   const reachStyle = useAnimatedStyle(() => {
     const p = placed.value.pose;
     return {
@@ -298,9 +299,9 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
   }, [g]);
   const rowStyle = useAnimatedStyle(() => {
     const available = placed.value.place.available;
-    return { transform: [{ translateX: g.cardWidth - available + deckHeaderLeading(available, tabsLayout.faviconSize, tabsLayout.headerSpacing, titleWidth.value, titleReveal(available)) }] };
-  });
-  const titleStyle = useAnimatedStyle(() => ({ opacity: titleReveal(placed.value.place.available) }));
+    return { transform: [{ translateX: g.cardWidth - available + (wholeHeader ? 0 : deckHeaderLeading(available, tabsLayout.faviconSize, tabsLayout.headerSpacing, titleWidth.value, titleReveal(available))) }] };
+  }, [wholeHeader]);
+  const titleStyle = useAnimatedStyle(() => ({ opacity: wholeHeader ? 1 : titleReveal(placed.value.place.available) }), [wholeHeader]);
   const underBars = usePageUnderBars();
   const pageTop = (tab.snapshotFileName ? snapshotPageTop(tab.snapshotFileName) : null) ?? (underBars ? 0 : g.safeTop);
   const faceStyle = useAnimatedStyle(() => ({ transform: [{ translateY: placed.value.expanded ? deckStatusStrip(g, scaleProgress.value, pageTop) : 0 }] }), [g, pageTop]);
@@ -317,6 +318,7 @@ export const DeckCard = memo(function DeckCard({ tab, index, geometry: g, motion
       <Animated.View testID="deckCardBarBand" pointerEvents="none" style={[styles.band, { height: bar.height, backgroundColor: tone.bottom ?? theme.surface }, bandStyle]}>
         {design === "original" ? <View testID="deckCardBarShade" style={[StyleSheet.absoluteFill, { backgroundColor: isDarkColor(tone.bottom ?? theme.surface) ? tabsInk.barShadeOnDark : tabsInk.barShadeOnLight }]} /> : null}
       </Animated.View>
+      {underBars && tab.snapshotFileName ? <View testID="deckCardStatusBand" pointerEvents="none" style={[styles.statusBand, { height: (g.safeTop * g.cardWidth) / g.width, backgroundColor: tone.top ?? theme.pageSurface }]} /> : null}
       {isUnseenReceived(tab) ? <ReceivedBadge /> : null}
     </>
   );
@@ -419,7 +421,6 @@ function plainCardMenuItems(tab: BrowserTab, { devices, pinned, syncEnabled, spa
 type CardMenuProps = { tab: BrowserTab; close: () => void; testID: string; haptic?: () => void; style?: StyleProp<ViewStyle>; children: (handlers: MenuHandlers) => ReactNode };
 
 export function CardMenu({ tab, close, testID, haptic, style, children }: CardMenuProps) {
-  const material = useDesign() === "material";
   const devices = useSendTargets(tab.id);
   const pinned = useIsPinned(tab.id);
   const syncEnabled = useSyncEnabled();
@@ -427,7 +428,7 @@ export function CardMenu({ tab, close, testID, haptic, style, children }: CardMe
   const profiles = useSyncView().profiles;
   const spaces = moveTargets(tabSpaces, profiles, tab);
   return (
-    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces, icons: material }, close)} trigger="longPress" haptic={haptic} privately={tab.isPrivate} onOpen={hideArchiveCard} style={style}>
+    <MenuTrigger testID={testID} items={cardMenuItems(tab, { devices, pinned, syncEnabled, spaces, icons: true }, close)} trigger="longPress" haptic={haptic} privately={tab.isPrivate} onOpen={hideArchiveCard} style={style}>
       {children}
     </MenuTrigger>
   );
@@ -526,6 +527,7 @@ export function OpeningCard({ tab, geometry: g, centerX, centerY, growsAtMount =
       <MotionView testID="openingCardFace" style={StyleSheet.absoluteFill} from={growsAtMount ? { translateY: 0 } : undefined} to={{ translateY: grown ? deckStatusStrip(inner, 0, pageTop) : 0 }} motion={OPENING_CARD_MOTION}>
         <TabFace tab={tab} title={title} host={host} tone={tone.top} roles={theme} paintedAs={`deck:${tab.id}`} />
       </MotionView>
+      {underBars && tab.snapshotFileName ? <View testID="openingCardStatusBand" pointerEvents="none" style={[styles.statusBand, { height: (g.safeTop * frame.width) / g.width, backgroundColor: tone.top ?? theme.pageSurface }]} /> : null}
       {underBars ? null : (
         <MotionView testID="openingCardBand" pointerEvents="none" style={StyleSheet.absoluteFill} from={growsAtMount ? { translateY: bar.height } : undefined} to={{ translateY: grown ? 0 : bar.height }} motion={OPENING_CARD_MOTION}>
           <View testID="openingCardBandFill" style={[styles.openingBand, { top: frame.height - bar.height, width: frame.width, height: bar.height, backgroundColor: tone.bottom ?? theme.surface }]}>
@@ -544,15 +546,15 @@ const CARD_ELEVATION = 14;
 const COVER_NEAR_END_PX = 2;
 const HEADER_ROW_ROOM = 2000;
 const HEADER_TITLE_FONT = iPhoneOr<{ fontSize: number; lineHeight: number }>(font.footnote, font.caption);
-const CARD_SHADOW_BLUR = 36;
+const CARD_SHADOW_BLUR = 28;
 const RECEIVED_INSET = 10;
 
 export function ReceivedBadge() {
   const theme = useTheme();
   return (
-    <View style={[styles.badge, { backgroundColor: theme.formAccent, boxShadow: `0px 2px 12px ${theme.formAccent}59` }]}>
-      <Symbol name="laptop" size={12} color={tabsInk.onDark} />
-      <Text style={[styles.badgeText, { color: tabsInk.onDark }]}>From Your Mac</Text>
+    <View style={[styles.badge, { backgroundColor: theme.spaceAccent, boxShadow: `0px 2px 12px ${theme.spaceAccent}59` }]}>
+      <Symbol name="laptop" size={12} color={theme.onSpaceAccent} />
+      <Text style={[styles.badgeText, { color: theme.onSpaceAccent }]}>From Your Mac</Text>
     </View>
   );
 }
@@ -563,12 +565,14 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     overflow: "hidden",
+    ...smoothCorners,
     borderWidth: StyleSheet.hairlineWidth,
-    ...Platform.select({ android: { elevation: CARD_ELEVATION, shadowColor: tabsInk.cardShadow }, default: { boxShadow: `-2px 4px ${CARD_SHADOW_BLUR}px ${tabsInk.cardShadow}` } }),
+    ...Platform.select({ android: { elevation: CARD_ELEVATION, shadowColor: tabsInk.cardShadow }, default: { boxShadow: `0px 6px ${CARD_SHADOW_BLUR}px ${tabsInk.cardShadow}` } }),
   },
+  statusBand: { position: "absolute", left: 0, right: 0, top: 0 },
   band: { position: "absolute", left: 0, right: 0, bottom: 0, transformOrigin: "bottom" },
-  cardMenu: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, borderRadius: DECK.cardRadius },
-  opening: { position: "absolute", overflow: "hidden" },
+  cardMenu: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0, borderRadius: DECK.cardRadius, ...smoothCorners },
+  opening: { position: "absolute", overflow: "hidden", ...smoothCorners },
   openingEdge: { borderWidth: StyleSheet.hairlineWidth },
   openingEdgeOverlay: { ...StyleSheet.absoluteFill, borderWidth: StyleSheet.hairlineWidth },
   openingBand: { position: "absolute", left: 0 },

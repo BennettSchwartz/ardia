@@ -110,7 +110,7 @@ export function ArchiveView() {
           <>
         <View style={styles.top}>
           <Pressable accessibilityRole="button" onPress={closeArchive} style={styles.topButton}>
-            <Text style={[font.body, styles.bold, { color: theme.formAccent }]}>Done</Text>
+            <Text style={[font.body, styles.bold, { color: theme.spaceAccentInk }]}>Done</Text>
           </Pressable>
           <Text accessibilityRole="header" style={[font.body, styles.bold, { color: theme.label }]}>
             Archive
@@ -118,7 +118,7 @@ export function ArchiveView() {
           <MenuTrigger items={items} trigger="tap" place={{ right: space.s, width: Math.min(tabsLayout.menuWidth, width - space.l) }}>
             {({ onPress }) => (
               <Pressable accessibilityRole="button" accessibilityLabel="Options" onPress={onPress} style={[styles.topButton, styles.end]}>
-                <Symbol name="ellipsis" size={22} color={theme.formAccent} />
+                <Symbol name="ellipsis" size={22} color={theme.spaceAccentInk} />
               </Pressable>
             )}
           </MenuTrigger>
@@ -131,7 +131,7 @@ export function ArchiveView() {
             placeholder="Search Archive"
             placeholderTextColor={theme.secondaryLabel}
             style={[font.body, styles.input, { color: theme.label }]}
-            selectionColor={theme.formAccent}
+            selectionColor={theme.spaceAccentInk}
             autoCorrect={false}
             autoCapitalize="none"
           />

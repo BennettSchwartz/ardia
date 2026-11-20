@@ -334,7 +334,7 @@ onIPhone("the dim fades in once the stage says the panel is up, and fades with t
     { state: State.ACTIVE, translationY: 60 },
   ]);
   expect(mockStage.holdLift).toHaveBeenCalledTimes(1);
-  const travel = 274 + 300;
+  const travel = (StyleSheet.flatten(host(root, "traySurface")!.props.style).height as number) + 300;
   expect(opacity(host(root, "trayDim"))).toBeCloseTo(1 - 60 / travel, 2);
 });
 
@@ -393,7 +393,7 @@ onIPhone("the stage gets the panel's look, the field's centre and, on a late rev
   const root = page();
   open();
   expect(stage().fieldCenter).toBeCloseTo(9 + 47.5 / 2);
-  expect(stage().morphLook).toMatchObject({ usesGlass: true, panelDark: false });
+  expect(stage().morphLook).toMatchObject({ usesGlass: false, panelDark: false, classicPanel: "#FFFFFF" });
   reveal(true);
   expect(counted).toHaveBeenCalledWith("search_reveals_late");
   act(() => browse.cancelSearch());

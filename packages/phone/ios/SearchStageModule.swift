@@ -53,6 +53,7 @@ final class SearchStageView: ExpoView {
   var commandTop: CGFloat?
   var landsDirectly = false
   var look = StageMorphLook()
+  var corners = StageCorners()
 
   private let keyboardSentinel = UIView()
   private var keyboard: StageKeyboardTracker?
@@ -268,7 +269,7 @@ final class SearchStageView: ExpoView {
     holdReveals()
     if let anchor = pendingAnchor, !keyboardUp, !isCommandBar, !reduceMotion {
       revealsContents = false
-      emergence = StageEmergence(pill: convert(anchor.frame, from: nil), fieldCenter: fieldCenter, face: face?.makeView(), on: panel)
+      emergence = StageEmergence(pill: convert(anchor.frame, from: nil), fieldCenter: fieldCenter, corners: corners, face: face?.makeView(), on: panel)
     }
     pendingAnchor = nil
     place()
@@ -389,7 +390,7 @@ final class SearchStageView: ExpoView {
 
   private func beginMorph(from shownSurface: StageMorph.Start?) {
     guard let panel else { return }
-    morph = StageMorph(card: card, fieldCenter: fieldCenter, of: panel, in: self, look: look, from: shownSurface)
+    morph = StageMorph(card: card, fieldCenter: fieldCenter, corners: corners, of: panel, in: self, look: look, from: shownSurface)
     move(.immediate) { [self] in
       isClosing = true
       if !keyboardUp { morph?.appear() }
