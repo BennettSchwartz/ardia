@@ -65,7 +65,7 @@ export function noteTopAppUnloadedFromMenu() {
 export function noteTabsSleptFromMenu(from: "tab" | "group", results: { outcome: string; keptBy?: KeptAwakeReason; pastAutomatic?: boolean }[], consent?: ConsentToken | null) {
   const keptAwake = results.filter((r) => r.outcome === "kept").length;
   const pastAutomatic = results.filter((r) => r.pastAutomatic).length;
-  const keptReason = results.find((r) => r.keptBy)?.keptBy;
+  const keptReason = [...results].reverse().find((r) => r.keptBy)?.keptBy;
   const key = from === "tab" ? "tabsSleptFromMenu" : "groupsSleptFromMenu";
   countFor(
     consent,

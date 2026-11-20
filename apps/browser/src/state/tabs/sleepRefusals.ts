@@ -1,6 +1,6 @@
 export type KeptAwakeReason = "playingOrSharing" | "audio" | "pictureInPicture" | "capturing" | "device" | "devTools" | "typedInput" | "noPage" | "other";
 
-const OVERRIDDEN_BY_ASKING: ReadonlySet<number> = new Set([6, 7, 12, 13, 14, 22, 23, 25, 29]);
+const OVERRIDDEN_BY_ASKING: ReadonlySet<number> = new Set([6, 7, 13, 14, 23, 25]);
 
 const REASONS: Readonly<Record<number, KeptAwakeReason>> = {
   [-1]: "noPage",

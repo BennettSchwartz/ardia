@@ -40,7 +40,8 @@ export async function sleepAsked(id: string): Promise<MenuSleep> {
   if (visibleWith(after, id)) return { outcome: "shown" };
   if (inUse(after, id)) return { outcome: "kept", keptBy: "playingOrSharing" };
   const discarded = await view.discard().catch(() => "refused" as const);
-  return discarded === "discarded" || discarded === "already" ? { outcome: "asleep", pastAutomatic: true } : { outcome: "kept", keptBy: "other" };
+  if (discarded === "already") return { outcome: "asleep" };
+  return discarded === "discarded" ? { outcome: "asleep", pastAutomatic: true } : { outcome: "kept", keptBy: "other" };
 }
 
 export async function sleepTab(id: string, { mayWrite }: { mayWrite?: () => boolean } = {}): Promise<string> {
