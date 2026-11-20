@@ -296,9 +296,11 @@ export function fieldProviderOpened(event: FieldProviderOpened) {
   if (event?.via === "badge" || event?.via === "menu") notePasswordPanel(event.via, event.shown === true, event.reason);
 }
 
+const PANEL_MAY_BE_UP = new Set(["noPanel", "tabGone"]);
+
 export async function openSystemPanel(tabId: string): Promise<boolean> {
   const result = await showSystemPanel(tabId, generation).catch(() => null);
-  return !!result?.shown;
+  return !!result && (result.shown || PANEL_MAY_BE_UP.has(result.reason ?? ""));
 }
 
 export function passwordManagerSnapshot(): Record<string, string> | null {

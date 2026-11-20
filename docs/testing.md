@@ -146,9 +146,12 @@ Launch with `scripts/agent/ac launch <app> --data <dir> [--instance K=V] [--test
   this key it sends AppKit's `_handleInsertFromPasswordsCommand:` for real and logs the first responder, the target and
   whether AppKit took it (`log show --predicate 'eventMessage CONTAINS "system passwords panel"'`). Apple's panel
   belongs to another process and can show on screen, so use it only with the screen locked or the owner's OK. After a
-  send it logs `held=1` (AppKit's own show-or-hide pass is held for 1.5 s, since its delayed dismiss used to cancel a
-  panel still opening) and, 0.6 s later, `seen`, `missing` (reported as `noPanel`) or `unchecked`; every refusal logs
-  `refused reason=<reason> via=<badge|menu> field=<kind>`.
+  send it logs `held=1`: AppKit's own show-or-hide pass is held for 1.5 s, since its delayed dismiss used to cancel a
+  panel still opening. A pass skipped meanwhile runs once when the hold ends (`hold ended, replaying …`), and the hold
+  ends at once if the send is refused or focus leaves the page (`hold ended early`). It then compares the Passwords
+  panel windows on screen with those there before the send, at 0.6 s and again at 1.5 s, and logs `seen`, `missing`
+  (reported as `noPanel`, which opens nothing in Ardia) or `unchecked` (another app's window names were hidden). Every
+  refusal logs `refused reason=<reason> via=<badge|menu> field=<username|password|code|other>`.
 - **`systemPanelRace`**: right after sending the Passwords command, runs AppKit's
   `_showOrHideAutoFillForCurrentTextInputContextIfAppropriate` at once, while Ardia is still active: the ordering that
   lost the panel before the hold. Use it with a visible instance to check the panel still shows.

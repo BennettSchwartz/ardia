@@ -7,6 +7,7 @@
 #import "ArdiaServices.h"
 
 #import <objc/runtime.h>
+#import <os/log.h>
 
 #include <climits>
 #include <cmath>
@@ -208,7 +209,10 @@ NSMutableOrderedSet<NSString *> *ScriptFramesOf(ArdiaCoreTab *tab) {
       if (reason) payload[@"reason"] = reason;
       [weakSelf emit:@"fieldProviderOpened" payload:payload];
     };
-    if (!_visible) report(@{@"shown" : @NO, @"reason" : @"hidden"});
+    if (!_visible) {
+      os_log(OS_LOG_DEFAULT, "[ardiacore] system passwords panel refused reason=hidden via=badge");
+      report(@{@"shown" : @NO, @"reason" : @"hidden"});
+    }
     else [ArdiaWebView requestSystemPanelIn:tab.view owner:tab profile:_profile field:field generation:generation completion:report];
   } else if ([kind isEqualToString:@"verificationCode"] && main && dict) {
     double generation;

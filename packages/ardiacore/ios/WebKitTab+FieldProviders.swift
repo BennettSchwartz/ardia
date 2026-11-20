@@ -1,3 +1,4 @@
+import os
 import WebKit
 
 extension WebKitTab {
@@ -13,7 +14,10 @@ extension WebKitTab {
       guard let view = webView, let field = dict?["field"] as? String, let generation = dict?["generation"] as? Double,
         sameOriginAsTop(frameInfo)
       else { return }
-      guard visible else { return emitPanelResult(["shown": false, "reason": "hidden"], via: "badge") }
+      guard visible else {
+        os_log("[ardiacore] system passwords panel refused reason=hidden via=badge")
+        return emitPanelResult(["shown": false, "reason": "hidden"], via: "badge")
+      }
       ArdiaWebView.requestSystemPanel(in: view, owner: view, profile: profile, field: field, generation: generation) { [weak self] result in
         self?.emitPanelResult(result, via: "badge")
       }
