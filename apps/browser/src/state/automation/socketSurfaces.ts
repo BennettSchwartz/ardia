@@ -1,4 +1,4 @@
-import { dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceEvent, type SurfaceItem } from "../../platform/surfaces";
+import { dismissSurface, menuBar, onSurface, openSurfaces, performMenuBarItem, type OpenSurface, type SurfaceItem } from "../../platform/surfaces";
 import type { BrowserState } from "../browser/store";
 import { eligibleKind, isEligibleTab, lastFocusedEligibleWindow } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
@@ -157,25 +157,11 @@ export const SURFACE_METHODS: MethodSpec[] = [
   },
 ];
 
-const EVENT_OF: Partial<Record<SurfaceEvent["type"], "menu.opened" | "menu.closed">> = { menuOpened: "menu.opened", menuClosed: "menu.closed" };
-
-export function startSurfaceEvents(send: EventSend, wants: ReadonlySet<string>) {
-  const shown = new Set<string>();
+export function startSurfaceEvents(send: EventSend) {
   const sub = onSurface((event) => {
-    if (event.type === "menuDropped") {
-      shown.delete(event.id);
-      return;
-    }
-    const name = EVENT_OF[event.type];
-    if (!name) return;
-    if (event.type === "menuOpened") {
-      const visible = visibleSurface(now(), event);
-      if (!visible) return;
-      shown.add(event.id);
-      if (wants.has(name)) send(name, { id: visible.id, kind: visible.kind, windowId: visible.window, tabId: visible.tab, items: visible.items?.length ?? 0 });
-    } else if (shown.delete(event.id) && wants.has(name)) {
-      send(name, { id: event.id, kind: event.kind });
-    }
+    if (event.type !== "menuOpened") return;
+    const visible = visibleSurface(now(), event);
+    if (visible) send("menu.opened", { id: visible.id, kind: visible.kind, windowId: visible.window, tabId: visible.tab, items: visible.items?.length ?? 0 });
   });
   return () => sub.remove();
 }

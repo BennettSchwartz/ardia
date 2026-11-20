@@ -127,15 +127,14 @@ test("menus.runBar runs a catalog item by its ref: Ardia commands through run wi
 });
 test("menu and prompt events reach subscribers", async () => {
   const { windowId, tab } = await freshWindow("https://cam.example/");
-  await ok("subscribe", { events: ["menu.opened", "menu.closed", "permission.prompted"] });
+  await ok("subscribe", { events: ["menu.opened", "permission.prompted"] });
   stub.controlSocket.broadcasts.length = 0;
   stub.surfaces.emit({ type: "menuOpened", id: "m9", kind: "page", captured: true, tab, window: windowId, items: [{ path: [0] }, { path: [1] }] });
-  stub.surfaces.emit({ type: "menuClosed", id: "m9", kind: "page" });
   await promptOn(tab, "p40", ["camera"]);
   const events = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line));
-  assert.deepEqual(events.map((e) => e.event), ["menu.opened", "menu.closed", "permission.prompted"]);
+  assert.deepEqual(events.map((e) => e.event), ["menu.opened", "permission.prompted"]);
   assert.equal(events[0].data.items, 2);
-  assert.equal(events[2].data.id, "p40");
+  assert.equal(events[1].data.id, "p40");
   await ok("subscribe", { events: [] });
 });
 

@@ -34,11 +34,10 @@ export const AUTOMATION_EVENTS = [
   "permission.prompted",
   "password.prompted",
   "menu.opened",
-  "menu.closed",
 ] as const;
 export type AutomationEventName = (typeof AUTOMATION_EVENTS)[number];
 
-export const NATIVE_UI_EVENTS: ReadonlySet<AutomationEventName> = new Set(["permission.prompted", "password.prompted", "menu.opened", "menu.closed"]);
+export const NATIVE_UI_EVENTS: ReadonlySet<AutomationEventName> = new Set(["permission.prompted", "password.prompted", "menu.opened"]);
 
 export const PLUGIN_EVENTS: readonly AutomationEventName[] = AUTOMATION_EVENTS.filter((name) => name !== "notification.shown" && !NATIVE_UI_EVENTS.has(name));
 

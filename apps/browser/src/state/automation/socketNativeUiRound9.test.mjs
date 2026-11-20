@@ -38,14 +38,21 @@ test("any menu that isn't a captured background menu answers exactly as a random
 
 test("a menu whose items target an unknown class is neither listed nor announced", async () => {
   const { windowId, tab } = await freshWindow();
-  await ok("subscribe", { events: ["menu.opened", "menu.closed"] });
+  await ok("subscribe", { events: ["menu.opened"] });
   stub.controlSocket.broadcasts.length = 0;
   stub.surfaces.open = unprovenMenus(windowId, tab);
   assert.deepEqual(await ok("menus.open"), []);
   for (const menu of unprovenMenus(windowId, tab)) {
     stub.surfaces.emit({ type: "menuOpened", ...menu });
-    stub.surfaces.emit({ type: "menuClosed", id: menu.id, kind: menu.kind });
+    stub.surfaces.emit({ type: "menuDropped", id: menu.id, kind: menu.kind });
   }
   assert.deepEqual(stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line).event), []);
   await ok("subscribe", { events: [] });
+});
+
+test("menu.closed isn't an event: nothing native sends a close, so it can't be subscribed and the menu feed keeps no announced ids to lose", async () => {
+  const { AUTOMATION_EVENTS } = await import("./eventNames.ts");
+  assert.equal(AUTOMATION_EVENTS.includes("menu.closed"), false);
+  const reply = await call("subscribe", { events: ["menu.opened", "menu.closed"] });
+  assert.equal(reply.error?.code, "bad_request", JSON.stringify(reply));
 });

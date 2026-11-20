@@ -62,13 +62,12 @@ test("a background Ardia runs nothing from the menu bar: native items are refuse
   }
 });
 
-test("a dropped capture leaves no announced id behind, so no menu.closed ever follows it", async () => {
+test("a dropped capture sends clients nothing", async () => {
   const { windowId, tab } = await freshWindow();
-  await ok("subscribe", { events: ["menu.opened", "menu.closed"] });
+  await ok("subscribe", { events: ["menu.opened"] });
   stub.controlSocket.broadcasts.length = 0;
   stub.surfaces.emit({ type: "menuOpened", id: "dr1", kind: "page", captured: true, tab, window: windowId, items: [] });
   stub.surfaces.emit({ type: "menuDropped", id: "dr1", kind: "page" });
-  stub.surfaces.emit({ type: "menuClosed", id: "dr1", kind: "page" });
   const events = stub.controlSocket.broadcasts.map((b) => JSON.parse(b.line).event);
   assert.deepEqual(events, ["menu.opened"]);
   await ok("subscribe", { events: [] });

@@ -81,7 +81,7 @@ export type OpenSurface = {
 
 export type SurfaceEvent =
   | (OpenSurface & { type: "menuOpened" })
-  | { type: "menuClosed" | "menuDropped"; id: string; kind: OpenSurface["kind"] };
+  | { type: "menuDropped"; id: string; kind: OpenSurface["kind"] };
 
 export type MenusNative = {
   addListener(name: "onCommand", listener: (e: CommandEvent | MenuPickEvent) => void): EventSubscription;
