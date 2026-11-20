@@ -431,9 +431,14 @@ class PackagingTests(unittest.TestCase):
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 policy = destdir / 'usr/share/polkit-1/actions/dev.ardia.linux.policy'
-                self.assertEqual(policy.read_text(), (REPO / 'scripts/linux/dev.ardia.linux.policy').read_text())
+                source_policy = (REPO / 'scripts/linux/dev.ardia.linux.policy').read_text()
+                self.assertIn('>/usr/lib/ardia/ardia-update<', source_policy)
+                self.assertEqual(policy.read_text(), source_policy.replace('>/usr/lib/ardia/ardia-update<', f'>{prefix}/lib/ardia/ardia-update<'))
                 self.assertEqual(policy.stat().st_mode & 0o777, 0o644)
                 installed = destdir / prefix.lstrip('/')
+                self.assertEqual(oct((installed / 'lib/ardia/ardia-update').stat().st_mode & 0o777), oct(0o755))
+                self.assertEqual(oct((installed / 'lib/ardia/linux-update.pem').stat().st_mode & 0o777), oct(0o644))
+                self.assertEqual([path.name for path in (installed / 'lib').iterdir()], ['ardia'])
                 self.assertTrue((installed / 'lib/ardia/chrome').is_file())
                 self.assertTrue(os.access(installed / 'lib/ardia/chrome', os.X_OK))
                 self.assertTrue((installed / 'lib/ardia/ardia-ui/index.html').is_file())
@@ -626,7 +631,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertIn(f'[ "$1" = {rollback} ]', postinst)
             fields = subprocess.run(['dpkg-deb', '-f', str(deb), 'Depends', 'Provides'], capture_output=True, text=True, check=True).stdout
             self.assertIn('Provides: www-browser', fields)
-            for package in ('libc6 (>= 2.17)', 'libgtk-3-0t64 | libgtk-3-0', 'libsecret-1-0', 'xdg-utils', 'curl'):
+            for package in ('libc6 (>= 2.17)', 'libgtk-3-0t64 | libgtk-3-0', 'libsecret-1-0', 'xdg-utils', 'curl', 'openssl'):
                 self.assertIn(package, fields)
             self.assertIn('Upstream-Name: Ardia', (unpacked / 'usr/share/doc/ardia/copyright').read_text())
             with gzip.open(unpacked / 'usr/share/doc/ardia/changelog.gz', 'rt') as changelog:
