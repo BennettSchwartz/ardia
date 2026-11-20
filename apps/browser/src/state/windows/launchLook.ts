@@ -116,6 +116,13 @@ export function heldThemeColor(tabId: string, url: string, reported: string | nu
 }
 
 
+export function endThemeHold(tabId: string) {
+  const hold = held.get(tabId);
+  if (!hold || hold.page !== null) return;
+  releaseHeldTheme(tabId);
+  if (useBrowser.getState().tabs[tabId] && liveOf(tabId).themeColor === hold.color) useBrowser.getState().updateLive(tabId, { themeColor: null });
+}
+
 export function hostThemeColor(tabId: string, url: string, reported: string | null | undefined, isLoading: boolean): string | null {
   if (held.get(tabId)?.page) releaseHeldTheme(tabId);
   return heldThemeColor(tabId, url, reported, isLoading);
