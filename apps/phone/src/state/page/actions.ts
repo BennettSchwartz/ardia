@@ -23,12 +23,14 @@ import { pageUi, usePageUi, type Press } from "./store";
 import { closeVoiceSearch, useVoice } from "../voice/store";
 import { addOnlineAgainListener } from "../../platform/network";
 import { countUsage } from "../telemetry/telemetry";
-import { pageSummaryOpenedCount, pageSummarySettledCount } from "../../lib/telemetrySchema";
+import { pageSummaryOpenedCount, pageSummarySettledCounts } from "../../lib/telemetrySchema";
+import { pageSummariesEnabled, pageSummariesRevision, refreshPageSummariesEnabled } from "../pageSummary/enabled";
 import { dismissArchiveCard } from "../browse/archiveCard";
 import { copy } from "../../lib/platformCopy";
 import { launchValues } from "../../platform/launch";
 import { COPIED_LINK } from "../browse/tabMenus";
 import { syncData } from "../sync/store";
+import { libraryBack } from "../library/store";
 import { showToast, TOAST_LONG_DURATION_MS } from "../toasts/store";
 import { syncOffered } from "../../platform/system";
 
@@ -105,12 +107,14 @@ export function canSummarizePages(): boolean {
 
 export function summarizeCurrentPage() {
   const tab = selectedTab();
-  if (!tab) return;
+  if (!tab || !pageSummariesEnabled()) return;
   const navigation = usePages.getState().navigation[tab.id];
   const url = navigation?.url ?? tab.url;
   if (!isSyncableUrl(url) || navigation?.isLoading) return;
+  const revision = pageSummariesRevision();
 
   afterMenuHidden = () => {
+    if (!pageSummariesEnabled() || pageSummariesRevision() !== revision) return;
     const current = selectedTab();
     const latest = usePages.getState().navigation[tab.id];
     if (current?.id !== tab.id || useBrowse.getState().surface !== "browsing" || latest?.isLoading || (latest?.url ?? current.url) !== url) return;
@@ -418,11 +422,9 @@ function pageEvent(event: PageEngineEvent) {
       if (field) countUsage(field);
       return;
     }
-    case "page.summarySettled": {
-      const field = event.isPrivate ? null : pageSummarySettledCount(event.outcome);
-      if (field) countUsage(field);
+    case "page.summarySettled":
+      if (!event.isPrivate) for (const field of pageSummarySettledCounts(event.outcome, event.chatGPTFellBack)) countUsage(field);
       return;
-    }
     default:
       return;
   }
@@ -434,6 +436,7 @@ export function startPageUi() {
   if (started) return;
   started = true;
   listenToPages(pageEvent);
+  void refreshPageSummariesEnabled();
   try {
     downloads.addListener(downloadEvent);
   } catch {
@@ -450,6 +453,7 @@ export function handleSystemBack(): boolean {
     return true;
   }
   if (popSettings()) return true;
+  if (libraryBack()) return true;
   const { surface, sheet } = useBrowse.getState();
   const id = selectedId();
   const ui = pageUi();
