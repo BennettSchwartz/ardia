@@ -141,12 +141,18 @@ export function linuxUpdater(deps: UpdateDeps) {
     return status;
   }
 
+  async function claim(run: number): Promise<boolean | null> {
+    const answer = await invokeHost<unknown>(CLAIM_METHOD, { args: [run] }, deps.host).then(
+      (claimed) => claimed === true,
+      () => null,
+    );
+    if (answer !== null) settledRun = Math.max(settledRun, run);
+    return answer;
+  }
+
   async function restart(consent: ConsentToken | null) {
     const status = await engineStatus();
-    if (status?.phase === "ready" && status.run > settledRun) {
-      settledRun = status.run;
-      if ((await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).catch(() => false)) === true) countOutcome(status, consent);
-    }
+    if (status?.phase === "ready" && status.run > settledRun && (await claim(status.run))) countOutcome(status, consent);
     noteUpdateRestart(consent);
     await invokeHost(RESTART_METHOD, { args: [] }, deps.host).catch((error: unknown) => console.info(`[ardia linux] Ardia couldn't restart: ${String(error)}`));
   }
@@ -197,13 +203,7 @@ export function linuxUpdater(deps: UpdateDeps) {
   async function settle(status: EngineStatus, consent: ConsentToken | null, own: OwnRun | null) {
     if (!finished(status) || status.run <= settledRun) return;
     if (status.phase === "ready" && deps.showsToasts === false) return;
-    const answer = await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).then(
-      (claimed) => ({ claimed: claimed === true }),
-      () => null,
-    );
-    if (!answer) return;
-    settledRun = Math.max(settledRun, status.run);
-    if (!answer.claimed) return;
+    if (!(await claim(status.run))) return;
     countOutcome(status, consent);
     const target = status.version ?? own?.release.version;
     if (!target) return;

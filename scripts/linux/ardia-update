@@ -30,7 +30,7 @@ max_manifest=4096
 signature_size=64
 install_budget=540
 watchdog_seconds=570
-start_time_slack=2
+start_time_slack=0.25
 small_copy_seconds=60
 version_pattern='^([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(-nightly\.([0-9]{1,9}))?$'
 version_line_pattern='^version (.+)$'
@@ -98,14 +98,16 @@ installed_version() {
   printf '%s' "$line"
 }
 
-parent_started_at() {
-  local stat ticks boot
-  stat=$(cat "/proc/$PPID/stat" 2>/dev/null) || return 1
+appimage_changed_since_launch() {
+  local stat ticks now changed
+  stat=$(cat "/proc/$PPID/stat" 2>/dev/null) || return 0
   read -r -a stat <<<"${stat##*) }"
-  ticks=$(getconf CLK_TCK 2>/dev/null) || return 1
-  boot=$(awk '$1 == "btime" { print $2 }' /proc/stat 2>/dev/null) || return 1
-  [[ "${stat[19]:-}" =~ ^[0-9]+$ && "$ticks" =~ ^[1-9][0-9]*$ && "$boot" =~ ^[0-9]+$ ]] || return 1
-  printf '%d' "$((boot + stat[19] / ticks))"
+  ticks=$(getconf CLK_TCK 2>/dev/null) || return 0
+  now=$(date +%s.%N) || return 0
+  changed=$(stat -c %.9Z -- "$appimage" 2>/dev/null) || return 0
+  [[ "${stat[19]:-}" =~ ^[0-9]+$ && "$ticks" =~ ^[1-9][0-9]*$ && "$now" =~ ^[0-9]+\.[0-9]+$ && "$changed" =~ ^[0-9]+\.[0-9]+$ ]] || return 0
+  awk -v started="${stat[19]}" -v ticks="$ticks" -v now="$now" -v changed="$changed" -v slack="$start_time_slack" \
+    '{ exit !(changed > now - $1 + started / ticks + slack) }' /proc/uptime
 }
 
 appimage_target() {
@@ -269,8 +271,10 @@ install_deb() {
     </dev/null >&2 || status=$?
   settle "$status" install "apt-get couldn't install $package_name"
   refresh_left
+  status=0
   # shellcheck disable=SC2016
-  installed=$(limited "$((left < 30 ? left : 30))" dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
+  installed=$(limited "$((left < 30 ? left : 30))" dpkg-query -W -f='${Version}' ardia 2>/dev/null) || status=$?
+  settle "$status" install "dpkg-query couldn't report the installed version"
   [[ "$installed" == "$expected" ]] || fail install "dpkg reports ardia $installed after the install, not $expected"
 }
 
@@ -379,10 +383,7 @@ run_install() {
     tarball) install_tarball ;;
     appimage)
       chmod 0755 -- "$staged"
-      local launched changed
-      launched=$(parent_started_at) || fail install "couldn't tell when Ardia started"
-      changed=$(stat -c %Z -- "$appimage") || fail install "couldn't stat $appimage"
-      ((changed <= launched + start_time_slack)) || fail notNewer "$appimage changed after this Ardia started"
+      ! appimage_changed_since_launch || fail notNewer "$appimage changed after this Ardia started"
       install_appimage
       ;;
   esac

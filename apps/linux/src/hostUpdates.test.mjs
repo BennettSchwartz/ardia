@@ -339,6 +339,20 @@ test("a claim call that fails leaves the run for the next look, so its toast and
   assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_deb: 1 });
 });
 
+test("a restart whose claim call fails leaves the run for a later claim, so its counts aren't lost", async () => {
+  takeUpdateCounts();
+  const engine = fakeEngine({ kind: "deb" });
+  const leader = harness({ engine });
+  await engine.update("0.2.46");
+  engine.finish();
+  engine.unansweredClaims = 1;
+  await leader.updater.restartWhenReady();
+  assert.deepEqual([engine.restarts, engine.claims], [1, []]);
+  await leader.updater.restartWhenReady();
+  assert.deepEqual([engine.restarts, engine.claims], [2, [1]]);
+  assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_deb: 1, update_restarts: 2 });
+});
+
 test("Settings left open never claims a finished update, so a browser window says it's ready", async () => {
   takeUpdateCounts();
   const engine = fakeEngine({ kind: "deb" });
