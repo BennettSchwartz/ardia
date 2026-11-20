@@ -15,6 +15,7 @@ $script:Lines = [System.Collections.Generic.List[string]]::new()
 $script:Sessions = [System.Collections.Generic.List[object]]::new()
 $script:StopNumber = 0
 $script:FailedStops = [System.Collections.Generic.List[string]]::new()
+$script:RequiredFailures = [System.Collections.Generic.List[string]]::new()
 $script:PreviousSignature = $null
 $script:UiaReady = $null
 $script:LightBrightness = $null
@@ -2497,8 +2498,6 @@ function Note-Required($Stop, [string]$Part) {
   }
 }
 
-$script:RequiredFailures = [System.Collections.Generic.List[string]]::new()
-
 function Invoke-PeekTabsTour {
   if (-not (Start-TourPages)) {
     $script:Lines.Add("- The peek-tabs part found no loopback page server on port $($script:TourPagesPort).")
@@ -2824,18 +2823,17 @@ $env:ARDIA_DATA_DIR = ""
 foreach ($part in $Required) {
   if (-not @($tours | Where-Object { $_.Name -eq $part }).Count) { $script:RequiredFailures.Add("$($part): not run") }
 }
-if ($script:RequiredFailures.Count) {
-  $script:Lines.Add("- Required stops that were not seen: $($script:RequiredFailures -join '; ').")
-  Set-Content -LiteralPath (Join-Path $Out "required-failed.txt") -Value ($script:RequiredFailures -join "`n") -Encoding utf8NoBOM
+$requiredNotSeen = @($script:FailedStops) + @($script:RequiredFailures)
+if ($requiredNotSeen.Count) {
+  $script:Lines.Add("- Required stops that were not seen: $($requiredNotSeen -join '; ').")
+  Set-Content -LiteralPath (Join-Path $Out "required-failed.txt") -Value ($requiredNotSeen -join "`n") -Encoding utf8NoBOM
 }
 Write-Tour
 $elapsed = [Math]::Round(((Get-Date) - $script:Started).TotalSeconds)
 $crashed = @($script:Sessions | Where-Object { $_.Crashed })
 Write-Host "[tour] $($script:StopNumber) stops in $elapsed s; tour.md and the screenshots are in $Out"
-if ($script:FailedStops.Count) {
-  foreach ($failed in $script:FailedStops) { Write-Host "::error::required tour stop failed: $failed" }
-}
-if ($crashed.Count -or $script:FailedStops.Count) {
+foreach ($failed in $requiredNotSeen) { Write-Host "::error::required tour stop failed: $failed" }
+if ($crashed.Count -or $requiredNotSeen.Count) {
   foreach ($session in $crashed) { Write-Host "::error::the app crashed or exited on its own during the '$($session.Name)' launch: $($session.Summary)" }
   exit 1
 }
