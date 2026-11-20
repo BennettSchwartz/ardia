@@ -29,7 +29,9 @@ UI update still happens.
 - **Control off means no more writes.** Consent is checked when a request arrives and again before every write that
   follows an `await` in a handler (a lookup, a confirmation, a settings read): handlers get a `SocketCall` and call
   `stillServing()` first, as `apply` does between ops. Turning control off mid-call answers `failed` "Control was
-  turned off before Ardia made the change, so nothing changed." The check also runs inside the shared actions the
+  turned off before Ardia made the change, so nothing changed." for a change it stopped before its first write; an
+  `apply` batch keeps the ops it already ran (no rollback) and reports them in `results` and `applied`, so read those
+  before retrying. The check also runs inside the shared actions the
   socket calls, through a `may…` callback they take: after `profiles.delete`'s and `extensions.uninstall`'s
   confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes and before the close starts (once the
   window's native close has started, AppKit has already ordered the window out, so the store close always finishes,
@@ -56,7 +58,7 @@ UI update still happens.
   JS at once (`onPeerFinished`, sent as the connection's close) while it goes on writing the replies already queued,
   so a search or `apply` still running on it is abandoned then, not when the drain ends. A client that leaves while a confirmation it caused is up takes that question away (by key, `dismissShownOnly`) and
   frees the window's close guard, as turning control off does. Ardia uses dismissal only where the platform's dialogs
-  module says it can (`dismissesShownOnly: true`, native API 83 and later on macOS; Linux's bridge answers every
+  module says it can (`dismissesShownOnly: true`, native API 84 and later on macOS; Linux's bridge answers every
   method, so a callable is no proof), and the request lets go only once the dismissal succeeded: if it rejects, or
   the platform can't dismiss, the guard holds until the dialog is answered and is freed when it closes. After every await, a request whose connection
   closed or whose generation changed is abandoned without touching shared state: the writers of that state check the
@@ -112,7 +114,10 @@ UI update still happens.
   (`tabId`, `windowId`, `profileId`, …); `profile` may be omitted where the default profile (or the window's) is meant.
 - **Errors** come from `automationMethods.ts`: `bad_request` (params don't match the schema, or a value is wrong),
   `unknown_method`, `no_window` (no such window, tab, profile, group, split, bookmark or download the command may use),
-  `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen). A new code needs a new protocol number; none was needed for this work. A request `id` is a safe integer or a well-formed string (no lone surrogate) of at most 256 UTF-8
+  `refused` (Ardia won't do that, with the reason), `failed` (it tried and it didn't happen), `password_manager_plugin`
+  (the profile's passwords are kept by a password-manager plugin, see Secrets). A new code needs a new protocol number
+  unless only methods new in the same release answer it: `password_manager_plugin` comes only from `passwords.list` and
+  `passwords.remove`, which are new here, so the protocol stays 4. A request `id` is a safe integer or a well-formed string (no lone surrogate) of at most 256 UTF-8
   bytes; anything else is refused up front with `bad_request` and `"id": null` (`automationMethods.ts`). The native
   fallback in `ControlOutput.swift` echoes exactly the ids JS accepts and `null` for the rest (`true`, `1.5`, `2^53`,
   a lone surrogate), so no reply can overflow a line because of its id.
@@ -421,8 +426,12 @@ connection, before params are even checked. Until the credential exists every co
 ## Secrets
 
 **Chosen:** the socket lists saved logins (origin and username) and autofill entries (addresses, and cards by name,
-network, last four and expiry), and removes a saved login, behind the same consent as every other method. It never
-returns a password, a full card number or a cookie value.
+network, last four and expiry), and removes a saved login, behind the same consent as every other method. It never returns a password, a full card number or a cookie value. When the profile's password manager is a plugin
+(Settings › Profiles › Passwords, `currentManagerPlugin` in `state/site/passwordManager.ts`, following profiles that
+share data and private windows' own profile), `passwords.list` and `passwords.remove` answer `password_manager_plugin`
+"This profile's passwords are kept by <plugin>; Ardia's own password store isn't used.": Ardia's store is empty or
+stale then, so an empty list would mislead. `cli_socket_password_manager_refusals` counts those refusals (never which
+plugin or profile).
 
 **Why:** "every single data point" covers knowing what is saved and cleaning it up, and those reads carry nothing an
 attacker could log in with. Revealing a password in Ardia's own UI asks macOS for the user's password or Touch ID
@@ -431,7 +440,8 @@ which program asked, and anything that can reach the socket (every process of th
 the user's live sessions on every site. Both are a different consent than "control Ardia".
 
 **Next, if the owner wants it:** `passwords.reveal {origin, username}` behind its own switch in Settings › Advanced
-(off by default) and the macOS re-auth on every call, with Ardia's own sheet naming the program first.
+(off by default) and the macOS re-auth on every call, with Ardia's own sheet naming the program first. It follows the
+same rule: a profile whose passwords a plugin keeps answers `password_manager_plugin`, naming the plugin.
 
 ## Next
 

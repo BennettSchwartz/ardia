@@ -1604,7 +1604,7 @@ Both are ports of the Mac's native code (`ArdiaWebView+Peek.mm`, `ArdiaWebView+T
   - With the setting off, or in a tab that isn't on the list, the page script never holds a click back and nothing
     here runs. Link clicks have their own message allowance per document (64, refilled at 32 a second), so a page
     that floods the channel can't make a held click vanish.
-- **`webView.setLittleArdiaOpensNewTabLinks {enabled}`** (Settings › General › Keep new-tab links inside a Little
+- **`webView.setLittleArdiaOpensNewTabLinks {enabled}`** (Settings › Tabs › Links › Keep new-tab links inside a Little
   Ardia window). The setting is one for the whole app, as on the Mac. A window is a Little Ardia window when its
   shell opened it with `kind: "small"`.
   - The page script notes each link it expects to open a tab (`newTabLink`: a `target` click or a `window.open` with
@@ -1678,8 +1678,9 @@ Both are ports of the Mac's native code (`ArdiaWebView+Peek.mm`, `ArdiaWebView+T
   `focus` window event the host already sends when a browser window becomes active, which is what the shared UI
   listens for. Advertised as `ArdiaShell.resignActive`.
 - **Small windows.** `ArdiaShell.openWindow` with `kind: "small"` and no `frame` now opens at `size` (`[width,
-  height]`, 900 by 640 without one), at least 420 by 300 and at most the work area of the opener's display, centred
-  in it where the desktop has global coordinates (`RequestedSmallFrame`). A window that is small has the
+  height]`, 900 by 640 without one), at least 420 by 300 and at most 80 % of the work area of the opener's display
+  each way (as on the Mac since #2784; the minimum wins on a smaller one), centred in it where the desktop has
+  global coordinates (`RequestedSmallFrame`, and the shell's `smallWindowFrame` for older engines). A window that is small has the
   Mac's minimum size, 420 by 300, through `chromium-linux-window-minimum-size.patch`
   (`BrowserView::GetMinimumSize` asks the host). The new window's bootstrap carries `windowKind` (`"small"`,
   `"browser"`, or `"settings"`/`"import"`), and, when the opener passed a `smallWindow` object in the options (up

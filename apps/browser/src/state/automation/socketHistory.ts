@@ -68,7 +68,15 @@ function pagesForIds(given: string[], connection: number, profile: unknown): His
   });
 }
 
-function historyRemove(params: Record<string, unknown>, call: SocketCall) {
+async function engineDeleted(deleting: Promise<unknown>) {
+  try {
+    await deleting;
+  } catch (error) {
+    throw new OpError("failed", `Ardia hid those pages, but the history database didn't delete them, so they may come back after a restart: ${String((error as Error)?.message ?? error)}`);
+  }
+}
+
+async function historyRemove(params: Record<string, unknown>, call: SocketCall) {
   const given = params.ids as string[] | undefined;
   const urls = params.urls as string[] | undefined;
   if (!given === !urls) throw new OpError("bad_request", "history.remove takes ids (from history.search) or urls, one of the two.");
@@ -76,7 +84,7 @@ function historyRemove(params: Record<string, unknown>, call: SocketCall) {
     if (urls.some((url) => url.length >= CLIPPED_STRING_CHARS)) {
       throw new OpError("bad_request", `A URL of ${CLIPPED_STRING_CHARS} characters or more may be one history.search cut short, so it can't name a page; pass that row's id instead.`);
     }
-    now().removeHistory(profileArg(params.profile), urls);
+    await engineDeleted(now().removeHistory(profileArg(params.profile), urls));
     return { ok: true };
   }
   const byProfile = new Map<string, { engine: string; urls: string[] }>();
@@ -89,7 +97,7 @@ function historyRemove(params: Record<string, unknown>, call: SocketCall) {
   for (const [profileId, entry] of byProfile) {
     if (!now().profiles[profileId] || engineProfile(now(), profileId) !== entry.engine) throw new OpError("bad_request", `Profile ${profileId}'s history moved since that search; search again.`);
   }
-  for (const [profileId, entry] of byProfile) now().removeHistory(profileId, entry.urls);
+  await engineDeleted(Promise.all([...byProfile].map(([profileId, entry]) => now().removeHistory(profileId, entry.urls))));
   return { ok: true };
 }
 

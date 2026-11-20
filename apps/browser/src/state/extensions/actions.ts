@@ -185,10 +185,11 @@ export async function setEnabled(profile: string, id: string, enabled: boolean) 
   await changeThenRefresh(profile, enabled ? "turn on" : "turn off", () => setExtensionEnabled(id, profile, enabled));
 }
 
-export async function setPinned(profile: string, id: string, pinned: boolean) {
+export async function setPinned(profile: string, id: string, pinned: boolean): Promise<boolean> {
   patchExtension(profile, id, { pinned });
   const done = await changed(pinned ? "pin" : "unpin", () => configureExtension(id, profile, { pinned }));
   if (!done) await refreshExtensions(profile);
+  return done;
 }
 
 export const setToolbarDrag = (windowId: string, drag: ToolbarDrag | null) => useExtensions.setState({ toolbarDrag: drag && { ...drag, windowId } });
@@ -217,8 +218,8 @@ export async function configure(profile: string, id: string, options: Parameters
   await changeThenRefresh(profile, "configure", () => configureExtension(id, profile, options));
 }
 
-export async function reload(profile: string, id: string) {
-  await changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
+export async function reload(profile: string, id: string): Promise<boolean> {
+  return changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
 }
 
 async function changed(what: string, change: () => Promise<void>): Promise<boolean> {
@@ -232,9 +233,10 @@ async function changed(what: string, change: () => Promise<void>): Promise<boole
   }
 }
 
-async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>) {
-  await changed(what, change);
+async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>): Promise<boolean> {
+  const done = await changed(what, change);
   await refreshExtensions(profile);
+  return done;
 }
 
 function patchExtension(profile: string, id: string, patch: Partial<InstalledExtension>) {
