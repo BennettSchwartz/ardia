@@ -4,6 +4,7 @@ import type { DataType, SendTarget, SyncUi } from "../../browser/src/state/sync/
 import type { FolderInfo, PhraseResult } from "../../browser/src/platform/sync";
 import { SyncNative } from "../../browser/src/platform/sync";
 import { ardiaHost, type ArdiaHost } from "./host";
+import { syncNowThrough } from "./syncForward";
 import { consentToken } from "../../browser/src/state/telemetry/client";
 import { warnFor } from "../../browser/src/state/telemetry/logs";
 import {
@@ -261,9 +262,7 @@ export const syncWritesOpen = () => {
 
 export async function syncNow(stillWanted: () => void = () => {}): Promise<boolean> {
   if (leading()) return engine.syncNow(stillWanted);
-  stillWanted();
-  await forward("syncNow", [], INTERACTIVE_CALL_TIMEOUT_MS);
-  return true;
+  return syncNowThrough(() => forward("syncNow", [], INTERACTIVE_CALL_TIMEOUT_MS), stillWanted);
 }
 
 export async function turnOnSync(folder: string): Promise<{ ok: true } | { error: string }> {

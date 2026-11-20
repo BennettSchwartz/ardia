@@ -253,3 +253,13 @@ test("refreshing sync documents drops journal parts stranded after a gap", async
   const result = await refreshSyncDocuments({ refresh: async (name) => disk.has(name), remove: async (name) => void disk.delete(name), maxParts: 12, batch: 5 });
   assert.deepEqual(result, { parts: 2, removed: ["sync-journal-4.nns", "sync-journal-7.nns"] });
 });
+
+test("a sync.now forwarded to the sync window reports that window's answer", async () => {
+  const { syncNowThrough } = await import("./syncForward.ts");
+  assert.equal(await syncNowThrough(async () => false, () => {}), false, "a refused pass stays refused");
+  assert.equal(await syncNowThrough(async () => true, () => {}), true);
+  assert.equal(await syncNowThrough(async () => null, () => {}), true, "an older sync window that answers nothing still counts as done");
+  let forwarded = false;
+  await assert.rejects(syncNowThrough(async () => (forwarded = true), () => { throw new Error("control is off"); }));
+  assert.equal(forwarded, false, "nothing is forwarded once the caller's check fails");
+});
