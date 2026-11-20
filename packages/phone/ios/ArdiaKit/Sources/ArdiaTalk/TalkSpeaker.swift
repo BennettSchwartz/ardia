@@ -7,25 +7,30 @@ public final class TalkSpeaker {
   public static let sampleRate = Phonon.sampleRate
 
   public private(set) var isSpeaking = false
+  public private(set) var isPaused = false
   public private(set) var voice: String
+  public private(set) var currentBlock = 0
+  public private(set) var blocks: [String] = []
   public var voices: [String] { tts.voices }
-  public var onSpeakingChange: ((Bool) -> Void)?
+  public var onFinished: (() -> Void)?
   public var onFirstAudio: ((Duration) -> Void)?
   public var onFailure: ((String) -> Void)?
-  public var onUtterance: ((String) -> Void)?
+  public var onUtterance: ((Int, String) -> Void)?
+  public var onProgress: ((Double) -> Void)?
 
   private let tts: Phonon
   private let engine = AVAudioEngine()
   private let node = AVAudioPlayerNode()
   private let timePitch = AVAudioUnitTimePitch()
   private let format: AVAudioFormat
-  private var queue: [String] = []
+  private var nextBlock = 0
   private var worker: Task<Void, Never>?
-  private var scheduled = 0
+  private var scheduledBlocks: [Int] = []
   private var generation = 0
   private var askedAt: ContinuousClock.Instant?
   private var recording: AVAudioFile?
   private var configurationObserver: NSObjectProtocol?
+  private var needsRestart = false
 
   public static func load(models: URL, voice: String?) async throws -> TalkSpeaker {
     let tts = try await Phonon.load(models: models, language: .english)
@@ -46,7 +51,7 @@ public final class TalkSpeaker {
     try engine.connectNode(node, to: timePitch, format: format)
     try engine.connectNode(timePitch, to: engine.mainMixerNode, format: format)
     configurationObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
-      MainActor.assumeIsolated { self?.stop() }
+      MainActor.assumeIsolated { self?.engineChanged() }
     }
   }
 
@@ -81,41 +86,83 @@ public final class TalkSpeaker {
     recording = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
   }
 
-  public func speak(_ text: String) {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return }
-    queue.append(trimmed)
-    if askedAt == nil, !isSpeaking { askedAt = .now }
-    setSpeaking(true)
-    guard worker == nil else { return }
+  public func finishRecording() {
+    guard let recording, recording.length > 0 else { return }
+    recording.close()
+    self.recording = nil
+  }
+
+  public func play(_ texts: [String], from index: Int = 0) {
+    halt()
+    blocks = texts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    guard index < blocks.count else { return }
+    nextBlock = max(index, 0)
+    currentBlock = nextBlock
+    isSpeaking = true
+    isPaused = false
+    askedAt = .now
+    reportProgress()
     let current = generation
     worker = Task { [weak self] in await self?.drain(generation: current) }
   }
 
+  public func pause() {
+    guard isSpeaking, !isPaused else { return }
+    isPaused = true
+    node.pause()
+  }
+
+  public func resume() {
+    guard isSpeaking, isPaused else { return }
+    isPaused = false
+    if needsRestart || !engine.isRunning {
+      play(blocks, from: currentBlock)
+      return
+    }
+    do {
+      try node.playAudio()
+    } catch {
+      play(blocks, from: currentBlock)
+    }
+  }
+
   public func stop() {
+    halt()
+    blocks = []
+    currentBlock = 0
+  }
+
+  private func halt() {
     generation += 1
     worker?.cancel()
     worker = nil
-    queue.removeAll()
-    scheduled = 0
+    scheduledBlocks.removeAll()
     askedAt = nil
+    needsRestart = false
+    isSpeaking = false
+    isPaused = false
     node.stop()
-    if let recording, recording.length > 0 {
-      recording.close()
-      self.recording = nil
+  }
+
+  private func engineChanged() {
+    guard isSpeaking, !engine.isRunning else { return }
+    if isPaused {
+      needsRestart = true
+    } else {
+      play(blocks, from: currentBlock)
     }
-    setSpeaking(false)
   }
 
   private func drain(generation current: Int) async {
-    while current == generation, !queue.isEmpty {
-      let text = queue.removeFirst()
-      onUtterance?(text)
+    while current == generation, nextBlock < blocks.count {
+      let index = nextBlock
+      nextBlock += 1
+      onUtterance?(index, blocks[index])
       do {
         try startEngine()
-        for try await chunk in tts.stream(text) {
+        for try await chunk in tts.stream(blocks[index]) {
           guard current == generation, !Task.isCancelled else { break }
-          schedule(chunk, generation: current)
+          schedule(chunk, block: index, generation: current)
         }
       } catch {
         guard current == generation, !Task.isCancelled else { return }
@@ -135,10 +182,10 @@ public final class TalkSpeaker {
       engine.prepare()
       try engine.start()
     }
-    if !node.isPlaying { try node.playAudio() }
+    if !node.isPlaying, !isPaused { try node.playAudio() }
   }
 
-  private func schedule(_ samples: [Float], generation current: Int) {
+  private func schedule(_ samples: [Float], block: Int, generation current: Int) {
     guard !samples.isEmpty, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)), let channel = buffer.floatChannelData?[0] else { return }
     buffer.frameLength = AVAudioFrameCount(samples.count)
     samples.withUnsafeBufferPointer { source in
@@ -149,26 +196,36 @@ public final class TalkSpeaker {
       onFirstAudio?(ContinuousClock.now - askedAt)
       self.askedAt = nil
     }
-    scheduled += 1
+    if scheduledBlocks.isEmpty, block != currentBlock {
+      currentBlock = block
+      reportProgress()
+    }
+    scheduledBlocks.append(block)
     node.scheduleBuffer(buffer, completionCallbackType: .dataPlayedBack) { [weak self] _ in
       Task { @MainActor [weak self] in self?.played(generation: current) }
     }
   }
 
   private func played(generation current: Int) {
-    guard current == generation else { return }
-    scheduled = max(scheduled - 1, 0)
+    guard current == generation, !scheduledBlocks.isEmpty else { return }
+    scheduledBlocks.removeFirst()
+    if let playing = scheduledBlocks.first, playing != currentBlock {
+      currentBlock = playing
+      reportProgress()
+    }
     settleIfDone()
   }
 
-  private func settleIfDone() {
-    guard scheduled == 0, queue.isEmpty, worker == nil else { return }
-    setSpeaking(false)
+  private func reportProgress() {
+    guard !blocks.isEmpty else { return }
+    onProgress?(Double(currentBlock) / Double(blocks.count))
   }
 
-  private func setSpeaking(_ speaking: Bool) {
-    guard speaking != isSpeaking else { return }
-    isSpeaking = speaking
-    onSpeakingChange?(speaking)
+  private func settleIfDone() {
+    guard isSpeaking, scheduledBlocks.isEmpty, worker == nil, nextBlock >= blocks.count else { return }
+    isSpeaking = false
+    isPaused = false
+    onProgress?(1)
+    onFinished?()
   }
 }

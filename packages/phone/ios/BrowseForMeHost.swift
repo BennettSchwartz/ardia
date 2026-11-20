@@ -23,7 +23,7 @@ final class BrowseForMeHost {
   func open(_ query: String) {
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return }
-    TalkToMe.shared.stop()
+    TalkToMe.shared.close()
     if let current = session {
       session = nil
       current.cancel()
@@ -57,7 +57,7 @@ final class BrowseForMeHost {
   }
 
   func closed(_ ended: ResearchSession) {
-    TalkToMe.shared.stop(ended)
+    TalkToMe.shared.close(ended)
     ended.cancel()
     guard session === ended else { return }
     session = nil
@@ -69,7 +69,7 @@ final class BrowseForMeHost {
   }
 
   private func leave(_ event: [String: Any?]) {
-    TalkToMe.shared.stop()
+    TalkToMe.shared.close()
     session?.cancel()
     send(event)
     dismiss()

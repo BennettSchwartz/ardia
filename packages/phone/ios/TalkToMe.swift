@@ -15,7 +15,6 @@ final class TalkToMe {
   static let assetPackID = "talk-to-me-phonon-31m-en"
   static let modelsManifest: FilePath = "TalkToMe/bundle.json"
   static let onKey = "ArdiaTalkToMeOn"
-  static let automaticKey = "ArdiaTalkToMeAutomatically"
   static let voiceKey = "ArdiaTalkToMeVoice"
   static let speedKey = "ArdiaTalkToMeSpeed"
   static let modelsOverrideKey = "ArdiaTalkToMeModels"
@@ -45,22 +44,12 @@ final class TalkToMe {
     case failed(String)
   }
 
-  enum Reading: Equatable {
-    case idle
-    case preparing
-    case speaking
-  }
-
   var isOn: Bool {
     didSet {
       guard isOn != oldValue else { return }
       UserDefaults.standard.set(isOn, forKey: Self.onKey)
-      if isOn { startDownloadIfNeeded() } else { stop() }
+      if isOn { startDownloadIfNeeded() } else { close() }
     }
-  }
-
-  var readsAutomatically: Bool {
-    didSet { UserDefaults.standard.set(readsAutomatically, forKey: Self.automaticKey) }
   }
 
   var voice: String {
@@ -79,17 +68,20 @@ final class TalkToMe {
   }
 
   private(set) var download: Download = .checking
-  private(set) var reading: Reading = .idle
-  private(set) var readingSessionID: UUID?
+  private(set) var listening = EarListening()
+  private(set) var listeningSessionID: UUID?
+  private(set) var isPreparing = false
+  private(set) var spokenFraction: Double = 0
   private(set) var sampling: String?
 
   @ObservationIgnored private var speaker: TalkSpeaker?
   @ObservationIgnored private var loading: Task<TalkSpeaker, Error>?
   @ObservationIgnored private var downloadTask: Task<Void, Never>?
   @ObservationIgnored private var downloadProgress: Progress?
-  @ObservationIgnored private var feed = SpokenAnswerFeed()
-  @ObservationIgnored private weak var readingSession: ResearchSession?
-  @ObservationIgnored private var declined: Set<UUID> = []
+  @ObservationIgnored private let proximity = ProximityFeed()
+  @ObservationIgnored private var blocks: [String] = []
+  @ObservationIgnored private var answer = ""
+  @ObservationIgnored private var startedAtEar = false
   @ObservationIgnored private var countedRead = false
   @ObservationIgnored private var overrideRemoved = false
   @ObservationIgnored private var sessionActive = false
@@ -100,12 +92,12 @@ final class TalkToMe {
   private init() {
     let defaults = UserDefaults.standard
     isOn = defaults.bool(forKey: Self.onKey)
-    readsAutomatically = defaults.bool(forKey: Self.automaticKey)
     let saved = defaults.string(forKey: Self.voiceKey) ?? Self.defaultVoice
     voice = Self.voices.contains { $0.id == saved } ? saved : Self.defaultVoice
     let savedSpeed = defaults.double(forKey: Self.speedKey)
     speed = Self.speeds.contains(savedSpeed) ? savedSpeed : 1
     watchAudio()
+    proximity.onChange = { [weak self] near in self?.proximityChanged(near) }
     refresh()
   }
 
@@ -114,14 +106,14 @@ final class TalkToMe {
     return false
   }
 
-  func canRead(_ session: ResearchSession) -> Bool {
-    guard isOn, isReady, !session.answer.isEmpty else { return false }
-    if case .other = SpokenAnswer.language(of: SpokenAnswer.text(session.answer)) { return false }
-    return true
+  var isNear: Bool { listening.isNear }
+
+  func offersListening(_ session: ResearchSession) -> Bool {
+    isOn && isReady && session.phase == .done && SpokenAnswer.isReadable(session.answer)
   }
 
-  func isReading(_ session: ResearchSession) -> Bool {
-    readingSessionID == session.id && reading != .idle
+  func isListening(to session: ResearchSession) -> Bool {
+    listeningSessionID == session.id
   }
 
   func refresh() {
@@ -172,7 +164,7 @@ final class TalkToMe {
   }
 
   func removeDownload() {
-    stop()
+    close()
     loading?.cancel()
     loading = nil
     speaker = nil
@@ -233,23 +225,59 @@ final class TalkToMe {
     return String(localized: "Couldn’t download the voice. Try again in a moment.")
   }
 
-  func follow(_ session: ResearchSession) {
-    if readingSessionID == session.id {
-      pump()
-      return
+  func watch(_ session: ResearchSession) {
+    guard isOn, isReady else { return }
+    if listeningSessionID != session.id {
+      close()
+      listeningSessionID = session.id
+      listening = EarListening()
+      startedAtEar = false
+      countedRead = false
+      spokenFraction = 0
+      prepareSpeaker()
+      proximity.start()
     }
-    guard readsAutomatically, readingSessionID == nil, !declined.contains(session.id), canRead(session) else { return }
-    start(session)
+    answerChanged(session)
   }
 
-  func toggle(_ session: ResearchSession) {
-    if isReading(session) {
-      declined.insert(session.id)
-      stop()
-    } else {
-      declined.remove(session.id)
-      start(session)
+  func answerChanged(_ session: ResearchSession) {
+    guard listeningSessionID == session.id else { return }
+    if session.answer != answer, !answer.isEmpty {
+      speaker?.stop()
+      listening.reset()
+      startedAtEar = false
+      countedRead = false
+      spokenFraction = 0
+      blocks = []
+      answer = ""
     }
+    guard session.phase == .done else { return }
+    guard offersListening(session) else { return close(session) }
+    guard session.answer != answer else { return }
+    answer = session.answer
+    blocks = SpokenAnswer.blocks(session.answer)
+    perform(listening.answerReady())
+  }
+
+  func toggleSpeaker(_ session: ResearchSession) {
+    guard listeningSessionID == session.id else { return }
+    perform(listening.toggleSpeaker())
+  }
+
+  func close(_ session: ResearchSession) {
+    guard listeningSessionID == session.id else { return }
+    close()
+  }
+
+  func close() {
+    proximity.stop()
+    listeningSessionID = nil
+    listening = EarListening()
+    blocks = []
+    answer = ""
+    spokenFraction = 0
+    isPreparing = false
+    stop()
   }
 
   func sample(_ name: String) {
@@ -263,8 +291,8 @@ final class TalkToMe {
         guard sampling == name else { return }
         try await speaker.setVoice(name)
         guard sampling == name else { return }
-        activateAudio()
-        speaker.speak(String(localized: "Hi, I’m \(name). I’ll read your Browse for Me answers aloud."))
+        guard route(.speaker) else { return sampling = nil }
+        speaker.play([String(localized: "Hi, I’m \(name). I’ll read your Browse for Me answers aloud.")])
       } catch {
         sampling = nil
         BrowseForMeHost.shared.countTalkToMe("failed")
@@ -273,51 +301,56 @@ final class TalkToMe {
   }
 
   func stop() {
-    readingSessionID = nil
-    readingSession = nil
     sampling = nil
-    reading = .idle
-    feed = SpokenAnswerFeed()
     speaker?.stop()
+    speaker?.finishRecording()
+    if listening.isPlaying { listening.routeFailed() }
     deactivateAudio()
   }
 
-  func stop(_ session: ResearchSession) {
-    guard readingSessionID == session.id else { return }
-    stop()
+  private func proximityChanged(_ near: Bool) {
+    perform(listening.proximity(isNear: near))
   }
 
-  private func start(_ session: ResearchSession) {
-    stop()
-    readingSessionID = session.id
-    readingSession = session
-    reading = .preparing
-    countedRead = false
-    let id = session.id
+  private func perform(_ command: EarListening.Command) {
+    switch command {
+    case .none:
+      return
+    case .start(let output):
+      startedAtEar = output == .earpiece
+      speak(from: 0)
+    case .resume(let output):
+      guard let speaker, speaker.isSpeaking else { return speak(from: 0) }
+      guard route(output) else { return listening.routeFailed() }
+      speaker.resume()
+    case .reroute(let output):
+      guard route(output) else {
+        speaker?.pause()
+        return listening.routeFailed()
+      }
+    case .pause:
+      speaker?.pause()
+    }
+  }
+
+  private func speak(from index: Int) {
+    let id = listeningSessionID
+    let texts = blocks
+    isPreparing = speaker == nil
     Task {
       do {
-        _ = try await loadSpeaker()
-        guard readingSessionID == id else { return }
-        activateAudio()
-        pump()
+        let speaker = try await loadSpeaker()
+        isPreparing = false
+        guard listeningSessionID == id, listening.isPlaying, let current = listening.output else { return }
+        guard route(current) else { return listening.routeFailed() }
+        speaker.play(texts, from: index)
       } catch {
-        guard readingSessionID == id else { return }
+        isPreparing = false
+        guard listeningSessionID == id else { return }
         BrowseForMeHost.shared.countTalkToMe("failed")
-        stop()
+        listening.routeFailed()
       }
     }
-  }
-
-  private func pump() {
-    guard let session = readingSession, let speaker, readingSessionID == session.id else { return }
-    let finished = session.phase == .done
-    if case .failed = session.phase { return stop() }
-    if let step = feed.advance(answer: session.answer, finished: finished) {
-      if step.restarted { speaker.stop() }
-      for line in step.text.split(whereSeparator: \.isNewline) { speaker.speak(String(line)) }
-    }
-    if case .other = feed.language { return stop() }
-    if finished, !speaker.isSpeaking { stop() }
   }
 
   private func prepareSpeaker() {
@@ -346,7 +379,8 @@ final class TalkToMe {
 
   private func configure(_ made: TalkSpeaker) {
     made.rate = Float(speed)
-    made.onSpeakingChange = { [weak self] speaking in self?.speakingChanged(speaking) }
+    made.onFinished = { [weak self] in self?.finishedSpeaking() }
+    made.onProgress = { [weak self] fraction in self?.progressed(fraction) }
     made.onFirstAudio = { [weak self] waited in self?.firstAudio(after: waited) }
     made.onFailure = { [weak self] message in self?.failed(message) }
     guard PhoneTestBuild.isOn, let path = UserDefaults.standard.string(forKey: Self.recordKey), !path.isEmpty else { return }
@@ -356,35 +390,42 @@ final class TalkToMe {
     FileManager.default.createFile(atPath: transcriptURL.path, contents: nil)
     transcript = try? FileHandle(forWritingTo: transcriptURL)
     transcriptStart = .now
-    made.onUtterance = { [weak self] text in self?.note(text) }
+    made.onUtterance = { [weak self] index, text in self?.note(index, text) }
   }
 
-  private func note(_ text: String) {
+  private func note(_ index: Int, _ text: String) {
     let elapsed = (ContinuousClock.now - transcriptStart).components
     let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
-    let line = String(format: "%.2f\t%@\n", seconds, text.replacingOccurrences(of: "\n", with: " "))
+    let output = sampling != nil ? "sample" : listening.output == .earpiece ? "earpiece" : "speaker"
+    let line = String(format: "%.2f\t%@\t%d\t%@\n", seconds, output, index, text.replacingOccurrences(of: "\n", with: " "))
     NSLog("TALKTOME utterance: %@", line)
     transcript?.write(Data(line.utf8))
   }
 
-  private func speakingChanged(_ speaking: Bool) {
-    if speaking { return }
+  private func finishedSpeaking() {
     if sampling != nil {
       sampling = nil
       deactivateAudio()
       return
     }
-    guard let session = readingSession, readingSessionID == session.id else { return }
-    if session.phase == .done { stop() }
+    guard listeningSessionID != nil else { return }
+    listening.finished()
+    spokenFraction = 1
+    speaker?.finishRecording()
+    deactivateAudio()
+  }
+
+  private func progressed(_ fraction: Double) {
+    guard sampling == nil, listeningSessionID != nil else { return }
+    spokenFraction = fraction
   }
 
   private func firstAudio(after waited: Duration) {
-    NSLog("TALKTOME first audio after %@", "\(waited)")
-    guard readingSessionID != nil, sampling == nil else { return }
-    reading = .speaking
-    guard !countedRead else { return }
+    NSLog("TALKTOME first audio after %@ (%@)", "\(waited)", sampling != nil ? "sample" : listening.output == .earpiece ? "earpiece" : "speaker")
+    guard listeningSessionID != nil, sampling == nil, !countedRead else { return }
     countedRead = true
     BrowseForMeHost.shared.countTalkToMe("answers_read")
+    if startedAtEar { BrowseForMeHost.shared.countTalkToMe("ear_listens") }
   }
 
   private func failed(_ message: String) {
@@ -393,14 +434,22 @@ final class TalkToMe {
     stop()
   }
 
-  private func activateAudio() {
+  private func route(_ output: ListeningOutput) -> Bool {
     let audio = AVAudioSession.sharedInstance()
     do {
-      try audio.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
+      switch output {
+      case .earpiece:
+        try audio.setCategory(.playAndRecord, mode: .spokenAudio, options: [.allowBluetoothHFP])
+        try audio.overrideOutputAudioPort(.none)
+      case .speaker:
+        try audio.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
+      }
       try audio.setActive(true)
       sessionActive = true
+      return true
     } catch {
-      NSLog("TALKTOME audio session: %@", error.localizedDescription)
+      NSLog("TALKTOME audio route %@: %@", output == .earpiece ? "earpiece" : "speaker", error.localizedDescription)
+      return false
     }
   }
 
@@ -428,9 +477,10 @@ final class TalkToMe {
   }
 
   private func interrupted() {
-    guard readingSessionID != nil || sampling != nil else { return }
-    if let id = readingSessionID { declined.insert(id) }
-    stop()
+    if sampling != nil { return stop() }
+    guard listening.isPlaying else { return }
+    speaker?.pause()
+    listening.routeFailed()
   }
 
   private func servicesReset() {

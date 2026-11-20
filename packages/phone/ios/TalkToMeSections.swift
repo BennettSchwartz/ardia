@@ -23,18 +23,12 @@ struct TalkToMeSections: View {
 
     if talk.isOn, talk.isReady {
       Section {
-        Toggle(isOn: Binding(get: { talk.readsAutomatically }, set: { talk.readsAutomatically = $0 })) {
-          Text("Read Answers Automatically")
-        }
-        .toggleStyle(SettingsSwitchStyle())
         Picker("Speed", selection: Binding(get: { talk.speed }, set: { talk.speed = $0 })) {
           ForEach(TalkToMe.speeds, id: \.self) { speed in
             Text(Self.speedLabel(speed)).tag(speed)
           }
         }
         .tint(.secondary)
-      } footer: {
-        Text("With Read Answers Automatically on, an answer starts reading as soon as it appears. The speaker button on an answer starts and stops it.")
       }
 
       Section {
@@ -62,7 +56,7 @@ struct TalkToMeSections: View {
   }
 
   private var footer: String {
-    var parts = [String(localized: "Answers are spoken on this iPhone by Phonon, an on-device voice. Nothing you hear leaves your iPhone.")]
+    var parts = [String(localized: "When an answer is done, the bar at its end plays it out loud, or hold your iPhone to your ear to listen. Phonon, an on-device voice, speaks it on this iPhone, and nothing you hear leaves it.")]
     if case .absent(let bytes?) = talk.download, !talk.isOn {
       parts.append(String(localized: "Turning it on downloads the voice (\(TalkToMe.size(bytes)))."))
     } else if !talk.isOn {

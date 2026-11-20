@@ -35,14 +35,20 @@ struct ResearchView: View {
         .frame(maxWidth: .infinity)
       }
       .scrollBounceBehavior(.basedOnSize)
+      .safeAreaInset(edge: .bottom) {
+        if talk.offersListening(session), talk.isListening(to: session) {
+          listenBar
+            .padding(.horizontal, Spacing.medium)
+            .padding(.bottom, Spacing.tight)
+            .frame(maxWidth: 680)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+      }
       .animation(reduceMotion ? nil : Motion.smooth, value: session.phase)
       .background(Color(.systemBackground))
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .topBarLeading) { moreMenu }
-        if talk.canRead(session) || talk.isReading(session) {
-          ToolbarItem(placement: .topBarTrailing) { talkButton }
-        }
         ToolbarItem(placement: .confirmationAction) {
           Button("Done", role: .close) { host.dismiss() }
         }
@@ -55,27 +61,88 @@ struct ResearchView: View {
       try? await Task.sleep(for: .seconds(1.5))
       withAnimation(reduceMotion ? nil : Motion.smooth) { showsCopied = false }
     }
-    .onAppear { talk.follow(session) }
-    .onChange(of: session.answer) { talk.follow(session) }
-    .onChange(of: session.phase) { talk.follow(session) }
-    .onChange(of: talk.isReady) { talk.follow(session) }
+    .overlay { simulatedScreenOff }
+    .onAppear { talk.watch(session) }
+    .onChange(of: session.answer) { talk.answerChanged(session) }
+    .onChange(of: session.phase) { talk.answerChanged(session) }
+    .onChange(of: talk.isReady) { talk.watch(session) }
+    .onChange(of: talk.isOn) { talk.watch(session) }
     .onDisappear { host.closed(session) }
   }
 
-  private var talkButton: some View {
-    let reading = talk.isReading(session)
-    return Button {
-      talk.toggle(session)
-    } label: {
-      if talk.readingSessionID == session.id, talk.reading == .preparing {
-        ProgressView()
-      } else {
-        Label(reading ? "Stop Reading" : "Read Aloud", systemImage: reading ? "stop.fill" : "speaker.wave.2")
-          .contentTransition(.symbolEffect(.replace))
+  private var listenBar: some View {
+    let listening = talk.listening
+    let playsAloud = listening.isPlaying && listening.output == .speaker
+    return HStack(spacing: Spacing.small) {
+      Image(systemName: listening.output == .earpiece ? "ear.fill" : "ear")
+        .font(.title3)
+        .symbolEffect(.variableColor.iterative, isActive: listening.isPlaying && listening.output == .earpiece && !reduceMotion)
+        .frame(width: 28)
+        .accessibilityHidden(true)
+      Text(listenText(listening))
+        .font(.subheadline.weight(.medium))
+        .lineLimit(2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      Button {
+        talk.toggleSpeaker(session)
+      } label: {
+        Group {
+          if talk.isPreparing, listening.isPlaying {
+            ProgressView()
+          } else {
+            Image(systemName: playsAloud ? "pause.fill" : "speaker.wave.2.fill")
+              .font(.body.weight(.semibold))
+              .contentTransition(.symbolEffect(.replace))
+          }
+        }
+        .frame(width: 44, height: 44)
+        .contentShape(.circle)
       }
+      .buttonStyle(.plain)
+      .accessibilityLabel(playsAloud ? Text("Pause") : Text("Play Out Loud"))
     }
-    .accessibilityLabel(Text(reading ? "Stop Reading" : "Read Answer Aloud"))
-    .accessibilityHint(Text(reading ? "Stops Talk to Me" : "Talk to Me reads the answer on this iPhone"))
+    .padding(.leading, Spacing.page)
+    .padding(.trailing, Spacing.hairline)
+    .padding(.vertical, Spacing.hairline)
+    .background(alignment: .bottomLeading) {
+      GeometryReader { proxy in
+        Capsule()
+          .fill(.tint.opacity(0.18))
+          .frame(width: proxy.size.width * talk.spokenFraction)
+          .animation(reduceMotion ? nil : .linear(duration: 0.25), value: talk.spokenFraction)
+      }
+      .clipShape(.capsule)
+    }
+    .glassEffect(.regular, in: .capsule)
+    .accessibilityElement(children: .contain)
+  }
+
+  private func listenText(_ listening: EarListening) -> String {
+    switch listening.state {
+    case .waiting: String(localized: "Hold your iPhone to your ear to listen")
+    case .playing(.earpiece): String(localized: "Reading at your ear")
+    case .playing(.speaker): String(localized: "Reading out loud")
+    case .paused(.earpiece): String(localized: "Paused. Hold it to your ear to keep listening")
+    case .paused(.speaker): String(localized: "Paused")
+    case .finished: String(localized: "Hold it to your ear to hear it again")
+    }
+  }
+
+  @ViewBuilder
+  private var simulatedScreenOff: some View {
+    #if targetEnvironment(simulator)
+    if talk.isNear, talk.isListening(to: session) {
+      Color.black
+        .ignoresSafeArea()
+        .overlay(alignment: .bottom) {
+          Text(verbatim: "Proximity: near")
+            .font(.caption.monospaced())
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(.bottom, Spacing.section)
+        }
+        .allowsHitTesting(false)
+    }
+    #endif
   }
 
   private var moreMenu: some View {

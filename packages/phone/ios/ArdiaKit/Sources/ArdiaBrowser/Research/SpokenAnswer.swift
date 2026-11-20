@@ -14,6 +14,17 @@ public enum SpokenAnswer {
     ready(answer, finished: true)
   }
 
+  public static func blocks(_ answer: String) -> [String] {
+    text(answer).split(whereSeparator: \.isNewline).map(String.init)
+  }
+
+  public static func isReadable(_ answer: String) -> Bool {
+    let spoken = text(answer)
+    guard !spoken.isEmpty else { return false }
+    if case .other = language(of: spoken) { return false }
+    return true
+  }
+
   public static func ready(_ answer: String, finished: Bool) -> String {
     var lines = answer.components(separatedBy: .newlines)
     let open = finished ? nil : lines.popLast()
@@ -91,47 +102,4 @@ public enum SpokenAnswer {
   nonisolated(unsafe) static let listNumberPattern = /\d{1,3}[.)]\s+/
   nonisolated(unsafe) static let linkPattern = /\[([^\]\[]+)\]\([^)\s]*\)/
   nonisolated(unsafe) static let spacesPattern = /[ \t]{2,}/
-}
-
-public struct SpokenAnswerFeed: Sendable {
-  public private(set) var spoken = ""
-  public private(set) var language: SpokenAnswer.Language = .undecided
-  private var answer = ""
-
-  public init() {}
-
-  public struct Step: Equatable, Sendable {
-    public var text: String
-    public var restarted: Bool
-  }
-
-  public mutating func advance(answer next: String, finished: Bool) -> Step? {
-    var restarted = false
-    if !next.hasPrefix(answer) {
-      restarted = !spoken.isEmpty
-      spoken = ""
-      language = .undecided
-    }
-    answer = next
-    let ready = SpokenAnswer.ready(next, finished: finished)
-    if language == .undecided {
-      language = SpokenAnswer.language(of: SpokenAnswer.text(next))
-      if language == .undecided, finished, !ready.isEmpty { language = .english }
-    }
-    let quiet = restarted ? Step(text: "", restarted: true) : nil
-    guard language == .english else { return quiet }
-    let start = ready.hasPrefix(spoken) ? spoken.count : Self.wordStart(in: ready, before: spoken.commonPrefix(with: ready).count)
-    guard ready.count > start else { return quiet }
-    let fresh = String(ready.dropFirst(start)).trimmingCharacters(in: .whitespacesAndNewlines)
-    spoken = ready
-    if fresh.isEmpty { return quiet }
-    return Step(text: fresh, restarted: restarted)
-  }
-
-  static func wordStart(in text: String, before offset: Int) -> Int {
-    var start = offset
-    let characters = Array(text)
-    while start > 0, !characters[start - 1].isWhitespace { start -= 1 }
-    return start
-  }
 }
