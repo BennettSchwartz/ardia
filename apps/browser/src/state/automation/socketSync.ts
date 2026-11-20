@@ -4,8 +4,25 @@ import type { MethodSpec, SocketCall } from "./socketCatalog";
 import { bool, id, obj, oneOf, PROFILE, TAB } from "./socketSchema";
 import { expect, now, profileArg, tabOf } from "./socketTargets";
 import { OpError } from "./workspaceTargets";
+import { useBrowser } from "../browser/store";
 
 const TYPES = DATA_TYPES.map((t) => t.id);
+
+export const SETTLE_MS = 3000;
+
+export function settles(check: () => boolean, ms = SETTLE_MS): Promise<boolean> {
+  if (check()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const finish = (ok: boolean) => {
+      clearTimeout(timer);
+      stops.forEach((stop) => stop());
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(check()), ms);
+    const watch = () => void (check() && finish(true));
+    const stops = [useSync.subscribe(watch), useBrowser.subscribe(watch)];
+  });
+}
 
 function syncing(what: string) {
   const s = useSync.getState();
@@ -32,11 +49,11 @@ async function runNow(_params: Record<string, unknown>, call: SocketCall) {
   return summary();
 }
 
-function setType(params: Record<string, unknown>) {
+async function setType(params: Record<string, unknown>) {
   writable("choosing what syncs");
   const type = params.type as DataType;
   setTypeSynced(type, params.on as boolean);
-  expect(useSync.getState().types[type] === params.on, `${type} didn't turn ${params.on ? "on" : "off"}.`);
+  expect(await settles(() => useSync.getState().types[type] === params.on), `${type} didn't turn ${params.on ? "on" : "off"}.`);
   return summary();
 }
 
@@ -46,20 +63,20 @@ function linkOf(profileId: string) {
   return link;
 }
 
-function setProfile(params: Record<string, unknown>) {
+async function setProfile(params: Record<string, unknown>) {
   const profileId = profileArg(params.profile);
   linkOf(profileId);
   setProfileSynced(profileId, params.on as boolean);
-  expect(!!useSync.getState().profiles[profileId]?.enabled === params.on, `profile ${profileId} didn't turn ${params.on ? "on" : "off"}.`);
+  expect(await settles(() => !!useSync.getState().profiles[profileId]?.enabled === params.on), `profile ${profileId} didn't turn ${params.on ? "on" : "off"}.`);
   return summary();
 }
 
-function setOpenTabs(params: Record<string, unknown>) {
+async function setOpenTabs(params: Record<string, unknown>) {
   const profileId = profileArg(params.profile);
   if (!linkOf(profileId).enabled) throw new OpError("refused", `Profile ${profileId} doesn't sync; turn it on with sync.setProfile first.`);
   if (!useSync.getState().types.tabs) throw new OpError("refused", "Open Tabs don't sync; turn them on with sync.setType first.");
   setOpenTabsSynced(profileId, params.on as boolean);
-  expect(!!now().profiles[profileId]?.syncTabs === params.on, `profile ${profileId}'s open tabs didn't turn ${params.on ? "on" : "off"}.`);
+  expect(await settles(() => !!now().profiles[profileId]?.syncTabs === params.on), `profile ${profileId}'s open tabs didn't turn ${params.on ? "on" : "off"}.`);
   return summary();
 }
 

@@ -213,3 +213,13 @@ test("a sync.now that waited behind a pass reports nothing ran when sync locked 
   });
   sync.useSync.setState({ status: "updated" });
 });
+
+test("a sync write's readback waits for state that another window applies a moment later, and gives up at its deadline", async () => {
+  const { settles } = await import("./socketSync.ts");
+  const before = !!sync.useSync.getState().types.history;
+  const later = settles(() => sync.useSync.getState().types.history === !before, 500);
+  setTimeout(() => sync.useSync.setState((st) => ({ types: { ...st.types, history: !before } })), 30);
+  assert.equal(await later, true);
+  assert.equal(await settles(() => false, 40), false);
+  sync.useSync.setState((st) => ({ types: { ...st.types, history: before } }));
+});
