@@ -270,7 +270,8 @@ export function MaterialSheet({ open, onDismiss, onTapAway, onBack, onHidden, ex
       }
       drag.value = !expandable || (resizeStart.value === 0 && event.translationY > 0) ? trayDragOffset(event.translationY) : 0;
     })
-    .onEnd((event) => {
+    .onEnd((event, success) => {
+      if (!success) return;
       if (expandable && !resizing.value) return;
       if ((!expandable || resizeStart.value === 0) && trayDragDismisses(event.translationY, event.velocityY, sheetHeight.value)) {
         runOnJS(onDismiss)();
@@ -284,7 +285,12 @@ export function MaterialSheet({ open, onDismiss, onTapAway, onBack, onHidden, ex
       drag.value = materialMove(0, "standard", materialDuration.short4);
     })
     .onFinalize((_event, success) => {
-      if (success || !expandable || !resizing.value) return;
+      if (success) return;
+      if (!expandable) {
+        drag.value = materialMove(0, "standard", reduceMotion ? 0 : materialDuration.short4);
+        return;
+      }
+      if (!resizing.value) return;
       expansion.value = materialMove(resizeStart.value, "standard", reduceMotion ? 0 : materialDuration.short4);
       drag.value = materialMove(0, "standard", reduceMotion ? 0 : materialDuration.short4);
     });

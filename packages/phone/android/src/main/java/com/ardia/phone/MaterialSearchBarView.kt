@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
 import android.os.SystemClock
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +38,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -44,6 +47,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.semantics.contentDescription
@@ -219,8 +224,10 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
         }
         onFocusChange(mapOf("focused" to isFocused))
         if (state.suffix != beforeSuffix) onSuffixChange(mapOf("suffix" to state.suffix))
-        if (!isFocused) applyPendingText()
-        else applyOffer()
+        if (!isFocused) {
+            focusWanted = false
+            applyPendingText()
+        } else applyOffer()
     }
 
     private fun submitNow() {
@@ -311,6 +318,24 @@ internal object CompletionSuffixTransformation {
     }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun NoPersonalizedLearning(enabled: Boolean, content: @Composable () -> Unit) {
+    if (!enabled) return content()
+    InterceptPlatformTextInput(
+        interceptor = { request, next ->
+            next.startInputMethod(object : PlatformTextInputMethodRequest {
+                override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
+                    val connection = request.createInputConnection(outAttributes)
+                    outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    return connection
+                }
+            })
+        },
+        content = content,
+    )
+}
+
 @Composable
 private fun MaterialSearchBarContent(
     scheme: ColorScheme,
@@ -362,7 +387,7 @@ private fun MaterialSearchBarContent(
                     tint = inkVariant,
                     modifier = Modifier.size(24.dp),
                 )
-                CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) {
+                CompositionLocalProvider(LocalTextSelectionColors provides selectionColors) { NoPersonalizedLearning(incognito) {
                     BasicTextField(
                         value = state.value,
                         onValueChange = onValueChange,
@@ -391,7 +416,7 @@ private fun MaterialSearchBarContent(
                             }
                         },
                     )
-                }
+                } }
                 val showsClear = state.value.text.isNotEmpty()
                 val showsVoiceButton = !showsClear && !incognito && showsVoice
                 val showsIncognito = !fieldOnly

@@ -256,8 +256,11 @@ class MaterialModule : Module() {
 
     private fun freshContext(): Context? = appContext.currentActivity ?: context()
 
+    private var watchedContext: Context? = null
+
     private fun startWatching() {
         val context = context() ?: return
+        watchedContext = context
         changes.check("wallpaper")
         if (MaterialScheme.dynamic && wallpaperListener == null) {
             val listener = WallpaperManager.OnColorsChangedListener { _: WallpaperColors?, _: Int ->
@@ -282,8 +285,9 @@ class MaterialModule : Module() {
     }
 
     private fun stopWatching() {
-        val context = context() ?: return
         main.removeCallbacksAndMessages(SETTLE_TOKEN)
+        val context = watchedContext ?: return
+        watchedContext = null
         wallpaperListener?.let { listener -> runCatching { WallpaperManager.getInstance(context).removeOnColorsChangedListener(listener) } }
         wallpaperListener = null
         configurationListener?.let(context::unregisterComponentCallbacks)

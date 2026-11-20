@@ -102,10 +102,15 @@ function MaterialLibraryView({ open, onGone }: { open: boolean; onGone: () => vo
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const folderKey = folderKeyOf(path[path.length - 1]);
+  const activeSpace = useTabs((s) => s.spaces.current);
   useEffect(() => {
     setSearching(false);
     setQuery("");
   }, [section, open]);
+  useEffect(() => {
+    setMenu(null);
+    setConfirmation(null);
+  }, [activeSpace]);
   const endSearch = useCallback(() => {
     Keyboard.dismiss();
     setSearching(false);
