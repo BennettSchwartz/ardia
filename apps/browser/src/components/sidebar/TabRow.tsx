@@ -13,7 +13,7 @@ import { isPinnedRow, tabTitle } from "../../state/browser/model";
 import { awayFromPin, rowAwayTitle } from "../../state/pins/organize";
 import { hidesRowIcon } from "../../state/pins/rowIcons";
 import { commitRename, endRename, startRename } from "../../state/sidebar/actions";
-import { useDragItem, useDropSplit } from "./DragProvider";
+import { useDragItem } from "./DragProvider";
 import { SplitDropHalf } from "./DropMarks";
 import { PreviewFade, previewFade, SplitPreview, useSplitPreview } from "./SplitPreview";
 import { profileSurfaces } from "./profileSurfaces";
@@ -24,9 +24,9 @@ import { RowCloseSlot, RowHoverFill } from "./RowHoverParts";
 import { RowCloseButton } from "./RowCloseButton";
 import { pressPaneClose, useTabCloseControlWhile } from "../../state/sidebar/closeControl";
 import { modifiersOf } from "../../lib/keys";
-import { ACTIVE, ICON_MARKS, IN_SPLIT, LOADING, mutedBy, PLAYING, SELECTED, useRowState, useStruckTitle } from "../../state/sidebar/rowState";
+import { ACTIVE, ICON_MARKS, IN_SPLIT, LOADING, mutedBy, PLAYING, SELECTED, SLEEPING, STRUCK, useRowState, useStruckTitle } from "../../state/sidebar/rowState";
 import { registerRow, useSidebarUi } from "../../state/sidebar/sidebarUi";
-import { TabIcon } from "./TabIcon";
+import { RowTabIcon, TabIcon } from "./TabIcon";
 import { TabBadges } from "../media/TabBadges";
 import { UnreadCount } from "../unread/UnreadBadge";
 import { useTabUnread } from "../../state/tabs/unread";
@@ -54,8 +54,7 @@ export const TabRowItem = memo(function TabRowItem({
   parentGroup?: string;
   motion?: EntryMotion | null;
 }) {
-  const { wrapper, handle } = useDragItem(entryKey("tab", tabId), { kind: "row", tabIds: [tabId], section, parentGroup }, motion?.clip);
-  const splitSide = useDropSplit(entryKey("tab", tabId));
+  const { wrapper, handle, splitSide } = useDragItem(entryKey("tab", tabId), { kind: "row", tabIds: [tabId], section, parentGroup }, motion?.clip);
   return (
     <Animated.View ref={wrapper.ref} style={wrapper.style} {...handle}>
       <TabRow tabId={tabId} splitSide={splitSide} shift={motion?.shift ?? null} />
@@ -93,7 +92,7 @@ export const TabRow = memo(function TabRow({
   const [unreadDrawn, setUnreadDrawn] = useState(false);
   const showsUnread = !!unread || unreadDrawn;
   const resettable = !!tab && (isPinnedRow(tab) || !tab.pin) && awayFromPin(tab);
-  const struck = useStruckTitle(tabId, flags & ICON_MARKS);
+  const struck = !!(flags & STRUCK);
   const preview = useSplitPreview(splitSide, 1);
   if (!tab) return null;
   const resetting = resettable && backToPin.hovered && !renaming;
@@ -141,7 +140,7 @@ export const TabRow = memo(function TabRow({
                       </View>
                     ) : (
                       <View>
-                        <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} compact={quiet} />
+                        <RowTabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} sleeping={!!(flags & SLEEPING)} compact={quiet} />
                         <TabBadges tabId={tab.id} />
                       </View>
                     )}
@@ -149,7 +148,7 @@ export const TabRow = memo(function TabRow({
                 </Pressable>
               ) : (
                 <>
-                  <TabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} compact={quiet} />
+                  <RowTabIcon tabId={tab.id} url={tab.url} favicon={tab.favicon} icon={tab.customIcon} profileId={tab.profileId} marks={flags & ICON_MARKS} sleeping={!!(flags & SLEEPING)} compact={quiet} />
                   <TabBadges tabId={tab.id} />
                 </>
               )}
@@ -277,8 +276,7 @@ export const SplitRowItem = memo(function SplitRowItem({
 }) {
   const windowId = useWindowId();
   const tabIds = useSplitRowPanes(splitId);
-  const { wrapper, handle } = useDragItem(entryKey("split", splitId), { kind: "split", tabIds, section, parentGroup }, motion?.clip);
-  const splitSide = useDropSplit(entryKey("split", splitId));
+  const { wrapper, handle, splitSide } = useDragItem(entryKey("split", splitId), { kind: "split", tabIds, section, parentGroup }, motion?.clip);
   const preview = useSplitPreview(splitSide, tabIds.length);
   const theme = useTheme();
   const tokens = useSidebarTokens();

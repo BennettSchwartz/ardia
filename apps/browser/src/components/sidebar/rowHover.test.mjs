@@ -74,3 +74,19 @@ test("a tab row reads nothing at mount that only a hover, a split or a press nee
   assert.match(parts, /export const RowHoverFill = memo\(/);
   assert.match(parts, /export const RowCloseSlot = memo\(/);
 });
+
+test("a drag wakes only the rows whose source, landing or split mark it changes", async () => {
+  await import("../../test-native/index.ts");
+  const { createDragMarks, watchMarks, markOf } = await import("../../state/sidebar/dragMarks.ts");
+  const marks = createDragMarks();
+  const woken = [];
+  const offs = ["tab:a", "tab:b", "tab:c"].map((key) => watchMarks(marks)(key, () => woken.push(key)));
+  marks.setState({ sources: new Set(["tab:a"]) });
+  assert.deepEqual(woken, ["tab:a"]);
+  marks.setState({ split: { key: "tab:b", side: "left" } });
+  assert.deepEqual(woken, ["tab:a", "tab:b"]);
+  assert.equal(markOf(marks.getState(), "tab:b"), 4);
+  marks.setState({ pins: true });
+  assert.deepEqual(woken, ["tab:a", "tab:b"]);
+  offs.forEach((off) => off());
+});
