@@ -1,7 +1,7 @@
 import { webStoreExtensionId } from "@ardia/core";
 import { errorText } from "../../lib/errors";
 import { engineProfile } from "../browser/model";
-import { configureThenRead, freshExtensions, openInExtensionProfile, refreshExtensions } from "../extensions/actions";
+import { configureThenRead, freshExtensions, openInExtensionProfile } from "../extensions/actions";
 import type { InstalledExtension } from "../extensions/store";
 import { ownEntry } from "./automationWindows";
 import type { MethodSpec, SocketCall } from "./socketCatalog";
@@ -30,7 +30,7 @@ async function install(params: Record<string, unknown>, call: SocketCall) {
   const engine = engineProfile(now(), profileId);
   const extensionId = webStoreExtensionId(params.webStore as string);
   if (!extensionId) throw new OpError("bad_request", "webStore is a Chrome Web Store link or extension id.");
-  const already = (await refreshExtensions(engine)).find((x) => x.id === extensionId);
+  const already = (await loaded(engine)).find((x) => x.id === extensionId);
   stillThere(call, profileId, engine);
   if (already) return { waiting: false, installed: true, extensions: [{ id: already.id, name: already.name, version: already.version }] };
   openInExtensionProfile(`https://chromewebstore.google.com/detail/${extensionId}`, engine, { profileId });

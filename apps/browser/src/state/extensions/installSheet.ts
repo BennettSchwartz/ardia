@@ -63,11 +63,10 @@ export async function loadUnpacked(windowId: string, profile = extensionProfile(
   if (!path) return false;
   try {
     const pkg = await inspectUnpackedExtension(path);
-    showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "ready", pkg });
+    return showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "ready", pkg });
   } catch (error) {
-    showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "error", error: errorText(error) });
+    return showInstallSheet({ key: nextInstallKey(), windowId, profile, source: "unpacked", status: "error", error: errorText(error) });
   }
-  return true;
 }
 
 const ownRequest = (key?: number) => {
