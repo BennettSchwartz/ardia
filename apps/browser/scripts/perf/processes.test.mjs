@@ -40,7 +40,7 @@ async function until(check, what, deadlineMs = 10_000) {
 test("stopping a launched tree kills its helpers and spares a process whose arguments merely contain the app path", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bench-procs-"));
   const app = join(dir, "Bench.app");
-  const exe = join(app, "Contents", "MacOS", "Bench");
+  const exe = join(app, "Contents", "MacOS", "sleep");
   mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
   copyFileSync("/bin/sleep", exe);
   const helper = spawn(exe, ["30"], { stdio: "ignore" });
