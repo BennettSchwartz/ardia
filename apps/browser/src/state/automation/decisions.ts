@@ -34,7 +34,7 @@ function decidingHook<A>(event: DecideEvent, plan: Plan<A>): Deciding<A> | null 
   return null;
 }
 
-function askHook<A>(hook: HookSpec, event: DecideEvent, data: Record<string, unknown>, plan: Plan<A>, signal?: AbortSignal, consent: ConsentToken | null = consentToken()): Promise<A | null> | null {
+function askHook<A>(hook: HookSpec, event: DecideEvent, data: Record<string, unknown>, plan: Plan<A>, signal: AbortSignal | undefined, consent: ConsentToken | null): Promise<A | null> | null {
   if (servingConnection(hook) === null) return null;
   const sent = hook.fullUrls || typeof data.url !== "string" ? data : { ...data, url: minimizedUrl(data.url) };
   return requestDecision(hook, event, sent, DECIDE_DEADLINE_MS[event], signal, consent).then(
@@ -47,7 +47,7 @@ export function decide<A>(event: DecideEvent, data: Record<string, unknown>, pla
   const found = decidingHook(event, plan);
   if (!found) return null;
   if ("verdict" in found) return found.verdict;
-  return askHook(found.hook, event, data, plan, signal);
+  return askHook(found.hook, event, data, plan, signal, consentToken());
 }
 
 const urlApplies = (hook: HookSpec, url: string) => !hook.specs.length || anyMatches(hook.specs, url);
