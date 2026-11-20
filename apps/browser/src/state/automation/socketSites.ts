@@ -102,8 +102,10 @@ async function enable(params: Record<string, unknown>, call: SocketCall) {
 async function pin(params: Record<string, unknown>, call: SocketCall) {
   const { engine, ext } = await extensionOf(params);
   call.stillServing();
-  await setPinned(engine, ext.id, params.pinned as boolean);
-  return extensionRow((await refreshExtensions(engine)).find((x) => x.id === ext.id) ?? ext);
+  const done = await setPinned(engine, ext.id, params.pinned as boolean);
+  const after = (await refreshExtensions(engine)).find((x) => x.id === ext.id);
+  expect(done && after?.pinned === params.pinned, `${ext.name} isn't ${params.pinned ? "pinned" : "unpinned"}.`);
+  return extensionRow(after!);
 }
 
 async function uninstall(params: Record<string, unknown>, call: SocketCall) {
@@ -163,7 +165,7 @@ export const SITE_METHODS: MethodSpec[] = [
     run: async (p, call) => {
       const { engine, ext } = await extensionOf(p);
       call.stillServing();
-      await reload(engine, ext.id);
+      expect(await reload(engine, ext.id), `${ext.name} didn't reload.`);
       return { ok: true };
     },
   },

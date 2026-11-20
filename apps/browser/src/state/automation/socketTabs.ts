@@ -65,6 +65,13 @@ function livePage(params: Record<string, unknown>, act: (tabId: string) => void)
   return { ok: true };
 }
 
+async function reload(params: Record<string, unknown>, call: SocketCall) {
+  const t = tabOf(params.tab);
+  if (await withLivePage(t.id, (page) => (params.bypassCache ? page.forceReload() : page.reload()), call.serving)) return { ok: true };
+  call.stillServing();
+  throw new OpError("failed", `Tab ${t.id} didn't reload: it has no page to reload, or its shared page couldn't be brought to it.`);
+}
+
 async function back(params: Record<string, unknown>, call: SocketCall) {
   const t = tabOf(params.tab);
   if (await goBackAsking(t.id, call.serving, askWhereSeen(`Tab ${t.id} stayed on its page`, call))) return { ok: true };
@@ -127,7 +134,7 @@ export const TAB_METHODS: MethodSpec[] = [
   { name: "tabs.list", mutates: false, description: "Every tab the command may use, with its pin, group, split, page state and times", params: obj({ window: WINDOW, profile: PROFILE }), result: "[tab]", run: listTabs },
   { name: "tabs.get", mutates: false, description: "One tab", params: obj({ tab: TAB }, ["tab"]), result: "tab", run: (p) => tabRow(now(), tabOf(p.tab).id) },
   { name: "tabs.navigate", mutates: true, description: "Load a URL in a tab, as typing it in the address bar does", params: obj({ tab: TAB, url: text("http, https or file URL, about:blank or ardia://history, bookmarks, downloads, newtab") }, ["tab", "url"]), result: "tab", run: navigate },
-  { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => withLivePage(t, (page) => (p.bypassCache ? page.forceReload() : page.reload()), call.serving)) },
+  { name: "tabs.reload", mutates: true, description: "Reload a tab's page", params: obj({ tab: TAB, bypassCache: bool("Reload without the cache") }, ["tab"]), result: "{ok}", run: reload },
   { name: "tabs.back", mutates: true, description: "Go back in a tab's history; when that leaves a page with unsaved changes, the reply waits for the user's answer", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: back },
   { name: "tabs.forward", mutates: true, description: "Go forward in a tab's history", params: obj({ tab: TAB }, ["tab"]), result: "{ok}", run: (p, call) => livePage(p, (t) => goForward(t, call.serving)) },
   {

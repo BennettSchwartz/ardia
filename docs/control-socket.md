@@ -29,7 +29,9 @@ UI update still happens.
 - **Control off means no more writes.** Consent is checked when a request arrives and again before every write that
   follows an `await` in a handler (a lookup, a confirmation, a settings read): handlers get a `SocketCall` and call
   `stillServing()` first, as `apply` does between ops. Turning control off mid-call answers `failed` "Control was
-  turned off before Ardia made the change, so nothing changed." The check also runs inside the shared actions the
+  turned off before Ardia made the change, so nothing changed." for a change it stopped before its first write; an
+  `apply` batch keeps the ops it already ran (no rollback) and reports them in `results` and `applied`, so read those
+  before retrying. The check also runs inside the shared actions the
   socket calls, through a `may…` callback they take: after `profiles.delete`'s and `extensions.uninstall`'s
   confirmations; in `windows.close` before the "Don't ask again" and quit-warning preference writes and before the close starts (once the
   window's native close has started, AppKit has already ordered the window out, so the store close always finishes,
