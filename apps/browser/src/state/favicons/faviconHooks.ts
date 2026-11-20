@@ -67,6 +67,13 @@ function faviconKeyWatches(empty: Icons) {
 
 const { watchFaviconPage, watchFaviconUri, pageKey } = faviconKeyWatches(EMPTY_ICONS);
 
+export function watchFaviconOf(url: string, src: string | null, listener: Listener): () => void {
+  const key = pageKey(url, src);
+  return key ? watchFaviconPage(key, listener) : () => {};
+}
+
+export const watchFaviconTheme = (uri: string, listener: Listener): (() => void) => watchFaviconUri(uri, listener);
+
 export const useResolvedFaviconUri = (url: string, src?: string | null, profileId?: string): string | null =>
   useKeyed(watchFaviconPage, pageKey(url, src), () => resolveFavicon(url, src, profileId)?.uri ?? null);
 

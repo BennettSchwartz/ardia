@@ -197,10 +197,9 @@ export const SidebarPage = memo(function SidebarPage({ profileId, slot, paging, 
                         onLayout={(e) => {
                           page.viewport = e.nativeEvent.layout.height;
                           scrollEdgeBelow.measure({ viewport: page.viewport });
+                          if (geometry) geometry.current.viewport = page.viewport;
                           selectedRow.relocate();
-                          if (!geometry) return;
-                          geometry.current.viewport = page.viewport;
-                          geometry.current.laidOut?.();
+                          geometry?.current.laidOut?.();
                         }}
                         style={{ flex: 1, transform: [{ translateY: playerMotion.listUnclip }] }}
                         showsVerticalScrollIndicator={false}
