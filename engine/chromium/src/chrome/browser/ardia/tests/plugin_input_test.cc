@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "chrome/browser/ardia/ac_cli_plugin_clipboard_keys.h"
@@ -401,6 +402,36 @@ int main() {
          "busy: a widget with no person input never answers busy", "");
   Expect(!ardia::PersonBusy(false, true, -1000),
          "busy: a person input stamped after now is stale", "");
+
+  const auto wheel_event = [](R result) { return ardia::PointerEvent{false, result}; };
+  Expect(ardia::PointerOutcomeOf({wheel_event(R::kAcked), wheel_event(R::kAcked)}, true,
+                                 true) == O::kDone,
+         "wheel: the renderer acked the wheel and the phase-end is done", "");
+  Expect(ardia::PointerOutcomeOf({wheel_event(R::kAcked), wheel_event(R::kPending)}, true,
+                                 true) == O::kPending,
+         "wheel: the phase-end still pending keeps it pending", "");
+  Expect(ardia::PointerOutcomeOf({wheel_event(R::kSentUnknown), wheel_event(R::kAcked)},
+                                 true, true) == O::kUnknown,
+         "wheel: a browser ack or timeout for the wheel is unknown", "");
+  Expect(ardia::PointerOutcomeOf({wheel_event(R::kNotSent), wheel_event(R::kNotSent)}, true,
+                                 true) == O::kNotDelivered,
+         "wheel: nothing forwarded is not delivered", "");
+  Expect(ardia::PointerOutcomeOf({wheel_event(R::kAcked), wheel_event(R::kAcked)}, false,
+                                 true) == O::kUnknown,
+         "wheel: complete acks after an epoch change are unknown", "");
+  ardia::OutstandingSlots<std::pair<std::string, const void*>> slots;
+  const int tab_a = 0;
+  const int tab_b = 0;
+  Expect(slots.Take({"plugin-a", &tab_a}), "slots: the first wheel takes the slot", "");
+  Expect(!slots.Take({"plugin-a", &tab_a}),
+         "slots: a second wheel while one is pending is busy", "");
+  Expect(slots.Take({"plugin-a", &tab_b}),
+         "slots: another tab has its own slot", "");
+  Expect(slots.Take({"plugin-b", &tab_a}),
+         "slots: another credential has its own slot", "");
+  slots.Release({"plugin-a", &tab_a});
+  Expect(slots.Take({"plugin-a", &tab_a}),
+         "slots: once released, the next wheel takes it again", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

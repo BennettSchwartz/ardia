@@ -194,6 +194,8 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
         return out.Error(ardia::refusal::kHoldOutOfScope);
       case ardia::PluginTabHold::kNoSession:
         return out.Error(ardia::refusal::kHoldNoAttachedSession);
+      case ardia::PluginTabHold::kInProgress:
+        return out.Error(ardia::refusal::kHoldInProgress);
     }
   }
   BrowserWindowInterface* browser =
@@ -211,7 +213,7 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
   const std::optional<ardia::MintedPluginCredential> minted =
       ardia::MintPluginCredential(std::move(scope));
   if (!minted) {
-    return out.Error("too many plugin credentials for this profile");
+    return out.Error(ardia::refusal::kTooManyCredentials);
   }
   out.Send(base::DictValue()
                .Set("id", minted->id)

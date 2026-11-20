@@ -15,7 +15,9 @@
 
 #include "ardia/core/ac_content_hooks.h"
 #include "ardia/core/ac_host_visibility.h"
+#include "ardia/core/ac_pointer_outcome.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
@@ -70,6 +72,13 @@ std::array<int, static_cast<size_t>(CommandDomain::kCount)>& CommandCounts() {
 bool NeedsResponse(const std::string& method) {
   return method == "Target.getTargets" || method == "Target.getTargetInfo" ||
          method == "Target.createTarget";
+}
+
+using WheelSlot = std::pair<std::string, const void*>;
+
+ardia::OutstandingSlots<WheelSlot>& PluginWheelSlots() {
+  static base::NoDestructor<ardia::OutstandingSlots<WheelSlot>> slots;
+  return *slots;
 }
 
 std::vector<TokenClient*> ClientsOf(const std::string& credential_id) {
@@ -343,19 +352,42 @@ bool TokenClient::DispatchPointerCommand(int id,
     return false;
   }
   pointer.epoch = content::ArdiaPageEpoch(host);
+  base::ScopedClosureRunner wheel_slot;
+  if (kind_ == TokenKind::kPlugin &&
+      pointer.kind == content::ArdiaPointer::Kind::kWheel) {
+    const WheelSlot slot{scope_->credential_id, host->GetWebContents()};
+    if (!PluginWheelSlots().Take(slot)) {
+      outstanding_.erase({session, id});
+      ++PluginTotalsSoFar().busy;
+      *reply = ErrorReply(id, session, kRefused, refusal::kBusy);
+      return false;
+    }
+    wheel_slot = base::ScopedClosureRunner(base::BindOnce(
+        [](WheelSlot slot) { PluginWheelSlots().Release(slot); }, slot));
+  }
   auto dispatch = base::BindOnce(
       [](base::WeakPtr<TokenClient> self,
          scoped_refptr<content::DevToolsAgentHost> host, std::string session,
-         int id, content::ArdiaPointer pointer) {
+         int id, content::ArdiaPointer pointer,
+         base::ScopedClosureRunner wheel_slot) {
         if (!self || self->revoked_) {
           return;
         }
         content::ArdiaDispatchPointer(
             host.get(), self->client_, session, pointer,
-            base::BindOnce(&TokenClient::FinishPointer, self, id, session));
+            base::BindOnce(
+                [](base::ScopedClosureRunner wheel_slot,
+                   base::OnceCallback<void(std::string)> finish,
+                   std::string error) {
+                  wheel_slot.RunAndReset();
+                  std::move(finish).Run(std::move(error));
+                },
+                std::move(wheel_slot),
+                base::BindOnce(&TokenClient::FinishPointer, self, id,
+                               session)));
       },
       weak_factory_.GetWeakPtr(), base::WrapRefCounted(host), session, id,
-      pointer);
+      pointer, std::move(wheel_slot));
   if (kind_ == TokenKind::kPlugin && CliPluginInputHold()) {
     base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, std::move(dispatch), kHeldPluginInput);

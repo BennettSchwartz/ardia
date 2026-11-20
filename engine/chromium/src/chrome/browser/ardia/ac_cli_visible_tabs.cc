@@ -52,6 +52,7 @@ using PluginHoldKey = std::pair<std::string, const content::WebContents*>;
 struct PluginHold {
   base::WeakPtr<content::WebContents> contents;
   base::ScopedClosureRunner capture;
+  uint64_t token = 0;
 };
 
 std::map<const void*, VisibleHold>& Holds() {
@@ -237,19 +238,28 @@ PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
     return PluginTabHold::kOk;
   }
   const PluginTabHold allowed = PluginHoldAllowed(credential_id, contents);
-  if (allowed != PluginTabHold::kOk || held != PluginHolds().end()) {
+  if (allowed != PluginTabHold::kOk) {
     return allowed;
   }
-  PluginHolds().insert_or_assign(key, PluginHold{contents->GetWeakPtr(), {}});
+  if (held != PluginHolds().end()) {
+    return held->second.capture ? PluginTabHold::kOk
+                                : PluginTabHold::kInProgress;
+  }
+  const base::WeakPtr<content::WebContents> weak = contents->GetWeakPtr();
+  const uint64_t token = NextHoldId();
+  PluginHolds().insert_or_assign(key, PluginHold{weak, {}, token});
   base::ScopedClosureRunner capture = CountedCapture(contents);
+  const PluginTabHold still =
+      weak ? PluginHoldAllowed(credential_id, weak.get())
+           : PluginTabHold::kNoSession;
   auto reserved = PluginHolds().find(key);
-  const PluginTabHold still = PluginHoldAllowed(credential_id, contents);
-  if (reserved == PluginHolds().end() || reserved->second.capture ||
-      !reserved->second.contents || still != PluginTabHold::kOk) {
-    if (reserved != PluginHolds().end() && !reserved->second.capture) {
+  const bool ours = reserved != PluginHolds().end() &&
+                    reserved->second.token == token;
+  if (!ours || !weak || still != PluginTabHold::kOk) {
+    if (ours) {
       PluginHolds().erase(reserved);
     }
-    return still != PluginTabHold::kOk ? still : PluginTabHold::kNoSession;
+    return still != PluginTabHold::kOk ? still : PluginTabHold::kInProgress;
   }
   reserved->second.capture = std::move(capture);
   ++PluginTotalsSoFar().holds;

@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 namespace ardia {
@@ -58,6 +59,17 @@ inline PointerOutcome PointerOutcomeOf(const std::vector<PointerEvent>& events,
   return all_acked && epoch_unchanged && widget_alive ? PointerOutcome::kDone
                                                       : PointerOutcome::kUnknown;
 }
+
+template <typename Key>
+class OutstandingSlots {
+ public:
+  bool Take(const Key& key) { return held_.insert(key).second; }
+  void Release(const Key& key) { held_.erase(key); }
+  bool Held(const Key& key) const { return held_.contains(key); }
+
+ private:
+  std::set<Key> held_;
+};
 
 inline bool RefusesHiddenTarget(bool wheel, bool hidden) {
   return wheel && hidden;

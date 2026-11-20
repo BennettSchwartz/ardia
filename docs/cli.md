@@ -117,14 +117,21 @@ TypeScript browse client), not to #2808. It must:
   input: keys, text, button-less pointer moves, the wheel, and clicks through `Ardia.dispatchClick` (one call presses
   and releases in place, so a plugin can never drag). Clicks, moves and wheels go only to the page target's own
   session. A click succeeds when the renderer has acknowledged every event, which isn't proof the page handled it; a
-  click whose press Chromium suppressed before dispatch answers `ardia: not delivered`. A wheel answers once it's
-  submitted, so read `DOM.getBoxModel` again to see whether it scrolled; a wheel to a page that isn't taking input
-  (its renderer is blocked, or a dialog holds it) is refused (`the page isn't taking input right now`), and so is a
-  wheel to a hidden page (`page hidden`). A wheel to a tab the person scrolled, touched or typed in (in any frame of
-  the page) during the last 500 ms answers `busy` without being queued (try again later); person input that Chromium
-  filtered or still holds in a queue doesn't count. One wheel already in Chromium's own wheel queue can still be
-  dispatched after the page navigates or the tab leaves scope, with no further check: that residual is one scroll,
-  never a click. It can't focus, scroll
+  click whose press Chromium suppressed, filtered or never dispatched (a renderer not yet running or gone) answers
+  `ardia: not delivered` at once. A wheel succeeds once the renderer has acknowledged it and Chromium has acknowledged
+  its phase-end (an acknowledgement, not proof it scrolled: read `DOM.getBoxModel` again); a browser acknowledgement
+  or the 5 s deadline answers `ardia: outcome unknown`. A plugin has at most one wheel outstanding per tab: another
+  wheel from the same credential to that tab before the first is answered gets `ardia: busy` and isn't queued. A
+  wheel to a page that isn't taking input (its renderer is blocked, or a dialog holds it) is refused (`the page isn't
+  taking input right now`), and so is a wheel to a hidden page (`page hidden`). A wheel to a tab the person scrolled,
+  touched or typed in (in any frame of the page) during the last 500 ms also answers `busy` without being queued (try
+  again later). That counts person input once Chromium reports it dispatched to the renderer: input Chromium filtered
+  doesn't count, and neither does input still waiting in most queues, but Chromium's deferred touch-move path reports
+  dispatch before it hands the move over, so such a move counts slightly early. The time only moves forward, so a late
+  event can't shorten the window. A wheel already in Chromium's own wheel queue can still be dispatched after the page
+  navigates or the tab leaves scope, with no further check; with one outstanding wheel per credential and tab, that
+  residual is at most one queued wheel and its phase-end per credential and tab: a scroll, never a click. It can't
+  focus, scroll
   a node into view, or emulate focus: only a click focuses the page (its keys and text don't), and it scrolls with the
   wheel.
   It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
@@ -133,7 +140,9 @@ TypeScript browse client), not to #2808. It must:
   `ardia: tab_out_of_scope`, and input it queued before the move never lands.
 - **The owner's clicks too.** `Ardia.dispatchClick` works on the `ardia` command's token connection as well, with the
   same page-session rule, outcome reporting (done, `ardia: not delivered`, `ardia: outcome unknown`) and gated recovery
-  release; the owner keeps Chromium's raw `Input.dispatchMouseEvent` alongside it.
+  release; the owner keeps Chromium's raw `Input.dispatchMouseEvent` alongside it. When the owner has mouse-to-touch
+  emulation on and the emulator takes a press, the click answers `ardia: outcome unknown`, since the emulator acted
+  on it (plugins are refused under that emulation).
 - **Showing a background tab while acting.** A plugin's attach doesn't make its tab visible, so a background tab stays
   hidden (`document.visibilityState` is `hidden`, and its wheels are refused) and costs nothing while the plugin is
   idle. The act lease turns a hold on at lease start, before the first action, and off only after the last action
@@ -150,14 +159,16 @@ TypeScript browse client), not to #2808. It must:
 - **Refusals.** Every refusal a plugin can get has a stable message, one constant each in
   `engine/ardiacore/src/ardia/core/ac_plugin_refusals.h` (`ardia::refusal`). Match on the exact message (or, for the
   three patterns, on the fixed prefix and suffix); the wording changes only together with the plugins that match it.
-  CDP refusals arrive as the command's `error.message`; hold refusals as the engine call's error.
+  CDP refusals arrive as the command's `error.message`; hold refusals as the engine call's error. A plugin can also
+  get Chromium's own CDP errors (an unknown node, a missing frame, invalid params from Chromium's handlers), which
+  aren't Ardia refusals and aren't in this table.
 
   | Refusal | Exact message |
   | --- | --- |
-  | Busy: the person used that tab in the last 500 ms (wheel) | `ardia: busy` |
+  | Busy (wheel): the person used that tab in the last 500 ms, or this credential's previous wheel to that tab is still outstanding | `ardia: busy` |
   | Page hidden (wheel) | `ardia: page hidden` |
   | Not delivered: no press (or event) was sent | `ardia: not delivered` |
-  | Outcome unknown: something was sent, not all of it acknowledged | `ardia: outcome unknown` |
+  | Outcome unknown: something was sent and not all of it was acknowledged by the renderer, or every event was acknowledged but the page navigated or the widget went away meanwhile, or (owner) the touch emulator took the press | `ardia: outcome unknown` |
   | Page changed: a navigation committed after admission | `ardia: the page changed after the input was sent` |
   | Not the page session (clicks, moves, wheels) | `ardia: pointer input and clicks go only to the page target's own session` |
   | Page not taking input (wheel) | `ardia: the page isn't taking input right now` |
@@ -185,6 +196,8 @@ TypeScript browse client), not to #2808. It must:
   | Hold: no such tab | `no such tab` |
   | Hold: tab out of scope | `tab out of scope` |
   | Hold: no attached session on that tab | `no attached session` |
+  | Hold: another hold on that tab is still being taken | `another hold on that tab is still being taken` |
+  | Mint: the profile already has 16 live credentials | `too many plugin credentials for this profile` |
 - **Handing it to the CLI child.** The app creates a pipe, writes the credential to it and closes its write end, and
   passes the read end to the child as an inherited fd (`posix_spawn_file_actions_adddup2`; with
   `POSIX_SPAWN_CLOEXEC_DEFAULT` nothing else leaks). It sets `ARDIA_PLUGIN_CREDENTIAL_FD=<n>`, the fd number only, and

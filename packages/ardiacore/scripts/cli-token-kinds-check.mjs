@@ -24,7 +24,8 @@ revoking it closes its socket and a new connection with it is refused. A plugin'
 background tab reports visibilityState hidden and refuses its wheels (page hidden) until the lease's hold
 (engine.cliPluginCredential {id, tabId, visible}) turns on; with it the tab reports visible, still in the background, and
 a wheel scrolls it; turning it off hides the tab again; a second on or off changes nothing; a hold on another window's
-tab, on a tab it has no session with, or for an unknown credential is refused; it drops when the last session on the
+tab, on a tab it has no session with, or for an unknown credential is refused; two back-to-back wheels give an
+acknowledged wheel and then busy (one outstanding wheel per credential and tab); it drops when the last session on the
 tab detaches, at once when the tab leaves the window (a hold after it comes back is refused while the old session
 is still detaching), and on revoke; and the owner token still makes a tab visible when it attaches. A plugin gets exactly its allowlist: the
 plain-data DOM and accessibility reads work; DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and
@@ -304,6 +305,12 @@ try {
   const wheelHeld = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 300 }, p4);
   const scrolledHeld = await until("the held tab to scroll", async () => (Number(await textOf(p4, "scrolled")) > 0 ? Number(await textOf(p4, "scrolled")) : null), 8000).catch(() => 0);
   check("plugin: with the hold, a wheel to the background tab scrolls it", !refused(wheelHeld) && scrolledHeld > 0, `${text(wheelHeld)} scrollY ${scrolledHeld}`);
+  const pairMark = plugin.replies.length;
+  plugin.raw(664001, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 100 }, p4);
+  plugin.raw(664002, "Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 100 }, p4);
+  const firstOfPair = await until("the first wheel's reply", async () => plugin.replies.slice(pairMark).find((m) => m.id === 664001) ?? null, 8000).catch(() => null);
+  const secondOfPair = plugin.replies.slice(pairMark).find((m) => m.id === 664002);
+  check("plugin: two back-to-back wheels: the first is acknowledged, the second answers busy while the first is outstanding", !!firstOfPair && !firstOfPair.error && !!secondOfPair && secondOfPair.error?.message === "ardia: busy", `${firstOfPair ? text(firstOfPair) : "no reply"} | ${secondOfPair ? text(secondOfPair) : "no reply"}`);
   const visOff = await hold("t4", false);
   const visOffAgain = await hold("t4", false);
   const visReleased = await until("visibilityState hidden", async () => ((await textOf(p4, "vis")) === "hidden" ? "hidden" : null), 10000).catch(() => null);

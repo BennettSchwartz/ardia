@@ -11,7 +11,13 @@ class WebContents;
 
 namespace ardia {
 
-enum class PluginTabHold { kOk, kNoCredential, kOutOfScope, kNoSession };
+enum class PluginTabHold {
+  kOk,
+  kNoCredential,
+  kOutOfScope,
+  kNoSession,
+  kInProgress,
+};
 
 PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
                                       content::WebContents* contents,
