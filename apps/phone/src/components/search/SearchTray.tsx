@@ -921,7 +921,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
       <View testID="trayFieldCapsule" onLayout={staged ? (event) => staged.onFieldHeight(event.nativeEvent.layout.height) : undefined} style={capsuleStyle}>
         <View testID="trayFieldReveal" nativeID={staged ? SEARCH_REVEAL_ID : undefined} collapsable={false} style={[styles.fieldContents, panelField ? styles.panelField : null]}>
         {fieldGone ? (
-          <Text testID="trayFieldLeaving" numberOfLines={1} style={[font.title3, styles.input, styles.leavingText, { color: lastText.current ? theme.foregroundPrimary : theme.foregroundTertiary }]}>
+          <Text testID="trayFieldLeaving" numberOfLines={1} style={[font.title3, styles.input, styles.leavingText, arc ? styles.searchPanelWeight : null, { color: lastText.current ? theme.foregroundPrimary : theme.foregroundTertiary }]}>
             {lastText.current || "Search…"}
           </Text>
         ) : (
@@ -931,6 +931,7 @@ function FieldInput({ first, closing }: { first: boolean; closing: boolean }) {
             trayInput = field;
           }}
           style={inputStyle}
+          weight={arc ? "medium" : "regular"}
           start={start}
           selectsStart={first && Boolean(initialText)}
           color={theme.foregroundPrimary}
@@ -1379,7 +1380,8 @@ const styles = StyleSheet.create({
   },
   searchPanelInput: { flex: 1, paddingVertical: 0, minHeight: searchPanel.fieldHeight - searchPanel.fieldEdge * 2 },
   panelIncognitoToggle: { flexDirection: "row", alignItems: "center", gap: searchPanel.eyesGap, minHeight: 40, paddingLeft: space.xs, paddingRight: space.xs },
-  panelIncognitoLabel: { fontSize: searchPanel.incognitoLabel, fontWeight: "500" },
+  panelIncognitoLabel: { fontSize: searchPanel.incognitoLabel, fontWeight: "600" },
+  searchPanelWeight: { fontWeight: "500" },
   searchPanelRowsContent: { paddingHorizontal: searchPanel.rowInset, paddingBottom: searchPanel.bottom },
   searchPanelRow: { minHeight: searchPanel.rowPitch, flexDirection: "row", alignItems: "center", gap: searchPanel.iconGap, paddingLeft: searchPanel.rowLeading, paddingRight: searchPanel.rowTrailing - space.s, borderRadius: radius.row, ...smoothCorners },
   searchPanelIcon: { width: searchPanel.iconSlot, height: searchPanel.iconSlot, alignItems: "center", justifyContent: "center" },

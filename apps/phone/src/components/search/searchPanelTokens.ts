@@ -21,7 +21,7 @@ export const searchPanel = {
   titleSize: 17,
   detailSize: 15,
   captionSize: 16,
-  incognitoLabel: 12,
+  incognitoLabel: 13,
   eyes: 26,
   eyesGap: 5,
   light: { tint: "rgba(255,255,255,0.62)", solid: "#F2F2F4", field: "rgba(118,118,128,0.17)", fieldEdge: "rgba(0,0,0,0.07)" },
