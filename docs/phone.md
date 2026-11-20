@@ -1425,8 +1425,13 @@ Browse for Me's answers read aloud on iPhone (#2845), by Phonon 31M (Gradium, Ap
 phone. The owner chose Phonon over Apple's voices and Kokoro, and the model must not grow the app's download.
 
 - **Engine.** `ptts` 0.7.1 from `https://github.com/gradium-ai/xn-ptts.git` (module `PhononTTS`), pinned exactly in
-  ArdiaKit's `Package.swift` and `Package.resolved`, wrapped by ArdiaKit's `ArdiaTalk` target (`TalkSpeaker`), which
-  the Podfile links into `ArdiaPhoneNative` beside ArdiaBrowser and ArdiaDesign. Its compiled core is a static arm64
+  the `packages/phone/ios/ArdiaTalk` package's `Package.swift` and `Package.resolved`, wrapped by its `ArdiaTalk`
+  target (`TalkSpeaker`), which the Podfile links into `ArdiaPhoneNative` beside ArdiaBrowser and ArdiaDesign. It is a
+  package of its own, not part of ArdiaKit, so the app project, which loads ArdiaKit for its extensions, never resolves
+  Phonon. `release-ios` archives with `ENABLE_SIGNATURE_AGGREGATION=NO`: otherwise both the
+  package and `ArdiaPhoneNative` collect `PhononCore.xcframework-ios.signature`, and xcodebuild fails copying the second
+  into the archive's Signatures folder. It has to be on the command line, since the package's own targets take no
+  project settings. Phonon's is the only xcframework signature the app has. A local Xcode archive needs the same setting. Its compiled core is a static arm64
   library; it adds about 13 MB to the app binary uncompressed (13.3 MB against 0.05 MB for an empty iOS dylib,
   stripped, Release), about 4 MB compressed. `TalkSpeaker` keeps one `Phonon` and its own `AVAudioEngine`: a player
   node through `AVAudioUnitTimePitch`, whose `rate` is the speed (pitch kept). Voices are the `.safetensors` files in
