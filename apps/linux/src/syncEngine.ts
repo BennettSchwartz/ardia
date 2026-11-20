@@ -4,7 +4,7 @@ import type { DataType, SendTarget, SyncUi } from "../../browser/src/state/sync/
 import type { FolderInfo, PhraseResult } from "../../browser/src/platform/sync";
 import { SyncNative } from "../../browser/src/platform/sync";
 import { ardiaHost, type ArdiaHost } from "./host";
-import { syncNowThrough } from "./syncForward";
+import { syncIdle, syncNowIfIdle, syncNowThrough } from "./syncForward";
 import { consentToken } from "../../browser/src/state/telemetry/client";
 import { warnFor } from "../../browser/src/state/telemetry/logs";
 import {
@@ -113,6 +113,8 @@ function dropHeldLogins() {
 function remoteFor(host: ArdiaHost): SyncRemote {
   return {
     syncNow: () => engine.syncNow(),
+    syncIdle: () => syncIdle(engine.syncNow),
+    syncNowIfIdle: () => syncNowIfIdle(engine.syncNow),
     turnOnSync: async (folder: string) => {
       let result: Awaited<ReturnType<typeof engine.turnOnSync>>;
       try {
@@ -262,7 +264,11 @@ export const syncWritesOpen = () => {
 
 export async function syncNow(stillWanted: () => void = () => {}): Promise<boolean> {
   if (leading()) return engine.syncNow(stillWanted);
-  return syncNowThrough(() => forward("syncNow", [], INTERACTIVE_CALL_TIMEOUT_MS), stillWanted);
+  return syncNowThrough(
+    () => forward("syncIdle", [], INTERACTIVE_CALL_TIMEOUT_MS),
+    () => forward("syncNowIfIdle", [], INTERACTIVE_CALL_TIMEOUT_MS),
+    stillWanted,
+  );
 }
 
 export async function turnOnSync(folder: string): Promise<{ ok: true } | { error: string }> {
