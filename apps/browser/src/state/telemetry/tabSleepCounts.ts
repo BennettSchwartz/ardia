@@ -36,7 +36,7 @@ let profilesUnloaded = 0;
 let unloadedProfilesReopened = 0;
 let unloadedProfileReloadMs = 0;
 
-export const noteProfileUnloaded = () => void profilesUnloaded++;
+export const noteProfileUnloaded = (consent?: ConsentToken | null) => countFor(consentOrNow(consent), () => void profilesUnloaded++);
 
 export const noteUnloadedProfileReopened = () => void unloadedProfilesReopened++;
 

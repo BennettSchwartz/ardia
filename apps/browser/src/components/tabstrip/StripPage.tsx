@@ -7,6 +7,7 @@ import { setMeasuredWidth, useMeasuredWidths } from "../../state/windows/measure
 import { dismissStripHoverIn, stripPageOffstage } from "../../state/tabs/stripHover";
 import { onTabPressEnd, tabPressHeld } from "../../state/sidebar/heldTabPress";
 import { noteTabStripCompact, noteTabStripReadable, noteTabStripHeldClose, noteTabStripOverflow, noteTabStripTabsInOverflow, noteTabStripRevealAfterPress, noteTabStripRevealHeldForScroll, noteTabStripScrolled, noteTabStripTitledTabs } from "../../state/telemetry/tabStripCounts";
+import { consentToken } from "../../state/telemetry/client";
 import { Offstage } from "../ui/useHover";
 import { usePageStyle } from "../../state/windows/profilePager";
 import { ThemeScope } from "../window/ThemeScope";
@@ -194,9 +195,10 @@ export const StripPage = memo(function StripPage({ profileId, slot, pageWidth, c
     if (!current || !activeId || tabDragging()) return;
     let frame = 0;
     let quiet: ReturnType<typeof setTimeout> | undefined;
+    const consent = consentToken();
     const now = () => {
       if (!userScrolling()) return reveal(activeId, true);
-      noteTabStripRevealHeldForScroll();
+      noteTabStripRevealHeldForScroll(consent);
       quiet = setTimeout(now, USER_SCROLL_QUIET_MS);
     };
     const later = () => void (frame = requestAnimationFrame(now));

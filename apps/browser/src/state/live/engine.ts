@@ -12,7 +12,7 @@ import { beginLiveRefresh, applyFetch, createFolder, finishCompleting, live, mar
 import { LiveError, type CompletionState, type LiveFolder, type LiveFolderKind, type LiveItem, type LiveSourceId, type PullRequestSection } from "./types";
 import { noteLiveCompletedTabsClosed } from "../telemetry/liveCompletedTabs";
 import { noteLiveSourceFetch } from "../telemetry/workCounts";
-import { consentToken } from "../telemetry/client";
+import { consentToken, type ConsentToken } from "../telemetry/client";
 import { warnFor } from "../telemetry/logs";
 import { isPlaying, useMedia } from "../media/media";
 import { usePages } from "../tabs/pageState";
@@ -33,12 +33,12 @@ const settingsOf = (folder: LiveFolder | undefined) => (folder ? JSON.stringify(
 const fetchedSources = new Map<string, Set<LiveSourceId>>();
 const sharedFetches = new Map<string, Promise<LiveItem[]>>();
 
-function fetchSource(source: LiveSourceId, folder: LiveFolder, interactive: boolean): Promise<LiveItem[]> {
+function fetchSource(source: LiveSourceId, folder: LiveFolder, interactive: boolean, consent?: ConsentToken | null): Promise<LiveItem[]> {
   const key = JSON.stringify([source, live().accounts[source]?.connectedAt ?? null, folder.filters]);
   const running = sharedFetches.get(key);
-  noteLiveSourceFetch(!!running);
+  noteLiveSourceFetch(!!running, consent);
   if (running) return running;
-  const task = SOURCES[source].fetch(folder, { interactive }).finally(() => sharedFetches.delete(key));
+  const task = SOURCES[source].fetch(folder, { interactive, consent }).finally(() => sharedFetches.delete(key));
   sharedFetches.set(key, task);
   return task;
 }
@@ -110,6 +110,7 @@ function staleRun(folderId: string, folder: LiveFolder, allowed: () => boolean):
 
 async function run(folderId: string, interactive: boolean, allowed: () => boolean) {
   if (!live().folders[folderId] || !allowed()) return;
+  const consent = consentToken();
   const claim = claimRefresh(folderId);
   let fence = claim ? await claim : undefined;
   if (fence === null) return;
@@ -119,7 +120,7 @@ async function run(folderId: string, interactive: boolean, allowed: () => boolea
   fetchingWith.set(folderId, settingsOf(folder));
   const before = live();
   setStatus(folderId, { state: before.status[folderId]?.lastFetch ? "updating" : "initializing" });
-  const results = await Promise.allSettled(folder.sources.map((id) => fetchSource(id, folder, interactive)));
+  const results = await Promise.allSettled(folder.sources.map((id) => fetchSource(id, folder, interactive, consent)));
 
   const fetched: LiveItem[] = [];
   const failed: { source: LiveSourceId; error: unknown }[] = [];
@@ -145,7 +146,7 @@ async function run(folderId: string, interactive: boolean, allowed: () => boolea
   for (const source of new Set(missing.map((it) => it.source))) {
     const resolve = SOURCES[source].resolveGone;
     if (!resolve) continue;
-    Object.assign(gone, await resolve(missing.filter((it) => it.source === source), { interactive }).catch(() => ({})));
+    Object.assign(gone, await resolve(missing.filter((it) => it.source === source), { interactive, consent }).catch(() => ({})));
   }
 
   if (!live().folders[folderId] || staleRun(folderId, folder, allowed)) return;

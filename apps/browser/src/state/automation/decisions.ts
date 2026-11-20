@@ -1,4 +1,4 @@
-import { consentToken } from "../telemetry/client";
+import { consentToken, type ConsentToken } from "../telemetry/client";
 import { isFields } from "../../lib/decode";
 import { minimizedUrl, originOf as urlOrigin, urlParts } from "../../lib/urlParts";
 import { anyMatches, matchesUrl } from "../../lib/matchPattern";
@@ -154,17 +154,18 @@ export function traceLink(url: string, source: LinkSource): LinkTrace {
   return settledLink();
 }
 
-function settle(trace: Exclude<LinkTrace, { by: "program" }>): LinkVerdict | null {
-  if (trace.by === "rule" || trace.by === "fallback") noteAirTrafficLink(trace.by);
+function settle(trace: Exclude<LinkTrace, { by: "program" }>, consent?: ConsentToken | null): LinkVerdict | null {
+  if (trace.by === "rule" || trace.by === "fallback") noteAirTrafficLink(trace.by, consent);
   return trace.by === "usual" ? null : trace.verdict;
 }
 
 export function decideLink(url: string, source: LinkSource, signal?: AbortSignal): LinkVerdict | null | Promise<LinkVerdict | null> {
+  const consent = consentToken();
   const trace = traceLink(url, source);
-  if (trace.by !== "program") return settle(trace);
+  if (trace.by !== "program") return settle(trace, consent);
   const asked = askHook(trace.hook, "link.opening", linkData(url, source), linkPlan(url, source), signal);
-  if (asked === null) return settle(trace.otherwise);
-  return asked.then((verdict) => verdict ?? settle(settledLink()));
+  if (asked === null) return settle(trace.otherwise, consent);
+  return asked.then((verdict) => verdict ?? settle(settledLink(), consent));
 }
 
 export type PermissionVerdict = "deny" | "ask";

@@ -9,6 +9,7 @@ import {
   shareableTabs,
   shareTab,
 } from "../../state/media/screenShare";
+import { consentToken } from "../../state/telemetry/client";
 import { runningAppIcon } from "../../state/app/system";
 import { Symbol, Button, Checkbox, PANEL, PanelHeader, Popover, POPOVER_MARGIN, Text, useHover } from "../ui";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -52,10 +53,11 @@ export function SharePicker({ tabId, paneWidth }: { tabId: string; paneWidth: nu
     setShareAudio(AUDIO_SHARED_BY_DEFAULT);
     setScreenAccess(null);
     let live = true;
+    const consent = consentToken();
     void screenRecordingAllowed().then((allowed) => {
       if (!live) return;
       setScreenAccess(allowed);
-      if (!allowed) noteScreenRecordingMissing();
+      if (!allowed) noteScreenRecordingMissing(consent);
     });
     const t = setInterval(() => {
       void getDisplayMediaSources().then((next) => live && setSources(next));
