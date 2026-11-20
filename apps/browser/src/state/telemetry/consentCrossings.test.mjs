@@ -59,3 +59,34 @@ test("a tab picked to share while sharing was off isn't counted when its source 
   webviews.delete("shared");
   webviews.delete("asker");
 });
+
+const presses = await import("./tabPresses.ts");
+const writes = await import("./sessionWrites.ts");
+const local = await import("./localStore.ts");
+const { telemetryLocal } = await import("../../test-native/telemetryLocal.ts");
+
+test("tab presses, session writes and external-app requests counted with sharing off are gone after the consent change, and never reach the record, the queue or the next usage_counts", async () => {
+  sharing(true);
+  await queuedUsage();
+  sharing(false);
+  local.flushLocal();
+  telemetryLocal.reset();
+  presses.notePressStarted();
+  presses.notePressEnded("click");
+  writes.noteSessionWrite(4096, false, 2);
+  track.noteExternalAppRequest(true);
+  assert.equal(presses.devTabPresses().presses, 1, "the press was tallied in memory");
+  sharing(true);
+  assert.equal(presses.devTabPresses().presses, 0, "the change dropped the press tally");
+  assert.deepEqual(Object.values(writes.takeSessionWrites()).filter(Boolean), [], "the change drained the session writes");
+  assert.deepEqual(Object.values(track.takeExternalAppRequests()).filter(Boolean), [], "the change drained the external-app requests");
+  const after = await queuedUsage();
+  const pressEvents = JSON.parse(stub.docs.get("telemetry-queue.json") ?? '{"events":[]}').events.filter((e) => e.event === "tab_presses");
+  const fields = ["session_writes", "session_kb_written", "session_pin_backups", "session_pins_backed_up", "external_app_prompts"];
+  assert.deepEqual(after.flatMap((e) => fields.filter((f) => (e.properties[f] ?? 0) > 0)), []);
+  assert.deepEqual(pressEvents.filter((e) => (e.properties.presses ?? 0) > 0), []);
+  local.flushLocal();
+  const recorded = telemetryLocal.records().filter((r) => ["usage_counts", "tab_presses"].includes(r.event));
+  assert.deepEqual(recorded.filter((r) => r.sent === false), []);
+  assert.deepEqual(recorded.flatMap((r) => [...fields, "presses"].filter((f) => (r.properties?.[f] ?? 0) > 0)), []);
+});
