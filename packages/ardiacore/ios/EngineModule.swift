@@ -60,6 +60,11 @@ public class EngineModule: Module {
         return
       }
       let tab = ArdiaHost.chromeTabId(ofTab: try args.text("tabId"))
+      if let visible = try args.optionalBool("visible") {
+        let id = try args.text("id")
+        EngineCall.passing("ac_cli_plugin_credential", profile: args.profile, args: ["id": id, "tab": tab, "visible": visible], reply: reply)
+        return
+      }
       EngineCall.passing("ac_cli_plugin_credential", profile: args.profile, args: ["tab": tab], reply: reply)
     },
     "setCliActiveTab": { args, reply in

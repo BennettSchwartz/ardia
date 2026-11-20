@@ -31,6 +31,8 @@ const NONE = {
   cli_plugin_credentials_minted: 0,
   cli_plugin_credentials_revoked: 0,
   cli_plugin_commands_refused: 0,
+  cli_plugin_tab_holds: 0,
+  cli_plugin_wheels_busy: 0,
   cli_file_picker_answers_armed: 0,
   cli_file_picker_answers_used: 0,
 };
@@ -47,8 +49,8 @@ const FIELDS = {
 
 let counts = { ...NONE };
 let windowlessSeen = { given: 0, missed: 0 };
-const PLUGIN_TOTALS = { minted: "cli_plugin_credentials_minted", revoked: "cli_plugin_credentials_revoked", refused: "cli_plugin_commands_refused" } as const;
-let pluginSeen = { minted: 0, revoked: 0, refused: 0 };
+const PLUGIN_TOTALS = { minted: "cli_plugin_credentials_minted", revoked: "cli_plugin_credentials_revoked", refused: "cli_plugin_commands_refused", holds: "cli_plugin_tab_holds", busy: "cli_plugin_wheels_busy" } as const;
+let pluginSeen = { minted: 0, revoked: 0, refused: 0, holds: 0, busy: 0 };
 let pickerSeen = { armed: 0, used: 0 };
 let cdpCommandsSeen: Record<CdpCommandDomain, number> = Object.fromEntries(CDP_COMMAND_DOMAINS.map((domain) => [domain, 0])) as Record<CdpCommandDomain, number>;
 

@@ -2008,8 +2008,16 @@ class HostMessageHandler : public content::WebUIMessageHandler,
         const std::string* tab = input.FindString("tabId");
         TabBinding* binding = tab ? host_->BindingForKey(*tab) : nullptr;
         content::WebContents* contents = binding ? binding->contents() : nullptr;
-        if (!contents) return Fail(id, "ERR_ENGINE", "engine.cliPluginCredential requires {tabId} or {revoke}");
-        request.Set("tab", TabId(contents));
+        if (std::optional<bool> visible = input.FindBool("visible")) {
+          const std::string* credential = input.FindString("id");
+          if (!credential || !tab) return Fail(id, "ERR_BAD_ARGS", "engine.cliPluginCredential {visible} requires {id, tabId}");
+          request.Set("id", *credential);
+          request.Set("visible", *visible);
+          request.Set("tab", contents ? TabId(contents) : -1);
+        } else {
+          if (!contents) return Fail(id, "ERR_ENGINE", "engine.cliPluginCredential requires {tabId} or {revoke}");
+          request.Set("tab", TabId(contents));
+        }
       }
     }
     const auto json = base::WriteJson(request);

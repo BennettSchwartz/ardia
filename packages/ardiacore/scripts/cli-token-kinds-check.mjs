@@ -20,7 +20,12 @@ The ardia command's token (kind cli) gets every method and target, including Bro
 page and the browser target. A plugin credential minted for window 1 (engine.cliPluginCredential, kind plugin) sees and
 attaches only window 1's web pages, is refused a chrome:// attach, Browser.setDownloadBehavior, DOM.setFileInputFiles,
 cookies, Target.createTarget and window 2's page, isn't written to ArdiaControl.json and can't read /ardia/active;
-revoking it closes its socket and a new connection with it is refused. A plugin gets exactly its allowlist: the
+revoking it closes its socket and a new connection with it is refused. A plugin's attach takes no visibility hold: its
+background tab reports visibilityState hidden and refuses its wheels (page hidden) until the lease's hold
+(engine.cliPluginCredential {id, tabId, visible}) turns on; with it the tab reports visible, still in the background, and
+a wheel scrolls it; turning it off hides the tab again; a second on or off changes nothing; a hold on another window's
+tab, on a tab it has no session with, or for an unknown credential is refused; it drops when the last session on the
+tab detaches and on revoke; and the owner token still makes a tab visible when it attaches. A plugin gets exactly its allowlist: the
 plain-data DOM and accessibility reads work; DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and
 Emulation.setFocusEmulationEnabled are refused (Ardia.dispatchClick focuses a field, a wheel scrolls); its moves and
 wheels, keys and text never focus the page (only Ardia.dispatchClick does), and clicks, moves and wheels go
@@ -79,6 +84,9 @@ open.onclick = () => report(showOpenFilePicker().then(async ([h]) => "open:" + h
 save.onclick = () => report(showSaveFilePicker().then(async (h) => { const w = await h.createWritable(); await w.write("saved by the page"); await w.close(); return "save:" + h.name; }));
 dir.onclick = () => report(showDirectoryPicker().then(async (d) => { window.dirHandle = d; const names = []; for await (const [n] of d.entries()) names.push(n); return "dir:" + names.sort().join(","); }));
 </script>`;
+const VIS = `<!doctype html><title>vis</title><p id=vis>-</p><p id=scrolled>0</p><div style="height:5000px"></div>
+<script>const show = () => (vis.textContent = document.visibilityState); show(); document.addEventListener("visibilitychange", show);
+addEventListener("scroll", () => (scrolled.textContent = String(Math.round(scrollY))), { passive: true });</script>`;
 let port = 0;
 const server = createServer((req, res) => {
   res.setHeader("content-type", "text/html");
@@ -86,6 +94,7 @@ const server = createServer((req, res) => {
 <div id=drag draggable=true style="position:fixed;left:10px;top:5px;width:80px;height:25px;background:#ccc">drag</div>
 <div id=drop style="position:fixed;left:10px;top:45px;width:80px;height:25px;background:#eee">drop</div><script>${DRAG_LOG}</script>`);
   if (req.url === "/xchild") return res.end(XCHILD);
+  if (req.url === "/vis") return res.end(VIS);
   const frames = req.url === "/one" ? `<iframe id=child src="/child" style="position:fixed;left:460px;top:40px;width:160px;height:80px"></iframe><iframe id=xsite src="http://localhost:${port}/xchild" style="position:fixed;left:460px;top:140px;width:160px;height:120px"></iframe>` : "";
   const answer = () => res.end(`<!doctype html><title>${req.url.slice(1)}</title><input type=file id=f>${PICKERS}${frames}`);
   if (req.url.startsWith("/slow")) setTimeout(answer, 3000);
@@ -108,7 +117,7 @@ const secureOrigin = `https://127.0.0.1:${secure.address().port}`;
 writeFileSync(join(data, "session.json"), JSON.stringify(session({
   settings: { cliControl: true },
   windows: [{ id: "w1" }, { id: "w2" }],
-  tabs: [{ id: "t1", windowId: "w1", url: `${origin}/one` }, { id: "t3", windowId: "w1", url: `${origin}/three` }, { id: "t2", windowId: "w2", url: `${origin}/two` }],
+  tabs: [{ id: "t1", windowId: "w1", url: `${origin}/one` }, { id: "t3", windowId: "w1", url: `${origin}/three` }, { id: "t4", windowId: "w1", url: `${origin}/vis` }, { id: "t2", windowId: "w2", url: `${origin}/two` }],
 })));
 writeFileSync(join(data, "onboarding.json"), JSON.stringify({ version: 1, completedAt: 1 }));
 writeFileSync(join(data, "perf-probe"), "");
@@ -217,6 +226,12 @@ try {
   const own = await plugin.send("Target.attachToTarget", { targetId: pages.one.targetId, flatten: true });
   const ps = own.result?.sessionId;
   check("plugin: window 1's page attaches", !!ps, text(own));
+  const hold = (tabId, visible, id = minted.id) => appEval(`return ac.engine.call("engine.cliPluginCredential", { id: ${JSON.stringify(id)}, tabId: ${JSON.stringify(tabId)}, visible: ${visible} }).then((v) => v, (e) => ({ error: String(e?.message ?? e) }))`);
+  const tabHolds = async () => (await appEval(`return ac.engine.call("engine.cliControlStatus")`))?.pluginTabHolds;
+  const holdsAtAttach = await tabHolds();
+  check("plugin: attaching takes no visibility hold", holdsAtAttach === 0, String(holdsAtAttach));
+  const t1Hold = await hold("t1", true);
+  check("plugin: a hold on its attached tab answers visible", t1Hold?.visible === true && (await tabHolds()) === 1, JSON.stringify(t1Hold));
   const other = await plugin.send("Target.attachToTarget", { targetId: pages.two.targetId, flatten: true });
   check("plugin: window 2's page is refused", refused(other), text(other));
   const chromeAttach = await plugin.send("Target.attachToTarget", { targetId: chrome.result.targetId, flatten: true });
@@ -258,6 +273,49 @@ try {
   check("plugin: DOM.focus, DOM.scrollIntoViewIfNeeded, Page.captureScreenshot and Emulation.setFocusEmulationEnabled are refused", [focused, scrolled, shot, emulatedFocus].every((r) => refused(r) && /plugin/.test(r.error?.message ?? "")), [focused, scrolled, shot, emulatedFocus].map(text).join(" | "));
   const wheel = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 60, deltaX: 0, deltaY: 50 }, ps);
   check("plugin: a mouseWheel event answers", !refused(wheel), text(wheel));
+
+  const visTarget = await until("the background vis tab", async () => (await urlsOf(plugin)).find((t) => t.url === `${origin}/vis`) ?? null);
+  const visAttach = await plugin.send("Target.attachToTarget", { targetId: visTarget.targetId, flatten: true });
+  const p4 = visAttach.result?.sessionId;
+  const textOf = async (session, id) => {
+    const root = (await plugin.send("DOM.getDocument", {}, session)).result?.root?.nodeId;
+    const node = root && (await plugin.send("DOM.querySelector", { nodeId: root, selector: `#${id}` }, session)).result?.nodeId;
+    return node ? ((await plugin.send("DOM.getOuterHTML", { nodeId: node }, session)).result?.outerHTML ?? "").replace(/<[^>]+>/g, "") : null;
+  };
+  const visState = (session) => until("the vis page", async () => { const v = await textOf(session, "vis"); return v && v !== "-" ? v : null; }, 10000).catch(() => null);
+  const visBefore = await visState(p4);
+  check("plugin: a background tab it attached to without a hold reports visibilityState hidden", !!p4 && visBefore === "hidden", `${text(visAttach)} ${visBefore}`);
+  const wheelHidden = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 300 }, p4);
+  check("plugin: a wheel to that tab without a hold is refused (page hidden)", refused(wheelHidden) && /page hidden/.test(wheelHidden.error?.message ?? ""), text(wheelHidden));
+  const holdOutOfScope = await hold("t2", true);
+  check("plugin: a hold on another window's tab is refused (tab out of scope)", /tab out of scope/.test(holdOutOfScope?.error ?? ""), JSON.stringify(holdOutOfScope));
+  const holdNoSession = await hold("t3", true);
+  check("plugin: a hold on a tab it has no session with is refused (no attached session)", /no attached session/.test(holdNoSession?.error ?? ""), JSON.stringify(holdNoSession));
+  const holdOther = await hold("t4", true, "plugin-0000000000000000");
+  check("plugin: a hold for an unknown credential is refused (no such credential)", /no such credential/.test(holdOther?.error ?? ""), JSON.stringify(holdOther));
+  const holdsBefore = await tabHolds();
+  const visOn = await hold("t4", true);
+  const visOnAgain = await hold("t4", true);
+  const holdsOn = await tabHolds();
+  check("plugin: a hold on its background tab answers visible, and a second one adds nothing", visOn?.visible === true && visOnAgain?.visible === true && holdsOn === holdsBefore + 1, `${JSON.stringify(visOn)} ${JSON.stringify(visOnAgain)} holds ${holdsBefore} -> ${holdsOn}`);
+  const visHeld = await until("visibilityState visible", async () => ((await textOf(p4, "vis")) === "visible" ? "visible" : null), 10000).catch(() => null);
+  check("plugin: with the hold, the background tab reports visibilityState visible and stays in the background", visHeld === "visible", String(visHeld));
+  const wheelHeld = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 300 }, p4);
+  const scrolledHeld = await until("the held tab to scroll", async () => (Number(await textOf(p4, "scrolled")) > 0 ? Number(await textOf(p4, "scrolled")) : null), 8000).catch(() => 0);
+  check("plugin: with the hold, a wheel to the background tab scrolls it", !refused(wheelHeld) && scrolledHeld > 0, `${text(wheelHeld)} scrollY ${scrolledHeld}`);
+  const visOff = await hold("t4", false);
+  const visOffAgain = await hold("t4", false);
+  const visReleased = await until("visibilityState hidden", async () => ((await textOf(p4, "vis")) === "hidden" ? "hidden" : null), 10000).catch(() => null);
+  const wheelReleased = await plugin.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 100, y: 100, deltaX: 0, deltaY: 300 }, p4);
+  check("plugin: turning the hold off (twice) hides the tab again and its wheels are refused", visOff?.visible === false && visOffAgain?.visible === false && visReleased === "hidden" && refused(wheelReleased) && /page hidden/.test(wheelReleased.error?.message ?? "") && (await tabHolds()) === holdsBefore, `${JSON.stringify(visOff)} ${visReleased} ${text(wheelReleased)}`);
+  await hold("t4", true);
+  const holdsBeforeDetach = await tabHolds();
+  await plugin.send("Target.detachFromTarget", { sessionId: p4 });
+  const holdsAfterDetach = await until("the hold to drop on detach", async () => ((await tabHolds()) === holdsBeforeDetach - 1 ? holdsBeforeDetach - 1 : null), 5000).catch(() => null);
+  check("plugin: detaching its last session from the tab drops the hold", holdsAfterDetach === holdsBeforeDetach - 1, `${holdsBeforeDetach} -> ${holdsAfterDetach}`);
+  const p4b = (await plugin.send("Target.attachToTarget", { targetId: visTarget.targetId, flatten: true })).result?.sessionId;
+  const reheld = await hold("t4", true);
+  check("plugin: a fresh session on the tab can take the hold again (it lasts until the revoke)", !!p4b && reheld?.visible === true, JSON.stringify(reheld));
 
   const allowed = [
     ["DOM.getDocument", {}],
@@ -741,6 +799,11 @@ try {
   const revoked = await appEval(`return ac.engine.call("engine.cliPluginCredential", { revoke: ${JSON.stringify(minted.id)} })`);
   const closedInTime = await Promise.race([plugin.closed.then(() => true), sleep(5000).then(() => false)]);
   check("revoking the credential closes its connection", revoked?.revoked === true && closedInTime, JSON.stringify(revoked));
+  const holdsAfterRevoke = await until("the holds to drop on revoke", async () => ((await tabHolds()) === 0 ? "none" : null), 5000).catch(() => null);
+  check("plugin: the revoke drops every hold the credential had", holdsAfterRevoke === "none", String(await tabHolds()));
+  const cliVis = (await cli.send("Target.attachToTarget", { targetId: visTarget.targetId, flatten: true })).result?.sessionId;
+  const cliVisState = cliVis && (await until("the owner's hold", async () => ((await cli.send("Runtime.evaluate", { expression: "document.visibilityState", returnByValue: true }, cliVis)).result?.result?.value === "visible" ? "visible" : null), 5000).catch(() => null));
+  check("cli: the owner token still makes a background tab visible when it attaches", cliVisState === "visible", String(cliVisState));
   await until("the draining socket to close", async () => drainedClosedAt || null, 4000).catch(() => null);
   check("plugin: a revoke during a scope close closes the draining socket at once", !!drained && drainedClosedAt > 0 && drainedClosedAt - revokeStarted < 2000 && drainedReplies <= 20, drained ? `closed after ${drainedClosedAt ? drainedClosedAt - revokeStarted : "never"} ms, ${drainedReplies} replies` : "no socket");
   const again = await connect(`${base}?token=${encodeURIComponent(minted.credential)}`).then(() => "accepted", () => "refused");

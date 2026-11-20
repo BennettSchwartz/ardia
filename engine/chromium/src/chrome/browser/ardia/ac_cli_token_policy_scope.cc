@@ -273,7 +273,6 @@ void TokenClient::CloseOutOfScope() {
   }
   outstanding_.clear();
   draining_ = true;
-  scope_timer_.Stop();
   if (closer_) {
     closer_.Run(false);
   }

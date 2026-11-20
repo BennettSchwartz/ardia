@@ -44,6 +44,7 @@
 #include "chrome/browser/ardia/ac_cli_plugin_credentials.h"
 #include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
+#include "chrome/browser/ardia/ac_cli_visible_tabs.h"
 #include "chrome/browser/ardia/ac_engine.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/termination_notification.h"
@@ -268,7 +269,10 @@ class ControlServer {
     status.Set("pluginCredentials", base::DictValue()
                                         .Set("minted", plugins.minted)
                                         .Set("revoked", plugins.revoked)
-                                        .Set("refused", plugins.refused));
+                                        .Set("refused", plugins.refused)
+                                        .Set("holds", plugins.holds)
+                                        .Set("busy", plugins.busy));
+    status.Set("pluginTabHolds", PluginTabVisibleHoldCount());
     if (ardiacore::TestFlag("nativeDragRefused")) {
       status.Set("nativeDragsRefused", true);
     }

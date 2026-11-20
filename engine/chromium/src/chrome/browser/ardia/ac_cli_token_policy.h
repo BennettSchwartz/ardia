@@ -15,6 +15,7 @@ namespace content {
 class DevToolsAgentHost;
 class DevToolsAgentHostClient;
 class RenderFrameHost;
+class WebContents;
 }
 
 namespace ardia {
@@ -57,12 +58,20 @@ bool PluginMayConnectTo(const PluginScope& scope,
 
 void CloseTokenClientsOf(const std::string& credential_id);
 
+std::optional<std::string> PluginCredentialOf(
+    content::DevToolsAgentHostClient* root_client);
+
+bool PluginTabInScope(const std::string& credential_id,
+                      content::WebContents* contents);
+
 base::DictValue TokenCommandsByDomain();
 
 struct PluginTotals {
   int minted = 0;
   int revoked = 0;
   int refused = 0;
+  int holds = 0;
+  int busy = 0;
 };
 
 PluginTotals& PluginTotalsSoFar();

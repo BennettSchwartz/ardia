@@ -63,6 +63,15 @@ inline bool RefusesHiddenTarget(bool wheel, bool hidden) {
   return wheel && hidden;
 }
 
+inline constexpr int64_t kPersonBusyMicroseconds = 500000;
+
+inline bool PersonBusy(bool hidden,
+                       bool person_input_seen,
+                       int64_t microseconds_since_person_input) {
+  return !hidden && person_input_seen &&
+         microseconds_since_person_input < kPersonBusyMicroseconds;
+}
+
 inline bool NeedsRecoveryRelease(const std::vector<PointerEvent>& events,
                                  PointerOutcome outcome) {
   if (outcome != PointerOutcome::kUnknown) {

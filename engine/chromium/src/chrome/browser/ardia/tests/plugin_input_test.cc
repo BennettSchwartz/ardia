@@ -389,6 +389,18 @@ int main() {
          "hidden: a wheel to a visible widget goes", "");
   Expect(!ardia::RefusesHiddenTarget(false, true),
          "hidden: clicks and moves to a hidden widget go", "");
+  Expect(ardia::PersonBusy(false, true, 0),
+         "busy: person input this instant defers a wheel", "");
+  Expect(ardia::PersonBusy(false, true, 499999),
+         "busy: person input 499.999 ms ago defers a wheel", "");
+  Expect(!ardia::PersonBusy(false, true, 500000),
+         "busy: person input 500 ms ago lets a wheel through", "");
+  Expect(!ardia::PersonBusy(true, true, 0),
+         "busy: a hidden widget never answers busy", "");
+  Expect(!ardia::PersonBusy(false, false, 0),
+         "busy: a widget with no person input never answers busy", "");
+  Expect(ardia::PersonBusy(false, true, -1000),
+         "busy: a person input stamped after now still defers", "");
 
   std::printf("%s\n", failures ? "FAILED" : "OK");
   return failures ? 1 : 0;

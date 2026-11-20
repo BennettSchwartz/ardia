@@ -118,13 +118,25 @@ TypeScript browse client), not to #2808. It must:
   and releases in place, so a plugin can never drag). Clicks, moves and wheels go only to the page target's own
   session. A click succeeds when the renderer has acknowledged every event, which isn't proof the page handled it; a
   wheel answers once it's submitted, so read `DOM.getBoxModel` again to see whether it scrolled; a wheel to a
-  hidden page is refused (`page hidden`). It can't focus, scroll
+  hidden page is refused (`page hidden`), and a wheel to a tab the person scrolled, touched or typed in during the
+  last 500 ms answers `busy` without being queued (try again later). It can't focus, scroll
   a node into view, or emulate focus: only a click focuses the page (its keys and text don't), and it scrolls with the
   wheel.
   It gets no Runtime at all: it can't run script in a page or hold a JavaScript object. What the page does in
   response to its input (a link that opens in another window) counts as the person acting, but the plugin still can't
   reach that window. When its tab leaves the window, its session is detached, commands in flight answer
   `ardia: tab_out_of_scope`, and input it queued before the move never lands.
+- **Showing a background tab while acting.** A plugin's attach doesn't make its tab visible, so a background tab stays
+  hidden (`document.visibilityState` is `hidden`, and its wheels are refused) and costs nothing while the plugin is
+  idle. The act lease turns a hold on at lease start, before the first action, and off only after the last action
+  returns: `engine.cliPluginCredential {id, tabId, visible}` (engine args `{"id", "tab", "visible"}`) answers
+  `{"visible": true}` or `{"visible": false}`. While it's on, the tab renders and reports `visible` to the page but
+  stays in the background. It's idempotent, synchronous (the tab is visible to its renderer when the call answers) and
+  per credential and tab. Turning it on fails with `no such credential` (the id is unknown, revoked or its window is
+  gone), `no such tab`, `tab out of scope` (another window or not a web page) or `no attached session` (the
+  credential has no session on that tab); turning it off always succeeds, also for a tab that's gone. The hold drops
+  by itself when the credential's last session on the tab detaches, when the credential is revoked and when the tab
+  closes. The `ardia` command's own token still keeps a tab visible for as long as it's attached.
 - **Handing it to the CLI child.** The app creates a pipe, writes the credential to it and closes its write end, and
   passes the read end to the child as an inherited fd (`posix_spawn_file_actions_adddup2`; with
   `POSIX_SPAWN_CLOEXEC_DEFAULT` nothing else leaks). It sets `ARDIA_PLUGIN_CREDENTIAL_FD=<n>`, the fd number only, and

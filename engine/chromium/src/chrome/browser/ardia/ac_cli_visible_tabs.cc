@@ -4,8 +4,10 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "ardia/core/ac_content_hooks.h"
 #include "ardia/core/ac_launch_switches.h"
@@ -14,6 +16,7 @@
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
+#include "chrome/browser/ardia/ac_cli_plugin_credentials.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -38,8 +41,30 @@ struct VisibleHold {
   base::ScopedClosureRunner capture;
 };
 
+struct PluginSession {
+  std::string credential_id;
+  base::WeakPtr<content::WebContents> contents;
+};
+
+using PluginHoldKey = std::pair<std::string, const content::WebContents*>;
+
+struct PluginHold {
+  base::WeakPtr<content::WebContents> contents;
+  base::ScopedClosureRunner capture;
+};
+
 std::map<const void*, VisibleHold>& Holds() {
   static base::NoDestructor<std::map<const void*, VisibleHold>> holds;
+  return *holds;
+}
+
+std::map<const void*, PluginSession>& PluginSessions() {
+  static base::NoDestructor<std::map<const void*, PluginSession>> sessions;
+  return *sessions;
+}
+
+std::map<PluginHoldKey, PluginHold>& PluginHolds() {
+  static base::NoDestructor<std::map<PluginHoldKey, PluginHold>> holds;
   return *holds;
 }
 
@@ -53,8 +78,11 @@ bool KeepsTabsVisible(content::DevToolsAgentHostClient* root_client) {
       root_client->GetTypeForMetrics() != kRemoteDebuggerClient) {
     return false;
   }
-  return IsTokenClient(root_client) ||
-         ardiacore::TestFlag(kPortClientsKeepTabsVisible);
+  const std::optional<TokenKind> kind = TokenClientKind(root_client);
+  if (kind.has_value()) {
+    return *kind == TokenKind::kCli;
+  }
+  return ardiacore::TestFlag(kPortClientsKeepTabsVisible);
 }
 
 bool IsTabTarget(content::DevToolsAgentHost* host) {
@@ -62,6 +90,32 @@ bool IsTabTarget(content::DevToolsAgentHost* host) {
   return type == content::DevToolsAgentHost::kTypePage ||
          type == content::DevToolsAgentHost::kTypeFrame ||
          type == content::DevToolsAgentHost::kTypeTab;
+}
+
+bool HasPluginSession(const std::string& credential_id,
+                      const content::WebContents* contents) {
+  for (const auto& [session, attached] : PluginSessions()) {
+    if (attached.credential_id == credential_id &&
+        attached.contents.get() == contents) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ReleaseLater(base::ScopedClosureRunner capture) {
+  if (!capture) {
+    return;
+  }
+  content::GetUIThreadTaskRunner({})->PostTask(
+      FROM_HERE, base::DoNothingWithBoundArgs(std::move(capture)));
+}
+
+void DropPluginHold(const PluginHoldKey& key) {
+  auto node = PluginHolds().extract(key);
+  if (!node.empty()) {
+    ReleaseLater(std::move(node.mapped().capture));
+  }
 }
 
 void StartHold(const void* session, uint64_t id) {
@@ -82,11 +136,27 @@ void StartHold(const void* session, uint64_t id) {
   }
 }
 
+void NotePluginSession(content::DevToolsAgentHostClient* root_client,
+                       content::DevToolsAgentHost* host,
+                       const void* session) {
+  std::optional<std::string> credential_id = PluginCredentialOf(root_client);
+  content::WebContents* contents = host->GetWebContents();
+  if (!credential_id || !contents || contents->IsBeingDestroyed()) {
+    return;
+  }
+  PluginSessions().insert_or_assign(
+      session, PluginSession{std::move(*credential_id),
+                             contents->GetWeakPtr()});
+}
+
 void SessionAttached(content::DevToolsAgentHostClient* root_client,
                      content::DevToolsAgentHost* host,
                      const void* session) {
-  if (!session || !host || !IsTabTarget(host) ||
-      !KeepsTabsVisible(root_client)) {
+  if (!session || !host || !IsTabTarget(host)) {
+    return;
+  }
+  if (!KeepsTabsVisible(root_client)) {
+    NotePluginSession(root_client, host, session);
     return;
   }
   content::WebContents* contents = host->GetWebContents();
@@ -101,15 +171,77 @@ void SessionAttached(content::DevToolsAgentHostClient* root_client,
 }
 
 void SessionDetached(const void* session) {
-  auto node = Holds().extract(session);
-  if (node.empty() || !node.mapped().capture) {
+  auto plugin = PluginSessions().extract(session);
+  if (!plugin.empty()) {
+    const PluginSession& gone = plugin.mapped();
+    const content::WebContents* contents = gone.contents.get();
+    if (contents && !HasPluginSession(gone.credential_id, contents)) {
+      DropPluginHold({gone.credential_id, contents});
+    }
     return;
   }
-  content::GetUIThreadTaskRunner({})->PostTask(
-      FROM_HERE,
-      base::DoNothingWithBoundArgs(std::move(node.mapped().capture)));
+  auto node = Holds().extract(session);
+  if (!node.empty()) {
+    ReleaseLater(std::move(node.mapped().capture));
+  }
 }
 
+}
+
+PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
+                                      content::WebContents* contents,
+                                      bool on) {
+  const PluginHoldKey key{credential_id, contents};
+  auto held = PluginHolds().find(key);
+  if (held != PluginHolds().end() && !held->second.contents) {
+    PluginHolds().erase(held);
+    held = PluginHolds().end();
+  }
+  if (!on) {
+    if (held != PluginHolds().end()) {
+      base::ScopedClosureRunner capture = std::move(held->second.capture);
+      PluginHolds().erase(held);
+    }
+    return PluginTabHold::kOk;
+  }
+  if (!PluginCredentialLive(credential_id)) {
+    return PluginTabHold::kNoCredential;
+  }
+  if (!PluginTabInScope(credential_id, contents)) {
+    return PluginTabHold::kOutOfScope;
+  }
+  if (!HasPluginSession(credential_id, contents)) {
+    return PluginTabHold::kNoSession;
+  }
+  if (held != PluginHolds().end()) {
+    return PluginTabHold::kOk;
+  }
+  ++PluginTotalsSoFar().holds;
+  PluginHolds().insert_or_assign(
+      key, PluginHold{contents->GetWeakPtr(),
+                      contents->IncrementCapturerCount(
+                          gfx::Size(), kStayHidden, kStayAwake, kIsActivity)});
+  return PluginTabHold::kOk;
+}
+
+void ReleasePluginTabVisibleHolds(const std::string& credential_id) {
+  std::vector<PluginHoldKey> keys;
+  for (const auto& [key, hold] : PluginHolds()) {
+    if (key.first == credential_id) {
+      keys.push_back(key);
+    }
+  }
+  for (const PluginHoldKey& key : keys) {
+    DropPluginHold(key);
+  }
+}
+
+int PluginTabVisibleHoldCount() {
+  int live = 0;
+  for (const auto& [key, hold] : PluginHolds()) {
+    live += hold.contents && hold.capture;
+  }
+  return live;
 }
 
 void InstallCliVisibleTabs() {

@@ -3,7 +3,23 @@
 #ifndef CHROME_BROWSER_ARDIA_AC_CLI_VISIBLE_TABS_H_
 #define CHROME_BROWSER_ARDIA_AC_CLI_VISIBLE_TABS_H_
 
+#include <string>
+
+namespace content {
+class WebContents;
+}
+
 namespace ardia {
+
+enum class PluginTabHold { kOk, kNoCredential, kOutOfScope, kNoSession };
+
+PluginTabHold SetPluginTabVisibleHold(const std::string& credential_id,
+                                      content::WebContents* contents,
+                                      bool on);
+
+void ReleasePluginTabVisibleHolds(const std::string& credential_id);
+
+int PluginTabVisibleHoldCount();
 
 void InstallCliVisibleTabs();
 

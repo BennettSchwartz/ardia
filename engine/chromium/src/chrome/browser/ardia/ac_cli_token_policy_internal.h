@@ -17,7 +17,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/ardia/ac_cli_plugin_input.h"
 #include "chrome/browser/ardia/ac_cli_token_policy.h"
@@ -42,6 +41,7 @@ inline constexpr int kMaxIoReadBytes = 16 * 1024 * 1024;
 inline constexpr char kAnswerFilePicker[] = "Ardia.answerFilePicker";
 inline constexpr char kDispatchClick[] = "Ardia.dispatchClick";
 inline constexpr char kOutOfScope[] = "ardia: tab_out_of_scope";
+inline constexpr char kPluginBusy[] = "ardia: busy";
 inline constexpr char kInternalCommand[] = "ardia.internal";
 
 enum class CommandDomain {
@@ -187,7 +187,6 @@ class TokenClient : public ArdiaDevToolsTokenClient {
   base::RepeatingCallback<void(bool drop_queued)> closer_;
   base::RepeatingCallback<void(std::string)> to_browser_;
   base::RepeatingCallback<void(std::string)> to_client_;
-  base::RepeatingTimer scope_timer_;
   int next_internal_id_ = 0;
   bool wedged_ = false;
   bool draining_ = false;

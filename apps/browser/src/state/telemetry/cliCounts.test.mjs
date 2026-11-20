@@ -44,6 +44,14 @@ test("plugin credential totals from the engine turn into counts since the last t
   assert.deepEqual([counts.cli_plugin_credentials_minted, counts.cli_plugin_credentials_revoked, counts.cli_plugin_commands_refused], [3, 1, 4]);
 });
 
+test("plugin tab holds and busy wheels from the engine turn into counts since the last take", () => {
+  takeCliCounts();
+  noteCliEngineTotals({ pluginCredentials: { holds: 0, busy: 0 } }, "holds");
+  noteCliEngineTotals({ pluginCredentials: { holds: 4, busy: 1 } }, "holds");
+  const counts = takeCliCounts();
+  assert.deepEqual([counts.cli_plugin_tab_holds, counts.cli_plugin_wheels_busy], [4, 1]);
+});
+
 test("file picker answers the engine counts turn into counts since the last take", () => {
   takeCliCounts();
   noteCliEngineTotals({ filePickerAnswers: { armed: 0, used: 0 } }, "pickers");

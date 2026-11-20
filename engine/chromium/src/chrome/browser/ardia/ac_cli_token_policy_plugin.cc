@@ -22,7 +22,8 @@
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+#include "components/sessions/core/session_id.h"
+#include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/render_frame_host.h"
@@ -264,8 +265,9 @@ bool InScopeWindow(const PluginScope& scope, content::WebContents* contents) {
   if (!contents) {
     return false;
   }
+  tabs::TabInterface* tab = tabs::TabInterface::MaybeGetFromContents(contents);
   BrowserWindowInterface* browser =
-      GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(contents);
+      tab ? tab->GetBrowserWindowInterface() : nullptr;
   Profile* profile = browser ? browser->GetProfile() : nullptr;
   return profile && browser->GetSessionID().id() == scope.window &&
          profile->GetPath() == scope.profile &&

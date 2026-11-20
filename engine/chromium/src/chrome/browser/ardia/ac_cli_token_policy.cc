@@ -30,6 +30,7 @@
 #include "chrome/browser/ardia/ac_cli_owned_tabs.h"
 #include "chrome/browser/ardia/ac_cli_test_signals.h"
 #include "chrome/browser/ardia/ac_cli_token_policy_internal.h"
+#include "chrome/browser/ardia/ac_cli_visible_tabs.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_agent_host_client.h"
 #include "content/public/browser/web_contents.h"
@@ -39,8 +40,6 @@ namespace ardia {
 namespace cli_token_policy_internal {
 
 namespace {
-
-constexpr base::TimeDelta kScopeCheckInterval = base::Seconds(1);
 
 constexpr std::array<std::pair<std::string_view, CommandDomain>, 11>
     kCountedDomains = {{
@@ -149,9 +148,6 @@ TokenClient::TokenClient(content::DevToolsAgentHostClient* client,
   CHECK_EQ(kind_ == TokenKind::kPlugin, scope_.has_value());
   Registry()[client_] = this;
   if (kind_ == TokenKind::kPlugin) {
-    scope_timer_.Start(FROM_HERE, kScopeCheckInterval,
-                       base::BindRepeating(&TokenClient::CheckScope,
-                                           base::Unretained(this)));
     WatchTab(std::string());
   }
 }
@@ -159,7 +155,9 @@ TokenClient::TokenClient(content::DevToolsAgentHostClient* client,
 void TokenClient::Revoke() {
   revoked_ = true;
   wedged_ = true;
-  scope_timer_.Stop();
+  if (scope_) {
+    ReleasePluginTabVisibleHolds(scope_->credential_id);
+  }
   if (closer_) {
     closer_.Run(true);
   }
@@ -376,6 +374,9 @@ void TokenClient::FinishPointer(int id,
     return;
   }
   if (!error.empty()) {
+    if (error == kPluginBusy) {
+      ++PluginTotalsSoFar().busy;
+    }
     to_client_.Run(ErrorReply(id, session, kRefused, error));
     return;
   }
@@ -540,6 +541,32 @@ void CloseTokenClientsOf(const std::string& credential_id) {
        cli_token_policy_internal::ClientsOf(credential_id)) {
     client->Revoke();
   }
+}
+
+std::optional<std::string> PluginCredentialOf(
+    content::DevToolsAgentHostClient* root_client) {
+  auto it = cli_token_policy_internal::Registry().find(root_client);
+  if (it == cli_token_policy_internal::Registry().end() ||
+      it->second->kind() != TokenKind::kPlugin) {
+    return std::nullopt;
+  }
+  return it->second->scope()->credential_id;
+}
+
+bool PluginTabInScope(const std::string& credential_id,
+                      content::WebContents* contents) {
+  if (!contents || contents->IsBeingDestroyed()) {
+    return false;
+  }
+  std::vector<cli_token_policy_internal::TokenClient*> clients =
+      cli_token_policy_internal::ClientsOf(credential_id);
+  if (clients.empty()) {
+    return false;
+  }
+  scoped_refptr<content::DevToolsAgentHost> page =
+      content::DevToolsAgentHost::GetOrCreateFor(contents);
+  return cli_token_policy_internal::PluginTargetInScope(
+      *clients.front()->scope(), page.get());
 }
 
 PluginTotals& PluginTotalsSoFar() {

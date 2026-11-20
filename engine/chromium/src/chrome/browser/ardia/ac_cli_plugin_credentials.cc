@@ -7,19 +7,25 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <vector>
 
 #include "base/base64url.h"
+#include "base/functional/bind.h"
+#include "base/location.h"
 #include "base/containers/span.h"
 #include "base/no_destructor.h"
 #include "base/rand_util.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/ardia/ac_cli_visible_tabs.h"
 #include "chrome/browser/ardia/ac_engine.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "components/sessions/core/session_id.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "crypto/secure_util.h"
 
@@ -60,6 +66,29 @@ void SweepDeadCredentials() {
   }
 }
 
+class SweepOnWindowClose : public BrowserCollectionObserver {
+ public:
+  void Watch() {
+    if (!observation_.IsObserving()) {
+      observation_.Observe(GlobalBrowserCollection::GetInstance());
+    }
+  }
+
+  void OnBrowserClosed(BrowserWindowInterface* browser) override {
+    content::GetUIThreadTaskRunner({})->PostTask(
+        FROM_HERE, base::BindOnce(&SweepDeadCredentials));
+  }
+
+ private:
+  base::ScopedObservation<BrowserCollection, BrowserCollectionObserver>
+      observation_{this};
+};
+
+void WatchWindowCloses() {
+  static base::NoDestructor<SweepOnWindowClose> sweep;
+  sweep->Watch();
+}
+
 std::string RandomText(size_t bytes) {
   std::string text;
   base::Base64UrlEncode(base::RandBytesAsVector(bytes),
@@ -71,6 +100,7 @@ std::string RandomText(size_t bytes) {
 
 std::optional<MintedPluginCredential> MintPluginCredential(PluginScope scope) {
   SweepDeadCredentials();
+  WatchWindowCloses();
   size_t in_profile = 0;
   for (const auto& [id, credential] : Credentials()) {
     in_profile += credential.scope.profile == scope.profile &&
@@ -145,6 +175,26 @@ AC_ARGS_CALL(ac_cli_plugin_credential) {
   }
   std::optional<int> tab = args.FindInt("tab");
   content::WebContents* contents = tab ? ardia::TabWithId(*tab) : nullptr;
+  if (std::optional<bool> visible = args.FindBool("visible")) {
+    const std::string* id = args.FindString("id");
+    if (!id) {
+      return out.Error("no such credential");
+    }
+    if (!contents) {
+      return *visible ? out.Error("no such tab")
+                      : out.Send(base::DictValue().Set("visible", false));
+    }
+    switch (ardia::SetPluginTabVisibleHold(*id, contents, *visible)) {
+      case ardia::PluginTabHold::kOk:
+        return out.Send(base::DictValue().Set("visible", *visible));
+      case ardia::PluginTabHold::kNoCredential:
+        return out.Error("no such credential");
+      case ardia::PluginTabHold::kOutOfScope:
+        return out.Error("tab out of scope");
+      case ardia::PluginTabHold::kNoSession:
+        return out.Error("no attached session");
+    }
+  }
   BrowserWindowInterface* browser =
       contents
           ? GlobalBrowserCollection::GetInstance()->FindBrowserWithTab(contents)
