@@ -276,7 +276,7 @@ refusals() {
   stage valid
   expect "$kind refuses a relative folder" "failed usage" "$(cd "$cases" && as_pkexec "$helper" install valid)"
   expect "$kind refuses a missing folder" "failed missing" "$(as_pkexec "$helper" install "$cases/nothing")"
-  expect "$kind refuses a run as the user" "failed usage" "$(as_tester "$helper" install "$cases/valid" 2>/dev/null | tail -n 1)"
+  expect "$kind refuses a run as the user" "failed usage" "$(result_of as_tester "$helper" install "$cases/valid")"
   flock -o /run/ardia-update.lock sleep 30 &
   local holder=$!
   sleep 1
