@@ -5,20 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-// scripts/windows/tour.ps1 keeps its lists of failed stops in script-scope variables. A script parameter
-// is a script-scope variable too, and PowerShell variable names ignore case. A parameter typed
-// [string[]] turns whatever is assigned to the variable of its name back into a fixed-size string[]:
-// the list became an empty array, its first Add threw "Collection was of a fixed size" and ended the
-// tour, and the parameter's own value was gone.
 const source = readFileSync(new URL("../../../../scripts/windows/tour.ps1", import.meta.url), "utf8");
 const paramBlock = /^param\(([\s\S]*?)^\)/m.exec(source);
 const paramNames = [...(paramBlock?.[1] ?? "").matchAll(/\]\s*\$(\w+)/g)].map((m) => m[1]);
 
-// Everything before the part that loads the Win32 helper: the parameter block and the script's own state.
 const setupEnd = source.indexOf('if (-not ([System.Management.Automation.PSTypeName]"ArdiaTour").Type)');
 const setup = source.slice(0, setupEnd);
 
-// The script's own lists (failed stops, lines of tour.md, ...): the ones started in the setup, and all of them.
 const listsIn = (text) => [...text.matchAll(/^\$script:(\w+) = \[System\.Collections\.Generic\.List\[string\]\]::new\(\)/gm)].map((m) => m[1]);
 const lists = listsIn(setup);
 const allLists = listsIn(source);
