@@ -1,3 +1,4 @@
+import CryptoKit
 import AppKit
 import AuthenticationServices
 import Darwin
@@ -114,7 +115,8 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
 
   private static func writeResult(_ counts: PasskeyImportCounts, directory: URL) {
     let result: [String: Any] = ["at": Date().timeIntervalSince1970 * 1000, "kept": counts.kept, "existing": counts.existing,
-                                 "skippedRelyingParty": counts.skippedRelyingParty, "skippedAlgorithm": counts.skippedAlgorithm, "failed": counts.failed]
+                                 "skippedRelyingParty": counts.skippedRelyingParty, "skippedAlgorithm": counts.skippedAlgorithm, "failed": counts.failed,
+                                 "failures": counts.failures]
     if let data = try? JSONSerialization.data(withJSONObject: result) {
       try? data.write(to: directory.appendingPathComponent("passkey-import-result.json"), options: .atomic)
     }
@@ -134,8 +136,62 @@ final class HelperDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
+enum StoreSelfTest {
+  static func run() -> String {
+    let lock = FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys-self-test.lock").path
+    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", lockPath: lock)
+    let key = P256.Signing.PrivateKey()
+    var id = Data(count: 16)
+    _ = id.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+    let record = PasskeyCredential(
+      groupId: "ardia-store-self-test", rpId: "self-test.invalid", credentialId: id, userHandle: Data("t".utf8), userName: "t",
+      userDisplayName: "t", created: Date(), source: .ardia, backupEligible: false, ready: false)
+    var steps: [String: String] = [:]
+    do { steps["add"] = "\(try store.add(record, privateX963: key.x963Representation))" } catch { steps["add"] = PasskeyStoreError.code(error) }
+    do { steps["addAgain"] = "\(try store.add(record, privateX963: key.x963Representation))" } catch { steps["addAgain"] = PasskeyStoreError.code(error) }
+    do { steps["list"] = "\(try store.credentials(groupId: "ardia-store-self-test", rpId: nil).count)" } catch { steps["list"] = PasskeyStoreError.code(error) }
+    do { steps["deleteAll"] = "\(try store.deleteAll(groupId: "ardia-store-self-test"))" } catch { steps["deleteAll"] = PasskeyStoreError.code(error) }
+    let data = (try? JSONSerialization.data(withJSONObject: steps, options: .sortedKeys)) ?? Data()
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+}
+
+extension StoreSelfTest {
+  static func importWalk() -> String {
+    guard #available(macOS 26.1, *), let suffixes = PasskeyPublicSuffixList.bundled else { return "{\"error\":\"setup\"}" }
+    let arguments = CommandLine.arguments
+    let lockDirectory = arguments.firstIndex(of: "--lock-dir").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil }
+    let lock = lockDirectory.map { ($0 as NSString).appendingPathComponent("passkeys.lock") }
+      ?? FileManager.default.temporaryDirectory.appendingPathComponent("ardia-passkeys-self-test.lock").path
+    let store = PasskeyKeychainStore(accessGroup: "U5L5T3NGVV.com.ardia.browser.passkeys", lockPath: lock)
+    let items = (1...5).map { n -> ASImportableItem in
+      let passkey = ASImportableCredential.Passkey(
+        credentialID: Data((0..<16).map { _ in UInt8.random(in: 0...255) }), relyingPartyIdentifier: "site\(n).self-test.example",
+        userName: "t\(n)", userDisplayName: "T", userHandle: Data("h\(n)".utf8), key: P256.Signing.PrivateKey().derRepresentation)
+      return ASImportableItem(id: Data("i\(n)".utf8), title: "t", credentials: [.passkey(passkey)])
+    }
+    let export = ASExportedCredentialData(
+      accounts: [ASImportableAccount(id: Data("a".utf8), userName: "u", email: "e@example.com", collections: [], items: items)],
+      formatVersion: .v1, exporterRelyingPartyIdentifier: "self-test", exporterDisplayName: "self-test", timestamp: Date())
+    let counts = PasskeyImport.keep(export, groupId: "ardia-import-self-test", store: store, suffixes: suffixes)
+    let removed = (try? store.deleteAll(groupId: "ardia-import-self-test")) ?? -1
+    let data = (try? JSONSerialization.data(withJSONObject: ["added": counts.added, "failed": counts.failed, "failures": counts.failures, "skippedRelyingParty": counts.skippedRelyingParty, "removed": removed], options: .sortedKeys)) ?? Data()
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
+}
+
 enum HelperCommand {
   static func run(_ arguments: [String]) -> Bool {
+    if arguments.contains("--import-self-test") {
+      let result = StoreSelfTest.importWalk()
+      print(result)
+      if let i = arguments.firstIndex(of: "--out"), i + 1 < arguments.count { try? result.write(toFile: arguments[i + 1], atomically: true, encoding: .utf8) }
+      return true
+    }
+    if arguments.contains("--store-self-test") {
+      print(StoreSelfTest.run())
+      return true
+    }
     if arguments.contains("--autofill-state") {
       let done = DispatchSemaphore(value: 0)
       var enabled = false

@@ -10,6 +10,7 @@ struct PasskeyImportCounts: Codable, Equatable {
   var skippedRelyingParty = 0
   var skippedAlgorithm = 0
   var failed = 0
+  var failures: [String: Int] = [:]
 
   var kept: Int { added + repaired }
 }
@@ -39,11 +40,15 @@ enum PasskeyImport {
             groupId: groupId, rpId: rpId, credentialId: passkey.credentialID, userHandle: passkey.userHandle,
             userName: String(passkey.userName.prefix(256)), userDisplayName: String(passkey.userDisplayName.prefix(256)),
             created: item.created ?? Date(), source: .apple, backupEligible: true, ready: false)
-          switch try? store.add(record, privateX963: key.privateX963) {
-          case .added: counts.added += 1
-          case .existing: counts.existing += 1
-          case .repaired: counts.repaired += 1
-          case nil: counts.failed += 1
+          do {
+            switch try store.add(record, privateX963: key.privateX963) {
+            case .added: counts.added += 1
+            case .existing: counts.existing += 1
+            case .repaired: counts.repaired += 1
+            }
+          } catch {
+            counts.failed += 1
+            counts.failures[PasskeyStoreError.code(error), default: 0] += 1
           }
           key.privateX963.resetBytes(in: 0..<key.privateX963.count)
         }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
 import { View } from "react-native";
 import { confirm } from "../../../state/app/system";
 import { requestPluginConsent } from "../../../state/plugins/lifecycle";
@@ -24,6 +24,28 @@ const SMALL_PRINT =
   "Passwords sends Ardia the whole export, including passwords, notes and cards. Ardia keeps only the passkeys, in this Mac's keychain, never synced or backed up, and each use asks for Touch ID or your password. It's a one-time copy: passkeys you add to Passwords later need another copy. Passkeys in iCloud Keychain can't be used directly, because Apple hasn't given Ardia that permission.";
 const STEP_GAP = { gap: space.m, marginTop: space.l } as const;
 
+class PasskeysBoundary extends Component<{ children: ReactNode; fallback: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+const FALLBACK_ROW = <Row title="Passkeys" description="Passkeys couldn't load here. Close Settings and open it again." />;
+
+export function SafePasskeysRow(props: { name: string; review: boolean }) {
+  return (
+    <PasskeysBoundary fallback={FALLBACK_ROW}>
+      <PasskeysRow {...props} />
+    </PasskeysBoundary>
+  );
+}
+
 let bumpCounts: () => void = () => {};
 let setupAfterReview = false;
 
@@ -40,7 +62,7 @@ export function PasskeysRow({ name, review }: { name: string; review: boolean })
   useEffect(() => {
     if (review || !setupAfterReview || !groups.length) return;
     setupAfterReview = false;
-    showSettingsSheet(<PasskeySetupSheet />);
+    showSettingsSheet(<SafeSetupSheet />);
   }, [review, groups.length]);
   if (review)
     return (
@@ -64,7 +86,7 @@ export function PasskeysRow({ name, review }: { name: string; review: boolean })
   return (
     <Row title="Passkeys" description={summary ? `${summary}. Copied from Apple Passwords.` : INTRO}>
       {summary ? <Button title="Remove…" onPress={() => void confirmRemove()} /> : null}
-      <Button title={summary ? "Copy Again…" : "Set Up Passkeys…"} onPress={() => showSettingsSheet(<PasskeySetupSheet />)} />
+      <Button title={summary ? "Copy Again…" : "Set Up Passkeys…"} onPress={() => showSettingsSheet(<SafeSetupSheet />)} />
     </Row>
   );
 }
@@ -100,6 +122,23 @@ function stepText(phase: string | undefined, group: string | undefined, kept: nu
     default:
       return "Waiting for Passwords… In Passwords, choose File › Export All Items to App…, pick Ardia, and confirm with Touch ID.";
   }
+}
+
+function SafeSetupSheet() {
+  return (
+    <PasskeysBoundary
+      fallback={
+        <Sheet size="s" onClose={closeSettingsSheet}>
+          <DialogTitle subtitle="Something went wrong. Close this and try again.">Set Up Passkeys</DialogTitle>
+          <DialogActions>
+            <Button title="Close" kind="primary" onPress={closeSettingsSheet} />
+          </DialogActions>
+        </Sheet>
+      }
+    >
+      <PasskeySetupSheet />
+    </PasskeysBoundary>
+  );
 }
 
 function PasskeySetupSheet() {

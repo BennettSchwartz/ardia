@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { deleteAllPasskeys, passkeyImportState, passkeySetupState, startPasskeyImport, storedPasskeys, turnOnPasskeyAutofill, type PasskeyImportState } from "../../platform/passwordProviders";
 import { useBrowser } from "../browser/store";
@@ -12,11 +12,11 @@ export const passkeyGroups = (): PasskeyProviderEntry[] => passkeyProviderSet(us
 
 export function usePasskeyGroups(): PasskeyProviderEntry[] {
   const plugins = useManagerPlugins();
-  const profiles = useBrowser((s) => s.profiles);
-  const [groups, setGroups] = useState<PasskeyProviderEntry[]>(() => passkeyProviderSet(useBrowser.getState(), plugins));
-  useEffect(() => setGroups(passkeyProviderSet(useBrowser.getState(), plugins)), [plugins, profiles]);
-  return groups;
+  const key = useBrowser((s) => JSON.stringify(passkeyProviderSet(s, plugins)));
+  return useMemo(() => JSON.parse(key) as PasskeyProviderEntry[], [key]);
 }
+
+const sameJSON = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 export async function countPasskeys(groups: readonly PasskeyProviderEntry[]): Promise<PasskeyGroupCount[]> {
   const counts = await Promise.all(groups.map((g) => storedPasskeys(g.group).then((r) => r?.passkeys?.length ?? 0).catch(() => 0)));
@@ -28,7 +28,7 @@ export function usePasskeyCounts(groups: readonly PasskeyProviderEntry[], refres
   const key = groups.map((g) => `${g.group}:${g.groupName}`).join("|");
   useEffect(() => {
     let live = true;
-    const refresh = () => void countPasskeys(groups).then((next) => live && setCounts(next));
+    const refresh = () => void countPasskeys(groups).then((next) => live && setCounts((now) => (now && sameJSON(now, next) ? now : next)));
     refresh();
     const watch = AppState.addEventListener("change", (state) => state === "active" && refresh());
     return () => {
@@ -64,7 +64,11 @@ export function usePasskeyImportState(since: number, watching: boolean): Passkey
     const poll = () =>
       void passkeyImportState()
         .catch(() => ({}) as PasskeyImportState)
-        .then((next) => live && setState(next && (next.at ?? 0) >= since ? next : {}));
+        .then((reply) => {
+          if (!live) return;
+          const next = reply && (reply.at ?? 0) >= since ? reply : {};
+          setState((now) => (sameJSON(now, next) ? now : next));
+        });
     poll();
     const timer = setInterval(poll, 1000);
     return () => {
