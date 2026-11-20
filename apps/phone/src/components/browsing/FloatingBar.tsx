@@ -7,7 +7,7 @@ import { haptics } from "../../state/app/haptics";
 import { TabsMenuTrigger } from "./tabsMenu";
 import { display } from "../../state/search/omnibox";
 import type { BrowserTab } from "../../state/tabs/tabModels";
-import { capsule, chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, shape, smoothCorners, Symbol, type ColorRoles } from "../ui";
+import { capsule, chromeInk, chromeLayout, ChromeSurface, Favicon, floatingBarLayout, PressScale, Symbol, type ColorRoles } from "../ui";
 import { TabStack } from "./BottomBar";
 import { barReturnedToPage } from "../../state/browse/deckPull";
 import { useDeckOwnsBar } from "../../state/browse/hooks";
@@ -184,7 +184,7 @@ export function FloatingTabsButton({ tab, order, roles, dark, testID, glass, gly
           onLongPress={onLongPress}
           style={styles.circleHit}
         >
-          <ChromeSurface testID={testID} shape="rounded" cornerRadius={shape.control} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+          <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(floatingBarLayout.control)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
             <PullGlyphs>
               <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
                 <TabStack tabs={order.slice(-2)} roles={roles} />
@@ -206,7 +206,7 @@ export function FloatingPlusButton({ tab, dark, testID, glass, glyphs, ghost = f
   const ink = dark ? chromeInk.dark : chromeInk.light;
   return (
     <PressScale label="New Search" onPress={onPlus} onPressIn={haptics.barPress} style={styles.circleHit}>
-      <ChromeSurface testID={testID} shape="rounded" cornerRadius={shape.control} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+      <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(floatingBarLayout.control)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
         <PullGlyphs>
           <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
             <Symbol name="plus" size={floatingBarLayout.plusSymbol} color={ink.foreground} />
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
   addressFade: { flex: 1, alignSelf: "stretch", flexDirection: "row" },
   menuGlyph: { alignItems: "center", justifyContent: "center" },
   menuLock: { position: "absolute", top: 0, bottom: 0, left: 0, right: 0 },
-  circle: { ...smoothCorners, width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
+  circle: { width: floatingBarLayout.control, height: floatingBarLayout.control, alignItems: "center", justifyContent: "center" },
   addressSlot: { flex: 1, height: floatingBarLayout.control },
   address: { flex: 1, height: floatingBarLayout.control, flexDirection: "row", alignItems: "center" },
   addressRow: { flex: 1, alignSelf: "stretch", flexDirection: "row", alignItems: "center" },

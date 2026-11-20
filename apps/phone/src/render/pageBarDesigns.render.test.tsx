@@ -53,14 +53,14 @@ test.each(DESIGNS)("the %s design draws its own page bar and only that one", (de
   unmount(root);
 });
 
-test("the redesigned bar is a glass pill address between two smooth rounded squares, 48 points tall, 8 apart and 24 in from the sides, their bottom 21.5 points above the screen's edge on iPhone and 8 above Android's 3-button bar", () => {
+test("the redesigned bar is a glass pill address between two glass circles, 48 points tall, 8 apart and 24 in from the sides, their bottom 21.5 points above the screen's edge on iPhone and 8 above Android's 3-button bar", () => {
   const root = page("redesigned");
   const row = StyleSheet.flatten(host(root, "floatingBar")!.props.style);
   expect(row).toMatchObject({ gap: 8, paddingHorizontal: 24, height: 48 });
   let place = host(root, "floatingBar")!.parent;
   while (place && (typeof place.type !== "string" || StyleSheet.flatten(place.props.style)?.bottom === undefined)) place = place.parent;
   expect(StyleSheet.flatten(place!.props.style).bottom).toBe(Platform.OS === "android" ? 34 + 8 : 21.5);
-  for (const piece of ["floatingBarTabs", "floatingBarPlus"]) expect(StyleSheet.flatten(host(root, piece)!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 12, borderCurve: "continuous" });
+  for (const piece of ["floatingBarTabs", "floatingBarPlus"]) expect(StyleSheet.flatten(host(root, piece)!.props.style)).toMatchObject({ width: 48, height: 48, borderRadius: 24 });
   expect(StyleSheet.flatten(host(root, "floatingBarAddress")!.props.style)).toMatchObject({ flex: 1, height: 48, borderRadius: 24 });
   unmount(root);
 });
