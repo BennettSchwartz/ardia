@@ -3,9 +3,8 @@ import { getAnimatedStyle } from "react-native-reanimated";
 import { act } from "react-test-renderer";
 import { Surfaces } from "../App";
 import { MaterialBarProvider, PersistentMaterialBar, useMaterialBarRegistration } from "../components/browsing/PersistentMaterialBar";
-import { barHeight } from "../components/ui";
 import { MaterialBottomBar } from "../components/ui/MaterialBottomBar";
-import { materialBottomBar } from "../components/ui/materialTokens";
+import { materialBarPill, materialBottomBar } from "../components/ui/materialTokens";
 import { SEEDED_SCHEMES } from "../lib/material/schemes";
 import { useBrowse } from "../state/browse/store";
 import { closePageMenu } from "../state/page/actions";
@@ -160,7 +159,7 @@ onAndroid("a missing registration or blocked overlay hides interaction without u
   unmount(root);
 });
 
-onAndroid("scrolling a page down animates the persistent Material bottom bar away, scrolling up brings it back, and switching to deck restores it", () => {
+onAndroid("scrolling a page down folds the persistent Material bottom bar into a host pill, scrolling up brings it back, and switching to deck restores it", () => {
   const scroll = (scrollDirection: PageState["scrollDirection"]) => {
     const tab = currentTabs().open.find((entry) => entry.id === currentTabs().selectedId)!;
     act(() => storeNavigation(tab.id, { url: tab.url, title: tab.title, canGoBack: false, canGoForward: false, isLoading: false, progress: 1, scrollDirection } as unknown as PageState));
@@ -175,15 +174,18 @@ onAndroid("scrolling a page down animates the persistent Material bottom bar awa
   scroll("up");
   const root = renderSurface(<Surfaces />);
   const shell = hosts(root, "materialBottomBar")[0]!;
-  const placed = StyleSheet.flatten(shell.props.style);
-  const travel = barHeight((placed.bottom as number) - materialBottomBar.inset, "material");
+  const folded = Math.round((materialBottomBar.height / 2) * (1 - materialBarPill.collapsedScale) * 10) / 10;
 
   scroll("down");
   settle();
   expect(hosts(root, "materialBottomBar")[0]).toBe(shell);
-  expect(motion(shell)).toEqual({ opacity: 0, translateY: travel });
+  expect(motion(shell)).toEqual({ opacity: 0, translateY: folded });
   expect(shell.props.pointerEvents).toBe("none");
   expect(shell.props.accessibilityElementsHidden).toBe(true);
+  const pill = hosts(root, "materialBarPillPlace")[0]!;
+  expect(motion(pill)).toEqual({ opacity: 1, translateY: 0 });
+  expect(pill.props.pointerEvents).toBe("box-none");
+  expect(pill.props.accessibilityElementsHidden).toBe(false);
 
   act(() => useBrowse.setState({ surface: "deck", deckEntrance: null, leaving: null }));
   expect(hosts(root, "materialBottomBar")[0]).toBe(shell);

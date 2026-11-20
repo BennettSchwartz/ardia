@@ -26,7 +26,9 @@ export const materialShape = { none: 0, extraSmall: 4, small: 8, medium: 12, lar
 
 export const MATERIAL_SEGMENT_GAP = 2;
 
-export const materialBottomBar = { height: 64, field: 48, inset: 8, edge: 16, gap: 4 } as const;
+export const materialBottomBar = { height: 56, field: 48, inset: 8, pad: 4, edge: 16, gap: 2 } as const;
+
+export const materialBarPill = { height: 36, maxWidth: 240, sideInset: 14, spacing: 8, siteIcon: 16, collapsedScale: 0.62 } as const;
 
 export const materialSegmentCorners = (index: number, count: number) => {
   const top = index === 0 ? materialShape.largeIncreased : materialShape.extraSmall;
@@ -45,7 +47,7 @@ export const materialSize = {
   listInset: 16,
   listIconGap: 16,
   topAppBar: 64,
-  bottomBar: 80,
+  bottomBar: materialBottomBar.height + materialBottomBar.inset * 2,
   fab: 56,
   searchBar: 56,
   badge: 16,
@@ -93,18 +95,18 @@ export function materialMove(to: number, easing: MaterialEasing, durationMs: num
 }
 
 export const materialMotion = {
-  sheetEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium4 },
-  sheetExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short4 },
-  scrimIn: { easing: "standard", durationMs: materialDuration.medium2 },
-  scrimOut: { easing: "standard", durationMs: materialDuration.short4 },
+  sheetEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium1 },
+  sheetExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short3 },
+  scrimIn: { easing: "standard", durationMs: materialDuration.short4 },
+  scrimOut: { easing: "standard", durationMs: materialDuration.short3 },
   fadeThroughOut: { easing: "emphasizedAccelerate", durationMs: materialDuration.short2 },
-  fadeThroughIn: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium1 },
-  containerTransform: { easing: "emphasized", durationMs: materialDuration.long2 },
-  menuEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium2 },
-  menuExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short3 },
-  dialogEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium4 },
-  dialogExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short4 },
+  fadeThroughIn: { easing: "emphasizedDecelerate", durationMs: materialDuration.short3 },
+  containerTransform: { easing: "emphasized", durationMs: materialDuration.medium1 },
+  menuEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.short4 },
+  menuExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short2 },
+  dialogEnter: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium1 },
+  dialogExit: { easing: "emphasizedAccelerate", durationMs: materialDuration.short3 },
   ripple: { easing: "standard", durationMs: materialDuration.medium1 },
-  sharedAxisIn: { easing: "emphasizedDecelerate", durationMs: materialDuration.medium2 },
-  sharedAxisOut: { easing: "emphasizedAccelerate", durationMs: materialDuration.short3 },
+  sharedAxisIn: { easing: "emphasizedDecelerate", durationMs: materialDuration.short4 },
+  sharedAxisOut: { easing: "emphasizedAccelerate", durationMs: materialDuration.short2 },
 } as const satisfies Record<string, { easing: MaterialEasing; durationMs: number }>;

@@ -247,7 +247,7 @@ export function MaterialBarIconButton({ testID, icon, label, hint, scheme, turne
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: materialBottomBar.gap, paddingHorizontal: materialBottomBar.inset, height: materialBottomBar.height, borderRadius: materialShape.full, elevation: 3 },
+  row: { flexDirection: "row", alignItems: "center", gap: materialBottomBar.gap, paddingHorizontal: materialBottomBar.pad, height: materialBottomBar.height, borderRadius: materialShape.full, elevation: 3 },
   fieldContainer: { flex: 1, height: materialBottomBar.field, borderRadius: materialShape.full, overflow: "hidden" },
   fieldPressable: { flexDirection: "row", alignItems: "center", gap: 8, paddingLeft: 12, paddingRight: 4 },
   startField: { paddingRight: 16 },

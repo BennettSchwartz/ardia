@@ -175,7 +175,7 @@ export function MaterialSheet({ open, onDismiss, onBack, onHidden, expandableLis
     }
     if (searchProgress.value === 1) return;
     searchStartHeight.value = expansion.value > 0 ? compactHeight.value : sheetHeight.value;
-    searchProgress.value = materialMove(1, "emphasized", reduceMotion ? 0 : materialDuration.medium1);
+    searchProgress.value = materialMove(1, "emphasized", reduceMotion ? 0 : materialDuration.short4);
   }, [searching, reduceMotion]);
   const compact = useDerivedValue(() => {
     if (searchHeight) return searchStartHeight.value + (searchHeight.value - searchStartHeight.value) * searchProgress.value;
@@ -279,7 +279,7 @@ export function MaterialSheet({ open, onDismiss, onBack, onHidden, expandableLis
       if (expandable) {
         const target = trayExpansionTarget(expansion.value, event.translationY, event.velocityY);
         if (target === 1 && resizeStart.value < 0.5 && onExpand) runOnJS(onExpand)();
-        expansion.value = materialMove(target, "emphasized", reduceMotion ? 0 : materialDuration.medium3);
+        expansion.value = materialMove(target, "emphasized", reduceMotion ? 0 : materialDuration.medium1);
       }
       drag.value = materialMove(0, "standard", materialDuration.short4);
     })
@@ -314,7 +314,7 @@ export function MaterialSheet({ open, onDismiss, onBack, onHidden, expandableLis
     const expanded = expansion.value;
     const panelLeft = (insets.left + (across - sheetWidth) / 2) * (1 - expanded);
     const panelWidth = sheetWidth + (width - sheetWidth) * expanded;
-    const barSide = search?.barSide ?? Math.max(insets.left, insets.right) + materialBottomBar.edge + materialBottomBar.inset + materialSize.touchTarget + materialBottomBar.gap;
+    const barSide = search?.barSide ?? Math.max(insets.left, insets.right) + materialBottomBar.edge + materialBottomBar.pad + materialSize.touchTarget + materialBottomBar.gap;
     const bottom = insets.bottom + materialBottomBar.inset + (materialBottomBar.height - materialBottomBar.field) / 2;
     const dockInset = materialSize.touchTarget + insets.top * expanded;
     const lift = liveSheetHeight.value - bottom - materialBottomBar.field - dockInset;

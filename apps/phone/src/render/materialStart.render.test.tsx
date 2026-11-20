@@ -58,7 +58,7 @@ onAndroid("the material start screen is the scheme's surfaces, a top app bar of 
     bottom: 32,
     left: 16,
     right: 16,
-    height: 64,
+    height: 56,
     borderRadius: 9999,
     backgroundColor: "transparent",
     elevation: 0,
@@ -125,6 +125,6 @@ onAndroid("while search is open the start screen's controls leave touch and Talk
   }
   expect(materialStartMs(true, true)).toBe(0);
   expect(materialStartMs(false, true)).toBe(100);
-  expect(materialStartMs(false, false)).toBe(250);
+  expect(materialStartMs(false, false)).toBe(150);
   unmount(root);
 });

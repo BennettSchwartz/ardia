@@ -145,11 +145,11 @@ onAndroid("in landscape the material sheet stays inside the side insets and is a
   Dimensions.set({ window, screen: window });
 });
 
-onAndroid("with Android's Remove animations the material sheet comes and goes at once, as Compose's do; otherwise it enters in 400 ms and leaves in 200 ms", () => {
+onAndroid("with Android's Remove animations the material sheet comes and goes at once, as Compose's do; otherwise it enters in 250 ms and leaves in 150 ms", () => {
   expect(materialSheetMs(true, true)).toBe(0);
   expect(materialSheetMs(true, false)).toBe(0);
-  expect(materialSheetMs(false, true)).toBe(400);
-  expect(materialSheetMs(false, false)).toBe(200);
+  expect(materialSheetMs(false, true)).toBe(250);
+  expect(materialSheetMs(false, false)).toBe(150);
 });
 
 onAndroid("in dark, drawn menus sit on surfaceContainerHighest, a tone above the page and above the search view's surfaceContainerHigh, so a suggestion's menu stands off the search behind it; light keeps surfaceContainer", () => {

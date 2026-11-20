@@ -544,7 +544,7 @@ export const TabDeck = memo(function TabDeck() {
       orderIds.value = ids;
       scroll.value = target;
       gap.value = 0;
-      gap.value = faded ? withTiming(1, { duration: tabsMotion.fade }) : material ? materialMove(1, "emphasized", materialDuration.medium2) : withSpring(1, tabsMotion.gapClose);
+      gap.value = faded ? withTiming(1, { duration: tabsMotion.fade }) : material ? materialMove(1, "emphasized", materialDuration.short4) : withSpring(1, tabsMotion.gapClose);
   };
   const moveCards = (next: readonly string[], to: number, by: number, expandedAt: number, keepsExpanded: boolean, reduced: boolean, leave: { id: string; spec: DeckLeave } | null) =>
     runOnUI(shiftDeck)(next, to, by, expandedAt, keepsExpanded, reduced, leave);

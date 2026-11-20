@@ -32,7 +32,7 @@ const SHEET_ABOVE_KEYBOARD = 340;
 const FOCUS_AFTER_ENTER_MS = 32;
 
 export const materialSearchMs = (reduceMotion: boolean, entering: boolean) =>
-  materialSheetMs(reduceMotion, entering) + (reduceMotion ? 0 : materialDuration.short3);
+  materialSheetMs(reduceMotion, entering) + (reduceMotion ? 0 : materialDuration.short2);
 
 export const materialSearchFocusDelay = (enterMs: number, sinceOpenMs: number) =>
   Math.max(0, enterMs - sinceOpenMs) + FOCUS_AFTER_ENTER_MS;
@@ -70,7 +70,7 @@ export function useMaterialSheetSearch(searching: boolean): MaterialSheetSearch 
   });
   const voice = useVoice((state) => state.presented);
   const covered = useTrayCovers((state) => state.covers > 0);
-  const barSide = Math.max(insets.left, insets.right) + materialBottomBar.edge + materialBottomBar.inset + (surface === "start" ? 0 : materialSize.touchTarget + materialBottomBar.gap);
+  const barSide = Math.max(insets.left, insets.right) + materialBottomBar.edge + materialBottomBar.pad + (surface === "start" ? 0 : materialSize.touchTarget + materialBottomBar.gap);
   return { height: sheetHeight, keyboard: keyboard.height, barSide, claimsBack: !voice && !covered, incognito, onBackSwipe: countSearchBackSwipe };
 }
 

@@ -234,10 +234,10 @@ onAndroid("downloads list each file as a two-line item with its size and date", 
   unmount(root);
 });
 
-test("with Remove animations the library comes and goes at once on Android; otherwise it enters in 400 ms and leaves in 200 ms", () => {
+test("with Remove animations the library comes and goes at once on Android; otherwise it enters in 250 ms and leaves in 150 ms", () => {
   expect(materialLibraryMs(true, true)).toBe(Platform.OS === "android" ? 0 : 150);
-  expect(materialLibraryMs(false, true)).toBe(400);
-  expect(materialLibraryMs(false, false)).toBe(200);
+  expect(materialLibraryMs(false, true)).toBe(250);
+  expect(materialLibraryMs(false, false)).toBe(150);
 });
 
 test("Back ends a search first, then pops a folder, then closes the library", () => {

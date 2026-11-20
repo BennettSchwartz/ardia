@@ -49,7 +49,8 @@ import {
 import { BottomBar } from "./BottomBar";
 import { FloatingBar } from "./FloatingBar";
 import { MaterialBarBand } from "./MaterialPageBar";
-import { useMaterialBarRegistration } from "./PersistentMaterialBar";
+import { materialBarPill, materialBottomBar } from "../ui/materialTokens";
+import { MaterialBarPill, useMaterialBarFold, useMaterialBarRegistration, useMaterialPillFold } from "./PersistentMaterialBar";
 import { useMaterialTheme } from "../ui/materialTheme";
 import { HostPill, useBarFold } from "./HostPill";
 import { hostPillLayout } from "./hostPillTokens";
@@ -164,6 +165,8 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
   const pageMenu = menu.mounted ? <PageMenu tabId={tab.id} open={menuOpen} onHidden={menu.hidden} /> : null;
   const siteSettingsSheet = design === "material" && menuDocked ? pageMenu : null;
   const barBlocked = collapse.hidden || siteSettingsSheet !== null;
+  const materialBarFold = useMaterialBarFold(design === "material" ? collapse.fold.progress : null);
+  const materialPillFold = useMaterialPillFold(design === "material" ? collapse.fold.progress : null);
   const materialBarHosted = useMaterialBarRegistration("page", design === "material" && !column ? {
     bar: { isTabOverview: false, scheme: materialScheme, tab, order, showsPlus: !searching, addressDocked: siteSettingsSheet !== null, onTabs: showDeck, onTabsMenu: openTabsMenu, onStep: stepTab, onAddress: editPageQuery, onPlus: newTab, onMore: openPageMenu, onSiteSettings: openDockedSiteSettings },
     gesture: barGesture,
@@ -171,6 +174,7 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
     hidden: finding || fullscreen || (menu.mounted && !siteSettingsSheet) || readerId === tab.id || pressing || tabsMenu,
     blocked: barBlocked,
     collapse: { progress: collapse.hide, travel: collapse.travel },
+    fold: { progress: collapse.fold.progress, collapsed: collapse.collapsed, expand: collapse.expand },
     siteSettingsSheet,
   } : null);
 
@@ -260,7 +264,14 @@ export const BrowsingScreen = memo(function BrowsingScreen({ tab }: { tab: Brows
                   ) : null}
                 </Animated.View>
               ) : design === "material" ? (
-                <MaterialBarBand tab={tab} order={order} showsPlus={!searching} addressDocked={siteSettingsSheet !== null} safeSide={safeSide} onTabs={showDeck} onTabsMenu={openTabsMenu} onStep={stepTab} onAddress={editPageQuery} onPlus={newTab} onMore={openPageMenu} onSiteSettings={openDockedSiteSettings} />
+                <>
+                  <Animated.View testID="materialBarFold" collapsable={false} style={[StyleSheet.absoluteFill, materialBarFold]} pointerEvents={collapse.collapsed ? "none" : "box-none"} importantForAccessibility={collapse.collapsed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={collapse.collapsed}>
+                    <MaterialBarBand tab={tab} order={order} showsPlus={!searching} addressDocked={siteSettingsSheet !== null} safeSide={safeSide} onTabs={showDeck} onTabsMenu={openTabsMenu} onStep={stepTab} onAddress={editPageQuery} onPlus={newTab} onMore={openPageMenu} onSiteSettings={openDockedSiteSettings} />
+                  </Animated.View>
+                  <Animated.View testID="materialBarPillPlace" collapsable={false} style={[styles.materialPillPlace, { bottom: insets.bottom + materialBottomBar.inset, left: safeSide + materialBottomBar.edge, right: safeSide + materialBottomBar.edge }, materialPillFold]} pointerEvents={collapse.collapsed ? "box-none" : "none"} importantForAccessibility={collapse.collapsed ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!collapse.collapsed}>
+                    <MaterialBarPill tab={tab} scheme={materialScheme} onExpand={collapse.expand} />
+                  </Animated.View>
+                </>
               ) : (
                 <>
                   <View style={[StyleSheet.absoluteFill, { backgroundColor: barDark ? tabsInk.barShadeOnDark : tabsInk.barShadeOnLight }]} />
@@ -307,7 +318,7 @@ function PageStack({ column, pulledTab, barTop, children }: { column: ScreenColu
 }
 
 function useBarCollapse(tabId: string, isPrivate: boolean, finding: boolean, design: Design, height: number) {
-  const folds = design === "redesigned";
+  const folds = design === "redesigned" || design === "material";
   const collapses = bottomBarCollapses(design, usePreferences((p) => p.collapsesBottomBar));
   const materialFind = design === "material" && finding;
   const followsScroll = collapses && !materialFind;
@@ -425,5 +436,6 @@ const styles = StyleSheet.create({
   bar: { position: "absolute", left: 0, right: 0, bottom: 0 },
   replacedBar: { opacity: 0 },
   controls: { position: "absolute", left: 0, right: 0 },
+  materialPillPlace: { position: "absolute", height: materialBarPill.height, alignItems: "center", justifyContent: "flex-end" },
   pillPlace: { position: "absolute", left: 0, right: 0, bottom: 0, height: hostPillLayout.height, alignItems: "center", justifyContent: "flex-end" },
 });

@@ -142,7 +142,7 @@ export function MaterialDeckBottomRow({ shown, barBlocked = false, safeSide, saf
   const lift = focused && keyboard > 0 ? materialKeyboardLift(keyboard, safeBottom, Platform.OS) : 0;
   const rise = useSharedValue(0);
   useEffect(() => {
-    rise.value = materialMove(-lift, "emphasized", materialDuration.medium2);
+    rise.value = materialMove(-lift, "emphasized", materialDuration.short4);
   }, [lift]);
   const riseStyle = useAnimatedStyle(() => ({ transform: [{ translateY: rise.value }] }));
   const row = useRef<ViewInstance>(null);

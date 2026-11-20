@@ -68,7 +68,7 @@ onAndroid("the Material search capsule uses the same docked sheet as the page me
     borderTopRightRadius: 28,
   });
   expect(node(root, "materialDragHandle")).toBeDefined();
-  expect(node(root, "materialSheetDockedBar")).toHaveAnimatedStyle({ left: 16, right: 16, bottom: 40 });
+  expect(node(root, "materialSheetDockedBar")).toHaveAnimatedStyle({ left: 16, right: 16, bottom: 36 });
   expect(flat(node(root, "materialSheetDockedBar"))).toMatchObject({ height: 48, borderRadius: 9999, backgroundColor: LIGHT.surfaceContainerHigh });
   expect(flat(node(root, "materialSearchBar"))).toMatchObject({
     height: 48,
@@ -103,7 +103,8 @@ onAndroid("the expanded field lands in the sheet header with results visible bel
   act(() => presentSearch("start", ""));
   const root = tray();
   const bar = node(root, "materialSheetDockedBar")!;
-  expect(bar).toHaveAnimatedStyle({ left: 16, transform: [{ translateY: -228 }] });
+  act(() => jest.advanceTimersByTime(400));
+  expect(bar).toHaveAnimatedStyle({ left: 16, transform: [{ translateY: -232 }] });
   act(() => closeSearch(root));
   expect(node(root, "materialSheet")).toBeDefined();
   act(() => jest.advanceTimersByTime(400));
@@ -151,7 +152,7 @@ onAndroid("in landscape the sheet grows past its top bar room so the search fiel
   Dimensions.set({ window: portrait, screen: portrait });
 });
 
-onAndroid.each([["start", 24], ["browsing", 80], ["deck", 80]] as const)("search returns to the %s bar with the menu's timing and morphs into the resting contents before removal", (surface, side) => {
+onAndroid.each([["start", 20], ["browsing", 70], ["deck", 70]] as const)("search returns to the %s bar with the menu's timing and morphs into the resting contents before removal", (surface, side) => {
   act(() => {
     browse.useBrowse.setState({ surface });
     presentSearch("start", "");
@@ -167,14 +168,14 @@ onAndroid.each([["start", 24], ["browsing", 80], ["deck", 80]] as const)("search
   expect(node(root, "materialSearchEditing")!).toHaveAnimatedStyle({ opacity: 1 });
   expect(flat(node(root, "materialSearchEditing")).width).toBe(360);
   expect(node(root, "materialSearchLanding")!).toHaveAnimatedStyle({ opacity: 0 });
-  act(() => jest.advanceTimersByTime(200));
+  act(() => jest.advanceTimersByTime(100));
   const landing = getAnimatedStyle(bar) as { left: number; transform: [{ translateY: number }] };
   expect(landing.left).toBeGreaterThan(moving.left);
   expect(landing.left).toBeLessThanOrEqual(side);
   expect(landing.transform[0].translateY).toBe(0);
   expect(getAnimatedStyle(node(root, "materialSearchLanding")!).opacity).toBeGreaterThan(0);
   expect(getAnimatedStyle(node(root, "materialSearchEditing")!).opacity).toBeLessThan(1);
-  act(() => jest.advanceTimersByTime(100));
+  act(() => jest.advanceTimersByTime(150));
   expect(node(root, "materialSheetDockedBar")).toBeUndefined();
   unmount(root);
 });
@@ -197,7 +198,7 @@ onAndroid("swiping up expands search to the whole screen, down returns to the sh
   settle();
   expect(searchState().open).toBe(true);
   expect(sheet).toHaveAnimatedStyle({ height, paddingTop: 40, borderTopLeftRadius: 0 });
-  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ transform: [{ translateY: -(height - 176) }] });
+  expect(node(root, "materialSheetDockedBar")!).toHaveAnimatedStyle({ transform: [{ translateY: -(height - 172) }] });
   layout(height);
   swipe(180);
   settle();
@@ -253,10 +254,10 @@ onAndroid("a wallpaper scheme change re-themes the search capsule and suggestion
   unmount(root);
 });
 
-onAndroid("with Remove animations search settles at once; otherwise it expands for 150 ms and rises for 400 ms, reversing on close", () => {
+onAndroid("with Remove animations search settles at once; otherwise it expands for 100 ms and rises for 250 ms, reversing on close", () => {
   expect(materialSearchMs(true, true)).toBe(0);
-  expect(materialSearchMs(false, true)).toBe(550);
-  expect(materialSearchMs(false, false)).toBe(350);
+  expect(materialSearchMs(false, true)).toBe(350);
+  expect(materialSearchMs(false, false)).toBe(250);
 });
 
 onAndroid("the field takes focus, and with it the keyboard, only once the field has reached the sheet header, so Android doesn't drop the request on a half-shown view", () => {

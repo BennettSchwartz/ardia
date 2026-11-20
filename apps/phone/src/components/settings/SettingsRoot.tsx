@@ -156,11 +156,12 @@ export function SettingsRoot() {
         </Group>
       ) : null}
       <Group header="About">
-        <Pressable accessibilityRole="button" onPress={showOnboardingFromSettings} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
+        {material ? <NavRow title="Show Onboarding" icon="handWave" onPress={showOnboardingFromSettings} /> : null}
+        {material ? null : <Pressable accessibilityRole="button" onPress={showOnboardingFromSettings} style={({ pressed }) => [styles.row, pressed ? { backgroundColor: theme.rowHighlight } : null]}>
           <IconTile icon="handWave" tint={settingsTint.onboarding} />
           <Text style={[font.body, { color: theme.label }]}>Show Onboarding</Text>
-        </Pressable>
-        <View style={[styles.divider, { backgroundColor: theme.separator }]} />
+        </Pressable>}
+        {material ? null : <View style={[styles.divider, { backgroundColor: theme.separator }]} />}
         <NavRow title="About Ardia" icon="info" tint={settingsTint.neutral} onPress={() => pushSettings({ page: "about" })} />
       </Group>
       <Text style={[font.footnote, styles.centered, { color: theme.secondaryLabel }]}>{appVersion()}</Text>

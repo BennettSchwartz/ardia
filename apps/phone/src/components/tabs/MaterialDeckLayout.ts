@@ -28,7 +28,7 @@ export const materialBottomRowCenter = (safeBottom: number) => safeBottom + mate
 export function fitsMaterialChrome(g: DeckGeometry): boolean {
   const cardTop = g.cardCenterY - g.cardHeight / 2;
   const titleRowTop = cardTop - tabsLayout.headerGap - tabsLayout.headerHeight;
-  const rowTop = g.height - g.safeBottom - MATERIAL_DECK.edge - materialSize.fab;
+  const rowTop = g.height - g.safeBottom - materialBottomBar.inset - materialBottomBar.height;
   return titleRowTop >= g.safeTop + materialSize.topAppBar && g.cardCenterY + g.cardHeight / 2 <= rowTop;
 }
 
