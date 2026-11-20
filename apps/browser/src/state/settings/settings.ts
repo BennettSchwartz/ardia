@@ -27,6 +27,7 @@ import type { SavedObject } from "../../lib/savedDocument";
 import type { JsonSchema } from "../../lib/jsonSchema";
 import { PROVIDERS_SCHEMA } from "../omnibox/providerSchema";
 import { COMMAND_BAR_START_SCHEMA, isCommandBarStart, type CommandBarStart } from "../omnibox/commandBarStart";
+import { PRESS_MOTIONS } from "../../lib/pressMotion";
 import { noteAutoHideTabsChosen } from "../telemetry/autoHideTabsChoices";
 import { READER_FONTS, READER_SIZE_NAMES } from "../reader/tokens";
 import { noteMinimalismToggled } from "../telemetry/minimalismCounts";
@@ -161,6 +162,9 @@ export const SETTING_SPECS = {
   pageFrameZeroWhenTabsHidden: flag(false, SYNCED),
   commandBarPlacement: oneOf(["field", "centred", "centredOnClick"], "field", SYNCED),
   commandBarStart: shaped<CommandBarStart>({}, isCommandBarStart, COMMAND_BAR_START_SCHEMA),
+  pressMotion: oneOf(PRESS_MOTIONS, "still"),
+  folderStyle: oneOf(["profile", "neutral"], "profile"),
+  liveFolderIcon: oneOf(["folder", "service"], "folder"),
   spacesFollowAppearance: flag(true),
   defaultProfileId: text(DEFAULT_PROFILE_ID),
   showProfileDots: flag(true, SYNCED),
@@ -168,6 +172,7 @@ export const SETTING_SPECS = {
   shortcuts: shaped<Record<string, string[]>>({}, (v) => isRecordOf(v, isStringList), recordOf(STRING_LIST), SYNCED),
   openLinksInLittleArdia: flag(true),
   littleArdiaOpensNewTabLinks: flag(true, SYNCED),
+  littleArdiaShortcutFromAnyApp: flag(false),
   littleArdiaSize: shaped<[number, number]>([900, 640], (v) => Array.isArray(v) && v.length === 2 && v.every(isWidth), { type: "array", prefixItems: [WIDTH, WIDTH], minItems: 2, maxItems: 2 }),
   pageEngine: oneOf(["chromium", "webkit"], "chromium"),
   websiteEngines: shaped<Record<string, "chromium" | "webkit">>({}, (v) => isRecordOf(v, (e) => e === "chromium" || e === "webkit"), recordOf({ type: "string", enum: ["chromium", "webkit"] })),
