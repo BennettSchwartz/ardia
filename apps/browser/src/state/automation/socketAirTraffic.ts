@@ -61,8 +61,7 @@ function targetOf(params: Record<string, unknown>, base: AirTrafficTarget): AirT
   const groupKey = params.group !== undefined ? (params.group as string | null) : kept;
   if (groupKey) {
     if (open !== "tab") throw new OpError("bad_request", "Only links opened as a tab go into a group.");
-    if (profileId === null || !targetUsableNow(profileId, groupKey)) throw new OpError("no_window", `There's no group ${groupKey} in that profile; airTraffic.rules lists them.`);
-    if (params.group !== undefined && groupKeyInSharedFolder(profileId, groupKey)) throw new OpError("refused", `Group ${groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here.`);
+    if (params.group !== undefined && (profileId === null || !targetUsableNow(profileId, groupKey))) throw new OpError("no_window", `There's no group ${groupKey} in that profile; airTraffic.rules lists them.`);
   }
   return { profileId, open, groupKey: groupKey ?? undefined };
 }
@@ -72,7 +71,11 @@ function draftOf(params: Record<string, unknown>, base: RuleDraft): RuleDraft {
   if (params.from && !from) throw new OpError("bad_request", "from is {name, bundleId?}, an app's name and its bundle id.");
   const when = params.when !== undefined ? conditionOf(params.when as Record<string, unknown>) : base.when;
   const enabled = (params.enabled as boolean | undefined) ?? base.enabled;
-  return { enabled, from, when, ...targetOf(params, base) };
+  const target = targetOf(params, base);
+  if (enabled && target.groupKey && target.profileId && groupKeyInSharedFolder(target.profileId, target.groupKey)) {
+    throw new OpError("refused", `Group ${target.groupKey} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so links from other apps can't be sent into it from here. The rule can still be turned off.`);
+  }
+  return { enabled, from, when, ...target };
 }
 
 function ruleOf(ruleId: unknown): AirTrafficRule {

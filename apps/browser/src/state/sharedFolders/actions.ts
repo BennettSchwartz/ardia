@@ -71,6 +71,7 @@ export async function addSharedFolder(windowId: string) {
   const { path } = found;
   const profileId = store().windows[windowId]?.profileId ?? w.profileId;
   const known = await bindingAt(profileId, found);
+  if (store().windows[windowId]?.profileId !== profileId) return;
   if (known) {
     const g = Object.values(store().groups).find((x) => x.profileId === profileId && x.pinned && pinKeyOf(x) === known.key);
     showToast(windowId, `“${(g && groupLabel(store(), g)) || path.split("/").at(-1)}” is already in your sidebar`, undefined, { icon: "person.2" });

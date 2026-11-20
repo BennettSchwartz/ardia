@@ -178,7 +178,7 @@ export function runMethod(params: Record<string, unknown>, background = backgrou
   if ("error" in plan) return plan;
   const target = commandTarget(useBrowser.getState(), plan.command, plan.windowId, plan.tabId);
   try {
-    refuseSharedRunCommand(plan.command, target.kind === "window" ? target.tabId : null);
+    refuseSharedRunCommand(plan.command, target.kind === "window" ? target.tabId : null, target.kind === "window" && !!target.targeted);
   } catch (error) {
     return failure("refused", errorText(error));
   }

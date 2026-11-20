@@ -42,6 +42,13 @@ export async function viaAlias(mayWrite: () => boolean) {
 export function viaHook(id: string, mayWrite: () => boolean) {
   foreignWriteHooks.around(() => store().closeTabs([id]));
 }
+export async function halfGuarded(id: string, mayWrite: () => boolean, quick: boolean) {
+  await foo();
+  if (quick) {
+    if (!mayWrite()) return;
+  }
+  store().closeTabs([id]);
+}
 export async function guarded(id: string, mayWrite: () => boolean) {
   await foo();
   if (!mayWrite()) return;
@@ -53,11 +60,13 @@ export async function guarded(id: string, mayWrite: () => boolean) {
   assert.ok(found.some((p) => p.includes("viaThen")), found.join("\n"));
   assert.ok(found.some((p) => p.includes("viaDestructuring")), found.join("\n"));
   assert.ok(found.some((p) => p.includes("later")), found.join("\n"));
-  for (const name of ["viaTimer", "viaForEach", "viaAlias", "viaHook"]) assert.ok(found.some((p) => p.includes(`: ${name} `)), `${name}: ${found.join("\n")}`);
-  assert.ok(!found.some((p) => p.includes("guarded")), found.join("\n"));
+  for (const name of ["viaTimer", "viaForEach", "viaAlias", "viaHook", "halfGuarded"]) assert.ok(found.some((p) => p.includes(`: ${name} `)), `${name}: ${found.join("\n")}`);
+  assert.ok(!found.some((p) => p.includes(": guarded ")), found.join("\n"));
 });
 
 const KNOWN_SAFE = new Map([
+  ["automation/controlSocket.ts: listen", "the listener is the socket's entry point: each request it hands to handleControlRequest starts its own socket origin in answer(), so its writes are checked there"],
+  ["automation/offscreen.ts: offscreenMethod", "the native move already happened; the store has to follow it whether or not the client is still there, or it would point at a page that left"],
   ["windows/windowClose.ts: closeAfterAsking", "dropStaleLastWindowMark clears the close's own last-window mark when the close is cancelled or fails; it undoes the close's bookkeeping and has to run whether or not control is still on"],
 ]);
 

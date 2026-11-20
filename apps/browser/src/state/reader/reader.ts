@@ -59,12 +59,12 @@ function pushLook(s: BrowserState) {
   for (const [tabId, state] of Object.entries(useReader.getState())) if (state?.active) void callPage(tabId, readerCall("setLook", look));
 }
 
-function settle(tabId: string, url: string, report: ReaderReport, available?: boolean, pushesBefore = lookPushes) {
+function settle(tabId: string, url: string, report: ReaderReport, available?: boolean, pushesBefore = lookPushes, mayWrite?: () => boolean) {
   const tab = useBrowser.getState().tabs[tabId];
   if (!tab || tab.url !== url) return;
   const before = readerState(tabId);
   set(tabId, { url, available: available ?? before.available, active: report.active });
-  if ((report.active || before.active) && pushesBefore === lookPushes) keepLook(report.look);
+  if ((report.active || before.active) && pushesBefore === lookPushes && (!mayWrite || mayWrite())) keepLook(report.look);
 }
 
 const counted = new Map<string, string>();
@@ -114,15 +114,15 @@ export async function toggleReader(tabId: string, mayWrite?: () => boolean) {
   const pushes = lookPushes;
   const consent = consentToken();
   const report = await callPage(tabId, readerToggleCall(lookFrom(s)));
-  if (!report || (mayWrite && !mayWrite())) return;
+  if (!report) return;
   if (report.noArticle) {
     noteReaderNoArticle(consent);
-    settle(tabId, url, report, false, pushes);
+    settle(tabId, url, report, false, pushes, mayWrite);
     showToast(tab.windowId, "No article found on this page", undefined, { icon: "doc.plaintext" });
     return;
   }
   if (report.active) noteReaderOpened(consent);
-  settle(tabId, url, report, true, pushes);
+  settle(tabId, url, report, true, pushes, mayWrite);
 }
 
 export async function closeReader(tabId: string, mayWrite?: () => boolean) {
@@ -130,7 +130,7 @@ export async function closeReader(tabId: string, mayWrite?: () => boolean) {
   if (!url || !readerState(tabId).active) return;
   const pushes = lookPushes;
   const report = await callPage(tabId, readerCall("hide"));
-  if (report && (!mayWrite || mayWrite())) settle(tabId, url, report, undefined, pushes);
+  if (report) settle(tabId, url, report, undefined, pushes, mayWrite);
 }
 
 function shownTabIds(s: BrowserState): Set<string> {

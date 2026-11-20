@@ -42,6 +42,8 @@ export function withTreesFrom(target: BrowserState, source: BrowserState, extraT
   const groupIds = new Set([...a.groups, ...b.groups]);
   const tabIds = new Set([...a.tabs, ...b.tabs, ...extraTabs]);
   for (const v of [...Object.values(source.splits), ...Object.values(target.splits)]) if (splitTabIds(v).some((t) => tabIds.has(t))) splitTabIds(v).forEach((t) => tabIds.add(t));
+  for (const g of Object.values(source.groups)) if (g.tabIds.some((t) => tabIds.has(t))) groupIds.add(g.id);
+  for (const g of Object.values(target.groups)) if (g.tabIds.some((t) => tabIds.has(t))) groupIds.add(g.id);
   if (!groupIds.size && !tabIds.size) return target;
   const tabs = withEntries<Tab>(target.tabs, source.tabs, tabIds);
   const groups = withEntries<TabGroup>(target.groups, source.groups, groupIds);
@@ -53,7 +55,6 @@ export function withTreesFrom(target: BrowserState, source: BrowserState, extraT
     const mine = [...tabIds].filter((t) => tabs[t]?.windowId === id);
     const tabOrder = placeIn(w.tabIds.filter((t) => !tabIds.has(t) || mine.includes(t)), mine, theirs?.tabIds ?? w.tabIds);
     const activeTabIds = { ...w.activeTabIds };
-    for (const [profile, active] of Object.entries(theirs?.activeTabIds ?? {})) if (tabIds.has(active) && tabs[active]) activeTabIds[profile] = active;
     for (const [profile, active] of Object.entries(w.activeTabIds)) if (!tabs[active] || !tabOrder.includes(active)) activeTabIds[profile] = theirs?.activeTabIds[profile] ?? tabOrder[0] ?? active;
     windows[id] = { ...w, tabIds: tabOrder, activeTabIds };
   }

@@ -146,7 +146,7 @@ export function findUnguardedWrites(program, rootFiles) {
         const flows = [terminates(node.thenStatement) ? null : yes, otherwise && terminates(node.elseStatement) ? null : no].filter(Boolean);
         if (!flows.length) return;
         ctx.afterAwait = flows.some((f) => f.afterAwait);
-        ctx.guarded = flows.filter((f) => f.afterAwait).every((f) => f.guarded);
+        ctx.guarded = flows.filter((f) => f.afterAwait).every((f) => f.guarded) && (ctx.afterAwait || flows.every((f) => f.guarded));
         return;
       }
       if (ts.isCallExpression(node)) {

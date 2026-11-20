@@ -512,7 +512,12 @@ public struct SharedFolderDirectory {
   private static let housekeeping: Set<String> = [manifestName, ".\(manifestName)\(placeholderSuffix)", ".DS_Store"]
 
   private func removeEmptyDirectory(in parent: Folder, _ name: String) throws {
-    guard Self.kind(in: parent, name) == .directory, let directory = Self.openDirectory(in: parent, name) else { return }
+    guard Self.kind(in: parent, name) == .directory else { return }
+    guard let directory = Self.openDirectory(in: parent, name) else {
+      let code = errno
+      if code == ENOENT || code == ENOTDIR || code == ELOOP { return }
+      throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+    }
     guard let names = Self.names(in: directory, budget: nil, stopAfter: Self.housekeeping.count + 1) else {
       throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }

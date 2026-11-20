@@ -230,4 +230,13 @@ final class SharedFolderDirectoryTests: XCTestCase {
     XCTAssertEqual(listing["exists"] as? Bool, false)
     XCTAssertTrue((listing["error"] as? String)?.contains("more than") == true)
   }
+
+  func testRemovingAFolderThatCantBeOpenedIsAnErrorNotDone() throws {
+    let root = try folder("root")
+    let locked = try folder("root/Locked")
+    try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+    defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+    XCTAssertThrowsError(try SharedFolderDirectory(root: root).apply(json: try ops([["op": "rmdir", "path": "Locked"]])))
+    XCTAssertTrue(fm.fileExists(atPath: locked.path))
+  }
 }

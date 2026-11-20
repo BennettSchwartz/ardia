@@ -31,7 +31,6 @@ export async function offscreenMethod(params: Record<string, unknown>, serving: 
   } catch (error) {
     return failure("failed", errorText(error));
   }
-  if (!serving()) return failure("failed", STOPPED);
   useBrowser.setState((s) => removeTabs(s, [tab], false));
   return { result: { ok: true } };
 }

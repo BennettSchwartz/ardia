@@ -182,3 +182,17 @@ test("a pass whose guard was revoked claims no refresh: neither the follow-up no
     liveRefreshClaims.begin = real;
   }
 });
+
+test("a refresh that control left mid-fetch says the hidden items were already shown again", async () => {
+  let calls = 0;
+  const held = gated();
+  await withGithub(async () => (++calls === 2 ? (await held.gate, [pr("held", 2)]) : [pr("any", calls)]), async (folder) => {
+    const refreshing = send("live.refresh", { folder });
+    await until(() => calls === 2);
+    S().updateSettings({ cliControl: false });
+    await settle();
+    held.open();
+    const reply = await refreshing;
+    assert.match(reply.error?.message ?? "", /hidden items were already shown again/, JSON.stringify(reply));
+  });
+});

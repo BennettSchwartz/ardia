@@ -135,7 +135,7 @@ function update(params: Record<string, unknown>, call: SocketCall) {
 async function refresh(params: Record<string, unknown>, call: SocketCall) {
   const folder = folderOf(params.folder);
   await manualRefresh(folder.id, call.serving);
-  call.stillServing();
+  if (!call.serving()) throw new OpError("failed", "Control was turned off during the refresh. The folder's hidden items were already shown again; nothing else changed.");
   return folderRow(live().folders[folder.id] ?? folder);
 }
 

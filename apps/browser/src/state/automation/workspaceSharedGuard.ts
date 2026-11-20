@@ -1,9 +1,8 @@
 import type { BrowserState } from "../browser/store";
 import { innermostGroupOf, rootOf } from "../groups/groups";
-import { groupLabel } from "../pins/tabGrouping";
 import { sharedFolderOfGroup } from "../sharedFolders/removal";
 import type { Op } from "./workspaceOps";
-import { anchorRef, groupRef, OpError, store, tabRefs, type OpResult } from "./workspaceTargets";
+import { anchorRef, groupRef, normalWindow, OpError, space, store, tabRefs, type NameScope, type OpResult } from "./workspaceTargets";
 
 export const SHARED_GROUPS_SIDEBAR_ONLY = "shared folder groups change only from the sidebar";
 
@@ -17,24 +16,48 @@ export function sharedRootOfTab(s: BrowserState, tabId: string): string | null {
   return g ? sharedRoot(s, g.id) : null;
 }
 
-function sharedNamed(s: BrowserState, name: string): string | null {
-  for (const g of Object.values(s.groups)) {
-    if (g.name !== name && groupLabel(s, g) !== name) continue;
-    const root = sharedRoot(s, g.id);
-    if (root) return root;
+
+function resolvedOrNull<T>(resolve: () => T): T | null {
+  try {
+    return resolve();
+  } catch {
+    return null;
   }
-  return null;
 }
 
-function groupField(s: BrowserState, results: OpResult[], ref: unknown): string | null {
+type Scope = (() => NameScope) | undefined;
+
+function groupField(s: BrowserState, results: OpResult[], ref: unknown, scope?: Scope): string | null {
   if (ref === undefined || ref === null) return null;
-  if (typeof ref === "object" && typeof (ref as { name?: unknown }).name === "string") return sharedNamed(s, (ref as { name: string }).name);
-  return sharedRoot(s, groupRef(results, ref).id);
+  const g = resolvedOrNull(() => groupRef(results, ref, scope));
+  return g ? sharedRoot(s, g.id) : null;
+}
+
+function nameScope(s: BrowserState, results: OpResult[], op: Op): Scope {
+  const profileId = op.profile as string | undefined;
+  const firstTab = () => tabsField(results, op.tabs)[0];
+  switch (op.op) {
+    case "open":
+      return () => ({ windowId: space(op).windowId, profileId });
+    case "tab.move":
+      return () => ({ windowId: op.window !== undefined ? normalWindow(String(op.window)) : s.tabs[firstTab()!]!.windowId, profileId });
+    case "group.create":
+      return () => ({ windowId: op.window !== undefined || !firstTab() ? space(op).windowId : s.tabs[firstTab()!]!.windowId, profileId });
+    default:
+      return undefined;
+  }
+}
+
+function parentOfMovedGroup(s: BrowserState, results: OpResult[], op: Op): string | null {
+  const asked = resolvedOrNull(() => groupRef(results, op.group));
+  if (!asked) return null;
+  return groupField(s, results, op.parent, () => ({ windowId: op.window !== undefined ? normalWindow(String(op.window)) : asked.windowId, profileId: (op.profile as string | undefined) ?? asked.profileId }));
 }
 
 function insideAnchor(s: BrowserState, results: OpResult[], ref: unknown): string | null {
   if (typeof ref !== "string") return null;
-  const anchor = anchorRef(results, ref);
+  const anchor = resolvedOrNull(() => anchorRef(results, ref));
+  if (!anchor) return null;
   if (anchor.kind === "tab") return sharedRootOfTab(s, anchor.id);
   const root = sharedRoot(s, anchor.id);
   return root && root !== anchor.id ? root : null;
@@ -47,7 +70,8 @@ function tabsField(results: OpResult[], value: unknown): string[] {
 
 function sharedTouched(s: BrowserState, results: OpResult[], op: Op): string | null {
   const members = (field: string) => tabsField(results, op[field]).map((id) => sharedRootOfTab(s, id)).find(Boolean) ?? null;
-  const destination = () => groupField(s, results, op.group) ?? groupField(s, results, op.parent) ?? insideAnchor(s, results, op.before) ?? insideAnchor(s, results, op.after);
+  const scope = nameScope(s, results, op);
+  const destination = () => groupField(s, results, op.group, scope) ?? groupField(s, results, op.parent, scope) ?? insideAnchor(s, results, op.before) ?? insideAnchor(s, results, op.after);
   switch (op.op) {
     case "open":
       return destination();
@@ -63,7 +87,7 @@ function sharedTouched(s: BrowserState, results: OpResult[], op: Op): string | n
     case "group.update":
       return op.name !== undefined ? groupField(s, results, op.group) : null;
     case "group.move":
-      return groupField(s, results, op.group) ?? groupField(s, results, op.parent) ?? insideAnchor(s, results, op.before) ?? insideAnchor(s, results, op.after);
+      return groupField(s, results, op.group) ?? parentOfMovedGroup(s, results, op) ?? insideAnchor(s, results, op.before) ?? insideAnchor(s, results, op.after);
     case "group.ungroup":
     case "group.close":
     case "group.delete":
@@ -92,10 +116,13 @@ export function refuseSyncedLinkChange(tabId: string | null | undefined, what: s
   if (hit) throw new OpError("refused", `Tab ${t.id} is a link in shared folder ${hit}, and ${what} would change the link it syncs; ${SHARED_GROUPS_SIDEBAR_ONLY}.`);
 }
 
-export function refuseSharedRunCommand(command: string, tabId: string | null) {
+export function refuseSharedRunCommand(command: string, tabId: string | null, targeted = false) {
   if (!tabId) return;
   if (command === "back" || command === "forward") return refuseSyncedLinkChange(tabId, command === "back" ? "going back" : "going forward");
   if (command !== "closeTab" && command !== "closeTabGroup") return;
-  const hit = sharedRootOfTab(store(), tabId);
+  const s = store();
+  const panel = s.windowUi[s.tabs[tabId]?.windowId ?? ""]?.panel;
+  if (command === "closeTab" && !targeted && panel?.open && !panel.newTab) return;
+  const hit = sharedRootOfTab(s, tabId);
   if (hit) throw new OpError("refused", `Group ${hit} is a shared folder; ${SHARED_GROUPS_SIDEBAR_ONLY}, so ${command} didn't run.`);
 }
