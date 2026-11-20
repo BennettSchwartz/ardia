@@ -7,7 +7,7 @@ $ErrorActionPreference = "Stop"
 
 $lab = @{ Tile = 48; Slot = 64; Left = 24; Rows = @(96, 176); Rounds = 6; FadeMs = 250 }
 $variants = @("plain", "blur", "layout", "blur+layout", "overlay", "plain later", "blur later", "layout later", "blur+layout later", "overlay later")
-$probes = @("state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex", "helper background", "helper background, child below zero", "helper setNativeProps background")
+$probes = @("state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex", "helper background", "helper background with a child below zero", "helper setNativeProps background")
 $slots = $variants.Count + 1
 $captureMs = 30000
 $labMs = 16000
@@ -227,7 +227,7 @@ function Measure-Fades([string]$Label, [switch]$Onboarded) {
     $bitmap.Dispose()
   }
   $csv = [System.Text.StringBuilder]::new()
-  [void]$csv.AppendLine("ms," + ((@("marker") + $variants + $probes + @(1..($slots - $probes.Count) | ForEach-Object { "row2-$_" })) -join ","))
+  [void]$csv.AppendLine("ms," + ((@("marker") + $variants + $probes + @(if ($slots -gt $probes.Count) { 1..($slots - $probes.Count) | ForEach-Object { "row2-$_" } })) -join ","))
   foreach ($sample in @($run.Samples)) { [void]$csv.AppendLine("$($sample.Ms - $run.WindowMs)," + ($sample.Values -join ",")) }
   Set-Content -LiteralPath (Join-Path $Out "fade-$Label-samples.csv") -Value $csv.ToString() -Encoding utf8NoBOM
   Start-Sleep -Milliseconds 800

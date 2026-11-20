@@ -18,7 +18,7 @@ const SHAPES = [
 
 export const FADE_VARIANTS: Variant[] = [false, true].flatMap((later) => SHAPES.map((shape) => ({ ...shape, name: `${shape.name}${later ? " later" : ""}`, later })));
 
-export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex", "helper background", "helper background, child below zero", "helper setNativeProps background"];
+export const FADE_PROBES = ["state", "setNativeProps", "inside background", "inside clear", "inside zIndex", "inside background+zIndex", "inside v1 panel", "helper background+zIndex", "helper background", "helper background with a child below zero", "helper setNativeProps background"];
 
 const CONTAINERS: { slot: number; style: object; pointerEvents?: "none" }[] = [
   { slot: 2, style: { backgroundColor: "#010101" } },

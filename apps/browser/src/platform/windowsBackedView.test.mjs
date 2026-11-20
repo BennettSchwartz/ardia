@@ -60,6 +60,7 @@ test("setNativeProps paint goes to the fill: background and border colours only 
   assert.equal(nativePaint(undefined), null);
   assert.equal(nativePaint({ opacity: 0.3, transform: [{ scale: 2 }] }), null);
   assert.deepEqual(nativePaint({ backgroundColor: undefined, borderColor: undefined }), { fill: { backgroundColor: null, borderColor: null }, own: {} });
+  assert.deepEqual(nativePaint({ borderRadius: undefined }), { fill: { borderRadius: null }, own: { borderRadius: null } });
   assert.deepEqual(nativePaint({ backgroundColor: "blue", opacity: 0.4 }), { fill: { backgroundColor: "blue" }, own: { opacity: 0.4 } });
   assert.deepEqual(nativePaint({ backgroundColor: "transparent" }), { fill: { backgroundColor: "transparent" }, own: {} });
   assert.deepEqual(nativePaint({ borderRadius: 12, borderTopColor: "red", borderStyle: "dotted", borderWidth: 2 }), { fill: { borderRadius: 12, borderTopColor: "red", borderStyle: "dotted" }, own: { borderRadius: 12, borderStyle: "dotted", borderWidth: 2 } });

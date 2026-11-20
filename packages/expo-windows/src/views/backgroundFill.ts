@@ -50,10 +50,14 @@ export function backedStyles(flat: Flat | undefined, draws: ColorDraws = drawsBy
   return { fill, own: withoutPaint(flat, bordered) };
 }
 
+const isPaint = (key: string) => key === "backgroundColor" || isBorderColor(key) || isBorderShape(key);
+
 export function nativePaint(style: Flat | undefined): Backed | null {
   if (!style) return null;
+  const sent: Flat = {};
+  for (const key of Object.keys(style)) sent[key] = style[key] === undefined && isPaint(key) ? null : style[key];
   const fill: Flat = {};
-  for (const key of Object.keys(style)) if (key === "backgroundColor" || isBorderColor(key) || isBorderShape(key)) fill[key] = style[key] === undefined ? null : style[key];
+  for (const key of Object.keys(sent)) if (isPaint(key)) fill[key] = sent[key];
   if (!Object.keys(fill).length) return null;
-  return { fill, own: withoutPaint(style, false) };
+  return { fill, own: withoutPaint(sent, false) };
 }
