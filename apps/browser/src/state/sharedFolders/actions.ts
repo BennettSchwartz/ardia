@@ -2,7 +2,7 @@ import { confirm, pickFolder } from "../../platform/dialogs";
 import { sharePage } from "../../platform/share";
 import { createSharedFolder, discardSharedFolder, identityOf, resolveSharedFolder, revealSharedFolder, sharedFoldersAvailable, sharedLocation } from "../../platform/sharedFolders";
 import { errorText } from "../../lib/errors";
-import { bindingAt } from "./bindings";
+import { bindingAt, boundAt } from "./bindings";
 import { useBrowser, type BrowserState } from "../browser/store";
 import type { Tab } from "../browser/types";
 import { isIncognitoProfile, makeTab, newId, pinKeyOf } from "../browser/model";
@@ -70,8 +70,9 @@ export async function addSharedFolder(windowId: string) {
   if (!found) return;
   const { path } = found;
   const profileId = store().windows[windowId]?.profileId ?? w.profileId;
-  const known = await bindingAt(profileId, found);
+  await bindingAt(profileId, found);
   if (store().windows[windowId]?.profileId !== profileId) return;
+  const known = boundAt(profileId, found);
   if (known) {
     const g = Object.values(store().groups).find((x) => x.profileId === profileId && x.pinned && pinKeyOf(x) === known.key);
     showToast(windowId, `“${(g && groupLabel(store(), g)) || path.split("/").at(-1)}” is already in your sidebar`, undefined, { icon: "person.2" });

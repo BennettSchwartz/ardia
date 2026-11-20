@@ -17,5 +17,7 @@ const sameFolder = (folder: SharedFolder, found: ResolvedSharedFolder) =>
 export async function bindingAt(profileId: string, found: ResolvedSharedFolder) {
   const legacy = boundFolders().filter((b) => b.profileId === profileId && !b.folder.identity);
   await Promise.all(legacy.map((b) => upgradeLegacy(profileId, b.key)));
-  return boundFolders().find((b) => b.profileId === profileId && sameFolder(b.folder, found));
+  return boundAt(profileId, found);
 }
+
+export const boundAt = (profileId: string, found: ResolvedSharedFolder) => boundFolders().find((b) => b.profileId === profileId && sameFolder(b.folder, found));

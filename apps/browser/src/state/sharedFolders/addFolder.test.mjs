@@ -60,3 +60,15 @@ test("a legacy binding whose folder is now refused is neither synced nor treated
     refusedPaths.clear();
   }
 });
+
+test("adding the same folder twice at once binds it once", async () => {
+  S().hydrate({});
+  const windowId = S().createWindow({ url: "https://home.example/" });
+  duringResolve = () => {};
+  await Promise.all([addSharedFolder(windowId), addSharedFolder(windowId)]);
+  assert.equal(boundFolders().length, 1, JSON.stringify(boundFolders()));
+  const { pinKeyOf } = await import("../browser/model.ts");
+  const groups = Object.values(S().groups).filter((g) => g.pinned);
+  assert.equal(groups.length, 1, "one shared group");
+  unbindFolder(groups[0].profileId, pinKeyOf(groups[0]));
+});
