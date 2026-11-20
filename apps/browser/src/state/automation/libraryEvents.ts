@@ -4,7 +4,7 @@ import { useBrowser, type BrowserState } from "../browser/store";
 import { engineProfile, isIncognitoProfile } from "../browser/model";
 import { changedIds } from "../browser/changes";
 import type { BookmarkNode } from "../browser/types";
-import { bookmarkRoots, ownerOfBookmark } from "../bookmarks/bookmarks";
+import { bookmarkRoots } from "../bookmarks/bookmarks";
 import { downloadSession } from "../downloads/downloadsSlice";
 import { awaitsKeep } from "../downloads/status";
 import type { EventSend } from "./storeEvents";
@@ -43,17 +43,31 @@ function bookmarksLoaded(s: BrowserState, profileId: string) {
   return !!roots && !!s.bookmarks.nodes[roots.bar];
 }
 
+const BOOKMARK_DEPTH = 64;
+
+function ownersOfBookmark(s: BrowserState, id: string): string[] {
+  let node = s.bookmarks.nodes[id];
+  for (let i = 0; node?.parentId && i < BOOKMARK_DEPTH; i++) node = s.bookmarks.nodes[node.parentId];
+  if (!node) return [];
+  const rootId = node.id;
+  return s.profileOrder.filter((p) => {
+    const roots = bookmarkRoots(s, p);
+    return roots?.bar === rootId || roots?.other === rootId;
+  });
+}
+
 export function bookmarkChanges(s: BrowserState, prev: BrowserState) {
   const byProfile = new Map<string, { added: string[]; changed: string[]; removed: string[] }>();
   for (const id of changedIds(s.bookmarks.nodes, prev.bookmarks.nodes)) {
     const next = s.bookmarks.nodes[id];
     const was = prev.bookmarks.nodes[id];
     if (next && was && sameBookmark(next, was)) continue;
-    const owner = next ? ownerOfBookmark(s, id) : ownerOfBookmark(prev, id);
-    if (!owner || isIncognitoProfile(owner) || (!was && !bookmarksLoaded(prev, owner))) continue;
-    let bucket = byProfile.get(owner);
-    if (!bucket) byProfile.set(owner, (bucket = { added: [], changed: [], removed: [] }));
-    bucket[!was ? "added" : !next ? "removed" : "changed"].push(id);
+    for (const owner of next ? ownersOfBookmark(s, id) : ownersOfBookmark(prev, id)) {
+      if (isIncognitoProfile(owner) || (!was && !bookmarksLoaded(prev, owner))) continue;
+      let bucket = byProfile.get(owner);
+      if (!bucket) byProfile.set(owner, (bucket = { added: [], changed: [], removed: [] }));
+      bucket[!was ? "added" : !next ? "removed" : "changed"].push(id);
+    }
   }
   return [...byProfile].map(([profile, b]) => ({ profile, count: b.added.length + b.changed.length + b.removed.length, added: capped(b.added), changed: capped(b.changed), removed: capped(b.removed) }));
 }
