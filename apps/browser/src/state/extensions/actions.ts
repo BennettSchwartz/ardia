@@ -80,11 +80,12 @@ export async function setEnabled(profile: string, id: string, enabled: boolean) 
   await changeThenRefresh(profile, enabled ? "turn on" : "turn off", () => setExtensionEnabled(id, profile, enabled));
 }
 
-export async function setPinned(profile: string, id: string, pinned: boolean) {
+export async function setPinned(profile: string, id: string, pinned: boolean): Promise<boolean> {
   patchExtension(profile, id, { pinned });
   const consent = consentToken();
   const done = await changed(pinned ? "pin" : "unpin", () => configureExtension(id, profile, { pinned }), consent);
   if (!done) await refreshExtensions(profile, consent);
+  return done;
 }
 
 export const setToolbarDrag = (windowId: string, drag: ToolbarDrag | null) => useExtensions.setState({ toolbarDrag: drag && { ...drag, windowId } });
@@ -120,8 +121,8 @@ export async function configureThenRead(profile: string, id: string, options: Pa
   return freshExtensions(profile);
 }
 
-export async function reload(profile: string, id: string) {
-  await changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
+export async function reload(profile: string, id: string): Promise<boolean> {
+  return changeThenRefresh(profile, "reload", () => reloadExtension(id, profile));
 }
 
 
@@ -135,7 +136,7 @@ async function changed(what: string, change: () => Promise<void>, consent: Conse
   }
 }
 
-async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>) {
+async function changeThenRefresh(profile: string, what: string, change: () => Promise<void>): Promise<boolean> {
   const consent = consentToken();
   const done = await changed(what, change, consent);
   await refreshExtensionsAfterChange(profile, consent);

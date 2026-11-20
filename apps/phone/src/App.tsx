@@ -15,7 +15,8 @@ import { ExpoSettingsSheet } from "./components/settings/ExpoSettingsStack";
 import { ExpoArchiveSheet } from "./components/tabs/ExpoArchive";
 import { ExpoSpacesSheet } from "./components/sync/ExpoSpaces";
 import { ExpoLibrarySheet } from "./components/library/ExpoLibrary";
-import { useLibrary } from "./state/library/store";
+import { LibraryView } from "./components/library/LibraryView";
+import { closeLibrary, useLibrary } from "./state/library/store";
 import { SettingsView } from "./components/settings/SettingsView";
 import { SpacesView } from "./components/sync/SpacesView";
 import { ToastHost } from "./components/toasts/ToastHost";
@@ -26,7 +27,7 @@ import { startSync } from "./state/sync/actions";
 import { setSpacesDesign } from "./state/sync/store";
 import { setAppearanceDesign, useDarkScheme } from "./state/settings/appearance";
 import { useSettingsNav } from "./state/settings/hooks";
-import { offerBrowseForMePage, offerSyncPages } from "./state/settings/nav";
+import { offerBrowseForMePage, offerPageSummaryPage, offerSyncPages } from "./state/settings/nav";
 import { useOnboarding } from "./state/onboarding/hooks";
 import { bootApp, useBoot } from "./state/app/boot";
 import { startLinks } from "./state/links/links";
@@ -56,6 +57,7 @@ import { setRootSize } from "./state/app/rootSize";
 import { syncOffered } from "./state/sync/offer";
 import { countDrawnMenu, countNativeMenu } from "./state/browse/menuCounts";
 import { browseForMeOffered } from "./state/browseForMe/offer";
+import { pageSummaryChoiceOffered } from "./state/pageSummary/store";
 import { listenForBrowseForMe } from "./state/browseForMe/events";
 
 export default function App() {
@@ -63,6 +65,7 @@ export default function App() {
     bootApp(() => {
       offerSyncPages(syncOffered);
       offerBrowseForMePage(browseForMeOffered);
+      offerPageSummaryPage(pageSummaryChoiceOffered);
       setSpacesDesign(appDesign);
       setAppearanceDesign(appDesign);
       startTelemetry();
@@ -132,7 +135,7 @@ export function Surfaces() {
   const sheetProgress = useSharedValue(0);
   const libraryOpen = useLibrary((s) => s.open);
   const systemSheet = SYSTEM_SHEETS && (settingsOpen || libraryOpen || sheet === "archive" || sheet === "spaces");
-  const front = frontSheet(settingsOpen && !SYSTEM_SHEETS, SYSTEM_SHEETS && (sheet === "archive" || sheet === "spaces") ? null : sheet);
+  const front = frontSheet(settingsOpen && !SYSTEM_SHEETS, SYSTEM_SHEETS && (sheet === "archive" || sheet === "spaces") ? null : sheet, libraryOpen && !SYSTEM_SHEETS);
   const theme = useTheme();
   countRender("Surfaces");
   const incognito = useIncognito();
@@ -164,8 +167,8 @@ export function Surfaces() {
         </Layer>
       </SheetBackground>
       <Layer covered={onboarding || voice}>
-        <FullSheet sheet={front} progress={sheetProgress} onDismiss={front === "settings" ? closeSettings : closeArchive}>
-          {(shown) => (shown === "settings" ? <SettingsView /> : shown === "archive" ? <ArchiveView /> : <SpacesView />)}
+        <FullSheet sheet={front} progress={sheetProgress} onDismiss={front === "settings" ? closeSettings : front === "library" ? closeLibrary : closeArchive}>
+          {(shown) => (shown === "settings" ? <SettingsView /> : shown === "library" ? <LibraryView /> : shown === "archive" ? <ArchiveView /> : <SpacesView />)}
         </FullSheet>
       </Layer>
       {SYSTEM_SHEETS ? <ExpoSettingsSheet /> : null}

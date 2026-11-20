@@ -32,10 +32,12 @@ function getSettings(params: Record<string, unknown>) {
   return Object.fromEntries(keys.map((k) => [k, s[k as SettingKey]]));
 }
 
+const SHORTCUTS_INPUT = { type: "object", additionalProperties: { type: "string" }, description: 'Command id to a shortcut like "cmd+shift+t" or "⇧⌘T", or "" for none; settings.set adds these to the custom shortcuts' };
+
 const settingsSchema = () =>
   SETTING_KEYS.map((key) => ({
     key,
-    schema: SETTING_SPECS[key].schema,
+    schema: key === "shortcuts" ? SHORTCUTS_INPUT : SETTING_SPECS[key].schema,
     default: SETTING_SPECS[key].default,
     writable: whyNot(key) === null,
     ...(whyNot(key) ? { why: whyNot(key) } : {}),
@@ -114,9 +116,16 @@ function addEngine(params: Record<string, unknown>) {
   return engineOf(made.id);
 }
 
+function refuseLegacyEngine(engine: { id: string }) {
+  if (engine.id === "custom" && !now().settings.customSearchEngines.some((e) => e.id === "custom")) {
+    throw new OpError("refused", "The Custom engine comes from the custom search URL setting, which the socket doesn't change; edit it in Settings › Search.");
+  }
+}
+
 function updateEngine(params: Record<string, unknown>) {
   const was = engineOf(params.id);
   if (!was.custom) throw new OpError("refused", `${was.name} is built in; only engines added in Settings change.`);
+  refuseLegacyEngine(was);
   const problem = now().updateCustomEngine(was.id, engineInput(params, was));
   if (problem) throw new OpError("bad_request", problem);
   return engineOf(was.id);
@@ -125,6 +134,7 @@ function updateEngine(params: Record<string, unknown>) {
 function removeEngine(params: Record<string, unknown>) {
   const was = engineOf(params.id);
   if (!was.custom) throw new OpError("refused", `${was.name} is built in; only engines added in Settings can be removed.`);
+  refuseLegacyEngine(was);
   now().removeCustomEngine(was.id);
   expect(!engineRows().some((e) => e.id === was.id), "the engine is still there.");
   return { ok: true };

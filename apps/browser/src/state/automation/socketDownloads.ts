@@ -11,6 +11,8 @@ import { expect, now, page, profileArg } from "./socketTargets";
 import { useDownloadProgress, withProgress } from "../downloads/progress";
 import { OpError } from "./workspaceTargets";
 import { backgroundInstance } from "../app/appSettings";
+import { isAbsoluteFolder } from "../../lib/absoluteFolder";
+import { PLATFORM_TERMS } from "../../lib/platformTerms";
 
 const STATES = ["downloading", "finished", "failed", "cancelled"] as const;
 
@@ -90,7 +92,7 @@ async function settings(params: Record<string, unknown>) {
 
 async function setSettings(params: Record<string, unknown>, call: SocketCall) {
   if (params.folder === undefined && params.askWhereToSave === undefined) throw new OpError("bad_request", "downloads.setSettings needs folder or askWhereToSave.");
-  if (params.folder !== undefined && !(params.folder as string).startsWith("/")) throw new OpError("bad_request", "folder is an absolute path.");
+  if (params.folder !== undefined && !isAbsoluteFolder(params.folder as string)) throw new OpError("bad_request", "folder is an absolute path.");
   const engine = engineProfile(now(), profileArg(params.profile));
   const current = await getDownloadSettings(engine);
   if (current.managed) throw new OpError("refused", "A policy sets this profile's download settings.");
@@ -107,7 +109,7 @@ export const DOWNLOAD_METHODS: MethodSpec[] = [
   { name: "downloads.cancel", mutates: true, description: "Cancel a download", params: DOWNLOAD, result: "{ok}", run: engineCall(cancelDownload, inProgress) },
   { name: "downloads.keep", mutates: true, description: "Keep a download Ardia held as dangerous", params: DOWNLOAD, result: "{ok}", run: engineCall(keepDownload, (d) => (awaitsKeep(d) ? null : `Download ${d.id} isn't waiting to be kept.`)) },
   { name: "downloads.open", mutates: true, description: "Open a finished download with its app", params: DOWNLOAD, result: "{ok}", run: (p, call) => openOrReveal(p, false, call) },
-  { name: "downloads.reveal", mutates: true, description: "Show a finished download in Finder", params: DOWNLOAD, result: "{ok}", run: (p, call) => openOrReveal(p, true, call) },
+  { name: "downloads.reveal", mutates: true, description: `Show a finished download in ${PLATFORM_TERMS.fileManager}`, params: DOWNLOAD, result: "{ok}", run: (p, call) => openOrReveal(p, true, call) },
   { name: "downloads.remove", mutates: true, description: "Remove a download from the list (the file stays)", params: DOWNLOAD, result: "{ok}", run: remove },
   { name: "downloads.clear", mutates: true, description: "Remove every download that isn't running from the list", params: obj({}), result: "{removed}", run: clear },
   { name: "downloads.settings", mutates: false, description: "Where a profile saves downloads and whether it asks", params: obj({ profile: PROFILE }), result: "{folder, askWhereToSave, managed}", run: settings },
