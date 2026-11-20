@@ -47,7 +47,10 @@ export async function openAppMenu(windowId: string, button: HTMLElement) {
   const choice = id ? appMenuChoice(id) : null;
   if (!choice) return;
   if (choice.kind === "about") return showAbout(windowId);
-  if (choice.kind === "updates") return void (ardiaHost && !choice.restart ? linuxUpdaterFor(ardiaHost).check(true) : checkForUpdates()).catch(reportHostError);
+  if (choice.kind === "updates") {
+    const updater = ardiaHost ? linuxUpdaterFor(ardiaHost) : null;
+    return void (!updater ? checkForUpdates() : choice.restart ? updater.restartWhenReady() : updater.check(true)).catch(reportHostError);
+  }
   if (choice.kind === "edit") return runEdit(windowId, choice.action, editTarget).catch(reportHostError);
   if (choice.kind === "command") return emitCommand({ command: choice.command, arg: choice.arg, windowId });
   if (choice.action === "close") return void closeWindow(windowId).catch(reportHostError);

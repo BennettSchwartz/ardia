@@ -630,8 +630,9 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   - Without `--destdir` it must run as root and refuses otherwise, so it never leaves a partial install. Installed
     files are owned by root.
   - It copies `lib/ardia` whole, so `VERSION`, `cli/` and the update helper come along. It copies it to
-    `<prefix>/lib/ardia.new-<pid>` first, then swaps it in with two renames (the old tree to `ardia.old-<pid>`, the
-    new one to `ardia`) and deletes the old tree, so a running Ardia keeps the files it has open and a failed copy
+    `<prefix>/lib/ardia.new-<pid>` first, then swaps it in with one atomic `mv --exchange` where coreutils has it
+    (9.5 and later), or else two renames (the old tree to `ardia.old-<pid>`, the new one to `ardia`), and deletes the
+    old tree, so a running Ardia keeps the files it has open and a failed copy
     leaves the old install whole. A failure between the renames puts the old tree back; leftovers of a run that died
     are removed by the next one.
   - It always installs the polkit policy at `<destdir>/usr/share/polkit-1/actions` (mode 0644), whatever the prefix,
@@ -700,11 +701,13 @@ command ([linux-ci.md](linux-ci.md) › Linux releases).
   It takes a lock (`/run/ardia-update.lock`, or the AppImage's folder), refuses a folder or file that isn't a regular,
   singly linked file owned by the calling user (`PKEXEC_UID`), copies the manifest (at most 4096 bytes) and its `.sig`
   (64 bytes) into a fresh 0700 folder, read by `dd iflag=nofollow,nonblock` running as the calling user (`setpriv`), so
-  root never opens a path the caller controls, verifies them with
+  root never opens a path the caller controls. That reader only gets a pipe that root's `head` empties into the copy,
+  never the copy or the lock itself, so a process of the caller that traces it can't change a file after it is
+  verified. It verifies them with
   `openssl pkeyutl -verify -rawin` against `lib/ardia/linux-update.pem`, parses the manifest strictly (it must
   re-serialize byte for byte, and each package name must be exactly `Ardia-<V>-linux-x64.<deb|tar.xz|AppImage>`),
   requires `<V>` to be newer than `lib/ardia/VERSION` (a nightly sorts before its stable), then copies its package
-  (at most the manifest's size, the same way) and checks size and sha256. Everything from the manifest copy to the install shares
+  (at most the manifest's size, the same way) and checks size and sha256. Everything from its start to the post-install version check shares
   one 9-minute deadline, enforced with `timeout`, so the helper gives up before the browser's 10-minute deadline. A `.deb` goes through `apt-get install --no-remove`, a
   tarball through its own `install.sh --prefix <the helper's prefix>`, and an AppImage is staged as
   `.ardia-update-XXXXXX` beside `$APPIMAGE` and renamed over it. PATH is its own and the prefix comes from its own

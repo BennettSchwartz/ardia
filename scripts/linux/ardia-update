@@ -17,8 +17,8 @@ Installs a signed Ardia update for Linux.
                  for this kind of install when <V> is newer than lib/ardia/VERSION.
                  A .deb or tarball install runs it as root through pkexec; an
                  AppImage replaces the file APPIMAGE names, as its user. The last line on
-                 stdout is "installed <V>" or "failed <reason>". Everything
-                 after the update folder is checked gets 9 minutes, then fails with timeout.'
+                 stdout is "installed <V>" or "failed <reason>". The whole
+                 install gets 9 minutes, then fails with timeout.'
 
 self=$(readlink -f -- "${BASH_SOURCE[0]}")
 libdir=${self%/*}
@@ -206,9 +206,13 @@ copy_in() {
   if [[ "$EUID" == 0 && "$owner" != 0 ]]; then
     reader=(setpriv --reuid="$owner" --regid="$owner_group" --clear-groups -- "${reader[@]}")
   fi
-  local status=0
-  limited "$seconds" "${reader[@]}" >"$destination" || status=$?
-  settle "$status" missing "couldn't read $name"
+  local statuses=()
+  {
+    limited "$seconds" "${reader[@]}" </dev/null 9>&- | limited "$seconds" head -c "$((cap + 1))" >"$destination"
+    statuses=("${PIPESTATUS[@]}")
+  } || true
+  settle "${statuses[0]}" missing "couldn't read $name"
+  settle "${statuses[1]}" missing "couldn't store $name"
   copied=$(stat -c %s -- "$destination")
   ((copied <= cap)) || fail "$oversize" "$name grew past $cap bytes"
 }
@@ -252,8 +256,9 @@ install_deb() {
     -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 -- "$work/$package_name" \
     </dev/null >&2 || status=$?
   settle "$status" install "apt-get couldn't install $package_name"
+  refresh_left
   # shellcheck disable=SC2016
-  installed=$(limited 30 dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
+  installed=$(limited "$((left < 30 ? left : 30))" dpkg-query -W -f='${Version}' ardia 2>/dev/null || true)
   [[ "$installed" == "$expected" ]] || fail install "dpkg reports ardia $installed after the install, not $expected"
 }
 
@@ -287,6 +292,7 @@ run_install() {
   else
     owner=$EUID
   fi
+  install_deadline=$((SECONDS + install_budget))
   owner_group=$(id -g -- "$owner" 2>/dev/null) || fail usage "uid $owner has no account"
   [[ "$owner_group" =~ ^[0-9]{1,10}$ ]] || fail usage "uid $owner has no primary group"
   kind=$(detect_kind)
@@ -328,7 +334,6 @@ run_install() {
   local named_version=${BASH_REMATCH[1]}
   version_parts "$named_version" >/dev/null || fail manifest "the manifest's file name has a malformed version"
 
-  install_deadline=$((SECONDS + install_budget))
   refresh_left
   copy_in "$manifest_name" "$max_manifest" "$work/manifest" manifest "$((left < small_copy_seconds ? left : small_copy_seconds))"
   refresh_left

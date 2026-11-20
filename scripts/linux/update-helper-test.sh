@@ -17,7 +17,8 @@ AppImage as a non-root user, and checks every refusal: a bad signature, the
 wrong key, an older or equal version, checksum and size mismatches,
 symlinked, hard-linked, FIFO and foreign-owned files, a manifest naming
 another version'"'"'s file, a path or shell metacharacters, a bad version
-string, a concurrent run and a relative folder. In archlinux (default) it
+string, a concurrent run and a relative folder, and that the reads it makes as
+the user hold no descriptor to its private copies. In archlinux (default) it
 installs the AUR PKGBUILD built from the OLD tarball and checks kind is
 managed.
 
@@ -287,6 +288,14 @@ swap_key
 expect "deb kind" deb "$(kind_of "$helper")"
 expect "an unprivileged kind ignores APPIMAGE outside an AppImage" deb "$(as_tester APPIMAGE=/home/tester/x.AppImage APPDIR=/tmp/elsewhere "$helper" kind)"
 refusals deb
+mv /usr/bin/setpriv /usr/bin/setpriv.real
+printf '#!/bin/sh\necho reader >> /tmp/reader-fds\nfor fd in /proc/$$/fd/*; do readlink "$fd"; done >> /tmp/reader-fds\nexec /usr/bin/setpriv.real "$@"\n' > /usr/bin/setpriv
+chmod 0755 /usr/bin/setpriv
+stage checksum
+expect "deb reads the manifest, signature and package as the user before the checksum refusal" "failed checksum" "$(as_pkexec "$helper" install "$cases/checksum")"
+mv /usr/bin/setpriv.real /usr/bin/setpriv
+expect "each read as the user went through setpriv" 3 "$(grep -cx reader /tmp/reader-fds)"
+expect "no read as the user holds the helper's private copies or its lock" 0 "$(grep -cE '/var/tmp/ardia-update|/run/ardia-update.lock' /tmp/reader-fds || true)"
 cp "$helper" /tmp/helper.aside
 sed -i 's/^install_budget=540$/install_budget=5/' "$helper"
 printf '#!/bin/sh\nsleep 300\n' > /usr/sbin/apt-get

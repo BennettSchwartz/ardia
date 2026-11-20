@@ -113,6 +113,7 @@ export function linuxUpdater(deps: UpdateDeps) {
   let switchCheck: SwitchCheck | null = null;
   let settledRun = 0;
   let sightedRun = 0;
+  let shownReady = false;
   const installingRuns = new Set<number>();
   const preferences = async () => {
     await deps.refresh?.(UPDATE_PREFERENCES).catch(() => {});
@@ -196,9 +197,13 @@ export function linuxUpdater(deps: UpdateDeps) {
   async function settle(status: EngineStatus, consent: ConsentToken | null, own: OwnRun | null) {
     if (!finished(status) || status.run <= settledRun) return;
     if (status.phase === "ready" && deps.showsToasts === false) return;
-    settledRun = status.run;
-    const claimed = (await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).catch(() => false)) === true;
-    if (!claimed) return;
+    const answer = await invokeHost<unknown>(CLAIM_METHOD, { args: [status.run] }, deps.host).then(
+      (claimed) => ({ claimed: claimed === true }),
+      () => null,
+    );
+    if (!answer) return;
+    settledRun = Math.max(settledRun, status.run);
+    if (!answer.claimed) return;
     countOutcome(status, consent);
     const target = status.version ?? own?.release.version;
     if (!target) return;
@@ -297,8 +302,8 @@ export function linuxUpdater(deps: UpdateDeps) {
     void startRun(release, "accepted", consent).catch((error: unknown) => console.info(`[ardia linux] the update to ${release.version} stopped: ${String(error)}`));
   };
 
-  async function checkOrRestart(consent: ConsentToken | null) {
-    const status = await engineStatus();
+  async function checkOrRestart(consent: ConsentToken | null, restartOffered: boolean) {
+    const status = restartOffered ? await engineStatus() : null;
     if (status?.phase === "ready" && installs(status.kind)) return restart(consent);
     return check(true, consent);
   }
@@ -329,6 +334,8 @@ export function linuxUpdater(deps: UpdateDeps) {
       const busy = selfUpdates && updateBusy(status);
       const engineCheck: SwitchCheck | null =
         selfUpdates && status?.version && (busy || status.phase === "ready") ? { phase: status.phase as SwitchCheck["phase"], channel: wanted, version: status.version } : null;
+      const shownCheck = checking && switchCheck ? switchCheck : (engineCheck ?? switchCheck);
+      shownReady = shownCheck?.phase === "ready";
       return {
         available: true,
         configured: !!current,
@@ -341,10 +348,10 @@ export function linuxUpdater(deps: UpdateDeps) {
         version: current ?? deps.appVersion() ?? "",
         channel: wanted,
         buildChannel: current ? channelOf(current) : "stable",
-        switchCheck: checking && switchCheck ? switchCheck : (engineCheck ?? switchCheck),
+        switchCheck: shownCheck,
       };
     },
-    checkForUpdates: () => checkOrRestart(consentToken()),
+    checkForUpdates: () => checkOrRestart(consentToken(), shownReady),
     setAutomaticUpdateChecks: async (on: unknown) => remember({ automaticChecks: on === true }),
     setAutomaticUpdateDownloads: async (on: unknown) => remember({ automaticDownloads: on === true }),
     setUpdateChannel: async (next: unknown) => {
@@ -358,7 +365,9 @@ export function linuxUpdater(deps: UpdateDeps) {
     return !!version() && !launch.background && !launch.isolated && (await preferences()).automaticChecks;
   };
 
-  return { methods, check, checksByItself, watch, menuItem };
+  const restartWhenReady = () => checkOrRestart(consentToken(), true);
+
+  return { methods, check, checksByItself, watch, menuItem, restartWhenReady };
 }
 
 export type LinuxUpdater = ReturnType<typeof linuxUpdater>;

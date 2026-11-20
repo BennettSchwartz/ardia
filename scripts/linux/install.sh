@@ -12,8 +12,8 @@ Installs an extracted Ardia Linux package.
 
 Ardia goes under PREFIX/lib/ardia with PREFIX/bin/ardia, its desktop entry
 and icon. The new lib/ardia is copied beside the old one and swapped in with
-renames, so a running Ardia keeps its files and a failed copy leaves the old
-install whole. Run as root without --destdir, it makes lib/ardia/chrome-sandbox
+renames (one atomic exchange where mv has --exchange), so a running Ardia keeps
+the files it has open and a failed copy leaves the old install whole. Run as root without --destdir, it makes lib/ardia/chrome-sandbox
 setuid root, Chromium's sandbox where user namespaces are unavailable. The polkit policy always goes to DESTDIR/usr/share/polkit-1/actions,
 the only directory polkit reads actions from, whatever the prefix; its update
 action names PREFIX/lib/ardia/ardia-update, and is left out unless every
@@ -97,10 +97,14 @@ if [[ "$(id -u)" == 0 ]]; then
     chmod 4755 "$staged/chrome-sandbox"
   fi
 fi
-if [[ -e "$installed" || -L "$installed" ]]; then
-  mv -T -- "$installed" "$retired"
+if [[ -d "$installed" && ! -L "$installed" ]] && mv --exchange -T -- "$staged" "$installed" 2>/dev/null; then
+  mv -T -- "$staged" "$retired"
+else
+  if [[ -e "$installed" || -L "$installed" ]]; then
+    mv -T -- "$installed" "$retired"
+  fi
+  mv -T -- "$staged" "$installed"
 fi
-mv -T -- "$staged" "$installed"
 rm -rf -- "$retired"
 
 launcher=$(mktemp)

@@ -38,7 +38,7 @@ test("only published releases with a Linux package and a GitHub release page cou
 });
 
 function fakeEngine({ kind = "deb", fail = null, failWhile = "downloading" } = {}) {
-  const engine = { phase: "idle", version: null, reason: null, kind, run: 0, claims: [], updates: [], restarts: 0 };
+  const engine = { phase: "idle", version: null, reason: null, kind, run: 0, claims: [], updates: [], restarts: 0, unansweredClaims: 0 };
   const status = () => ({ phase: engine.phase, version: engine.version, reason: engine.reason, kind: engine.kind, run: engine.run });
   engine.status = status;
   engine.update = (version) => {
@@ -57,6 +57,10 @@ function fakeEngine({ kind = "deb", fail = null, failWhile = "downloading" } = {
     while (engine.phase === "downloading" || engine.phase === "installing") engine.advance();
   };
   engine.claim = (run) => {
+    if (engine.unansweredClaims > 0) {
+      engine.unansweredClaims--;
+      throw new Error("the claim call failed");
+    }
     const answer = run === engine.run && (engine.phase === "ready" || engine.phase === "failed") && !engine.claims.includes(run);
     if (answer) engine.claims.push(run);
     return answer;
@@ -320,6 +324,21 @@ test("closing Settings mid-run loses nothing: the engine finishes, and the leade
   assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_deb: 1 });
 });
 
+test("a claim call that fails leaves the run for the next look, so its toast and counts aren't lost", async () => {
+  takeUpdateCounts();
+  const engine = fakeEngine({ kind: "deb" });
+  const leader = harness({ engine });
+  await engine.update("0.2.46");
+  engine.finish();
+  engine.unansweredClaims = 1;
+  for (let i = 0; i < 2; i++) await leader.updater.watch();
+  assert.deepEqual([leader.seen.ready, engine.claims], [[], []]);
+  await leader.updater.watch();
+  assert.deepEqual(leader.seen.ready.map((r) => r.version), ["0.2.46"]);
+  assert.deepEqual(engine.claims, [1]);
+  assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_deb: 1 });
+});
+
 test("Settings left open never claims a finished update, so a browser window says it's ready", async () => {
   takeUpdateCounts();
   const engine = fakeEngine({ kind: "deb" });
@@ -349,7 +368,10 @@ test("restarting from Settings before a browser window claims the update still c
   await offline.updater.check(true);
   assert.deepEqual([offline.seen.ready.map((r) => r.version), offline.seen.told, offline.seen.requests], [["0.2.46"], [], 0], "a ready update is shown before GitHub is asked, so a failed check can't hide it");
   await settings.updater.methods.checkForUpdates();
-  assert.equal(engine.restarts, 1);
+  assert.equal(engine.restarts, 0, "a Check Now drawn before the update was ready checks instead of restarting");
+  assert.equal((await settings.updater.methods.updaterState()).switchCheck?.phase, "ready");
+  await settings.updater.methods.checkForUpdates();
+  assert.equal(engine.restarts, 1, "Restart to Update restarts");
   assert.deepEqual(engine.claims, [1]);
   assert.deepEqual(SELF_UPDATE_COUNTS(takeUpdateCounts()), { update_downloads_started: 1, update_downloads_finished: 1, update_installs_tarball: 1, update_restarts: 1 });
 });
@@ -366,7 +388,9 @@ test("the app menu reads the engine fresh, so it offers Restart to Update after 
   await first.updater.check(false);
   assert.deepEqual(engine.updates, ["0.2.46"], "a ready update is never downloaded again");
   await second.updater.methods.checkForUpdates();
-  assert.equal(engine.restarts, 1);
+  assert.equal(engine.restarts, 0, "a Check Now drawn before the update was ready never restarts");
+  await second.updater.restartWhenReady();
+  assert.equal(engine.restarts, 1, "the menu's Restart to Update restarts");
 });
 
 test("with automatic updates off, the automatic check offers the update once, and Update starts the same run", async () => {
