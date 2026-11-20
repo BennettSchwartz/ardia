@@ -1,4 +1,4 @@
-import { Keyboard, Platform, StyleSheet } from "react-native";
+import { Dimensions, Keyboard, Platform, StyleSheet } from "react-native";
 import { State } from "react-native-gesture-handler";
 import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-handler/jest-utils";
 import { getAnimatedStyle } from "react-native-reanimated";
@@ -6,6 +6,7 @@ import { act, type ReactTestInstance } from "react-test-renderer";
 import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { SearchTray } from "../components/search/SearchTray";
 import { DesignProvider } from "../components/ui";
+import { FloatingBar } from "../components/browsing/FloatingBar";
 import { useScreenLayout, type ScreenHinge } from "../state/app/screenLayout";
 import * as browse from "../state/browse/store";
 import { usePageUi } from "../state/page/store";
@@ -25,6 +26,7 @@ type StageProps = {
   rowsRevealNativeId?: string | null;
   fieldCenter?: number;
   commandTop?: number | null;
+  landsDirectly?: boolean;
   morphLook?: { usesGlass: boolean; panelTint: string; panelDark: boolean; classicPanel: string };
   onLift?: (lift: { lift: number; up: boolean }) => void;
   onReveal?: (reveal: { late: boolean }) => void;
@@ -439,4 +441,51 @@ onIPhone("with no hinge the search panel keeps its 8 a side", () => {
   const card = stageCardOf(root);
   expect(card.paddingHorizontal).toBe(8);
   expect(card.paddingRight).toBeUndefined();
+});
+
+const anchorSpan = (root: Root, width: number) => {
+  let controls: ReactTestInstance | null = root.root.findAll((node) => node.type === FloatingBar)[0]!.parent;
+  while (controls && (typeof controls.type !== "string" || StyleSheet.flatten(controls.props.style).bottom === undefined)) controls = controls.parent;
+  const { left, right } = StyleSheet.flatten(controls!.props.style) as { left: number; right: number };
+  const centre = { ...StyleSheet.flatten(host(root, "floatingBarCentre")!.props.style), ...getAnimatedStyle(host(root, "floatingBarCentre")!) } as { marginLeft?: number; marginRight?: number };
+  return { left: left + 24 + (centre.marginLeft ?? 0), right: width - right - 24 - (centre.marginRight ?? 0) };
+};
+
+const DUO_SCREENS = [
+  { name: "open Duo", width: 951, height: 669, hinge: "fullyOpen", anchor: { left: 527, right: 927 }, direct: true },
+  { name: "closed Duo", width: 466, height: 678, hinge: "closed", anchor: { left: 24, right: 370 }, direct: false },
+] as const satisfies readonly { name: string; width: number; height: number; hinge: ScreenHinge; anchor: { left: number; right: number }; direct: boolean }[];
+
+for (const screen of DUO_SCREENS) {
+  onIPhone(`on the ${screen.name} closing search lands on the address capsule as laid out, ${screen.anchor.left} to ${screen.anchor.right}, ${screen.direct ? "in one move" : "on the phone's path"}, and the capsule never moves after it lands`, () => {
+    const portrait = Dimensions.get("window");
+    Dimensions.set({ window: { ...portrait, width: screen.width, height: screen.height }, screen: { ...portrait, width: screen.width, height: screen.height } });
+    jest.spyOn(safeArea, "useSafeAreaInsets").mockImplementation(() => ({ top: 0, bottom: 34, left: 0, right: 84 }));
+    act(() => useScreenLayout.setState({ hinge: screen.hinge }));
+    const root = page();
+    expect(anchorSpan(root, screen.width)).toEqual(screen.anchor);
+    open();
+    advance(400);
+    expect(stage().landsDirectly).toBe(screen.direct);
+    expect(anchorSpan(root, screen.width)).toEqual(screen.anchor);
+    act(() => browse.cancelSearch());
+    expect(mockStage.close).toHaveBeenLastCalledWith("morph", 0);
+    for (let frame = 0; frame < 20; frame++) {
+      act(() => jest.advanceTimersByTime(16));
+      expect(anchorSpan(root, screen.width)).toEqual(screen.anchor);
+    }
+    act(() => stage().onSettled?.({ landed: true }));
+    for (let frame = 0; frame < 20; frame++) {
+      act(() => jest.advanceTimersByTime(16));
+      expect(anchorSpan(root, screen.width)).toEqual(screen.anchor);
+    }
+    act(() => useScreenLayout.setState({ hinge: "none" }));
+    Dimensions.set({ window: portrait, screen: portrait });
+  });
+}
+
+onIPhone("with no hinge the stage keeps the phone's landing path", () => {
+  page();
+  open();
+  expect(stage().landsDirectly).toBe(false);
 });

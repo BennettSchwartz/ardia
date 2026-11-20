@@ -1896,7 +1896,9 @@ resets the browsing view's own state: the bar comes back expanded and the sideba
     the top slot, the Incognito switch in the middle one (where the page's Tabs button turns into the Incognito
     glyph as the deck pulls in) and Search Tabs as a 48 magnifier circle in the bottom slot that grows left into the 400-wide field when tapped (on the same spring, focused, counted in `search_tabs_opened`), runs from 24 to the slot while the keyboard is up, and shrinks back once the search closes empty; the page's capsule hands over to it on the same slot as the deck pulls in; the start page puts `+` and Tabs in the
     top two and Settings in the bottom slot. On either Duo the search panel keeps 8 from the safe edges, so it ends
-    short of the strip and its clock. Each open Duo collapse counts in `bottom_bar_collapses`. The deck's header, cards, grid, archive capsule and the search tray keep
+    short of the strip and its clock. Closing search on the open Duo lands the panel on the capsule in one move
+    (`landsDirectly`): the phone's drop, fold and then narrow read as a second slide there, the panel being twice
+    the capsule's width and off to its left. Each open Duo collapse counts in `bottom_bar_collapses`. The deck's header, cards, grid, archive capsule and the search tray keep
   the side insets.
 - Pager: the full screen width.
 - Search tray: the panel is the safe width less 8 each side, so it clears the island; radius 32.75; 8 above the

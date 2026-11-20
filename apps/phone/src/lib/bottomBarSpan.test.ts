@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoFieldReach, duoSqueeze } from "./bottomBarSpan.ts";
+import { besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoFieldReach, duoSqueeze, isOpenDuo } from "./bottomBarSpan.ts";
 
 test("with no hinge every bottom bar pads by the larger side inset plus its own side, on both sides, and nothing goes to a strip", () => {
   assert.deepEqual(bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), { span: { left: 24, right: 24 }, strip: null });
@@ -63,4 +63,11 @@ test("on the open Duo the deck's Search Tabs field rests in the bottom slot, ope
   assert.deepEqual(duoFieldReach(951, mirrored, 24), { side: "marginRight", rest: 352, open: 0, typing: -503 });
   assert.equal(duoFieldReach(466, bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24), 24), null);
   assert.equal(duoFieldReach(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), 24), null);
+});
+
+test("the open Duo is a hinge at 600 wide or more, which is where closing search lands in one move", () => {
+  assert.equal(isOpenDuo(951, "fullyOpen"), true);
+  assert.equal(isOpenDuo(600, "partiallyOpen"), true);
+  assert.equal(isOpenDuo(466, "closed"), false);
+  assert.equal(isOpenDuo(1032, "none"), false);
 });
