@@ -9,11 +9,11 @@ import { menuOpenedHaptic } from "../../state/browse/tabMenus";
 import { useCanReopen, useIncognito } from "../../state/tabs/hooks";
 import { countUsage } from "../../state/telemetry/telemetry";
 import { noteDeckBarTop, watchDeckBar } from "../../state/toasts/store";
-import { capsule, ChromeSurface, deckChromeLayout, deckChromeMotion, font, ink, iPhoneOr, PressScale, rolesFor, startLayout, tabsCurve, tabsInk, tabsLayout, tabsMotion, useReduceMotion, useTheme, type MenuItem, Symbol, SystemGlyph } from "../ui";
+import { capsule, chromeLayout, ChromeSurface, deckChromeLayout, deckChromeMotion, font, ink, iPhoneOr, PressScale, rolesFor, startLayout, tabsCurve, tabsInk, tabsLayout, tabsMotion, useReduceMotion, useTheme, type MenuItem, Symbol, SystemGlyph } from "../ui";
 import { MenuTrigger } from "../ui/MenuTrigger";
 import { useKeyboardTopFromBottom } from "../search/useKeyboardHeight";
 import { FadingGlyphs, GlassPlusButton, type ChromeFade } from "./ChromeButtons";
-import { besideStrip, DUO_BAR, type BottomBarLayout } from "../../lib/bottomBarSpan";
+import { besideStrip, DUO_BAR, duoFieldReach, type BottomBarLayout } from "../../lib/bottomBarSpan";
 
 type Props = {
   shown: boolean;
@@ -159,8 +159,14 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, width, layout, in
   useEffect(() => {
     growth.value = reduceMotion ? withTiming(opened ? 1 : 0, { duration: tabsMotion.barCollapseReduced }) : withSpring(opened ? 1 : 0, tabsMotion.barCollapse);
   }, [opened, reduceMotion]);
-  const tucked = Math.max(width - span.left - span.right - DUO_BAR.button, 0);
-  const grow = useAnimatedStyle(() => (ends ? { marginLeft: tucked * (1 - Math.min(Math.max(growth.value, 0), 1)) } : {}), [ends, tucked]);
+  const reach = duoFieldReach(width, layout, chromeLayout.barSideInset);
+  const reachTo = reach ? (focused && keyboard > 0 ? reach.typing : opened ? reach.open : reach.rest) : 0;
+  const edge = useSharedValue(reachTo);
+  useEffect(() => {
+    edge.value = reduceMotion ? withTiming(reachTo, { duration: tabsMotion.barCollapseReduced }) : withSpring(reachTo, tabsMotion.barCollapse);
+  }, [reachTo, reduceMotion]);
+  const reachSide = reach?.side ?? null;
+  const grow = useAnimatedStyle(() => (reachSide === "marginLeft" ? { marginLeft: edge.value } : reachSide === "marginRight" ? { marginRight: edge.value } : {}), [reachSide]);
   const fieldFade = useAnimatedStyle(() => (ends ? { opacity: Math.min(Math.max(growth.value, 0), 1) } : {}), [ends]);
   const circleFade = useAnimatedStyle(() => ({ opacity: 1 - Math.min(Math.max(growth.value, 0), 1) }));
   const plus = <PlusMenuButton width={deckChromeLayout.barCircle} label={incognito ? "New Incognito Tab" : "New Tab"} testID="deckBarPlus" dark={dark} place={plusPlace} menusShown={menusShown} onMenu={onMenu} {...fade} />;
@@ -179,7 +185,7 @@ export function DeckBottomBar({ shown, barCenterY, deckHeight, width, layout, in
         {ends ? (
           <Animated.View testID="deckSearchGrow" collapsable={false} style={[styles.searchHit, styles.grows, grow]}>
             <SearchTabsField search={search} style={styles.searchHit} resting={!opened} contentStyle={fieldFade} {...fade} />
-            <Animated.View testID="deckSearchCircle" collapsable={false} style={[styles.searchCircle, circleFade]} pointerEvents={opened ? "none" : "auto"} importantForAccessibility={opened ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={opened}>
+            <Animated.View testID="deckSearchCircle" collapsable={false} style={[styles.searchCircle, strip?.side === "left" ? styles.circleLeading : styles.circleTrailing, circleFade]} pointerEvents={opened ? "none" : "auto"} importantForAccessibility={opened ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={opened}>
               <PressScale label="Search Tabs" onPress={() => search.input.current?.focus()} onPressIn={haptics.barPress} style={[styles.centered, styles.circleHit]}>
                 <FadingGlyphs fade={glyphFade} pointerEvents="none" style={styles.centered}>
                   <SystemGlyph testID="deckSearchCircleGlyph" systemName="magnifyingglass" pointSize={18} weight="medium" fitted name="magnifyingglass" size={deckChromeLayout.searchGlyph} color={roles.label} />
@@ -206,7 +212,9 @@ const styles = StyleSheet.create({
   strip: { position: "absolute", width: DUO_BAR.button, height: DUO_BAR.button },
   searchHit: { flex: 1, height: deckChromeLayout.barCircle },
   grows: { overflow: "hidden", borderRadius: capsule(deckChromeLayout.barCircle) },
-  searchCircle: { position: "absolute", top: 0, right: 0, width: DUO_BAR.button, height: DUO_BAR.button },
+  searchCircle: { position: "absolute", top: 0, width: DUO_BAR.button, height: DUO_BAR.button },
+  circleLeading: { left: 0 },
+  circleTrailing: { right: 0 },
   circleHit: { width: DUO_BAR.button, height: DUO_BAR.button },
   search: { flex: 1, paddingLeft: deckChromeLayout.searchLead },
   searchRow: { flex: 1, flexDirection: "row", alignItems: "center", gap: deckChromeLayout.searchSpacing },

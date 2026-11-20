@@ -436,6 +436,7 @@ function StagedTray() {
   const reduceTransparency = useReduceTransparency();
   const chrome = useChromeStyle();
   const phoneLayout = useScreenLayout((s) => s.layout.name === "phone");
+  const hinged = useScreenLayout((s) => s.hinge !== "none");
   const pills = useStageBar((state) => state.pills);
   const stage = useRef<SearchStageHandle>(null);
   const [mounted, setMounted] = useState<number | null>(open ? session : null);
@@ -707,7 +708,7 @@ function StagedTray() {
           {mounted !== null ? (
             <View
               key={presentation}
-              style={command ? { marginLeft: command.left, width: command.width } : styles.stageCard}
+              style={command ? { marginLeft: command.left, width: command.width } : [styles.stageCard, hinged ? { paddingLeft: insets.left + floatingPanelLayout.inset, paddingRight: insets.right + floatingPanelLayout.inset } : null]}
               importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
               accessibilityElementsHidden={closing}
             >

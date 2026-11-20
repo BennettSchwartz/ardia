@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoSqueeze } from "./bottomBarSpan.ts";
+import { besideStrip, bottomBarLayout, DUO_PLUS_ABOVE, duoFieldReach, duoSqueeze } from "./bottomBarSpan.ts";
 
 test("with no hinge every bottom bar pads by the larger side inset plus its own side, on both sides, and nothing goes to a strip", () => {
   assert.deepEqual(bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), { span: { left: 24, right: 24 }, strip: null });
@@ -52,4 +52,15 @@ test("the closed Duo and a phone with no hinge never squeeze", () => {
   assert.equal(duoSqueeze(599, bottomBarLayout(599, { left: 0, right: 84 }, "fullyOpen", 24)), null);
   assert.equal(duoSqueeze(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24)), null);
   assert.equal(duoSqueeze(1032, bottomBarLayout(1032, { left: 0, right: 0 }, "none", 24)), null);
+});
+
+test("on the open Duo the deck's Search Tabs field rests in the bottom slot, opens to 400, and runs from 24 to the slot's right edge while typing", () => {
+  const open = bottomBarLayout(951, { left: 0, right: 84 }, "fullyOpen", 24);
+  assert.deepEqual(duoFieldReach(951, open, 24), { side: "marginLeft", rest: 352, open: 0, typing: -503 });
+  assert.equal(527 + 352, 903 - 24);
+  assert.equal(527 - 503, 24);
+  const mirrored = bottomBarLayout(951, { left: 84, right: 0 }, "fullyOpen", 24);
+  assert.deepEqual(duoFieldReach(951, mirrored, 24), { side: "marginRight", rest: 352, open: 0, typing: -503 });
+  assert.equal(duoFieldReach(466, bottomBarLayout(466, { left: 0, right: 84 }, "closed", 24), 24), null);
+  assert.equal(duoFieldReach(402, bottomBarLayout(402, { left: 0, right: 0 }, "none", 24), 24), null);
 });

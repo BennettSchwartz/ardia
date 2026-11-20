@@ -1,4 +1,4 @@
-import { Dimensions, StyleSheet } from "react-native";
+import { Dimensions, Keyboard, Platform, StyleSheet, type KeyboardEvent } from "react-native";
 import { getAnimatedStyle } from "react-native-reanimated";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { TabDeck } from "../components/tabs/TabDeck";
@@ -96,3 +96,32 @@ for (const [name, width, hinge, right] of [["closed Duo", 466, "closed", 84], ["
     unmount(root);
   });
 }
+
+test("on the open Duo, while typing with the keyboard up the field runs from 24 to the slot's right edge, back to 400 with the keyboard down and a query, and into the circle once cleared", () => {
+  const listeners = new Map<string, ((event: KeyboardEvent) => void)[]>();
+  jest.spyOn(Keyboard, "metrics").mockReturnValue(undefined);
+  jest.spyOn(Keyboard, "addListener").mockImplementation((name, listener) => {
+    listeners.set(name, [...(listeners.get(name) ?? []), listener]);
+    return { remove: () => listeners.set(name, (listeners.get(name) ?? []).filter((one) => one !== listener)) } as never;
+  });
+  const keyboard = (shows: boolean) => {
+    const name = Platform.OS === "ios" ? (shows ? "keyboardWillShow" : "keyboardWillHide") : shows ? "keyboardDidShow" : "keyboardDidHide";
+    act(() => (listeners.get(name) ?? []).forEach((listener) => listener({ endCoordinates: { height: shows ? 300 : 0, screenX: 0, screenY: shows ? 369 : 669, width: 951 } } as never)));
+  };
+  onScreen(951, 669, "fullyOpen", 84);
+  const root = deck();
+  act(() => field(root).props.onFocus());
+  keyboard(true);
+  settle();
+  expect(shown(host(root, "deckSearchGrow")!).marginLeft).toBeCloseTo(-503, 3);
+  expect(527 - 503).toBe(24);
+  act(() => field(root).props.onChangeText("verge"));
+  keyboard(false);
+  act(() => field(root).props.onBlur());
+  settle();
+  expect(shown(host(root, "deckSearchGrow")!).marginLeft).toBeCloseTo(0, 3);
+  act(() => field(root).props.onChangeText(""));
+  settle();
+  expect(shown(host(root, "deckSearchGrow")!).marginLeft).toBeCloseTo(352, 3);
+  unmount(root);
+});

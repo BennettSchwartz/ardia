@@ -34,6 +34,15 @@ export function duoSqueeze(width: number, layout: BottomBarLayout): DuoSqueeze |
   return { marginLeft: strip.centerX - half - span.left, marginRight: width - span.right - (strip.centerX + half) };
 }
 
+export type DuoFieldReach = { side: "marginLeft" | "marginRight"; rest: number; open: number; typing: number };
+
+export function duoFieldReach(width: number, layout: BottomBarLayout, side: number): DuoFieldReach | null {
+  const { span, strip } = layout;
+  if (!strip?.ends) return null;
+  const far = strip.side === "right" ? span.left : span.right;
+  return { side: strip.side === "right" ? "marginLeft" : "marginRight", rest: Math.max(width - span.left - span.right - DUO_BAR.button, 0), open: 0, typing: side - far };
+}
+
 export const barSpanCenter = (width: number, span: BarSpan) => (span.left + width - span.right) / 2;
 
 export function besideStrip(strip: DuoStrip, width: number, menuWidth: number, margin: number) {

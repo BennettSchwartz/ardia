@@ -6,6 +6,7 @@ import { act, type ReactTestInstance } from "react-test-renderer";
 import { BrowsingScreen } from "../components/browsing/BrowsingScreen";
 import { SearchTray } from "../components/search/SearchTray";
 import { DesignProvider } from "../components/ui";
+import { useScreenLayout, type ScreenHinge } from "../state/app/screenLayout";
 import * as browse from "../state/browse/store";
 import { usePageUi } from "../state/page/store";
 import { storeNavigation, usePages, type PageState } from "../state/pages/store";
@@ -409,4 +410,33 @@ onAndroid("Android keeps the sheet tray and its own motion: no stage, and the ba
   expect(mockSeen.props).toBeNull();
   expect(host(root, "trayRoot")).toBeDefined();
   expect(host(root, "trayDim")).toBeDefined();
+});
+
+const safeArea = require("react-native-safe-area-context") as { useSafeAreaInsets: () => { top: number; bottom: number; left: number; right: number } };
+
+const stageCardOf = (root: Root) => {
+  let card: ReactTestInstance | null = host(root, "traySurface")!.parent;
+  while (card && typeof card.type !== "string") card = card.parent;
+  return StyleSheet.flatten(card!.props.style) as { paddingHorizontal?: number; paddingLeft?: number; paddingRight?: number };
+};
+
+for (const [name, hinge, right] of [["open Duo", "fullyOpen", 84], ["closed Duo", "closed", 84]] as const satisfies readonly (readonly [string, ScreenHinge, number])[]) {
+  onIPhone(`on the ${name} the search panel stays out of the sensor strip and its clock: it ends 8 short of the strip, its inner edge`, () => {
+    jest.spyOn(safeArea, "useSafeAreaInsets").mockImplementation(() => ({ top: 0, bottom: 34, left: 0, right }));
+    act(() => useScreenLayout.setState({ hinge }));
+    const root = page();
+    open();
+    advance(400);
+    expect(stageCardOf(root)).toMatchObject({ paddingLeft: 8, paddingRight: right + 8 });
+    act(() => useScreenLayout.setState({ hinge: "none" }));
+  });
+}
+
+onIPhone("with no hinge the search panel keeps its 8 a side", () => {
+  const root = page();
+  open();
+  advance(400);
+  const card = stageCardOf(root);
+  expect(card.paddingHorizontal).toBe(8);
+  expect(card.paddingRight).toBeUndefined();
 });
