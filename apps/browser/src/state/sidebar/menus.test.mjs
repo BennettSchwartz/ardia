@@ -489,6 +489,14 @@ test("Sleep Tab sleeps a pinned row, a Top App and a regular tab that Chrome kee
   assert.equal(counts.menu_sleeps_past_automatic, 3);
   assert.equal(counts.menu_sleeps_kept_awake, 1);
   assert.equal(counts.menu_sleep_kept_reason, "typedInput");
+  const late = ids[4];
+  let shownMeanwhile;
+  webviews.set(late, { sleepIfHidden: async () => (S().activate(late), (shownMeanwhile = true), [25]), discard: async () => (discarded.push(late), "discarded") });
+  S().activate(plain);
+  await whileMenuIsUp(() => openTabMenu(w, S().tabs[late]), () => {}, "sleep");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(shownMeanwhile);
+  assert.ok(!discarded.includes(late), "a tab shown while Chrome answered is not discarded");
   webviews.clear();
 });
 

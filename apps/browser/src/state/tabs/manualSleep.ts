@@ -35,6 +35,10 @@ export async function sleepAsked(id: string): Promise<MenuSleep> {
   const keptBy = await view.sleepIfHidden(0).catch(() => [-1]);
   if (!keptBy.length) return { outcome: "asleep" };
   if (!onlyAutomaticProtections(keptBy)) return { outcome: "kept", keptBy: keptAwakeReason(keptBy) };
+  const after = useBrowser.getState();
+  if (!after.tabs[id] || webviews.get(id) !== view) return { outcome: "gone" };
+  if (visibleWith(after, id)) return { outcome: "shown" };
+  if (inUse(after, id)) return { outcome: "kept", keptBy: "playingOrSharing" };
   const discarded = await view.discard().catch(() => "refused" as const);
   return discarded === "discarded" || discarded === "already" ? { outcome: "asleep", pastAutomatic: true } : { outcome: "kept", keptBy: "other" };
 }
