@@ -103,7 +103,7 @@ export function FloatingBar({ tab, order, roles, dark, showsPlus, anchors = true
     <View testID="floatingBar" style={styles.row} pointerEvents="box-none">
       {inStrip ? null : leading}
       <Animated.View testID="floatingBarCentre" nativeID={ids?.anchor} collapsable={false} style={[styles.addressSlot, centreSqueeze]} pointerEvents={back.centreShown ? "box-none" : "none"} importantForAccessibility={back.centreShown ? "auto" : "no-hide-descendants"} accessibilityElementsHidden={!back.centreShown}>
-      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
+      <ChromeSurface testID="floatingBarAddress" shape="capsule" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={back.centreGlass.shown} shownMs={back.centreGlass.shownMs} style={[styles.address, squeeze ? styles.squeezes : null]}>
         <Animated.View testID="floatingBarCentreGlyphs" nativeID={ids?.face} collapsable={false} style={[styles.addressRow, back.centreGlyphs]}>
         <PullGlyphs style={styles.addressRow}>
         <Animated.View testID="floatingBarAddressFade" collapsable={false} style={[styles.addressFade, addressFade]} pointerEvents={squeezed ? "none" : "box-none"} importantForAccessibility={squeezed ? "no-hide-descendants" : "auto"} accessibilityElementsHidden={squeezed}>
@@ -186,7 +186,7 @@ export function FloatingTabsButton({ tab, order, roles, dark, testID, glass, gly
           onLongPress={onLongPress}
           style={styles.circleHit}
         >
-          <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+          <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
             <PullGlyphs>
               <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
                 <TabStack tabs={order.slice(-2)} roles={roles} />
@@ -209,7 +209,7 @@ export function FloatingPlusButton({ tab, dark, testID, glass, glyphs, ghost = f
   const size = floatingBarLayout.control;
   return (
     <PressScale label="New Search" onPress={onPlus} onPressIn={haptics.barPress} style={styles.circleHit}>
-      <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
+      <ChromeSurface testID={testID} shape="circle" cornerRadius={capsule(size)} incognito={tab.isPrivate} dark={dark} barShadow={chromeLayout.barCastsShadow} shown={glass?.shown} shownMs={glass?.shownMs} style={styles.circle}>
         <PullGlyphs>
           <Animated.View testID={`${testID}Glyphs`} pointerEvents="none" style={glyphs}>
             <Symbol name="plus" size={floatingBarLayout.plusSymbol} color={ink.foreground} />
