@@ -148,7 +148,8 @@ export function handleControlRequest({ connection, generation: tagged, line }: C
   const consent = consentToken();
   const reply = (settled: Body) => {
     const line = replyLine(id, settled, method, consent);
-    noteSocketCall(family, "error" in settled || line.startsWith(`{"id":${JSON.stringify(id)},"error":`), consent);
+    const failedResult = "result" in settled && typeof settled.result === "object" && settled.result !== null && (settled.result as { ok?: unknown }).ok === false;
+    noteSocketCall(family, "error" in settled || failedResult || line.startsWith(`{"id":${JSON.stringify(id)},"error":`), consent);
     try {
       replyOnControlSocket(connection, line, ticket);
     } catch (error) {
