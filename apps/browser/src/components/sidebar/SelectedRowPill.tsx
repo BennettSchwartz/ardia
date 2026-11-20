@@ -3,7 +3,7 @@ import { Animated, Pressable, StyleSheet, View, type ScrollView } from "react-na
 import { watchWindowRecord } from "../../state/browser/keyedWatch";
 import { revealTab, rowsStamp, sameRows, selectedTabIn, selectedTabSnapshot, type PillTab, type RowsStamp } from "../../state/sidebar/reveal";
 import { notePageOverlay } from "../../state/telemetry/usage";
-import { capsule, Panel, radius, reduceMotion, Symbol, Text, TintedImage } from "../ui";
+import { capsule, Panel, radius, reduceMotion, Symbol, Text, tintedImage } from "../ui";
 import { useTheme } from "../ui/theme";
 import { SHADOWS } from "../window/tokens";
 import { GLOW_ROOM, type SidebarGeometry } from "./pageLayout";
@@ -231,15 +231,13 @@ function PillGlyph({ tab, size }: { tab: PillTab; size: number }) {
   if (!tab.url && !tab.faviconUri) return <NewTabIcon size={size} />;
   if (!tab.faviconUri || broken === tab.faviconUri) return <FaviconFallback url={tab.url} size={size} />;
   const uri = tab.faviconUri;
-  return (
-    <TintedImage
-      source={{ uri }}
-      identity={uri}
-      tint={tab.template && !theme.dark ? theme.textPrimary : undefined}
-      onError={() => setBroken(uri)}
-      style={{ width: size, height: size, borderRadius: radius.hair }}
-    />
-  );
+  return tintedImage({
+    source: { uri },
+    identity: uri,
+    tint: tab.template && !theme.dark ? theme.textPrimary : undefined,
+    onError: () => setBroken(uri),
+    style: { width: size, height: size, borderRadius: radius.hair },
+  });
 }
 
 const PLACE = { position: "absolute", left: 0, right: 0, alignItems: "center" } as const;

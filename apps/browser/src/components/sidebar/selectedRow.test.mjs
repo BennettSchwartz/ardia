@@ -50,12 +50,12 @@ test("the pill reads no store while it shows: no external-store hook, no tab hoo
   assert.match(pill, /if \(!away \|\| frame\) return;/, "a window change waits a frame only while the pill shows");
 });
 
-test("the pill's icon keeps what the row's icon shows: the engine badge, the faded look, a tint only through TintedImage", () => {
+test("the pill's icon keeps what the row's icon shows: the engine badge, the faded look, a tint only through tintedImage", () => {
   const pill = readFileSync(new URL("./SelectedRowPill.tsx", import.meta.url), "utf8");
   assert.match(pill, /const engine = markedEngine\(tab\.marks\);/);
   assert.match(pill, /\{engine \? <EngineMark mark=\{engine\} size=\{size\} \/> : null\}/);
   assert.match(pill, /tab\.marks & FADED \? SLEEPING_OPACITY : 1/);
-  assert.match(pill, /<TintedImage/);
+  assert.match(pill, /return tintedImage\(\{/);
 });
 
 test("the tracker hands the pill the selected tab only while its row is out of view, and keeps quiet otherwise", async (t) => {
