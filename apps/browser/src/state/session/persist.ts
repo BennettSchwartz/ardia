@@ -14,7 +14,7 @@ import type { BrowserWindow, ClosedWindow, ParkedPins, SplitView, Tab } from "..
 import { downloadSession, withoutRepeats } from "../downloads/downloadsSlice";
 import { anyDownloadProgress, withLiveProgress } from "../downloads/progress";
 import { noteDownloadHistoryWrite } from "../telemetry/downloadWork";
-import { noteSessionPinBackup, noteSessionWrite } from "../telemetry/sessionWrites";
+import { noteSessionWrite } from "../telemetry/sessionWrites";
 import { saveBeforeQuit } from "../app/quit";
 import { landHeldPins, pinGuard, savedAfterPins } from "./pinGuard";
 import { noteSavedTopAppsMerged } from "../telemetry/topAppsSharing";
@@ -310,7 +310,7 @@ export function startPersistence(overrides: LaunchOverrides = {}) {
   useBrowser.getState().hydrate(loaded ?? {});
   restoreLaunchLook();
 
-  const keepDroppedPins = pinGuard(useBrowser.getState(), (delay) => schedule(delay), noteSessionPinBackup);
+  const keepDroppedPins = pinGuard(useBrowser.getState(), (delay) => unstaged() && schedule(delay));
   pinsLanding = keepDroppedPins.landing;
   saveBeforeQuit(() => landHeldPins(() => unstaged() && frozen, pinsLanding, () => ((frozen = false), save(), (frozen = true))));
   const lastSources = new Map<string, unknown[]>();

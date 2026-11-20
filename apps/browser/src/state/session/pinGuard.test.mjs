@@ -381,3 +381,89 @@ test("quitting while a healthy backup is still landing writes the session once i
     resumePersistence();
   }
 });
+
+test("each failed backup try is counted once, only while sharing, and nothing else is sent with it", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const { stop, pin } = onePin();
+  takeSessionWrites();
+  try {
+    sharing(true);
+    stub.refusedSaves.on = true;
+    dropPins([pin]);
+    flushPersistence();
+    await microtasks();
+    await elapse(2_000);
+    assert.equal(takeSessionWrites().session_pin_backup_failures, 2, "the first try and one retry");
+    sharing(false);
+    await elapse(4_000);
+    assert.equal(takeSessionWrites().session_pin_backup_failures, 0, "not counted while sharing is off");
+  } finally {
+    stub.refusedSaves.on = false;
+    sharing(false);
+    stop();
+    mock.timers.reset();
+  }
+});
+
+test("quitting while a second backup starts behind the first still writes the session once both land (round 2, R4)", async () => {
+  const { stop, pinA, pinB } = twoProfilePins();
+  try {
+    stub.heldSaves.on = true;
+    dropPins([pinA]);
+    flushPersistence();
+    dropPins([pinB]);
+    flushPersistence({ final: true });
+    const quit = finishQuitSaves(3_000);
+    stub.heldSaves.on = false;
+    for (let i = 0; i < 6; i++) {
+      for (const land of stub.heldSaves.queue.splice(0)) land();
+      await turn();
+    }
+    await quit;
+    assert.ok(!sessionUrls().includes("https://pin-a.com") && !sessionUrls().includes("https://pin-b.com"), "the session followed both backups before quitting");
+  } finally {
+    stub.heldSaves.on = false;
+    stop();
+    resumePersistence();
+  }
+});
+
+test("a profile deleted while its backup waits is left out of the backup (round 2, C)", async () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: Date.now() });
+  const { stop, pinA, pinB, work } = twoProfilePins();
+  try {
+    stub.refusedSaves.on = true;
+    dropPins([pinA]);
+    flushPersistence();
+    dropPins([pinB]);
+    flushPersistence();
+    S().deleteProfile(work);
+    await microtasks();
+    stub.refusedSaves.on = false;
+    await elapse(3_000);
+    const kept = backups();
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].pins[work], undefined, "nothing of the deleted profile is written");
+  } finally {
+    stub.refusedSaves.on = false;
+    stub.heldSaves.on = false;
+    stop();
+    mock.timers.reset();
+  }
+});
+
+test("a pins-backup.json that can't be read is kept, and the new backup goes beside it (round 2, E)", async () => {
+  const { stop, pin, profileId } = onePin();
+  stub.docs.set(PINS_BACKUP_DOCUMENT, "{ not json");
+  try {
+    dropPins([pin]);
+    await settle();
+  } finally {
+    stop();
+  }
+  assert.equal(stub.docs.get(PINS_BACKUP_DOCUMENT), "{ not json", "the unreadable file is left alone");
+  const beside = [...stub.docs.keys()].filter((name) => name.startsWith("pins-backup-") && name.endsWith(".json"));
+  assert.equal(beside.length, 1);
+  assert.deepEqual(parsePinBackups(stub.docs.get(beside[0]))[0].pins[profileId].tabs.map((t) => t.url), ["https://pin.com"]);
+  assert.ok(!sessionUrls().includes("https://pin.com"));
+});

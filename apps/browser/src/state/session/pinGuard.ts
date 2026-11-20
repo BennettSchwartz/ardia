@@ -5,7 +5,8 @@ import { isRegularWindow } from "../windows/small";
 import { isFields } from "../../lib/decode";
 import { readDocument, saveDocument } from "../../platform/documents";
 import type { ParkedPins } from "../browser/types";
-import { consentToken, type ConsentToken } from "../telemetry/client";
+import { consentToken } from "../telemetry/client";
+import { noteSessionPinBackup, noteSessionPinBackupFailure } from "../telemetry/sessionWrites";
 
 export const PINS_BACKUP_DOCUMENT = "pins-backup.json";
 export const PINS_BACKUP_VERSION = 1;
@@ -95,15 +96,19 @@ export const MAX_PIN_BACKUP_WAIT_MS = 60_000;
 
 export type PinCheck = { hold: false; commit: () => void } | { hold: true; againIn: number | null };
 export type PinGuard = ((s: PinState) => PinCheck) & { landing: () => Promise<void> | null };
-type Cover = { baseline: PinState; base: PinBackup[]; at: number; dropped: Map<string, number> };
+type Cover = { baseline: PinState; base: PinBackup[]; document: string; at: number; dropped: Map<string, number> };
 
 const NOTHING: PinCheck = { hold: false, commit: () => {} };
 
-function savedBackups(): PinBackup[] {
+function savedBackups(): { base: PinBackup[]; document: string } {
+  const beside = `pins-backup-${Date.now()}.json`;
   try {
-    return parsePinBackups(readDocument(PINS_BACKUP_DOCUMENT));
+    const json = readDocument(PINS_BACKUP_DOCUMENT);
+    if (!json) return { base: [], document: PINS_BACKUP_DOCUMENT };
+    const raw: unknown = JSON.parse(json);
+    return isFields(raw) && Array.isArray(raw.backups) ? { base: parsePinBackups(json), document: PINS_BACKUP_DOCUMENT } : { base: [], document: beside };
   } catch {
-    return [];
+    return { base: [], document: beside };
   }
 }
 
@@ -112,7 +117,7 @@ function coverJson(cover: Cover): string {
   return JSON.stringify({ version: PINS_BACKUP_VERSION, backups: [...cover.base, entry].slice(-MAX_PIN_BACKUPS) });
 }
 
-export function pinGuard(initial: PinState, saveAgain: (delay: number) => void, noteBackup: (pins: number, consent: ConsentToken | null) => void): PinGuard {
+export function pinGuard(initial: PinState, saveAgain: (delay: number) => void): PinGuard {
   let saved = initial;
   let sourcesSaved = pinSources(saved);
   let censusSaved: PinCensus | null = null;
@@ -127,7 +132,7 @@ export function pinGuard(initial: PinState, saveAgain: (delay: number) => void, 
     const consent = consentToken();
     let attempt: Promise<void>;
     try {
-      attempt = saveDocument(PINS_BACKUP_DOCUMENT, coverJson(staged));
+      attempt = saveDocument(staged.document, coverJson(staged));
     } catch (error) {
       attempt = Promise.reject(error);
     }
@@ -139,13 +144,14 @@ export function pinGuard(initial: PinState, saveAgain: (delay: number) => void, 
         if (cover === staged) {
           const fresh = profiles.filter((p) => !landed.has(p));
           for (const p of fresh) landed.add(p);
-          if (fresh.length) noteBackup(fresh.reduce((a, p) => a + (staged.dropped.get(p) ?? 0), 0), consent);
+          if (fresh.length) noteSessionPinBackup(fresh.reduce((a, p) => a + (staged.dropped.get(p) ?? 0), 0), consent);
         }
         saveAgain(0);
       },
       () => {
         landing = null;
         failures++;
+        noteSessionPinBackupFailure(consent);
         const delay = Math.min(MAX_PIN_BACKUP_WAIT_MS, PIN_BACKUP_WAIT_MS * 2 ** (failures - 1));
         againAt = Date.now() + delay;
         saveAgain(delay);
@@ -164,7 +170,8 @@ export function pinGuard(initial: PinState, saveAgain: (delay: number) => void, 
     }
     const missing = [...dropped].filter(([p]) => !landed.has(p));
     if (missing.length) {
-      cover ??= { baseline: saved, base: savedBackups(), at: Date.now(), dropped: new Map() };
+      cover ??= { baseline: saved, ...savedBackups(), at: Date.now(), dropped: new Map() };
+      for (const p of cover.dropped.keys()) if (!s.profiles[p]) cover.dropped.delete(p);
       let grew = false;
       for (const [p, n] of missing) {
         if (cover.dropped.has(p)) continue;
@@ -201,8 +208,8 @@ export async function savedAfterPins(flush: () => boolean, held: () => boolean, 
 }
 
 export async function landHeldPins(held: () => boolean, landing: () => Promise<void> | null, saveNow: () => void): Promise<void> {
-  const waiting = held() ? landing() : null;
-  if (!waiting) return;
-  await waiting;
-  saveNow();
+  for (let waiting = held() ? landing() : null; waiting; waiting = held() ? landing() : null) {
+    await waiting;
+    saveNow();
+  }
 }
