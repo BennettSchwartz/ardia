@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -40,10 +40,11 @@ async function until(check, what, deadlineMs = 10_000) {
 test("stopping a launched tree kills its helpers and spares a process whose arguments merely contain the app path", async () => {
   const dir = mkdtempSync(join(tmpdir(), "bench-procs-"));
   const app = join(dir, "Bench.app");
-  const exe = join(app, "Contents", "MacOS", "sleep");
+  const exe = join(app, "Contents", "MacOS", "Bench");
   mkdirSync(join(app, "Contents", "MacOS"), { recursive: true });
-  copyFileSync("/bin/sleep", exe);
-  const helper = spawn(exe, ["30"], { stdio: "ignore" });
+  symlinkSync(process.execPath, exe);
+  const { NODE_OPTIONS, ...env } = process.env;
+  const helper = spawn(exe, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore", env });
   const decoy = spawn("/bin/sh", ["-c", "sleep 30", exe], { stdio: "ignore" });
   const helperGone = new Promise((ok) => helper.once("exit", (code, signal) => ok(signal)));
   try {
