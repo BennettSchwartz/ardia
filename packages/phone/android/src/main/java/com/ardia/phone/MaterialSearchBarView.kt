@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -150,7 +151,15 @@ class MaterialSearchBarView(context: Context, appContext: AppContext) : ExpoView
     }
 
     fun setIncognito(value: Boolean) {
+        if (incognitoState == value) return
         incognitoState = value
+        if (state.isFocused) compose.postOnAnimation { compose.post { restartKeyboard() } }
+    }
+
+    private fun restartKeyboard() {
+        if (!isAttachedToWindow || !state.isFocused) return
+        val target = compose.findFocus() ?: return
+        context.getSystemService(InputMethodManager::class.java)?.restartInput(target)
     }
 
     fun setShowsVoice(value: Boolean) {
@@ -321,13 +330,13 @@ internal object CompletionSuffixTransformation {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun NoPersonalizedLearning(enabled: Boolean, content: @Composable () -> Unit) {
-    if (!enabled) return content()
+    val noLearning by rememberUpdatedState(enabled)
     InterceptPlatformTextInput(
         interceptor = { request, next ->
             next.startInputMethod(object : PlatformTextInputMethodRequest {
                 override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
                     val connection = request.createInputConnection(outAttributes)
-                    outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    if (noLearning) outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
                     return connection
                 }
             })
