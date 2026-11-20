@@ -327,6 +327,8 @@ The only variables the app and engine read, through `ArdiaLaunchConfig` (`packag
 | | `cliInstallScript=<path>` | Another `ardia` installer script (the Linux and Windows hosts' installer; macOS no longer runs one) |
 | | `applePasswordsPanel` | Background mode really opens macOS's Passwords panel for the key and Edit › AutoFill › Passwords… instead of logging it (`docs/testing.md`); the panel is another process's window and can show on screen |
 | | `systemPanelRace` | Runs AppKit's delayed autofill show-or-hide pass right after the Passwords command, to check the panel survives it (`docs/testing.md`) |
+| | `passkeysTestStore` | Passkeys (#2854) use an in-memory store with no Keychain, Touch ID or visibility check, so a hidden instance can create and use test passkeys; test instances only (`docs/testing.md`) |
+| | `passkeysAnswer` | `accept`, `other` or `cancel`: answers every passkey sheet at once; with `passkeysTestStore` (`docs/testing.md`) |
 | | `bundledPlugins=<dir>` | Built-in plugins come from this folder instead of `Ardia.app/Contents/Resources/Plugins` (`docs/plugins.md` › Built-in plugins) |
 | | `legacySource=<home>` · `legacyCrashAfter=<step>` | The Netnyahoo → Ardia migration from a scratch home |
 | | `bangsUrl` · `onboarding` · `whatsNew` · `telemetry` · `liveMock=<url>` · `calendarFixture` | Debug builds only: bang list, run onboarding, show What's New, send telemetry, live folders from a mock, the calendar fixture |

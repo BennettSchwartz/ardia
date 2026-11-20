@@ -4,6 +4,8 @@ public class PasswordsModule: Module {
   public func definition() -> ModuleDefinition {
     Name(Self.calls.moduleName)
 
+    OnCreate { PasskeyCoordinator.configureFromLaunch() }
+
     Self.calls.function
 
     AsyncFunction("save") { (profile: String, origin: String, username: String, password: String, promise: Promise) in

@@ -13,18 +13,5 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)passkeyEmit:(NSString *)name payload:(NSDictionary<NSString *, id> *)payload;
 @end
 
-@interface ArdiaPasskeyCoordinator : NSObject
-@property(class, nonatomic, readonly) ArdiaPasskeyCoordinator *shared;
-- (void)request:(NSString *)op
-        options:(NSString *)optionsJSON
-          nonce:(NSString *)nonce
-         pageId:(NSInteger)pageId
-         origin:(nullable NSString *)origin
-           main:(BOOL)main
-           page:(id<ArdiaPasskeyPage>)page;
-- (void)cancel:(NSString *)nonce pageId:(NSInteger)pageId page:(id<ArdiaPasskeyPage>)page;
-- (void)pageChanged:(id<ArdiaPasskeyPage>)page;
-- (BOOL)providesForProfile:(NSString *)profile;
-@end
 
 NS_ASSUME_NONNULL_END

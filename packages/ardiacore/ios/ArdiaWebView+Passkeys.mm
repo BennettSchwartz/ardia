@@ -5,6 +5,22 @@
 #import "ArdiaHost.h"
 #import "ArdiaPasskeys.h"
 
+NS_ASSUME_NONNULL_BEGIN
+@interface ArdiaPasskeyCoordinator : NSObject
+@property(class, nonatomic, readonly) ArdiaPasskeyCoordinator *shared;
+- (void)request:(NSString *)op
+        options:(NSString *)optionsJSON
+          nonce:(NSString *)nonce
+         pageId:(NSInteger)pageId
+         origin:(nullable NSString *)origin
+           main:(BOOL)main
+           page:(id<ArdiaPasskeyPage>)page;
+- (void)cancel:(NSString *)nonce pageId:(NSInteger)pageId page:(id<ArdiaPasskeyPage>)page;
+- (void)pageChanged:(id<ArdiaPasskeyPage>)page;
+- (BOOL)providesForProfile:(NSString *)profile;
+@end
+NS_ASSUME_NONNULL_END
+
 static char kPasskeyConfirmsKey;
 
 static NSString *PasskeyJSON(NSDictionary *object) {
@@ -77,7 +93,7 @@ static NSString *ConfirmKey(NSString *nonce, NSInteger pageId) {
 @implementation ArdiaWebView (Passkeys)
 
 + (void)pushPasskeyConfigEverywhere {
-  for (ArdiaWebView *view in LiveViews().allObjects) [view pushPasskeyConfig];
+  for (ArdiaWebView *view in ardia_web_view::LiveViews().allObjects) [view pushPasskeyConfig];
 }
 
 - (BOOL)handlePasskeyMessage:(NSString *)kind dict:(NSDictionary *)dict main:(BOOL)main origin:(NSString *)verifiedOrigin {

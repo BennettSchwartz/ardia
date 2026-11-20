@@ -44,6 +44,8 @@ public final class PasskeyCoordinator: NSObject {
     context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { ok, _ in done(ok) }
   }
   var record: (String) -> Void = { _ in }
+  var autoAnswer: String?
+  var requiresVisiblePage = true
 
   private lazy var authenticator: PasskeyAuthenticator? = makeAuthenticator()
   private var providers: [String: PasskeyProviderEntry] = [:]
@@ -92,7 +94,7 @@ public final class PasskeyCoordinator: NSObject {
       let available = LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
       return fallThrough(available ? ["handled": true] : ["fallThrough": true])
     }
-    guard page.passkeyVisible else { return fallThrough(["fallThrough": true]) }
+    guard page.passkeyVisible || !requiresVisiblePage else { return fallThrough(["fallThrough": true]) }
     guard let data = json.data(using: .utf8), data.count <= 64 * 1024, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
       return fallThrough(["fallThrough": true])
     }
@@ -137,6 +139,10 @@ public final class PasskeyCoordinator: NSObject {
       guard stillPending, self.isCurrent(request, page) else { return self.finish(id, reply: ["fallThrough": true], reason: "stale") }
       self.lastPrompt[pageKey] = Date()
       page.passkeyEmit("passkeyRequest", payload: self.promptPayload(request, kind: promptKind))
+      if let answer = self.autoAnswer {
+        let accepted = ["get": "use", "create": "save", "excluded": "excludedOk"][promptKind] ?? "cancel"
+        DispatchQueue.main.async { self.resolve(id, action: answer == "accept" ? accepted : answer, account: 0) }
+      }
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestLifetime) { [weak self] in
       self?.finish(id, reply: ["error": "NotAllowedError", "message": "The operation timed out."], reason: "expired")

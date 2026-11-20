@@ -1,19 +1,18 @@
 (function (post, engine) {
   "use strict";
-  const idle = () => {};
+  const idle = () => false;
   if (window !== window.top || !/^https?:$/.test(location.protocol)) return idle;
-  const container = window.CredentialsContainer && CredentialsContainer.prototype;
-  const PKC = window.PublicKeyCredential;
-  if (!container || typeof container.get !== "function" || typeof PKC !== "function") return idle;
 
   const apply = Reflect.apply;
   const { defineProperty, create, freeze } = Object;
   const { stringify: toJSON, parse: fromJSON } = JSON;
-  const nativeGet = container.get;
-  const nativeCreate = container.create;
-  const nativeUvpaa = PKC.isUserVerifyingPlatformAuthenticatorAvailable;
-  const AssertionResponse = window.AuthenticatorAssertionResponse;
-  const AttestationResponse = window.AuthenticatorAttestationResponse;
+  let container = null;
+  let PKC = null;
+  let nativeGet = null;
+  let nativeCreate = null;
+  let nativeUvpaa = null;
+  let AssertionResponse = null;
+  let AttestationResponse = null;
   const toBase64 = window.btoa.bind(window);
   const fromBase64 = window.atob.bind(window);
   const NativeDOMException = window.DOMException;
@@ -166,17 +165,40 @@
     defineProperty(wrapped, "length", { value: original.length });
     return wrapped;
   };
-  const installed = {
-    get: disguise(nativeGet, "get", (self, args) => run("get", nativeGet, self, args)),
-    create: disguise(nativeCreate, "create", (self, args) => run("create", nativeCreate, self, args)),
-    uvpaa: disguise(nativeUvpaa, "isUserVerifyingPlatformAuthenticatorAvailable", (self, args) => {
-      if (enabled !== true) return apply(nativeUvpaa, self, args);
-      return ask("uvpaa", {}, null).then((reply) => (reply.handled === true ? true : engine === "webkit" ? false : apply(nativeUvpaa, self, args)));
-    }),
+  const install = () => {
+    if (container) return true;
+    const proto = window.CredentialsContainer && window.CredentialsContainer.prototype;
+    const credential = window.PublicKeyCredential;
+    if (!proto || typeof proto.get !== "function" || typeof credential !== "function") return false;
+    container = proto;
+    PKC = credential;
+    nativeGet = proto.get;
+    nativeCreate = proto.create;
+    nativeUvpaa = credential.isUserVerifyingPlatformAuthenticatorAvailable;
+    AssertionResponse = window.AuthenticatorAssertionResponse;
+    AttestationResponse = window.AuthenticatorAttestationResponse;
+    const wrapped = {
+      get: disguise(nativeGet, "get", (self, args) => run("get", nativeGet, self, args)),
+      create: disguise(nativeCreate, "create", (self, args) => run("create", nativeCreate, self, args)),
+      uvpaa: disguise(nativeUvpaa, "isUserVerifyingPlatformAuthenticatorAvailable", (self, args) => {
+        if (enabled !== true) return apply(nativeUvpaa, self, args);
+        return ask("uvpaa", {}, null).then((reply) => (reply.handled === true ? true : engine === "webkit" ? false : apply(nativeUvpaa, self, args)));
+      }),
+    };
+    defineProperty(proto, "get", { value: wrapped.get, writable: true, configurable: true });
+    defineProperty(proto, "create", { value: wrapped.create, writable: true, configurable: true });
+    defineProperty(credential, "isUserVerifyingPlatformAuthenticatorAvailable", { value: wrapped.uvpaa, writable: true, configurable: true });
+    return true;
   };
-  defineProperty(container, "get", { value: installed.get, writable: true, configurable: true });
-  defineProperty(container, "create", { value: installed.create, writable: true, configurable: true });
-  defineProperty(PKC, "isUserVerifyingPlatformAuthenticatorAvailable", { value: installed.uvpaa, writable: true, configurable: true });
+  if (!install()) {
+    const retry = () => install();
+    if (typeof queueMicrotask === "function") queueMicrotask(retry);
+    setTimeout(retry, 0);
+    if (window.document && typeof window.document.addEventListener === "function") {
+      window.document.addEventListener("readystatechange", retry);
+      window.document.addEventListener("DOMContentLoaded", retry, { once: true });
+    }
+  }
 
   const handlers = {
     passkeyConfig: (config) => {

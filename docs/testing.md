@@ -155,6 +155,11 @@ Launch with `scripts/agent/ac launch <app> --data <dir> [--instance K=V] [--test
 - **`systemPanelRace`**: right after sending the Passwords command, runs AppKit's
   `_showOrHideAutoFillForCurrentTextInputContextIfAppropriate` at once, while Ardia is still active: the ordering that
   lost the panel before the hold. Use it with a visible instance to check the panel still shows.
+- **`passkeysTestStore`** (#2854, test instances only): Ardia's passkey store is in memory, with no Keychain item, Touch ID
+  prompt or key-window check, so a hidden instance can create a passkey on webauthn.io and sign in with it in either
+  engine. Release builds and team-signed builds on their real data never read it.
+- **`passkeysAnswer`**: `accept` (use the first account, or save), `other` (fall through to the browser) or `cancel`;
+  answers every passkey sheet the moment it would show.
 - **`appDialog`**: `confirm` and `prompt` write their options (and `kind`) to `<data dir>/dialog.json` and answer from
   `dialog.json.pick` (deleted): `confirm` (with `,suppress` to tick the suppression box) or anything else to cancel; a
   prompt's answer is the text, empty to cancel. With no pick file they run as usual (background mode cancels).
