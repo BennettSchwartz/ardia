@@ -9,6 +9,12 @@ type Info = Record<string, unknown>;
 
 const PROFILE_MARKERS = ["Preferences", "Bookmarks", "History", "Login Data"];
 
+const outsideFolder = (host: ImportHost, path: string) =>
+  host.separator === "\\" ? /^[a-zA-Z]:|^[\\/]/.test(path) || path.split(/[\\/]/).includes("..") : path.startsWith("/") || path.split("/").includes("..");
+
+const unsafeProfileFolder = (host: ImportHost, dir: string) =>
+  host.separator === "\\" ? dir.includes("..") || dir.includes(":") : outsideFolder(host, dir);
+
 const has = (names: Set<string>, ...wanted: string[]) => wanted.some((n) => names.has(n.toLowerCase()));
 
 async function namesIn(host: ImportHost, folder: string): Promise<Set<string>> {
@@ -54,7 +60,7 @@ export async function chromiumProfiles(host: ImportHost, browser: Browser, only?
   const out: Profile[] = [];
   let fallback = 0;
   for (const dir of dirs) {
-    if (dir.includes("..") || dir.includes(":")) continue;
+    if (unsafeProfileFolder(host, dir)) continue;
     const path = dir === "." ? root : join(host, root, dir);
     if (!(await isProfile(host, path))) continue;
     fallback += 1;
@@ -84,7 +90,7 @@ async function firefoxSource(host: ImportHost, browser: Browser): Promise<Profil
   if (ini == null) return [];
   const out: Profile[] = [];
   for (const p of firefoxProfiles(ini)) {
-    if (/^[a-zA-Z]:|^[\\/]/.test(p.path) || p.path.split(/[\\/]/).includes("..")) continue;
+    if (outsideFolder(host, p.path)) continue;
     const dir = join(host, root, p.path);
     const names = await namesIn(host, dir);
     if (!names.size) continue;

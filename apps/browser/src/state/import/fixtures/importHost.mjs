@@ -7,9 +7,11 @@ const cell = (value) => (value instanceof Uint8Array ? { blob: Buffer.from(value
 
 export function fixtureHost({ platform, separator, browsers, onDisk, within }, secrets = {}) {
   const calls = [];
+  const secretFiles = [];
   const open = new Map();
   return {
     calls,
+    secretFiles,
     open,
     platform,
     separator,
@@ -84,27 +86,33 @@ export function fixtureHost({ platform, separator, browsers, onDisk, within }, s
       rmSync(held.scratch, { recursive: true, force: true });
       open.delete(id);
     },
-    async unlock(browserId) {
+    async unlock(browserId, localState) {
+      secretFiles.push(["unlock", localState]);
       calls.push(["unlock", browserId]);
       return { unlocked: secrets.unlocked ?? true, appBound: false };
     },
     async logins(browserId, files) {
+      secretFiles.push(["logins", ...files]);
       calls.push(["logins", browserId, files.length]);
       return secrets.logins ?? { items: [], undecryptable: 0, appBound: 0 };
     },
-    async cookies(browserId) {
+    async cookies(browserId, file) {
+      secretFiles.push(["cookies", file]);
       calls.push(["cookies", browserId]);
       return secrets.cookies ?? { count: 0, undecryptable: 0, appBound: 0, dropped: 0 };
     },
     async firefoxLogins(profile) {
+      secretFiles.push(["firefoxLogins", profile]);
       calls.push(["firefoxLogins", profile]);
       return secrets.firefoxLogins ?? { items: [], undecryptable: 0, appBound: 0 };
     },
     async firefoxCookies(file) {
+      secretFiles.push(["firefoxCookies", file]);
       calls.push(["firefoxCookies", file]);
       return secrets.firefoxCookies ?? { count: 0, undecryptable: 0, appBound: 0, dropped: 0, skipped: 0 };
     },
     async autofill(browserId, file, joinToken) {
+      secretFiles.push(["autofill", file]);
       calls.push(["autofill", browserId, joinToken]);
       return secrets.autofill ?? { addresses: 0, cards: 0, lockedCards: 0, undecryptable: 0, appBound: 0 };
     },
