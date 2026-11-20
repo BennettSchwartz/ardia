@@ -5,17 +5,19 @@ import { useBrowser } from "../browser/store";
 import { engineProfile } from "../browser/model";
 import { usePages } from "../tabs/pageState";
 import { useMedia, type TabShare } from "./media";
+import { useBrowserWhile, useStoreWhile } from "../tabs/tabWatch";
 
 export { getDisplayMediaSources, screenRecordingAllowed, type DisplayMediaAudio, type DisplayMediaSource } from "../../platform/media";
 export { noteScreenRecordingMissing } from "../telemetry/usage";
 
 export function useShareFor(tabId: string): [string, TabShare] | null {
   const shares = useMedia((m) => m.tabShares);
-  const profile = useBrowser((s) => {
+  const sharing = Object.keys(shares).length > 0;
+  const profile = useBrowserWhile(sharing, (s) => {
     const tab = s.tabs[tabId];
     return tab && /^https?:|^file:/.test(tab.url) ? engineProfile(s, tab.profileId) : null;
   });
-  const capturing = usePages((p) => Object.keys(shares).filter((id) => p.pages[id]?.mediaAccess?.screen).join(","));
+  const capturing = useStoreWhile(usePages, sharing, (p) => Object.keys(shares).filter((id) => p.pages[id]?.mediaAccess?.screen).join(","));
   if (profile === null) return null;
   for (const capturer of capturing ? capturing.split(",") : []) {
     const share = shares[capturer];
@@ -28,7 +30,7 @@ export function useShareFor(tabId: string): [string, TabShare] | null {
 
 export function useTabShared(tabId: string): boolean {
   const capturers = useMedia((m) => Object.keys(m.tabShares).filter((id) => m.tabShares[id]!.capturedTabId === tabId).join(","));
-  return usePages((p) => !!capturers && capturers.split(",").some((id) => !!p.pages[id]?.mediaAccess?.screen));
+  return useStoreWhile(usePages, !!capturers, (p) => !!capturers && capturers.split(",").some((id) => !!p.pages[id]?.mediaAccess?.screen));
 }
 
 export function noteTabShare(capturerTabId: string, capturedTabId: string, origin: string) {
