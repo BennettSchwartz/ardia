@@ -5,7 +5,9 @@ const { rowAway, visibleSpan } = await import("./selectedRow.ts");
 const { GLOW_ROOM } = await import("./pageLayout.ts");
 import { mount } from "../../test-hooks.mjs";
 globalThis.require ??= (id) => ({ asset: id });
-const { useListFrame } = await import("./SelectedRowPill.tsx");
+globalThis.requestAnimationFrame ??= (run) => setTimeout(run, 0);
+globalThis.cancelAnimationFrame ??= (id) => clearTimeout(id);
+const { useSelectedRowAway } = await import("./SelectedRowPill.tsx");
 
 const row = (y, height = 34) => ({ y, height });
 
@@ -34,34 +36,45 @@ test("no pill without a selected row in the list, or before the list is laid out
   assert.equal(rowAway(row(900), 0, 0), null);
 });
 
-test("the pill's shown state lives in the pill, so its showing never re-renders the sidebar page", () => {
+test("the sidebar page measures no frame for the pill and never re-renders to show it", () => {
+  const page = readFileSync(new URL("./SidebarPage.tsx", import.meta.url), "utf8");
+  assert.match(page, /\{geometry \? <SelectedRowPill windowId=\{windowId\} tracker=\{selectedRow\}/);
+  assert.match(page, /useSelectedRowAway\(windowId, geometry, scrollView, \(\) => page\.scrollY\)/);
+  assert.doesNotMatch(page, /listFrame|useListFrame|pillNeeded/);
+});
+
+test("the pill reads no store while it shows: no external-store hook, no tab hooks, no store listener", () => {
   const pill = readFileSync(new URL("./SelectedRowPill.tsx", import.meta.url), "utf8");
-  const page = readFileSync(new URL("./SidebarPage.tsx", import.meta.url), "utf8");
-  const tracker = pill.slice(pill.indexOf("export function useSelectedRowAway"), pill.indexOf("export function SelectedRowPill"));
-  assert.doesNotMatch(tracker, /useState<RowAway>/);
-  assert.match(pill, /const away = useSyncExternalStore\(source\.subscribe, source\.read, source\.read\);/);
-  assert.match(page, /<SelectedRowPillFrame frame=\{listFrame\} lift=\{edgeLift\} windowId=\{windowId\} away=\{selectedRow\.away\}/);
+  assert.doesNotMatch(pill, /useSyncExternalStore|useActiveTabId|useTab\(|useBrowser|watchRowsMoved/);
+  assert.match(pill, /watchWindowRecord\(windowId, tracker\.relocate\)/);
 });
 
-test("the list's frame for the pill lives outside the page's state, so a list layout at launch never re-renders the sidebar page", () => {
-  const page = readFileSync(new URL("./SidebarPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /const listFrame = useListFrame\(\);/);
-  assert.match(page, /onLayout=\{listFrame\.onLayout\}/);
-  assert.doesNotMatch(page, /setListFrame/);
-});
-
-test("the list frame notifies the pill only when the list's top or height changes", (t) => {
-  const frame = mount(() => useListFrame());
-  t.after(() => frame.unmount());
-  const source = frame.value;
-  let notified = 0;
-  source.subscribe(() => notified++);
-  const layout = (y, height) => source.onLayout({ nativeEvent: { layout: { x: 0, y, width: 200, height } } });
-  layout(40, 600);
-  layout(40, 600);
-  assert.equal(notified, 1);
-  assert.deepEqual(source.read(), { top: 40, height: 600 });
-  layout(40, 520);
-  assert.equal(notified, 2);
-  assert.deepEqual(source.read(), { top: 40, height: 520 });
+test("the tracker hands the pill the selected tab only while its row is out of view, and keeps quiet otherwise", async (t) => {
+  await import("../../test-native/index.ts");
+  const { useBrowser } = await import("../../state/browser/store.ts");
+  const S = () => useBrowser.getState();
+  S().hydrate({});
+  const w = S().createWindow({ url: "https://a.com/" });
+  const ids = [S().windows[w].tabIds[0]];
+  for (let i = 0; i < 30; i++) ids.push(S().newTab(w, { url: `https://t${i}.com/` }));
+  S().activate(ids[0]);
+  const geometry = { current: { viewport: 200, regions: { pinnedGroups: 0, list: 0 }, newTabAtTop: false, tilesFixed: false, edgeLift: 0 } };
+  let scrollY = 0;
+  const hook = mount(() => useSelectedRowAway(w, geometry, { current: null }, () => scrollY));
+  t.after(() => hook.unmount());
+  const tracker = hook.value;
+  const seen = [];
+  const detach = tracker.attach((away) => seen.push(away));
+  tracker.judge();
+  assert.deepEqual(seen, [null], "in view at the top: the pill hears nothing new");
+  scrollY = 900;
+  tracker.judge();
+  tracker.judge();
+  assert.equal(seen.length, 2, "one change, however many scroll events");
+  assert.equal(seen.at(-1)?.side, "above");
+  assert.equal(seen.at(-1)?.tab.id, ids[0]);
+  scrollY = 0;
+  tracker.judge();
+  assert.equal(seen.at(-1), null);
+  detach();
 });
