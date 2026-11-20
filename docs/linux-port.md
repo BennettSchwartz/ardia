@@ -1782,9 +1782,10 @@ A background instance rejects without fetching.
   - Escape still closes it.
   - While a row's menu is open, presses and Escape belong to the menu (`menuShown()` in `menus.tsx`). Escape closes
     only the menu, and choosing an item leaves the panel open. The menu renders under `document.body`, outside the
-    panel's region, so `OutsidePressArea` ignores presses while a menu is shown too. A press outside both closes only
-    the menu and goes on to what it landed on, as Linux menus do elsewhere; the panel closes on the next one. That
-    holds for every Linux popover built on `OutsidePressArea`.
+    panel's region, so `OutsidePressArea` ignores presses while a menu is shown too. A press on the shell outside both
+    closes only the menu and goes on to what it landed on, as Linux menus do elsewhere; the panel closes on the next
+    one. That holds for every Linux popover built on `OutsidePressArea`. A click in the page closes both at once,
+    since the page taking focus closes every popover.
   - Acceptance F08 presses the header, a finished row (open file), Show in Folder, a row's menu (Escape, then Open),
     View all downloads, Pause, Resume, Cancel, Keep, Discard and Clear, with real CDP input in the packaged UI. Outside
     the panel it presses a toolbar button (Go Back, Go Forward or Reload) with a left and then a right press, and the
