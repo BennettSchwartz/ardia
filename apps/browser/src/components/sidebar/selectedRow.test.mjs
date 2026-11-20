@@ -46,7 +46,16 @@ test("the sidebar page measures no frame for the pill and never re-renders to sh
 test("the pill reads no store while it shows: no external-store hook, no tab hooks, no store listener", () => {
   const pill = readFileSync(new URL("./SelectedRowPill.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(pill, /useSyncExternalStore|useActiveTabId|useTab\(|useBrowser|watchRowsMoved/);
-  assert.match(pill, /watchWindowRecord\(windowId, tracker\.relocate\)/);
+  assert.match(pill, /watchWindowRecord\(windowId, tracker\.selectionMoved\)/);
+  assert.match(pill, /if \(!away \|\| frame\) return;/, "a window change waits a frame only while the pill shows");
+});
+
+test("the pill's icon keeps what the row's icon shows: the engine badge, the faded look, a tint only through TintedImage", () => {
+  const pill = readFileSync(new URL("./SelectedRowPill.tsx", import.meta.url), "utf8");
+  assert.match(pill, /const engine = markedEngine\(tab\.marks\);/);
+  assert.match(pill, /\{engine \? <EngineMark mark=\{engine\} size=\{size\} \/> : null\}/);
+  assert.match(pill, /tab\.marks & FADED \? SLEEPING_OPACITY : 1/);
+  assert.match(pill, /<TintedImage/);
 });
 
 test("the tracker hands the pill the selected tab only while its row is out of view, and keeps quiet otherwise", async (t) => {

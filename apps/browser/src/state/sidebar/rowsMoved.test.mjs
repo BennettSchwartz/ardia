@@ -44,5 +44,6 @@ test("the pill's tab snapshot is the window's selected tab, read once", () => {
   const tab = selectedTabSnapshot(w);
   assert.equal(tab?.id, ids[1]);
   assert.equal(tab?.url, "https://b.com/");
+  assert.equal(typeof tab?.marks, "number", "the icon marks ride along, so the pill draws the row's engine badge");
   assert.equal(selectedTabSnapshot("missing"), null);
 });

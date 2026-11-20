@@ -3,6 +3,7 @@ import { activeTabId } from "../browser/model";
 import { revealTargets, type RevealTargets } from "./revealTargets";
 import { useLive } from "../live/store";
 import { knownFaviconTheme, resolveFavicon } from "../favicons/favicons";
+import { iconMarks } from "./rowState";
 
 const asked = new Map<string, Set<(tabId: string) => void>>();
 
@@ -29,7 +30,7 @@ const watchStoreTargets = (windowId: string, found: (targets: RevealTargets, via
 
 export const selectedTabIn = (windowId: string) => activeTabId(useBrowser.getState(), windowId);
 
-export type PillTab = { id: string; url: string; favicon: string | null; icon: string | null; profileId: string; faviconUri: string | null; template: boolean };
+export type PillTab = { id: string; url: string; favicon: string | null; icon: string | null; profileId: string; faviconUri: string | null; template: boolean; marks: number };
 
 export function selectedTabSnapshot(windowId: string): PillTab | null {
   const s = useBrowser.getState();
@@ -38,7 +39,7 @@ export function selectedTabSnapshot(windowId: string): PillTab | null {
   if (!id || !tab) return null;
   const faviconUri = resolveFavicon(tab.url, tab.favicon, tab.profileId)?.uri ?? null;
   const theme = faviconUri ? knownFaviconTheme(faviconUri) : null;
-  return { id, url: tab.url, favicon: tab.favicon ?? null, icon: tab.customIcon ?? null, profileId: tab.profileId, faviconUri, template: theme?.kind === "template" && !!theme.stroke };
+  return { id, url: tab.url, favicon: tab.favicon ?? null, icon: tab.customIcon ?? null, profileId: tab.profileId, faviconUri, template: theme?.kind === "template" && !!theme.stroke, marks: iconMarks(s, id) };
 }
 
 export type RowsStamp = readonly unknown[];

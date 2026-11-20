@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Animated, Image, Pressable, StyleSheet, View, type ScrollView } from "react-native";
+import { Animated, Pressable, StyleSheet, View, type ScrollView } from "react-native";
 import { watchWindowRecord } from "../../state/browser/keyedWatch";
 import { revealTab, rowsStamp, sameRows, selectedTabIn, selectedTabSnapshot, type PillTab, type RowsStamp } from "../../state/sidebar/reveal";
 import { notePageOverlay } from "../../state/telemetry/usage";
-import { capsule, Panel, radius, reduceMotion, Symbol, Text } from "../ui";
+import { capsule, Panel, radius, reduceMotion, Symbol, Text, TintedImage } from "../ui";
 import { useTheme } from "../ui/theme";
 import { SHADOWS } from "../window/tokens";
 import { GLOW_ROOM, type SidebarGeometry } from "./pageLayout";
@@ -11,6 +11,8 @@ import { locateTab, rowAway, type RowSpot } from "./selectedRow";
 import { FaviconFallback, NewTabIcon } from "../favicon/Favicon";
 import { drawnIcon } from "../../state/pins/rowIcons";
 import { iconSymbol } from "../../lib/customIcon";
+import { FADED, markedEngine } from "../../state/sidebar/rowState";
+import { EngineMark, SLEEPING_OPACITY } from "./TabIcon";
 import { SELECTED_ROW_PILL, SELECTED_ROW_PILL_MOTION, SELECTED_ROW_REVEAL_SETTLE_MS, useSidebarTokens } from "./tokens";
 
 function settle(progress: Animated.Value, phase: keyof typeof SELECTED_ROW_PILL_MOTION, done?: () => void) {
@@ -95,7 +97,11 @@ export function useSelectedRowAway(
       judge,
       relocate: () => {
         stamp = null;
-        if (frame) return;
+        judge();
+      },
+      selectionMoved: () => {
+        stamp = null;
+        if (!away || frame) return;
         frame = requestAnimationFrame(() => {
           frame = 0;
           judge();
@@ -118,7 +124,7 @@ export function useSelectedRowAway(
   useEffect(() => {
     if (!geometry) return;
     tracker.relocate();
-    const unwatch = watchWindowRecord(windowId, tracker.relocate);
+    const unwatch = watchWindowRecord(windowId, tracker.selectionMoved);
     return () => {
       unwatch();
       tracker.stop();
@@ -201,6 +207,17 @@ function PillFace({ windowId, side, tab }: { windowId: string; side: "above" | "
 }
 
 function PillIcon({ tab, size }: { tab: PillTab; size: number }) {
+  const engine = markedEngine(tab.marks);
+  const glyph = <PillGlyph tab={tab} size={size} />;
+  return (
+    <View style={{ opacity: tab.marks & FADED ? SLEEPING_OPACITY : 1 }}>
+      {glyph}
+      {engine ? <EngineMark mark={engine} size={size} /> : null}
+    </View>
+  );
+}
+
+function PillGlyph({ tab, size }: { tab: PillTab; size: number }) {
   const theme = useTheme();
   const [broken, setBroken] = useState<string | null>(null);
   const icon = drawnIcon(tab.icon);
@@ -209,13 +226,14 @@ function PillIcon({ tab, size }: { tab: PillTab; size: number }) {
   if (icon) return <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}><Text style={{ fontSize: size - 3, lineHeight: size }}>{icon}</Text></View>;
   if (!tab.url && !tab.faviconUri) return <NewTabIcon size={size} />;
   if (!tab.faviconUri || broken === tab.faviconUri) return <FaviconFallback url={tab.url} size={size} />;
-  const white = tab.template && !theme.dark;
+  const uri = tab.faviconUri;
   return (
-    <Image
-      key={white ? `${tab.faviconUri} tinted` : tab.faviconUri}
-      source={{ uri: tab.faviconUri }}
-      onError={() => setBroken(tab.faviconUri)}
-      style={{ width: size, height: size, borderRadius: radius.hair, tintColor: white ? theme.textPrimary : undefined }}
+    <TintedImage
+      source={{ uri }}
+      identity={uri}
+      tint={tab.template && !theme.dark ? theme.textPrimary : undefined}
+      onError={() => setBroken(uri)}
+      style={{ width: size, height: size, borderRadius: radius.hair }}
     />
   );
 }
