@@ -318,9 +318,17 @@ final class PageView: ExpoView {
     return UIEdgeInsets(top: top, left: 0, bottom: obscuredInsets.bottom, right: 0)
   }
 
+  private var heldSafeArea = UIEdgeInsets.zero
+
+  private func pinnedSafeArea() -> UIEdgeInsets {
+    guard pinsSafeArea, let window else { return .zero }
+    guard bounds.width <= window.bounds.width + 0.5, bounds.height <= window.bounds.height + 0.5 else { return heldSafeArea }
+    heldSafeArea = restingSafeArea
+    return heldSafeArea
+  }
+
   private var pinnedSides: UIEdgeInsets {
-    guard pinsSafeArea, window != nil else { return .zero }
-    let pinned = restingSafeArea
+    let pinned = pinnedSafeArea()
     return UIEdgeInsets(top: 0, left: pinned.left, bottom: 0, right: pinned.right)
   }
 
@@ -346,7 +354,7 @@ final class PageView: ExpoView {
   private func applyObscuredInsets() {
     guard let hostedWebView, hostedWebView.superview === self else { return }
     let pins = pinsSafeArea && window != nil
-    let pinned = pins ? restingSafeArea : .zero
+    let pinned = pins ? pinnedSafeArea() : .zero
     let frame = webViewFrame
     if hostedWebView.frame != frame { hostedWebView.frame = frame }
     paintSideMargins()
