@@ -80,9 +80,25 @@ function goBackHere(tabId: string) {
 }
 
 export function goForward(tabId: string, mayAct: () => boolean = () => true): void {
-  if (livePageId(tabId) !== tabId) return void withLivePage(tabId, (_, id) => goForward(id, mayAct), mayAct);
-  if (pageOf(tabId).newTabShown) return hideNewTab(tabId);
-  void webviews.get(tabId)?.goForward();
+  void goForwardAsking(tabId, mayAct);
+}
+
+export async function goForwardAsking(tabId: string, mayAct: () => boolean = () => true): Promise<boolean> {
+  if (livePageId(tabId) === tabId) return goForwardHere(tabId);
+  let went = false;
+  const acted = await withLivePage(tabId, (_, id) => (went = goForwardHere(id)), mayAct);
+  return acted && went;
+}
+
+function goForwardHere(tabId: string): boolean {
+  if (pageOf(tabId).newTabShown) {
+    hideNewTab(tabId);
+    return true;
+  }
+  const page = webviews.get(tabId);
+  if (!page) return false;
+  void page.goForward();
+  return true;
 }
 
 function showNewTab(tabId: string, keep?: { url: string; title: string }) {

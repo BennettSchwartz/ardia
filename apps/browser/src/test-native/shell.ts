@@ -19,6 +19,8 @@ import type {
 import { nativeEvents, unfaked } from "./events";
 import { reportModule } from "./report";
 import { telemetryLocalModule } from "./telemetryLocal";
+import { windowGeometries, windowGeometryFakes } from "./windowGeometry";
+export { beginWindowControlTransition, finishStalledTransition, geometryWorld } from "./windowGeometry";
 
 type Modules = ShellNativeModules;
 
@@ -66,6 +68,7 @@ export const windows = {
   closed: [] as string[],
   focused: null as string | null,
   emit: (event: WindowEvent) => shellEvents.emit("onWindowEvent", event),
+  geometry: windowGeometries,
 };
 export const emitAppEvent = (event: AppEvent) => shellEvents.emit("onAppEvent", event);
 export const emitCommand = (event: CommandEvent) => shellEvents.emit("onCommand", event);
@@ -127,6 +130,7 @@ const windowsModule: Modules["ArdiaAppWindows"] & { requestClose(id: string): Pr
   dragPreviewEnd: () => Promise.resolve(),
   raiseView: () => Promise.resolve(),
   windowFrame: () => Promise.resolve(null),
+  ...windowGeometryFakes((id) => windows.open.has(id), (event) => shellEvents.emit("onWindowEvent", event)),
   frameCornerRadius: () => Promise.resolve(0),
   replyToTerminate: () => Promise.resolve(),
 };
