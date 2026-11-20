@@ -217,7 +217,7 @@ export const WHATS_SENT: { title: string; items: string[] }[] = [
     title: "The local copy",
     items: [
       "Leaves this Mac only as the events above while sharing is on, or when you attach it to a problem report. Settings › Privacy › View My Data saves it to your Downloads folder",
-      "Every hour, how big the local copy is and how long writing it took, so we notice if it ever slows Ardia down",
+      "Every hour while sharing is on, how much Ardia wrote to the local copy that hour and how long writing it took, so we notice if it ever slows Ardia down",
     ],
   },
   {
@@ -255,7 +255,7 @@ export const LOCAL_COPY = {
   exportFailed: "Couldn't save your data",
   items: [
     "Each event and warning or error line listed in What's Sent, with whether it was sent, and the last 20 times Ardia froze for 0.4 seconds or more: which part froze, for how long, which of its own jobs was running and the program addresses where it was stuck, kept whether sharing is on or off (Help › Copy Last Freeze copies the latest)",
-    "With sharing off, they carry no install ID and stay here",
+    "With sharing off, they carry no install ID and stay here, except usage counts and speed, memory and local-copy measurements, which aren't kept at all",
     "Kept 7 days and 8 MB at most, oldest first out; checked when Ardia opens and every hour",
     "Never leaves this Mac unless sharing is on or you attach it to a problem report",
     "Resetting your anonymous ID deletes it",
