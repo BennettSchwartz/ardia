@@ -85,7 +85,7 @@ jobs:
         with:
           retries: 3
           script: |
-            let full = context.eventName !== "pull_request";
+            let full = false;
             if (!full) {
               const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: context.payload.pull_request.number });
               full = pr.labels.some((label) => label.name === "full-ci");
@@ -415,6 +415,20 @@ jobs:
         if: ${{ !cancelled() && steps.engine.outcome == 'success' }}
         shell: pwsh
         run: scripts/windows/assemble.ps1 -App $env:APP -Engine "${{ runner.temp }}/engine" -Out "${{ runner.temp }}/Ardia" -Version $env:VERSION -Build $env:BUILD
+      - name: Probe unreadable profile files
+        if: ${{ !cancelled() && steps.assemble.outcome == 'success' && env.SLUG == 'x64' && env.PART == 'launch' }}
+        timeout-minutes: 15
+        shell: pwsh
+        run: scripts/windows/profile-error-probe.ps1 -App "${{ runner.temp }}/Ardia/Ardia.exe" -Out "${{ runner.temp }}/probe"
+      - if: ${{ !cancelled() && env.SLUG == 'x64' && env.PART == 'launch' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: profile-error-probe
+          path: |
+            ${{ runner.temp }}/probe
+            !${{ runner.temp }}/probe/*-data
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Every DLL the assembled app needs is in it or in a clean Windows 11
         if: ${{ !cancelled() && steps.assemble.outcome == 'success' && env.PART == 'launch' }}
         shell: pwsh
