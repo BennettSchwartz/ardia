@@ -28,6 +28,8 @@ import { withoutFragment } from "../../lib/url";
 import { developerBarShown, paneBar, type CardChrome } from "./paneChrome";
 import { DeveloperBar } from "../toolbar/DeveloperBar";
 import { useDeveloperMode } from "../../state/site/developerMode";
+import { PluginPageBar } from "../plugins/PluginPageBar";
+import type { PageBarMatch } from "../../state/plugins/pageBar";
 import { PageOverlays } from "./PageOverlays";
 import { useProfileTheme } from "./ThemeScope";
 import { useCardFrame } from "./cardFrame";
@@ -57,6 +59,7 @@ export const TabPane = memo(function TabPane({
   peekShown,
   lingering,
   seeThrough,
+  pageBar,
 }: {
   tabId: string;
   windowId: string;
@@ -78,6 +81,7 @@ export const TabPane = memo(function TabPane({
   peekShown: boolean;
   lingering: boolean;
   seeThrough: boolean;
+  pageBar: PageBarMatch | null;
 }) {
   const visible = !!rect;
   const live = visible || !!warm;
@@ -144,6 +148,7 @@ export const TabPane = memo(function TabPane({
       {bar.kind === "backdrop" && <ToolbarBackdrop tabId={tabId} />}
       {bar.kind === "spacer" && <View style={{ height: toolbarHeight }} />}
       {developerBar && <DeveloperBar tabId={tabId} windowId={windowId} />}
+      {!developerBar && pageBar && <PluginPageBar tabId={tabId} windowId={windowId} match={pageBar} />}
       {!autoLayout && bookmarksBar && <BookmarksBar tabId={tabId} placeholder={!visible} />}
       <Animated.View style={autoLayout ? motion.groupStyle : { flex: 1 }}>
         {autoLayout && bookmarksBar && <BookmarksBar tabId={tabId} placeholder={!visible} />}

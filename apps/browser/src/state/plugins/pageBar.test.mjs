@@ -1,0 +1,183 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+const stub = await import("../../test-native/index.ts");
+const { useBrowser } = await import("../browser/store.ts");
+const { startPlugins } = await import("./start.ts");
+const { usePlugins } = await import("./store.ts");
+const lifecycle = await import("./lifecycle.ts");
+const { pageBarFor, pageBarPaneEligible } = await import("./pageBar.ts");
+const { notePageDocument, forgetPageDocument, usePageDocuments, confirmedDocument } = await import("./pageBarDocuments.ts");
+const { setSiteSwitch, siteSwitchValue, siteSwitchRows } = await import("./siteSwitches.ts");
+const { noteTypedAddress } = await import("./typedAddresses.ts");
+const { parsePluginRecords, pluginRecordsJson } = await import("./savedState.ts");
+const { publishPageBars, publishedPageBar, withdrawPageBars } = await import("./pageBarPanes.ts");
+const { runHostAction } = await import("./hostActions.ts");
+const { takePageBarCounts } = await import("../telemetry/pageBarCounts.ts");
+const { setConsentPeriod, consentToken } = await import("../telemetry/consentPeriod.ts");
+setConsentPeriod(true, "page-bar-test");
+
+const FIXTURE = readFileSync(new URL("../../../../../tests/fixtures/plugins/developer-mode/plugin.json", import.meta.url), "utf8");
+const twin = (name) => JSON.stringify({ ...JSON.parse(FIXTURE), name });
+const P = () => usePlugins.getState();
+const host = stub.pluginHost;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const LOCAL = "http://127.0.0.1:18318/management.html";
+
+async function enable(names = ["developer-mode"]) {
+  useBrowser.getState().hydrate({});
+  startPlugins();
+  for (const name of Object.keys(P().records)) lifecycle.disablePlugin(name, null);
+  host.folders = names.map((name) => ({ name, status: "ok", text: name === "developer-mode" ? FIXTURE : twin(name) }));
+  await lifecycle.rescanPlugins(consentToken());
+  for (const name of names) assert.ok(lifecycle.requestPluginConsent(name) && lifecycle.enablePlugin(name, P().consent.hash));
+}
+
+const pane = (tabId, over = {}) => ({
+  tabId,
+  visible: true,
+  lingering: false,
+  warm: false,
+  covered: false,
+  mounted: true,
+  live: true,
+  frozen: false,
+  peek: false,
+  otherProfile: false,
+  privatePage: false,
+  small: false,
+  documentFullscreen: false,
+  windowFullscreen: false,
+  ...over,
+});
+
+const settledDoc = (tabId, url, at = Date.now() - 5000) => notePageDocument(tabId, url, url, at, false);
+const state = () => ({ plugins: P(), documents: usePageDocuments.getState() });
+
+test("only a visible, live pane of its own document can draw a bar: the nightly.8 leak can't happen", async () => {
+  await enable();
+  assert.ok(setSiteSwitch("developer-mode", "on", LOCAL, true));
+  settledDoc("local", LOCAL);
+  settledDoc("ordinary", "https://example.com/");
+  assert.equal(pageBarFor(state(), pane("local", { visible: false, warm: true })), null, "a hidden kept-alive loopback pane draws nothing over the card");
+  assert.equal(pageBarFor(state(), pane("ordinary")), null, "the visible ordinary tab above or below it gets no bar");
+  assert.equal(pageBarFor(state(), pane("local")).url, LOCAL);
+  for (const hidden of [{ visible: false }, { lingering: true }, { warm: true }, { covered: true }, { mounted: false }, { live: false }, { frozen: true }, { peek: true }, { otherProfile: true }, { privatePage: true }, { small: true }, { documentFullscreen: true }, { windowFullscreen: true }]) {
+    assert.equal(pageBarPaneEligible(pane("local", hidden)), false, JSON.stringify(hidden));
+    assert.equal(pageBarFor(state(), pane("local", hidden)), null, JSON.stringify(hidden));
+  }
+  forgetPageDocument("local");
+  forgetPageDocument("ordinary");
+});
+
+test("a new document shows its bar after 300 ms committed; a same-document change keeps the decision; a disagreeing address shows none", async () => {
+  await enable();
+  setSiteSwitch("developer-mode", "on", LOCAL, true);
+  notePageDocument("t", LOCAL, LOCAL, Date.now(), false);
+  assert.equal(pageBarFor(state(), pane("t")), null, "not yet settled");
+  await wait(330);
+  assert.equal(pageBarFor(state(), pane("t")).url, LOCAL);
+  const at = usePageDocuments.getState().t.at;
+  notePageDocument("t", `${LOCAL}#section`, `${LOCAL}#section`, at, false);
+  assert.equal(pageBarFor(state(), pane("t")).url, `${LOCAL}#section`, "same document: the decision stays, the address follows");
+  notePageDocument("t", "http://127.0.0.1:18318/next", `${LOCAL}#section`, at, false);
+  assert.equal(pageBarFor(state(), pane("t")), null, "while the shown and committed addresses disagree");
+  notePageDocument("t", "https://example.com/", "https://example.com/", Date.now(), false);
+  assert.equal(confirmedDocument(usePageDocuments.getState(), "t"), null, "a client redirect that leaves within 300 ms never settles");
+  notePageDocument("t", LOCAL, LOCAL, Date.now() - 1000, false);
+  assert.equal(pageBarFor(state(), pane("t")).url, LOCAL, "a document committed long ago shows at once");
+  forgetPageDocument("t");
+  assert.equal(usePageDocuments.getState().t, undefined);
+});
+
+test("typing a local address turns the switch on only with the toggle row on, only for that origin, and never over an explicit off", async () => {
+  await enable();
+  takePageBarCounts();
+  const origin = "http://localhost:18318";
+  noteTypedAddress("a", `${origin}/management.html`);
+  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now(), false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), undefined, "the row is off by default");
+  lifecycle.setPluginValue("developer-mode", "localAddresses", true);
+  noteTypedAddress("a", `${origin}/management.html`);
+  notePageDocument("a", `${origin}/management.html`, `${origin}/management.html`, Date.now() + 1, false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), true);
+  assert.equal(takePageBarCounts().plugin_site_switch_auto_on_typed, 1);
+  setSiteSwitch("developer-mode", "on", `${origin}/`, false);
+  noteTypedAddress("a", `${origin}/`);
+  notePageDocument("a", `${origin}/`, `${origin}/`, Date.now() + 2, false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", origin), false, "an explicit off wins");
+  const callback = "http://127.0.0.1:18455/callback?code=1";
+  notePageDocument("b", callback, callback, Date.now(), false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://127.0.0.1:18455"), undefined, "a redirect or link to a local address turns nothing on");
+  noteTypedAddress("c", "http://192.168.1.20:18318/");
+  notePageDocument("c", callback, callback, Date.now(), false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://127.0.0.1:18455"), undefined, "a typed LAN address that redirects to a local callback turns nothing on");
+  noteTypedAddress("d", "http://localhost:5173/");
+  notePageDocument("d", "http://localhost:5173/", "http://localhost:5173/", Date.now(), true);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5173"), undefined, "never in a private window");
+  noteTypedAddress("e", "http://localhost:5174/");
+  notePageDocument("e", "http://localhost:9999/", "http://localhost:9999/", Date.now(), false);
+  notePageDocument("e", "http://localhost:5174/", "http://localhost:5174/", Date.now() + 5, false);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "http://localhost:5174"), undefined, "the intent is spent on the next document, whatever it is");
+  for (const id of ["a", "b", "c", "d", "e"]) forgetPageDocument(id);
+});
+
+test("site switch values live beside the record, keyed by origin, and stay out of the helper's values", async () => {
+  await enable();
+  setSiteSwitch("developer-mode", "on", "https://Example.com:443/a", true);
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "https://example.com"), true);
+  assert.deepEqual(Object.keys(P().records["developer-mode"].values), ["localAddresses"]);
+  assert.deepEqual(siteSwitchRows(P(), "https://example.com/b"), [{ plugin: "developer-mode", key: "on", title: "Developer Mode", icon: "hammer", on: true }]);
+  assert.deepEqual(siteSwitchRows(P(), "ardia://settings"), []);
+  const parsed = parsePluginRecords(pluginRecordsJson({ x: { enabled: false, approved: null, values: {}, applied: {}, sites: { on: { "https://example.com": true, "not an origin": true, "http://a.test/path": true, "http://b.test": "yes", __proto__: true }, "bad key!": { "https://c.test": true } } } }));
+  assert.deepEqual(parsed.x.sites, { on: { "https://example.com": true } });
+  assert.equal(siteSwitchValue({ records: parsed }, "x", "constructor", "https://example.com"), undefined);
+  lifecycle.disablePlugin("developer-mode", null);
+  assert.deepEqual(siteSwitchRows(P(), "https://example.com/b"), [], "withdrawn while the plugin is off");
+  assert.equal(P().records["developer-mode"].sites.on["https://example.com"], true, "and kept for when it's back");
+  assert.ok(lifecycle.requestPluginConsent("developer-mode") && lifecycle.enablePlugin("developer-mode", P().consent.hash));
+  assert.equal(siteSwitchValue(P(), "developer-mode", "on", "https://example.com"), true);
+});
+
+test("several plugins matching one page: the first by name draws, the rest count as superseded", async () => {
+  await enable(["zeta-bar", "developer-mode"]);
+  for (const name of ["zeta-bar", "developer-mode"]) setSiteSwitch(name, "on", LOCAL, true);
+  settledDoc("s", LOCAL);
+  const match = pageBarFor(state(), pane("s"));
+  assert.equal(match.plugin, "developer-mode");
+  assert.equal(match.superseded, 1);
+  takePageBarCounts();
+  publishPageBars("w", { s: match });
+  publishPageBars("w", { s: match });
+  const counts = takePageBarCounts();
+  assert.equal(counts.plugin_page_bar_shown_other, 1, "once per tab per document");
+  assert.equal(counts.plugin_page_bar_superseded, 1);
+  withdrawPageBars("w");
+  forgetPageDocument("s");
+});
+
+test("page bars ask native for commit reports as their own reader, apart from automation", async () => {
+  stub.commitReaders.length = 0;
+  await enable();
+  assert.deepEqual(stub.commitReaders.at(-1), ["pageBars", true]);
+  lifecycle.disablePlugin("developer-mode", null);
+  assert.deepEqual(stub.commitReaders.at(-1), ["pageBars", false]);
+});
+
+test("a host action runs only for the tab whose bar shows it", async () => {
+  await enable();
+  const windowId = useBrowser.getState().createWindow({ url: LOCAL });
+  const tabId = useBrowser.getState().windows[windowId].tabIds[0];
+  takePageBarCounts();
+  runHostAction("copyLink", windowId, tabId);
+  assert.equal(takePageBarCounts().plugin_page_bar_press_copy_link, 0, "no bar, no action");
+  setSiteSwitch("developer-mode", "on", LOCAL, true);
+  settledDoc(tabId, LOCAL);
+  publishPageBars(windowId, { [tabId]: pageBarFor(state(), pane(tabId)) });
+  assert.ok(publishedPageBar(windowId, tabId));
+  runHostAction("copyLink", windowId, "someone-else");
+  runHostAction("copyLink", windowId, tabId);
+  assert.equal(takePageBarCounts().plugin_page_bar_press_copy_link, 1);
+  withdrawPageBars(windowId);
+  forgetPageDocument(tabId);
+});
