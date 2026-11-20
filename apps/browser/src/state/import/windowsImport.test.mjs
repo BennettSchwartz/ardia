@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { listSources } from "../../../../../packages/expo-windows/src/import/discovery.ts";
-import { bookmarksFromHtml, passwordsFromCsv } from "../../../../../packages/expo-windows/src/import/fileFormats.ts";
-import { importProfile, Unlocks } from "../../../../../packages/expo-windows/src/import/importer.ts";
-import { lz4Block } from "../../../../../packages/expo-windows/src/import/bytes.ts";
-import { pathFromFileUrl } from "../../../../../packages/expo-windows/src/import/host.ts";
+import { listSources } from "../../../../../packages/import/src/readers/discovery.ts";
+import { bookmarksFromHtml, passwordsFromCsv } from "../../../../../packages/import/src/readers/fileFormats.ts";
+import { importProfile, Unlocks } from "../../../../../packages/import/src/readers/importer.ts";
+import { lz4Block } from "../../../../../packages/import/src/readers/bytes.ts";
+import { pathFromFileUrl } from "../../../../../packages/expo-windows/src/import/fileUrl.ts";
 import { fakeHost, fixtures, LOCAL } from "./fixtures/windowsHost.mjs";
 
 const quiet = { progress() {}, cancelled: () => false };
