@@ -5,6 +5,7 @@ import { DeckBar } from "../components/tabs/DeckBar";
 import { IncognitoChip } from "../components/tabs/DeckChrome";
 import { TabDeck } from "../components/tabs/TabDeck";
 import { ConfirmSheet, DesignProvider, IncognitoSpecs, Symbol, SystemGlyph } from "../components/ui";
+import { IncognitoEyes } from "../components/ui/IncognitoEyes";
 import { DECK, DECK_ARC, deckGeometry, redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import { designFor, type Design } from "../lib/design";
 import { haptics } from "../state/app/haptics";
@@ -246,12 +247,13 @@ test("the bottom bar is the Incognito switch, the Search Tabs pill and a 48-poin
 
 const incognitoSwitch = (root: Root) => root.root.findAll((node) => node.props.accessibilityLabel === "Incognito" && node.props.accessibilityRole === "switch" && typeof node.props.onPress === "function")[0];
 
-test("the bar's left button is an Incognito switch: Arc Search's open eyes, 30 points, drawn on 48-point glass, read as a switch with a hint, on both phones and only in the redesign", () => {
+test("the bar's left button is an Incognito switch: drawn white eyes with dark pupils, 30 points, drawn on 48-point glass, read as a switch with a hint, on both phones and only in the redesign", () => {
   const root = deck();
   const toggle = incognitoSwitch(root)!;
   expect(toggle.props.accessibilityState).toMatchObject({ checked: false });
   expect(toggle.props.accessibilityHint).toBe("Shows your Incognito tabs.");
-  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol && node.props.name === "eyes" && node.props.size === 30)).toHaveLength(1);
+  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === IncognitoEyes && node.props.size === 30)).toHaveLength(1);
+  expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === Symbol)).toHaveLength(0);
   expect(host(root, "deckBarIncognitoGlyph")!.findAll((node) => node.type === IncognitoSpecs)).toHaveLength(0);
   expect(root.root.findAll((node) => node.type === SystemGlyph && node.props.systemName === "eyes")).toHaveLength(0);
   expect(root.root.findAll((node) => node.props.testID === "deckBarIncognito" && node.props.incognito === true)).toHaveLength(0);

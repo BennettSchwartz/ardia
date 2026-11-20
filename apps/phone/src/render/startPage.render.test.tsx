@@ -3,7 +3,7 @@ import { getAnimatedStyle } from "react-native-reanimated";
 import { act } from "react-test-renderer";
 import { StartScreen } from "../components/search/StartScreen";
 import { DeckBar } from "../components/tabs/DeckBar";
-import { ArdiaLogo, DesignProvider } from "../components/ui";
+import { AppIcon, ArdiaLogo, DesignProvider } from "../components/ui";
 import { redesignedBarCenterFromBottom } from "../lib/deckGeometry";
 import type { Design } from "../lib/design";
 import { haptics } from "../state/app/haptics";
@@ -96,7 +96,9 @@ test("the original start page keeps its logo and its deck bar, and none of the r
 
 test("the redesigned start page has no deck bar and only the Ardia mark in the middle; its own bar holds round Tabs and Settings circles and a 77 by 48 plus pill, centred 11 points above the safe bottom on iPhone and where the browsing bar sits on Android, 24 in from the sides", () => {
   const root = start();
-  expect(root.root.findAll((node) => node.type === ArdiaLogo)).toHaveLength(1);
+  expect(root.root.findAll((node) => node.type === AppIcon && node.props.side === 128)).toHaveLength(1);
+  expect(host(root, "appIcon")).toBeDefined();
+  expect(root.root.findAll((node) => node.type === ArdiaLogo)).toHaveLength(0);
   expect(root.root.findAll((node) => node.type === DeckBar)).toHaveLength(0);
   const bar = style(root, "startBar");
   expect(bar.top + bar.height / 2).toBe(BAR_CENTER_Y);
@@ -129,7 +131,9 @@ test("with spaces the page shows no name, tiles or dots, only the mark over a gr
   for (const gone of ["startSwitcher", "startTiles", "startTile", "startPageDots", "startSyncInvitation"]) expect(host(root, gone)).toBeUndefined();
   expect(root.root.findAll((node) => node.props.accessibilityRole === "header" && node.props.accessibilityLabel === "Work")).toHaveLength(0);
   expect(String(style(root, "startGradient").experimental_backgroundImage)).toMatch(/^linear-gradient\(/);
-  expect(root.root.findAll((node) => node.type === ArdiaLogo)).toHaveLength(1);
+  expect(root.root.findAll((node) => node.type === AppIcon && node.props.side === 128)).toHaveLength(1);
+  expect(host(root, "appIcon")).toBeDefined();
+  expect(root.root.findAll((node) => node.type === ArdiaLogo)).toHaveLength(0);
   unmount(root);
 });
 

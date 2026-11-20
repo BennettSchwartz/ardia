@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type ComponentProps, type RefObject } from "react";
+import { IncognitoEyes } from "../ui/IncognitoEyes";
+import { eyeOutline } from "./DeckBarGlyphs";
 import { Pressable, StyleSheet, TextInput, View, type StyleProp, type TextInputInstance, type ViewInstance, type ViewStyle } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -54,7 +56,7 @@ export function IncognitoSwitch({ incognito, dark, glassShown, glassShownMs, gly
       <ChromeSurface testID="deckBarIncognito" shape="circle" cornerRadius={capsule(deckChromeLayout.barCircle)} incognito={incognito} dark={dark || incognito} shown={glassShown} shownMs={glassShownMs} style={[styles.centered, size]}>
         <FadingGlyphs testID="deckBarIncognitoGlyph" pointerEvents="none" fade={glyphFade} style={[styles.centered, size]}>
           {incognito ? <View testID="deckBarIncognitoOn" style={[styles.switchOn, { backgroundColor: dark ? ink.white : tabsInk.incognitoCard }]} /> : null}
-          <Symbol name={incognito ? "eyesClosed" : "eyes"} size={deckChromeLayout.incognitoEyes} color={incognito ? (dark ? tabsInk.incognitoCard : ink.white) : rolesFor(dark).label} />
+          {incognito ? <Symbol name="eyesClosed" size={deckChromeLayout.incognitoEyes} color={dark ? tabsInk.incognitoCard : ink.white} /> : <IncognitoEyes size={deckChromeLayout.incognitoEyes} outline={eyeOutline(dark)} />}
         </FadingGlyphs>
       </ChromeSurface>
     </PressScale>

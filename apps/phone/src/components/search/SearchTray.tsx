@@ -1,4 +1,5 @@
 import { createContext, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { IncognitoEyes } from "../ui/IncognitoEyes";
 import { countRender } from "../../state/app/interactionPerf";
 import { AppState, Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { SheetScrollContext, SheetScrollView, sheetPullTranslation, type SheetScroll } from "../ui/Sheet";
@@ -1011,7 +1012,7 @@ function PanelIncognitoToggle() {
         </Animated.Text>
       ) : null}
       <View testID="trayIncognitoGlyph">
-        <Symbol name="eyes" size={searchPanel.eyes} color={on ? tabsInk.onDark : theme.foregroundTertiary} />
+        <IncognitoEyes size={searchPanel.eyes} outline={on ? "rgba(0,0,0,0.45)" : theme.foregroundTertiary} opacity={on ? 1 : 0.7} />
       </View>
     </Pressable>
   );

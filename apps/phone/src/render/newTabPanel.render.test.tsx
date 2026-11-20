@@ -4,6 +4,7 @@ import { fireGestureHandler, getByGestureTestId } from "react-native-gesture-han
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { sheetPullTranslation } from "../components/ui/Sheet";
 import { Symbol } from "../components/ui";
+import { IncognitoEyes } from "../components/ui/IncognitoEyes";
 import { act, type ReactTestInstance } from "react-test-renderer";
 import { searchPanelShown, SearchTray } from "../components/search/SearchTray";
 import { searchPanel } from "../components/search/searchPanelTokens";
@@ -116,7 +117,8 @@ onIPhone("the panel's field is a 44 point pill with the mic and Incognito's eyes
   expect(flat(capsule)).toMatchObject({ minHeight: searchPanel.fieldHeight, borderRadius: searchPanel.fieldHeight / 2 });
   expect(flat(host(root, "completingField")).fontSize).toBeUndefined();
   expect(capsule.findAll((node) => node.props.accessibilityLabel === "Activate Incognito")).not.toHaveLength(0);
-  expect(capsule.findAll((node) => node.type === Symbol && node.props.name === "eyes")).toHaveLength(1);
+  expect(capsule.findAll((node) => node.type === IncognitoEyes)).toHaveLength(1);
+  expect(capsule.findAll((node) => node.type === Symbol && node.props.name === "eyes")).toHaveLength(0);
   expect(host(root, "trayIncognitoLabel")).toBeUndefined();
   act(() => root.root.findAll((node) => node.props.testID === "trayIncognito" && typeof node.props.onPress === "function")[0]!.props.onPress());
   expect(useTabs.getState().incognito).toBe(true);

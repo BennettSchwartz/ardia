@@ -13,7 +13,7 @@ import { selectProfile } from "../../state/sync/actions";
 import { useSelectedProfile, useSyncStatus, useSyncView } from "../../state/sync/hooks";
 import type { SyncedProfile } from "../../state/sync/store";
 import { countUsage } from "../../state/telemetry/telemetry";
-import { ArdiaLogo, browseLayout, DEFAULT_PROFILE_COLOR, font, isSymbolName, PROFILE_PRESETS, rolesFor, spring, startInk, startLayout, Symbol, SystemGlyph, tabsCurve, useProfileLook, useReduceMotion, type SymbolName } from "../ui";
+import { AppIcon, browseLayout, DEFAULT_PROFILE_COLOR, font, isSymbolName, PROFILE_PRESETS, rolesFor, spring, startInk, startLayout, Symbol, SystemGlyph, tabsCurve, useProfileLook, useReduceMotion, type SymbolName } from "../ui";
 import { startGradient, startLogo } from "./startLook";
 
 export type StartGeometry = { width: number; height: number; safeSide: number; barCenterY: number };
@@ -174,7 +174,7 @@ export function StartMark({ incognito }: { incognito: boolean }) {
           onPress={search}
           style={styles.logoButton}
         >
-          <ArdiaLogo width={startLogo.width} />
+          <AppIcon side={startLogo.iconSide} shadow scalesWithText={false} />
         </Pressable>
       </Animated.View>
     </GestureDetector>

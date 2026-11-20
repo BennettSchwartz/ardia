@@ -70,6 +70,7 @@ const host = (root: ReactTestRenderer, testID: string) => hosts(root, (id) => id
 const ROW_IDS = /^(pageMenuRow:|menuToggle:|menuZoom$)/;
 const rowTitle = (testID: string) => (testID === "menuZoom" ? "Page Zoom" : testID.replace(/^(pageMenuRow|menuToggle):/, ""));
 const wordRows = (root: ReactTestRenderer) => hosts(root, (id) => ROW_IDS.test(id)).map((node) => rowTitle(node.props.testID));
+const showMore = (root: ReactTestRenderer) => act(() => root.root.findAll((node) => node.props.testID === "pageMenuRow:More" && typeof node.props.onPress === "function")[0]!.props.onPress());
 const symbolsIn = (node: { findAll: ReactTestRenderer["root"]["findAll"] }) => node.findAll((child) => (child.type as { name?: string })?.name === "Symbol");
 const labelled = (root: ReactTestRenderer, label: string) => root.root.findAll((node) => node.props.accessibilityLabel === label && typeof node.props.onPress === "function")[0];
 const textSize = (scale: number) => Dimensions.set({ window: { ...realWindow, fontScale: scale }, screen: { ...realWindow, fontScale: scale } });
@@ -99,9 +100,26 @@ test("the original menu is unchanged: icon rows and tiles, no glass capsules, Pr
   unmount(root);
 });
 
+test("the redesign's page menu starts compact with the navigation bar, the four tiles and one group ending in More, and More reveals the rest in three more groups", async () => {
+  jest.spyOn(pages, "canSummarize").mockReturnValue(true);
+  withOneMac();
+  const root = await openMenu("redesigned");
+  expect(wordRows(root)).toEqual(["Summarize Page", "Send to Studio", "Block Ads and Trackers", "More"]);
+  expect(hosts(root, (id) => id === "pageMenuGroup")).toHaveLength(1);
+  expect(hosts(root, (id) => id.startsWith("pageMenuAction:"))).toHaveLength(4);
+  expect(host(root, "pageMenuCapsule")).toBeDefined();
+  for (const hidden of ["menuToggle:Night Shade", "menuZoom", "menuToggle:Desktop Site", "pageMenuRow:Translate", "pageMenuRow:Print", "pageMenuRow:Site Settings", "pageMenuRow:History", "pageMenuRow:Bookmarks", "pageMenuRow:Downloads", "pageMenuRow:Open in Default Browser"]) expect(host(root, hidden)).toBeUndefined();
+  showMore(root);
+  expect(host(root, "pageMenuRow:More")).toBeUndefined();
+  expect(wordRows(root)).toEqual(["Summarize Page", "Send to Studio", "Block Ads and Trackers", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Print", "Site Settings", "History", "Bookmarks", "Downloads", "Open in Default Browser"]);
+  expect(hosts(root, (id) => id === "pageMenuGroup")).toHaveLength(4);
+  unmount(root);
+});
+
 test("the redesign has main's word rows in main's order, each with its icon, in main's groups, with the Library's rows on both phones", async () => {
   const root = await openMenu("redesigned");
-  expect(wordRows(root)).toEqual(["Print", "History", "Bookmarks", "Downloads", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Block Ads and Trackers", "Site Settings", "Open in Default Browser"]);
+  showMore(root);
+  expect(wordRows(root)).toEqual(["Block Ads and Trackers", "Night Shade", "Page Zoom", "Desktop Site", "Translate", "Print", "Site Settings", "History", "Bookmarks", "Downloads", "Open in Default Browser"]);
   expect(hosts(root, (id) => id === "pageMenuGroup")).toHaveLength(4);
   for (const row of hosts(root, (id) => id.startsWith("pageMenuRow:") || id.startsWith("menuToggle:"))) expect(symbolsIn(row)).toHaveLength(1);
   unmount(root);
@@ -111,6 +129,7 @@ test("on both phones the page menu's History, Bookmarks and Downloads close the 
   for (const section of ["history", "bookmarks", "downloads"] as const) {
     useLibrary.setState({ open: false, section: "history", path: [] });
     const root = await openMenu("redesigned");
+    showMore(root);
     const title = section === "history" ? "History" : section === "bookmarks" ? "Bookmarks" : "Downloads";
     await pressButton(root, title);
     expect(usePageUi.getState().menuOpen).toBe(false);
@@ -123,16 +142,17 @@ test("on both phones the page menu's History, Bookmarks and Downloads close the 
 test("opening the Library from an Incognito page isn't counted", async () => {
   useTabs.setState({ incognito: true });
   const root = await openMenu("redesigned");
+  showMore(root);
   await pressButton(root, "History");
   expect(useLibrary.getState()).toMatchObject({ open: true, section: "history" });
   expect(counted).not.toHaveBeenCalledWith("library_opened");
   unmount(root);
 });
 
-test("the redesign puts Send above Print, as main's first group", async () => {
+test("the redesign puts Send above Block Ads and Trackers, in the first group", async () => {
   withOneMac();
   const root = await openMenu("redesigned");
-  expect(wordRows(root).slice(0, 2)).toEqual(["Send to Studio", "Print"]);
+  expect(wordRows(root).slice(0, 2)).toEqual(["Send to Studio", "Block Ads and Trackers"]);
   unmount(root);
 });
 
@@ -159,6 +179,7 @@ test("the redesign's Reader, Find on Page, Copy Link and Share are square rounde
 test("the redesign's capsules are off on a page that isn't on the web, and Print with them", async () => {
   page("about:blank");
   const root = await openMenu("redesigned");
+  showMore(root);
   for (const label of ["Reader", "Copy Link", "Share"]) expect(labelled(root, label)!.props.accessibilityState).toMatchObject({ disabled: true });
   expect(host(root, "pageMenuRow:Print")!.props.accessibilityState).toMatchObject({ disabled: true });
   unmount(root);
@@ -167,13 +188,15 @@ test("the redesign's capsules are off on a page that isn't on the web, and Print
 test("Print shows only where the phone can print", async () => {
   jest.spyOn(pages, "canPrint").mockReturnValue(false);
   const root = await openMenu("redesigned");
+  showMore(root);
   expect(wordRows(root)).not.toContain("Print");
-  expect(wordRows(root)[0]).toBe("History");
+  expect(wordRows(root).slice(3, 6)).toEqual(["Desktop Site", "Translate", "Site Settings"]);
   unmount(root);
 });
 
 test("Print closes the menu, then prints the current page once the sheet has gone, and counts it", async () => {
   const root = await openMenu("redesigned");
+  showMore(root);
   await pressButton(root, "Print");
   expect(usePageUi.getState().menuOpen).toBe(false);
   expect(printed).not.toHaveBeenCalled();
@@ -189,6 +212,7 @@ test("Print closes the menu, then prints the current page once the sheet has gon
 test("a private page prints but is never counted, and a print that didn't open isn't counted", async () => {
   useTabs.setState((state) => ({ ...state, open: state.open.map((tab) => ({ ...tab, isPrivate: true })) }));
   const root = await openMenu("redesigned");
+  showMore(root);
   await pressButton(root, "Print");
   await act(async () => {
     jest.advanceTimersByTime(1000);
@@ -199,6 +223,7 @@ test("a private page prints but is never counted, and a print that didn't open i
   useTabs.setState((state) => ({ ...state, open: state.open.map((tab) => ({ ...tab, isPrivate: false })) }));
   printed.mockResolvedValue(false);
   const again = await openMenu("redesigned");
+  showMore(again);
   await pressButton(again, "Print");
   await act(async () => {
     jest.advanceTimersByTime(1000);
@@ -309,6 +334,7 @@ test("Summarize Page is off on a page that isn't on the web", async () => {
 
 test("a print asked for and then given up by reopening the menu doesn't run later", async () => {
   const root = await openMenu("redesigned");
+  showMore(root);
   await pressButton(root, "Print");
   await act(async () => {
     await openPageMenu();
@@ -322,6 +348,7 @@ test("a print asked for and then given up by reopening the menu doesn't run late
 
 test("the redesign's Site Settings closes the menu and opens Settings at Site Settings, as main", async () => {
   const root = await openMenu("redesigned");
+  showMore(root);
   await pressButton(root, "Site Settings");
   expect(usePageUi.getState().menuOpen).toBe(false);
   expect(usePageUi.getState().menuPage).toBe("main");
@@ -333,6 +360,7 @@ test("the redesign's Site Settings closes the menu and opens Settings at Site Se
 test("at accessibility text sizes the redesign's title moves under the navigation buttons and the zoom controls stack, while the capsules stay icons", async () => {
   textSize(1.7);
   const root = await openMenu("redesigned");
+  showMore(root);
   const titlesIn = (testID: string) => host(root, testID)!.findAll((node) => node.props.testID === "pageMenuTitle" && typeof node.type === "string").length;
   expect(titlesIn("pageMenuCapsule")).toBe(1);
   expect(titlesIn("pageMenuCapsuleRow")).toBe(0);
@@ -357,6 +385,7 @@ for (const design of ["redesigned", "original"] as const) {
   test(`${design}: Translate asks about Google the first time, and the answer stands: the next one goes straight there, as main's does`, async () => {
     const { confirmed, loaded } = withTranslation({ languageName: null, confirmed: false });
     const first = await openMenu(design);
+    if (design === "redesigned") showMore(first);
     await pressButton(first, "Translate");
     expect(textOf(first)).toContain("Translate with Google?");
     expect(loaded).toHaveLength(0);
@@ -370,6 +399,7 @@ for (const design of ["redesigned", "original"] as const) {
     expect(usePageUi.getState().menuOpen).toBe(false);
     unmount(first);
     const second = await openMenu(design);
+    if (design === "redesigned") showMore(second);
     await pressButton(second, "Translate");
     expect(textOf(second)).not.toContain("Translate with Google?");
     expect(loaded).toHaveLength(2);
@@ -380,6 +410,7 @@ for (const design of ["redesigned", "original"] as const) {
   test(`${design}: the row names the remembered language and opens the page in it`, async () => {
     const { loaded } = withTranslation({ languageName: "German", confirmed: true });
     const root = await openMenu(design);
+    if (design === "redesigned") showMore(root);
     expect(textOf(root)).toContain("Translate to German");
     await pressButton(root, "Translate to German");
     expect(loaded).toEqual(["https://translate.google.com/translate?sl=auto&tl=de&u=https%3A%2F%2Fsite0.example%2F"]);
@@ -391,6 +422,7 @@ for (const design of ["redesigned", "original"] as const) {
     const { confirmed, loaded } = withTranslation({ languageName: "German", confirmed: true });
     useTabs.setState((state) => ({ ...state, open: [], privates: [{ ...state.open[0]!, isPrivate: true }], incognito: true }));
     const root = await openMenu(design);
+    if (design === "redesigned") showMore(root);
     await pressButton(root, "Translate to German");
     expect(textOf(root)).toContain("Translate with Google?");
     expect(loaded).toHaveLength(0);
