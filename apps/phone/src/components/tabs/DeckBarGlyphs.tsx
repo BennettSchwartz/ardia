@@ -8,7 +8,7 @@ export function IncognitoGlyph({ incognito, dark }: { incognito: boolean; dark: 
   return (
     <View style={styles.switch}>
       <View style={[styles.switchOn, { backgroundColor: theme.dark ? ink.white : tabsInk.incognitoCard }]} />
-      <IncognitoEyes size={deckChromeLayout.incognitoEyes} color={theme.dark ? tabsInk.incognitoCard : ink.white} />
+      <IncognitoEyes incognito size={deckChromeLayout.incognitoEyes} color={theme.dark ? tabsInk.incognitoCard : ink.white} />
     </View>
   );
 }
