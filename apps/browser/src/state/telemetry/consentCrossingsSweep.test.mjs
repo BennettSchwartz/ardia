@@ -26,6 +26,13 @@ const { openExternalUrls } = await import("../littleArdia/actions.ts");
 const { dropTabsInProfile } = await import("../browser/actions.ts");
 const loading = await import("../profiles/profileLoading.ts");
 const { checkIdleProfiles, profileUnloadingForTests, startProfileUnloading } = await import("../profiles/profileUnloading.ts");
+const { checkScreenRecording } = await import("../media/screenShare.ts");
+const { introSession, takeIntroCounts } = await import("./introCounts.ts");
+const { closeWindowAnimated } = await import("../windows/closeAnimated.ts");
+const { refreshFolder, refreshFolderWhile } = await import("../live/engine.ts");
+const { SOURCES } = await import("../live/sources.ts");
+const liveStore = await import("../live/store.ts");
+const { takeWorkCounts } = await import("./workCounts.ts");
 after(() => client.setSharing(false, "settings"));
 
 const S = () => useBrowser.getState();
@@ -157,4 +164,67 @@ test("a tab dragged onto another profile isn't counted as a drop when the drag b
   assert.ok(placed, "the tab still moves");
   assert.equal(S().tabs[b].profileId, work);
   assert.equal(presses.devTabPresses().drops_other_profile - before, 0);
+});
+
+test("a share picker opened with sharing off doesn't count a missing screen recording permission when the check answers after sharing turns on", async () => {
+  sharing(false);
+  let answer = () => {};
+  stub.screenRecordingCheck.answer = new Promise((resolve) => (answer = resolve));
+  const shown = [];
+  const checking = checkScreenRecording(() => true, (allowed) => shown.push(allowed));
+  sharing(true);
+  await usageSince(0);
+  const seen = queued().length;
+  answer(false);
+  await checking;
+  stub.screenRecordingCheck.answer = true;
+  assert.deepEqual(shown, [false], "the picker still shows the missing permission");
+  const counted = (await usageSince(seen)).filter((e) => (e.properties.share_picker_screen_recording_missing ?? 0) > 0);
+  assert.deepEqual(counted, []);
+});
+
+test("an intro that began with sharing off isn't counted as finished when it ends after sharing turns on", () => {
+  sharing(false);
+  const session = introSession();
+  sharing(true);
+  takeIntroCounts();
+  session.ended({ skipped: false, shown: "animated", firstFrameMs: 300 });
+  const counts = takeIntroCounts();
+  assert.deepEqual([counts.intros_finished, counts.intros_scene_animated, counts.intros_first_frame_ms], [0, 0, 0]);
+});
+
+test("a Live folder refresh asked for before a consent change doesn't count its source fetch when the fetch starts after it", async () => {
+  sharing(true);
+  S().hydrate({ profiles: { default: PERSONAL }, profileOrder: ["default"] });
+  const id = liveStore.createFolder("default", "pullRequests", ["github"]);
+  let release = () => {};
+  const held = new Promise((resolve) => (release = resolve));
+  let fetched = 0;
+  SOURCES.github.fetch = async () => (++fetched === 1 ? held.then(() => []) : []);
+  const running = refreshFolder(id);
+  const queued = refreshFolderWhile(id, false, () => true);
+  flipSharing();
+  takeWorkCounts();
+  release();
+  await running;
+  await queued;
+  liveStore.removeFolder(id);
+  assert.equal(fetched, 2, "the queued refresh still fetches");
+  assert.equal(takeWorkCounts().live_source_fetches, 0);
+});
+
+test("a window closed with an animation before a consent change doesn't count the tabs it hands over when the animation ends after it", async () => {
+  sharing(true);
+  S().hydrate({ profiles: { default: PERSONAL }, profileOrder: ["default"] });
+  S().updateSettings({ shareTabsAcrossWindows: true });
+  const work = S().createProfile({ name: "Work" });
+  S().createWindow({ url: "https://keep.example/" });
+  const leaving = S().createWindow({ profileId: work, url: "https://handed.example/" });
+  await usageSince(0);
+  const seen = queued().length;
+  const closing = closeWindowAnimated(leaving);
+  flipSharing();
+  assert.equal(await closing, true, "the window still closes");
+  const counted = (await usageSince(seen)).filter((e) => (e.properties.window_close_tabs_kept ?? 0) > 0);
+  assert.deepEqual(counted, []);
 });

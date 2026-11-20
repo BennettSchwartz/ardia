@@ -1,5 +1,6 @@
 import type { ConsentToken } from "./choice";
 import { consentOrNow, countFor } from "./countFor";
+import { consentToken } from "./consentPeriod";
 
 export type IntroScene = "animated" | "poster" | "fallback";
 
@@ -27,6 +28,11 @@ export function noteIntroEnded(ended: { skipped: boolean; shown: IntroScene | nu
     if (ended.shown) scenes[ended.shown] += 1;
     if (ended.shown === "animated" && ended.firstFrameMs !== null) firstFrameMs += Math.round(Math.max(0, ended.firstFrameMs) / FIRST_FRAME_STEP_MS) * FIRST_FRAME_STEP_MS;
   });
+}
+
+export function introSession() {
+  const startedIn = consentToken();
+  return { ended: (ended: Parameters<typeof noteIntroEnded>[0]) => noteIntroEnded(ended, startedIn) };
 }
 
 export function takeIntroCounts() {
