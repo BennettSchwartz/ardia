@@ -3,6 +3,7 @@ import type { MenuShortcut } from "../../platform/commands";
 import { useMemo } from "react";
 import { create } from "zustand";
 import { useBrowser } from "../browser/store";
+import { ALL, useKeyed } from "../browser/keyedWatch";
 import { shortcutSources, UNAVAILABLE_COMMANDS } from "./commandCatalog";
 import { ALTERNATE_MODIFIER } from "./keyNotation";
 import { formatShortcut, resolveShortcuts, type ResolvedShortcuts, type Shortcut, type ShortcutOverrides, type ShortcutSource } from "./shortcuts";
@@ -93,7 +94,22 @@ export function withShortcut(title: string, hint: string | undefined): string {
 
 export function useShortcutHint(id: string): string | undefined {
   useMenuBar(() => shortcutHint(id));
-  return useBrowser((s) => shortcutHint(id, s));
+  return useKeyed(watchShortcuts, ALL, () => shortcutHint(id));
+}
+
+const shortcutListeners = new Set<() => void>();
+let hearingShortcuts = false;
+
+function watchShortcuts(_key: string, listener: () => void): () => void {
+  if (!hearingShortcuts) {
+    hearingShortcuts = true;
+    useBrowser.subscribeTo(["settings", "profileOrder"], (s, prev) => {
+      if (s.settings.shortcuts === prev.settings.shortcuts && s.profileOrder === prev.profileOrder) return;
+      for (const heard of [...shortcutListeners]) heard();
+    });
+  }
+  shortcutListeners.add(listener);
+  return () => void shortcutListeners.delete(listener);
 }
 
 const HINT_SEPARATOR = "\u0000";
@@ -101,7 +117,7 @@ const joinedHints = (ids: readonly string[], s?: ShortcutState) => ids.map((id) 
 
 export function useShortcutHints<K extends string>(ids: readonly K[]): Readonly<Record<K, string | undefined>> {
   useMenuBar(() => joinedHints(ids));
-  const joined = useBrowser((s) => joinedHints(ids, s));
+  const joined = useKeyed(watchShortcuts, ALL, () => joinedHints(ids));
   return useMemo(() => {
     const hints = joined.split(HINT_SEPARATOR);
     return Object.fromEntries(ids.map((id, i) => [id, hints[i] || undefined])) as Record<K, string | undefined>;
