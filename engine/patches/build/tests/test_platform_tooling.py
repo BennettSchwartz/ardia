@@ -551,6 +551,8 @@ class PackagingTests(unittest.TestCase):
             (root / 'apparmor.d').mkdir()
             (root / 'apparmor.d/ardia').write_text(env['profile'].replace('CHROME', str((runtime / 'chrome').resolve())))
         variables = {'PATH': os.environ['PATH'], **env.get('vars', {})}
+        if 'APPIMAGE' in variables:
+            variables.setdefault('APPDIR', str(root.resolve()))
         return subprocess.run([str(runtime / 'ardia-launch'), '--marker', *extra], capture_output=True, text=True, timeout=30, env=variables)
 
     def test_the_launcher_keeps_the_sandbox_and_runs_without_it_only_when_asked(self):
@@ -564,6 +566,7 @@ class PackagingTests(unittest.TestCase):
             ('namespaces off', {'proc': {'sys/user/max_user_namespaces': '0'}}, (), 1, None),
             ('asked', {'proc': restricted}, ('--no-sandbox',), 0, None),
             ('AppImage, asked', {'proc': restricted, 'vars': {'APPIMAGE': '/tmp/Ardia.AppImage'}}, ('--no-sandbox',), 0, None),
+            ('APPIMAGE without APPDIR', {'proc': restricted, 'vars': {'APPIMAGE': '/tmp/Ardia.AppImage', 'APPDIR': ''}}, (), 1, None),
         ]
         for label, env, extra, code, expected in cases:
             with self.subTest(label), tempfile.TemporaryDirectory() as scratch:
@@ -575,6 +578,8 @@ class PackagingTests(unittest.TestCase):
                 if code == 1:
                     self.assertEqual(lines, [])
                     self.assertIn("can't start Chromium's sandbox", result.stderr)
+                if label == 'APPIMAGE without APPDIR':
+                    self.assertNotIn("Ardia won't run without the sandbox", result.stderr)
                 if label.startswith('AppImage') and code == 1:
                     self.assertIn("Ardia won't run without the sandbox", result.stderr)
                     self.assertIn("Install Ardia's .deb, which sets up the sandbox helper and its AppArmor profile", result.stderr)
