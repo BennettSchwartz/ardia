@@ -236,7 +236,10 @@ export function linuxUpdater(deps: UpdateDeps) {
       return;
     }
     if (status && installs(status.kind)) {
-      if (status.phase === "ready") return;
+      if (status.phase === "ready") {
+        if (asked && status.version) deps.ready(status.version, restartToUpdate);
+        return;
+      }
       if (!asked && saved.failed === release.version) return;
       if (asked || saved.automaticDownloads) return startRun(release, asked ? "asked" : "automatic", consent);
       if (await offeredOnce(release)) deps.offerInstall(release, () => installOffered(release));
