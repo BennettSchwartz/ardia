@@ -86,6 +86,24 @@ fn sidecar(mode: &str) -> i32 {
             report.finish();
             0
         }
+        "pathwatch" => {
+            write_fd(3, "READY");
+            let mut byte = [0u8; 1];
+            while unsafe { libc::read(3, byte.as_mut_ptr().cast(), 1) } == 1 && byte[0] != b'\n' {}
+            let path = std::env::var("PROBE_JAIL_PROGRAM").unwrap_or_default();
+            let head = std::fs::read(&path)
+                .map(|bytes| {
+                    bytes
+                        .iter()
+                        .take(4)
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<String>()
+                })
+                .unwrap_or_else(|e| format!("unreadable({})", e.raw_os_error().unwrap_or(0)));
+            write_fd(3, &format!("PATHWATCH {path} head={head}"));
+            write_fd(3, "DONE");
+            0
+        }
         "mountwatch" => {
             write_fd(3, "READY");
             let mut byte = [0u8; 1];
@@ -154,6 +172,7 @@ fn sidecar(mode: &str) -> i32 {
                 unsafe { libc::pause() };
             }
         }
+        mode if mode.starts_with("exit:") => mode[5..].parse().unwrap_or(64),
         _ => 64,
     }
 }

@@ -23,7 +23,7 @@ as DIR/ardia-bwrap, the bwrap Ardia's plugin broker binds plugin folders with.
 The tarball is checked against the pinned sha256 before anything is built. The build
 lands in a scratch folder and reaches DIR only after it reports version ${BWRAP_VERSION},
 offers ${REQUIRED_FLAGS[*]}
-and, for --mode static, links no loader and hashes to the pinned
+and, for --mode static (x86_64 only), links no loader and hashes to the pinned
 ${BWRAP_OUTPUT_SHA256}. Linux only. The binary is never setuid.
 EOF
 }
@@ -42,6 +42,10 @@ while [ $# -gt 0 ]; do
 done
 case "$mode" in static|native) ;; *) echo "build-bwrap.sh: --mode is static or native" >&2; exit 64 ;; esac
 [ "$(uname -s)" = Linux ] || { echo "build-bwrap.sh: bubblewrap builds on Linux only" >&2; exit 1; }
+if [ "$mode" = static ] && [ "$(uname -m)" != x86_64 ]; then
+  echo "build-bwrap.sh: the pinned static output is for x86_64; $(uname -m) has no pinned hash yet" >&2
+  exit 1
+fi
 
 mkdir -p "$out" "$cache"
 out="$(cd "$out" && pwd)"

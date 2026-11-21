@@ -61,7 +61,17 @@ fn parse_fd(args: &[String], name: &str) -> Option<RawFd> {
 
 pub fn exec_main(args: &[String]) -> ExecOutcome {
     if args.first().map(String::as_str) == Some("--probe") {
-        return ExecOutcome::Exit(0);
+        return match make_mounts_private_and_drop_capabilities() {
+            Ok(()) => ExecOutcome::Exit(0),
+            Err(error) => {
+                let _ = sys::write_all(
+                    2,
+                    format!("[ardia] the launcher can't make its mounts private: {error}\n")
+                        .as_bytes(),
+                );
+                ExecOutcome::Exit(EXIT_SANDBOX_SETUP)
+            }
+        };
     }
     let (Some(policy), Some(ready)) = (parse_fd(args, "--policy-fd"), parse_fd(args, "--ready-fd"))
     else {
@@ -408,22 +418,15 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
     sys::write_all(READY_FD, line.as_bytes()).map_err(fail("accepted"))?;
     match (frame.kind, frame.program, program_fd) {
         (RunKind::Sidecar, Some(program), Some(fd)) => {
-            let kept = if program.script {
-                vec![]
-            } else {
-                vec![fd.as_raw_fd()]
-            };
-            keep_only(&kept).map_err(fail("close-fds"))?;
+            keep_only(&[fd.as_raw_fd()]).map_err(fail("close-fds"))?;
             sys::check(unsafe { libc::fcntl(READY_FD, libc::F_SETFD, libc::FD_CLOEXEC) })
                 .map_err(fail("ready-fd"))?;
-            if program.script {
-                std::mem::forget(fd);
-                exec_path(&program.path, &frame.argv, &frame.env)
-            } else {
-                let raw = fd.as_raw_fd();
-                std::mem::forget(fd);
-                exec_fd(raw, &frame.argv, &frame.env)
-            }
+            let script_needs_the_fd = if program.script { 0 } else { libc::FD_CLOEXEC };
+            sys::check(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, script_needs_the_fd) })
+                .map_err(fail("program-fd"))?;
+            let raw = fd.as_raw_fd();
+            std::mem::forget(fd);
+            exec_fd(raw, &frame.argv, &frame.env)
         }
         (RunKind::Sidecar, _, _) => Err(Failure {
             code: "program-missing",
@@ -476,7 +479,6 @@ fn exec_failed(argv: &[String]) -> ! {
 fn exec_fd(fd: RawFd, argv: &[String], env: &[String]) -> ! {
     if let (Some(args), Some(vars)) = (cstrings(argv), cstrings(env)) {
         let (args, vars) = (pointers(&args), pointers(&vars));
-        sys::check(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }).ok();
         unsafe {
             libc::syscall(
                 libc::SYS_execveat,
@@ -487,15 +489,6 @@ fn exec_fd(fd: RawFd, argv: &[String], env: &[String]) -> ! {
                 libc::AT_EMPTY_PATH,
             )
         };
-    }
-    exec_failed(argv)
-}
-
-fn exec_path(path: &Path, argv: &[String], env: &[String]) -> ! {
-    if let (Ok(path), Some(args), Some(vars)) = (sys::cstring(path), cstrings(argv), cstrings(env))
-    {
-        let (args, vars) = (pointers(&args), pointers(&vars));
-        unsafe { libc::execve(path.as_ptr(), args.as_ptr(), vars.as_ptr()) };
     }
     exec_failed(argv)
 }

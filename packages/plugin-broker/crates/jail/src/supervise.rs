@@ -475,25 +475,6 @@ impl ReadyLines {
     }
 }
 
-fn peek_exit(pid: i32) -> Option<libc::siginfo_t> {
-    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
-    let result = unsafe {
-        libc::waitid(
-            libc::P_PID,
-            pid as libc::id_t,
-            &mut info,
-            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
-        )
-    };
-    (result == 0 && unsafe { info.si_pid() } == pid).then_some(info)
-}
-
-fn exe_identity(pid: i32) -> Option<(u64, u64)> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::metadata(format!("/proc/{pid}/exe")).ok()?;
-    Some((meta.dev(), meta.ino()))
-}
-
 fn read_child_pid(fd: RawFd, deadline: Instant) -> io::Result<Option<i32>> {
     let mut data = Vec::new();
     let mut chunk = [0u8; 512];
@@ -1212,7 +1193,7 @@ impl Supervisor {
         drop(withheld);
         let problem = match (kind, ready.next(deadline)) {
             (RunKind::Host, Readiness::Line(line)) if line == "started" => None,
-            (RunKind::Sidecar, Readiness::Closed) => self.classify_exec(id, outer),
+            (RunKind::Sidecar, Readiness::Closed) => None,
             (_, Readiness::Line(line)) => Some(format!("the runtime didn't start: {line}")),
             (RunKind::Host, Readiness::Closed) => {
                 Some("the host exited before it confined itself".into())
@@ -1233,38 +1214,6 @@ impl Supervisor {
             init_pid,
             main_pid,
         })
-    }
-
-    fn classify_exec(&self, id: RunId, outer: i32) -> Option<String> {
-        let launcher = sys::identity(self.broker_exe.as_raw_fd()).ok();
-        let run = self.runs.get(&id)?;
-        let main = run.main?;
-        let alive = run
-            .main_pidfd
-            .as_ref()
-            .map(|fd| !sys::wait_readable(fd.as_raw_fd(), Instant::now()).unwrap_or(true))
-            .unwrap_or(false);
-        if alive {
-            return match exe_identity(main) {
-                Some(running) if Some(running) != launcher => None,
-                _ => Some(
-                    "the launcher closed its readiness pipe without running the program".into(),
-                ),
-            };
-        }
-        let settle = Instant::now() + Duration::from_millis(500);
-        let _ = sys::wait_readable(run.outer_pidfd.as_raw_fd(), settle);
-        match peek_exit(outer) {
-            Some(info) if info.si_code == libc::CLD_EXITED && unsafe { info.si_status() } < 128 => {
-                None
-            }
-            Some(info) => Some(format!(
-                "the sandbox died while starting the program (code {}, status {})",
-                info.si_code,
-                unsafe { info.si_status() }
-            )),
-            None => Some("the program's process vanished during startup".into()),
-        }
     }
 
     fn abort(&mut self, id: RunId, log: &OwnedFd, why: String) -> SpawnError {
@@ -1463,6 +1412,31 @@ impl Supervisor {
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown(QUIT_GRACE);
+        let deadline = Instant::now() + TEARDOWN_DEADLINE;
+        while !self.stragglers.is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            self.reap_stragglers();
+        }
+        let left = std::mem::take(&mut self.stragglers);
+        if !left.is_empty() {
+            let _ = std::thread::Builder::new()
+                .name("jail-straggler-reaper".into())
+                .spawn(move || {
+                    for straggler in left {
+                        if let Some(pid) = straggler.pid {
+                            let _ = sys::wait_child(pid);
+                        }
+                        if let Some(cgroup) = straggler.cgroup {
+                            for _ in 0..6000 {
+                                if cgroup.try_remove() {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_millis(100));
+                            }
+                        }
+                    }
+                });
+        }
     }
 }
 

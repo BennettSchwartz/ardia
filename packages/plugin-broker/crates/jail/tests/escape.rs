@@ -1147,7 +1147,7 @@ fn a_script_program_runs_from_its_pinned_fd() {
     let script = world.root.join("progs/script-pkg/bin/hello.sh");
     write(
         &script,
-        "#!/bin/sh\nchmod 755 \"$0\" 2>/dev/null && echo \"META-OK chmod $0\" >&3\ntouch -r \"$0\" \"$0\" 2>/dev/null && echo \"META-OK touch $0\" >&3\nfor f in /proc/self/fd/* /proc/$$/fd/*; do [ -f \"$f\" ] && chmod 755 \"$f\" 2>/dev/null && echo \"META-OK chmod $f\" >&3; done\necho \"SCRIPT-RAN args=$1 home=$HOME self=$0\" >&3\necho DONE >&3\n",
+        "#!/bin/sh\nchmod 755 \"$0\" 2>/dev/null && echo \"META-OK chmod $0\" >&3\ntouch -r \"$0\" \"$0\" 2>/dev/null && echo \"META-OK touch $0\" >&3\nfor f in /proc/self/fd/* /proc/$$/fd/*; do [ -f \"$f\" ] && chmod 755 \"$f\" 2>/dev/null && echo \"META-OK chmod $f\" >&3; done\necho \"REREAD $(head -c 9 \"$0\")\" >&3\necho \"SCRIPT-RAN args=$1 home=$HOME self=$0\" >&3\necho DONE >&3\n",
     );
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let mut args: Vec<String> = world
@@ -1177,8 +1177,12 @@ fn a_script_program_runs_from_its_pinned_fd() {
     assert!(ran.contains("args=probe"), "{ran}");
     assert!(ran.contains("home=/run/ardia/data/home"), "{ran}");
     assert!(
-        ran.contains("self=/run/ardia/program/bin/hello.sh"),
-        "{ran}"
+        ran.contains("self=/dev/fd/"),
+        "the script didn't run from its verified fd: {ran}"
+    );
+    assert!(
+        lines.iter().any(|l| l == "LINE REREAD #!/bin/sh"),
+        "the interpreter couldn't reopen its script path: {lines:#?}"
     );
 }
 
@@ -1609,4 +1613,150 @@ fn a_program_path_that_became_a_link_or_vanished_is_refused() {
             "{lines:#?}"
         );
     }
+}
+
+fn prebuilt_or_cc(world: &World, name: &str, source: &str) -> Option<PathBuf> {
+    let package = world.root.join("progs/quick-pkg/bin");
+    std::fs::create_dir_all(&package).unwrap();
+    let target = package.join(name);
+    if let Some(dir) = std::env::var_os("JAIL_PREBUILT_DIR") {
+        return std::fs::copy(PathBuf::from(dir).join(name), &target)
+            .ok()
+            .map(|_| target);
+    }
+    let file = world.root.join(format!("{name}.c"));
+    std::fs::write(&file, source).unwrap();
+    let built = Command::new("cc")
+        .args(["-static", "-O2", "-o"])
+        .arg(&target)
+        .arg(&file)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    built.then_some(target)
+}
+
+#[test]
+fn sidecars_that_exit_at_once_are_never_reported_as_setup_failures() {
+    let world = World::new("instant-exit");
+    let mut programs = Vec::new();
+    for code in [0, 200] {
+        let name = format!("quick{code}");
+        match prebuilt_or_cc(
+            &world,
+            &name,
+            &format!("int main(void) {{ return {code}; }}\n"),
+        ) {
+            Some(path) => programs.push((code, path)),
+            None => {
+                skip(
+                    "instant_exit",
+                    "no C compiler and no JAIL_PREBUILT_DIR",
+                    "host",
+                );
+                return;
+            }
+        }
+    }
+    let load: Vec<Child> = (0..8)
+        .map(|_| {
+            Command::new("sh")
+                .args(["-c", "while :; do :; done"])
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    let mut summary = Vec::new();
+    let mut failures = Vec::new();
+    for (code, program) in &programs {
+        let mut started = 0;
+        for _ in 0..40 {
+            let mut args: Vec<String> = world
+                .sim_args("sidecar", "none")
+                .into_iter()
+                .filter(|a| !a.starts_with("program=") && !a.starts_with("leak"))
+                .collect();
+            args.push(format!("program={}", program.display()));
+            let lines = run_to_end(&world, args);
+            if !full_sidecars_available(&lines) {
+                for mut child in load {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                skip("instant_exit", "sidecars aren't available", "full");
+                return;
+            }
+            if lines.iter().any(|l| l.starts_with("SPAWNED")) {
+                started += 1;
+            } else {
+                failures.push(lines);
+            }
+        }
+        summary.push(format!("exit {code}: {started}/40 started"));
+    }
+    for mut child in load {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    eprintln!("SUMMARY instant_exit {}", summary.join(", "));
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn a_mount_namespace_quota_without_room_for_the_launcher_falls_back_to_host_reduced() {
+    let world = World::new("mnt-quota");
+    if !userns_wrapper_works() {
+        skip("mnt_quota", "the test can't make a user namespace", "tool");
+        return;
+    }
+    let script = "echo 1 > /proc/sys/user/max_mnt_namespaces && exec \"$@\"";
+    let wrap = [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "sh",
+        "-c",
+        script,
+        "sh",
+    ];
+    let mut host = world.sim_args("host", "probe");
+    host.push("host_mode=probe".into());
+    let lines = Sim::start(&world, host, &wrap).finish(Duration::from_secs(30));
+    if caps_from(&lines).abi.is_none() {
+        expect_landlock_refusal("mnt_quota", &lines);
+        return;
+    }
+    let caps = lines
+        .iter()
+        .find(|l| l.starts_with("CAPS"))
+        .cloned()
+        .unwrap_or_default();
+    let spawned = lines
+        .iter()
+        .find(|l| l.starts_with("SPAWNED"))
+        .cloned()
+        .unwrap_or_default();
+    eprintln!("SUMMARY mnt_quota/host {caps} || {spawned}");
+    assert!(
+        caps.contains("full=no"),
+        "the probe should fail like a real launch: {lines:#?}"
+    );
+    assert!(spawned.contains("level=hostReduced"), "{lines:#?}");
+    assert!(
+        lines.iter().any(|l| l.starts_with("LINE DONE denied=")),
+        "{lines:#?}"
+    );
+    let mut sidecar = world.sim_args("sidecar", "probe");
+    sidecar.push("probe=escape".into());
+    let lines = Sim::start(&world, sidecar, &wrap).finish(Duration::from_secs(30));
+    let refused = lines
+        .iter()
+        .find(|l| l.starts_with("REFUSED"))
+        .cloned()
+        .unwrap_or_default();
+    eprintln!("SUMMARY mnt_quota/sidecar {refused}");
+    assert!(
+        refused.contains("Sidecars need user namespaces"),
+        "{lines:#?}"
+    );
 }

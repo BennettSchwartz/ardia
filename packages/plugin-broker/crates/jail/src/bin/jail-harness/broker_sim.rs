@@ -350,6 +350,19 @@ pub fn main(args: &[String]) -> i32 {
     };
     let soon = |seconds| Instant::now() + Duration::from_secs(seconds);
     match event.as_str() {
+        "replace-after-start" => {
+            if !lines.until("READY", soon(20)) {
+                say("NOT-READY");
+            }
+            let target = get("program");
+            let decoy = format!("{target}.decoy");
+            std::fs::write(&decoy, "#!/bin/sh\necho DECOY >&3\n").expect("decoy");
+            std::fs::rename(&decoy, &target).expect("replace the program");
+            say("REPLACED-PROGRAM");
+            let _ = jail::sys::write_all(ours.as_raw_fd(), b"CHECK\n");
+            lines.until("DONE", soon(20));
+            report(supervisor.stop(launched.id, Duration::from_secs(1)));
+        }
         "mount-after-start" => {
             if !lines.until("READY", soon(20)) {
                 say("NOT-READY");

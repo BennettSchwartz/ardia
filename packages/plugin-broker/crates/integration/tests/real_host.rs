@@ -2,7 +2,7 @@
 
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use jail::{Level, Quiet, SpawnRequest, Supervisor, SupervisorConfig, Work};
@@ -160,13 +160,18 @@ fn pinned_bwrap() -> Option<OwnedFd> {
     };
     let fd = open(Path::new(&path), libc::O_RDONLY);
     if required() {
-        let version = Command::new(&path).arg("--version").output().unwrap();
+        let through_fd = format!("/proc/self/fd/{}", fd.as_raw_fd());
+        let version = Command::new(&through_fd).arg("--version").output().unwrap();
         let version = String::from_utf8_lossy(&version.stdout).trim().to_string();
         assert_eq!(
             version, PINNED_BWRAP,
             "ARDIA_BWRAP isn't the pinned version"
         );
-        let hash = Command::new("sha256sum").arg(&path).output().unwrap();
+        let same_file = std::fs::File::open(&through_fd).unwrap();
+        let hash = Command::new("sha256sum")
+            .stdin(Stdio::from(same_file))
+            .output()
+            .unwrap();
         let hash = String::from_utf8_lossy(&hash.stdout)
             .split_whitespace()
             .next()

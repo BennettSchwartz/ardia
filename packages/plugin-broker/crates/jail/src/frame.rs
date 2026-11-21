@@ -289,8 +289,10 @@ impl Frame {
             1 => true,
             _ => return Err(invalid("the private-mounts flag is wrong")),
         };
-        if private_mounts && level != Level::Full {
-            return Err(invalid("only a full sandbox owns a mount namespace"));
+        if private_mounts != (level == Level::Full) {
+            return Err(invalid(
+                "a full sandbox always makes its mounts private, and only a full sandbox can",
+            ));
         }
         if entry
             .as_deref()
@@ -409,6 +411,9 @@ mod tests {
         let mut extra = bytes.clone();
         extra.push(0);
         assert!(Frame::decode(&extra).is_err());
+        let mut public_full = sample();
+        public_full.private_mounts = false;
+        assert!(Frame::decode(&public_full.encode()).is_err());
         let mut reduced_sidecar = sample();
         reduced_sidecar.level = Level::HostReduced;
         reduced_sidecar.baseline = vec![0; 8];

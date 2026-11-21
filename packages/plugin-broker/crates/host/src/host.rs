@@ -112,18 +112,16 @@ pub struct Confined(Prepared);
 
 pub fn prepare(options: &Options) -> Result<Prepared, Exit> {
     stderr::make_nonblocking();
+    let handed = options.entry_fd.map(|fd| {
+        let read = entry::read_open(fd, &options.entry);
+        unsafe { libc::close(fd) };
+        read
+    });
     let fd = channel_fd().map_err(|problem| {
         stderr::note(&format!("[ardia] {problem}"));
         Exit::Usage
     })?;
-    let read = match options.entry_fd {
-        Some(fd) => {
-            let read = entry::read_open(fd, &options.entry);
-            unsafe { libc::close(fd) };
-            read
-        }
-        None => entry::read(&options.entry),
-    };
+    let read = handed.unwrap_or_else(|| entry::read(&options.entry));
     let source = read.map_err(|problem| {
         stderr::note(&format!("[ardia] {problem}"));
         Exit::LoadFailed
