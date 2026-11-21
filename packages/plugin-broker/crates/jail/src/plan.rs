@@ -5,7 +5,9 @@ use crate::frame::{MountCheck, Rule, Target};
 use crate::landlock::{
     DEVICE_READ, DEVICE_READ_WRITE, EXECUTE, READ, READ_EXECUTE, READ_FILE, READ_WRITE,
 };
-use crate::{RunKind, BROKER_PATH_IN_JAIL, DATA_IN_JAIL, PLUGIN_IN_JAIL, PROGRAM_IN_JAIL};
+use crate::{
+    RunKind, BROKER_PATH_IN_JAIL, DATA_IN_JAIL, EXEC_STAGE_IN_JAIL, PLUGIN_IN_JAIL, PROGRAM_IN_JAIL,
+};
 
 pub const TMP_BYTES: u64 = 64 << 20;
 
@@ -40,6 +42,7 @@ pub enum Source {
     Dev,
     Symlink(PathBuf),
     Present,
+    Dir,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +172,13 @@ pub fn build(input: &Input) -> Plan {
             sidecar_only(kind, READ_EXECUTE),
         );
     }
+    if kind == RunKind::Sidecar {
+        entries.push(Entry {
+            dest: EXEC_STAGE_IN_JAIL.into(),
+            source: Source::Dir,
+            rights: 0,
+        });
+    }
     if let Some((fd, dest)) = &input.program_file {
         entries.push(Entry {
             dest: dest.clone(),
@@ -221,6 +231,7 @@ impl Plan {
                 Source::Dev => push(&["--dev", &dest]),
                 Source::Symlink(target) => push(&["--symlink", &target.to_string_lossy(), &dest]),
                 Source::Present => {}
+                Source::Dir => push(&["--dir", &dest]),
             }
         }
         args.push("--remount-ro".into());

@@ -31,6 +31,7 @@ pub const PLUGIN_IN_JAIL: &str = "/run/ardia/plugin";
 pub const DATA_IN_JAIL: &str = "/run/ardia/data";
 pub const PROGRAM_IN_JAIL: &str = "/run/ardia/program";
 pub const PROGRAM_FD_IN_JAIL: i32 = 13;
+pub const EXEC_STAGE_IN_JAIL: &str = "/run/ardia/exec";
 pub const LANDLOCK_MISSING: &str =
     "This system's kernel lacks Landlock, which Ardia needs to sandbox plugins";
 

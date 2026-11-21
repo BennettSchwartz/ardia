@@ -206,6 +206,11 @@ fn mount_root<'a>(
 }
 
 fn make_mounts_private_and_drop_capabilities() -> io::Result<()> {
+    make_mounts_private()?;
+    drop_capabilities()
+}
+
+fn make_mounts_private() -> io::Result<()> {
     sys::check(unsafe { libc::unshare(libc::CLONE_NEWNS) })?;
     let root = c"/";
     sys::check(unsafe {
@@ -217,6 +222,115 @@ fn make_mounts_private_and_drop_capabilities() -> io::Result<()> {
             std::ptr::null(),
         )
     })?;
+    Ok(())
+}
+
+fn mount_call(
+    source: Option<&Path>,
+    target: &Path,
+    fstype: Option<&std::ffi::CStr>,
+    flags: libc::c_ulong,
+    data: Option<&std::ffi::CStr>,
+) -> io::Result<()> {
+    let source = source.map(sys::cstring).transpose()?;
+    let target = sys::cstring(target)?;
+    sys::check(unsafe {
+        libc::mount(
+            source.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
+            target.as_ptr(),
+            fstype.map_or(std::ptr::null(), |s| s.as_ptr()),
+            flags,
+            data.map_or(std::ptr::null(), |s| s.as_ptr().cast()),
+        )
+    })?;
+    Ok(())
+}
+
+const STAGE_ENTRY_LIMIT: usize = 4096;
+
+fn stage_script(program: &PinnedProgram, verified: &OwnedFd) -> io::Result<PathBuf> {
+    let stage = Path::new(crate::EXEC_STAGE_IN_JAIL);
+    let (root, relative) = match (
+        program.path.strip_prefix(crate::PROGRAM_IN_JAIL),
+        program.path.strip_prefix(crate::PLUGIN_IN_JAIL),
+    ) {
+        (Ok(relative), _) => (Path::new(crate::PROGRAM_IN_JAIL), relative),
+        (_, Ok(relative)) => (Path::new(crate::PLUGIN_IN_JAIL), relative),
+        _ => return Ok(program.path.clone()),
+    };
+    let parts: Vec<&std::ffi::OsStr> = relative
+        .components()
+        .map(|part| match part {
+            std::path::Component::Normal(name) => Ok(name),
+            _ => Err(sys::invalid("the script's path isn't plain")),
+        })
+        .collect::<io::Result<_>>()?;
+    if parts.is_empty() {
+        return Err(sys::invalid("the script's path is empty"));
+    }
+    let nosuid_nodev = libc::MS_NOSUID | libc::MS_NODEV;
+    mount_call(
+        None,
+        stage,
+        Some(c"tmpfs"),
+        nosuid_nodev,
+        Some(c"size=1m,mode=0755"),
+    )?;
+    let mut real = root.to_path_buf();
+    let mut staged = stage.to_path_buf();
+    for (index, part) in parts.iter().enumerate() {
+        let mut linked = 0;
+        for entry in std::fs::read_dir(&real)? {
+            let name = entry?.file_name();
+            if name.as_os_str() == *part {
+                continue;
+            }
+            linked += 1;
+            if linked > STAGE_ENTRY_LIMIT {
+                return Err(sys::invalid(
+                    "the script's folder has too many entries to stage",
+                ));
+            }
+            std::os::unix::fs::symlink(real.join(&name), staged.join(&name))?;
+        }
+        real.push(part);
+        staged.push(part);
+        if index + 1 < parts.len() {
+            std::fs::create_dir(&staged)?;
+        }
+    }
+    std::fs::File::create(&staged)?;
+    let source = PathBuf::from(format!("/proc/self/fd/{}", verified.as_raw_fd()));
+    mount_call(Some(&source), &staged, None, libc::MS_BIND, None)?;
+    let read_only = libc::MS_REMOUNT | libc::MS_BIND | libc::MS_RDONLY | nosuid_nodev;
+    mount_call(None, &staged, None, read_only, None)?;
+    mount_call(
+        None,
+        stage,
+        None,
+        libc::MS_REMOUNT | libc::MS_RDONLY | nosuid_nodev,
+        None,
+    )?;
+    let again = sys::openat(
+        libc::AT_FDCWD,
+        &staged,
+        libc::O_RDONLY | libc::O_NOFOLLOW,
+        0,
+    )?;
+    if sys::identity(again.as_raw_fd())? != (program.device, program.inode) {
+        return Err(sys::invalid("the staged script isn't the verified one"));
+    }
+    let entries = roots::read_mountinfo()?;
+    let mount = mount_root(&entries, &staged)?;
+    if sys::mount_id(again.as_raw_fd())? != mount.id || !mount.read_only() || mount.propagates() {
+        return Err(sys::invalid(
+            "the staged script isn't on its own read-only, private mount",
+        ));
+    }
+    Ok(staged)
+}
+
+fn drop_capabilities() -> io::Result<()> {
     unsafe {
         libc::prctl(
             libc::PR_CAP_AMBIENT,
@@ -347,8 +461,16 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
         sys::die_with_parent(frame.expected_parent).map_err(fail("parent-gone"))?;
     }
     sys::set_no_new_privs().map_err(fail("no-new-privs"))?;
+    let mut staged_script = None;
+    let mut verified_early = None;
     if frame.private_mounts {
-        make_mounts_private_and_drop_capabilities().map_err(fail("private-mounts"))?;
+        make_mounts_private().map_err(fail("private-mounts"))?;
+        if let Some(program) = frame.program.as_ref().filter(|program| program.script) {
+            let fd = open_program(program, true).map_err(fail("program-identity"))?;
+            staged_script = Some(stage_script(program, &fd).map_err(fail("script-stage"))?);
+            verified_early = Some(fd);
+        }
+        drop_capabilities().map_err(fail("private-mounts"))?;
         let program = seccomp::compile(&seccomp::baseline()).map_err(fail("baseline"))?;
         seccomp::install(&program, false).map_err(fail("baseline"))?;
     }
@@ -378,11 +500,12 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
     }
     check_mount_view(&frame).map_err(fail("unexpected-mount"))?;
     let entry = check_entry(&frame).map_err(fail("entry-check"))?;
-    let program_fd = match &frame.program {
-        Some(program) => {
+    let program_fd = match (&frame.program, verified_early) {
+        (Some(_), Some(fd)) => Some(fd),
+        (Some(program), None) => {
             Some(open_program(program, frame.private_mounts).map_err(fail("program-identity"))?)
         }
-        None => None,
+        (None, _) => None,
     };
     let mut opened = Vec::new();
     let mut rules = Vec::new();
@@ -399,6 +522,15 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
             }
         }
     }
+    if let Some(fd) = &program_fd {
+        rules.push((fd.as_raw_fd(), landlock::READ_FILE | landlock::EXECUTE));
+    }
+    if staged_script.is_some() {
+        let stage =
+            sys::open_path(Path::new(crate::EXEC_STAGE_IN_JAIL)).map_err(fail("script-stage"))?;
+        rules.push((stage.as_raw_fd(), landlock::READ));
+        opened.push(stage);
+    }
     landlock::restrict_self(frame.landlock_abi, &rules).map_err(fail("landlock"))?;
     drop(opened);
     if frame.kind == RunKind::Sidecar {
@@ -414,19 +546,18 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
             sys::check(unsafe { libc::fchdir(*fd) }).map_err(fail("cwd"))?;
         }
     }
-    let line = format!("accepted {} {}\n", frame.level.name(), frame.landlock_abi);
-    sys::write_all(READY_FD, line.as_bytes()).map_err(fail("accepted"))?;
+    let accepted = format!("accepted {} {}\n", frame.level.name(), frame.landlock_abi);
     match (frame.kind, frame.program, program_fd) {
-        (RunKind::Sidecar, Some(program), Some(fd)) => {
+        (RunKind::Sidecar, Some(_), Some(fd)) => {
             keep_only(&[fd.as_raw_fd()]).map_err(fail("close-fds"))?;
             sys::check(unsafe { libc::fcntl(READY_FD, libc::F_SETFD, libc::FD_CLOEXEC) })
                 .map_err(fail("ready-fd"))?;
-            let script_needs_the_fd = if program.script { 0 } else { libc::FD_CLOEXEC };
-            sys::check(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, script_needs_the_fd) })
+            sys::check(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) })
                 .map_err(fail("program-fd"))?;
-            let raw = fd.as_raw_fd();
-            std::mem::forget(fd);
-            exec_fd(raw, &frame.argv, &frame.env)
+            let launch = Launch::prepare(&fd, staged_script.as_deref(), &frame.argv, &frame.env)
+                .map_err(fail("argv"))?;
+            sys::write_all(READY_FD, accepted.as_bytes()).map_err(fail("accepted"))?;
+            launch.run(&frame.argv)
         }
         (RunKind::Sidecar, _, _) => Err(Failure {
             code: "program-missing",
@@ -435,6 +566,7 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
         (RunKind::Host, _, _) => {
             let kept: Vec<RawFd> = entry.iter().map(|(_, fd)| fd.as_raw_fd()).collect();
             keep_only(&kept).map_err(fail("close-fds"))?;
+            sys::write_all(READY_FD, accepted.as_bytes()).map_err(fail("accepted"))?;
             Ok(HostHandoff {
                 level: frame.level,
                 landlock_abi: frame.landlock_abi,
@@ -443,6 +575,60 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
                 entry,
             })
         }
+    }
+}
+
+struct Launch {
+    fd: RawFd,
+    path: Option<CString>,
+    _args: Vec<CString>,
+    _vars: Vec<CString>,
+    arg_pointers: Vec<*const libc::c_char>,
+    var_pointers: Vec<*const libc::c_char>,
+}
+
+impl Launch {
+    fn prepare(
+        fd: &OwnedFd,
+        path: Option<&Path>,
+        argv: &[String],
+        env: &[String],
+    ) -> io::Result<Launch> {
+        let args = cstrings(argv).ok_or_else(|| sys::invalid("an argument holds a NUL byte"))?;
+        let vars = cstrings(env).ok_or_else(|| sys::invalid("a variable holds a NUL byte"))?;
+        let path = path.map(sys::cstring).transpose()?;
+        let (arg_pointers, var_pointers) = (pointers(&args), pointers(&vars));
+        Ok(Launch {
+            fd: fd.as_raw_fd(),
+            path,
+            _args: args,
+            _vars: vars,
+            arg_pointers,
+            var_pointers,
+        })
+    }
+
+    fn run(self, argv: &[String]) -> ! {
+        match &self.path {
+            Some(path) => unsafe {
+                libc::execve(
+                    path.as_ptr(),
+                    self.arg_pointers.as_ptr(),
+                    self.var_pointers.as_ptr(),
+                );
+            },
+            None => unsafe {
+                libc::syscall(
+                    libc::SYS_execveat,
+                    self.fd,
+                    c"".as_ptr(),
+                    self.arg_pointers.as_ptr(),
+                    self.var_pointers.as_ptr(),
+                    libc::AT_EMPTY_PATH,
+                );
+            },
+        }
+        exec_failed(argv)
     }
 }
 
@@ -474,23 +660,6 @@ fn exec_failed(argv: &[String]) -> ! {
     );
     let _ = sys::write_all(READY_FD, b"error exec\n");
     unsafe { libc::_exit(EXIT_EXEC_FAILED) }
-}
-
-fn exec_fd(fd: RawFd, argv: &[String], env: &[String]) -> ! {
-    if let (Some(args), Some(vars)) = (cstrings(argv), cstrings(env)) {
-        let (args, vars) = (pointers(&args), pointers(&vars));
-        unsafe {
-            libc::syscall(
-                libc::SYS_execveat,
-                fd,
-                c"".as_ptr(),
-                args.as_ptr(),
-                vars.as_ptr(),
-                libc::AT_EMPTY_PATH,
-            )
-        };
-    }
-    exec_failed(argv)
 }
 
 fn confine_host_threads(kept_fds: &[RawFd]) -> Result<(), String> {

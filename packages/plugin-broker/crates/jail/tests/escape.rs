@@ -1177,8 +1177,8 @@ fn a_script_program_runs_from_its_pinned_fd() {
     assert!(ran.contains("args=probe"), "{ran}");
     assert!(ran.contains("home=/run/ardia/data/home"), "{ran}");
     assert!(
-        ran.contains("self=/dev/fd/"),
-        "the script didn't run from its verified fd: {ran}"
+        ran.contains("self=/run/ardia/exec/bin/hello.sh"),
+        "the script should keep its layout under the pinned stage: {ran}"
     );
     assert!(
         lines.iter().any(|l| l == "LINE REREAD #!/bin/sh"),
@@ -1758,5 +1758,60 @@ fn a_mount_namespace_quota_without_room_for_the_launcher_falls_back_to_host_redu
     assert!(
         refused.contains("Sidecars need user namespaces"),
         "{lines:#?}"
+    );
+}
+
+#[test]
+fn a_script_sources_its_siblings_and_keeps_running_the_verified_copy_after_a_rename() {
+    let world = World::new("script-siblings");
+    let script = world.root.join("progs/script-pkg/bin/run.sh");
+    write(
+        &world.root.join("progs/script-pkg/lib/setup.sh"),
+        "SETUP=sourced\n",
+    );
+    write(
+        &script,
+        "#!/bin/sh\n. \"$(dirname \"$0\")/../lib/setup.sh\"\necho READY >&3\nread line <&3\necho \"AFTER self=$0 head=$(head -c 12 \"$0\" | tr '\\n' '_') setup=$SETUP script_fds=$(ls -l /proc/self/fd | grep -c run.sh)\" >&3\necho DONE >&3\n",
+    );
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut args: Vec<String> = world
+        .sim_args("sidecar", "replace-after-start")
+        .into_iter()
+        .filter(|a| !a.starts_with("program="))
+        .collect();
+    args.push(format!("program={}", script.display()));
+    args.push("probe=siblings".into());
+    let lines = run_to_end(&world, args);
+    if !full_sidecars_available(&lines) {
+        skip("script_siblings", "sidecars aren't available", "full");
+        return;
+    }
+    let after = lines
+        .iter()
+        .find(|l| l.starts_with("LINE AFTER"))
+        .cloned()
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    eprintln!("SUMMARY script_siblings {after}");
+    assert!(lines.iter().any(|l| l == "REPLACED-PROGRAM"), "{lines:#?}");
+    assert!(
+        std::fs::read_to_string(&script).unwrap().contains("DECOY"),
+        "the host copy wasn't replaced"
+    );
+    assert!(after.contains("self=/run/ardia/exec/bin/run.sh"), "{after}");
+    assert!(
+        after.contains("setup=sourced"),
+        "the sibling wasn't sourced: {after}"
+    );
+    assert!(
+        after.contains("script_fds=0"),
+        "a child inherited the script's fd: {after}"
+    );
+    assert!(
+        after.contains("head=#!/bin/sh_. "),
+        "the script now reads the replacement: {after}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("DECOY")),
+        "the replacement ran: {lines:#?}"
     );
 }

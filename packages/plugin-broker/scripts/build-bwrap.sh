@@ -3,7 +3,9 @@ set -euo pipefail
 
 BWRAP_VERSION=0.13.1
 BWRAP_SHA256=0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d
-BWRAP_OUTPUT_SHA256=8692c364f47c179003f5e8f950ef7f1ad7a3e0ef3708367e86486f64d75e1252
+BWRAP_PATCH=bwrap-die-with-parent-race.patch
+BWRAP_PATCH_SHA256=7d6e026f875389a4b9981ed2fefa5fb88382262346ad0d9848078d252220a4b4
+BWRAP_OUTPUT_SHA256=8b7bf6888fc6b8dac6f3437292721c02c6826843506b1714b69b3219193efa70
 BWRAP_URL="https://github.com/containers/bubblewrap/releases/download/v${BWRAP_VERSION}/bubblewrap-${BWRAP_VERSION}.tar.xz"
 ALPINE_IMAGE=alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 REQUIRED_FLAGS=(--ro-bind-fd --bind-fd --add-seccomp-fd --block-fd --info-fd --disable-userns --size --die-with-parent)
@@ -13,6 +15,8 @@ usage() {
 Usage: build-bwrap.sh [--out DIR] [--mode static|native] [--cache DIR]
 
 Builds the pinned bubblewrap ${BWRAP_VERSION} (sha256 ${BWRAP_SHA256})
+with ${BWRAP_PATCH} applied (sha256 ${BWRAP_PATCH_SHA256}), so a sandbox
+whose bwrap monitor dies during setup exits instead of waiting forever,
 as DIR/ardia-bwrap, the bwrap Ardia's plugin broker binds plugin folders with.
 
   --out DIR     where ardia-bwrap goes (default: ./out)
@@ -64,6 +68,13 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 tar -xJf "$tarball" -C "$work"
 src="$work/bubblewrap-${BWRAP_VERSION}"
+patch_file="$(cd "$(dirname "$0")" && pwd)/$BWRAP_PATCH"
+if ! echo "${BWRAP_PATCH_SHA256}  $patch_file" | sha256sum -c --status; then
+  echo "build-bwrap.sh: $patch_file doesn't match the pinned sha256 ${BWRAP_PATCH_SHA256}" >&2
+  exit 1
+fi
+command -v patch >/dev/null || { echo "build-bwrap.sh: applying $BWRAP_PATCH needs patch" >&2; exit 1; }
+patch -s -d "$src" -p1 < "$patch_file"
 staged="$work/staged"
 mkdir -p "$staged"
 meson_options=(-Dselinux=disabled -Dman=disabled -Dtests=false -Dbash_completion=disabled -Dzsh_completion=disabled)

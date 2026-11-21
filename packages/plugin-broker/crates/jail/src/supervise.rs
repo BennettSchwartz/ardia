@@ -1409,32 +1409,43 @@ impl Supervisor {
     }
 }
 
+fn reap_independently(stragglers: &mut Vec<Straggler>, deadline: Instant) {
+    loop {
+        stragglers.retain_mut(|straggler| {
+            if let Some(pid) = straggler.pid {
+                if !matches!(sys::try_wait_child(pid), Ok(None)) {
+                    straggler.pid = None;
+                    straggler._pidfd = None;
+                }
+            }
+            if straggler
+                .cgroup
+                .as_ref()
+                .map(|c| c.try_remove())
+                .unwrap_or(false)
+            {
+                straggler.cgroup = None;
+            }
+            straggler.pid.is_some() || straggler.cgroup.is_some()
+        });
+        if stragglers.is_empty() || Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 impl Drop for Supervisor {
     fn drop(&mut self) {
         self.shutdown(QUIT_GRACE);
-        let deadline = Instant::now() + TEARDOWN_DEADLINE;
-        while !self.stragglers.is_empty() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
-            self.reap_stragglers();
-        }
-        let left = std::mem::take(&mut self.stragglers);
+        self.spawner.reap_orphans();
+        let mut left = std::mem::take(&mut self.stragglers);
+        reap_independently(&mut left, Instant::now() + TEARDOWN_DEADLINE);
         if !left.is_empty() {
             let _ = std::thread::Builder::new()
                 .name("jail-straggler-reaper".into())
                 .spawn(move || {
-                    for straggler in left {
-                        if let Some(pid) = straggler.pid {
-                            let _ = sys::wait_child(pid);
-                        }
-                        if let Some(cgroup) = straggler.cgroup {
-                            for _ in 0..6000 {
-                                if cgroup.try_remove() {
-                                    break;
-                                }
-                                std::thread::sleep(Duration::from_millis(100));
-                            }
-                        }
-                    }
+                    reap_independently(&mut left, Instant::now() + Duration::from_secs(600));
                 });
         }
     }
@@ -1443,6 +1454,52 @@ impl Drop for Supervisor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn child(seconds: u32) -> (i32, OwnedFd) {
+        let pid = unsafe { libc::fork() };
+        if pid == 0 {
+            unsafe {
+                libc::syscall(libc::SYS_close_range, 3u32, u32::MAX, 0u32);
+                libc::sleep(seconds);
+                libc::_exit(0);
+            }
+        }
+        (pid, sys::pidfd_open(pid).unwrap())
+    }
+
+    #[test]
+    fn one_stuck_straggler_never_holds_up_the_others() {
+        let (slow, slow_fd) = child(3);
+        let (quick, quick_fd) = child(0);
+        let mut stragglers = vec![
+            Straggler {
+                pid: Some(slow),
+                _pidfd: Some(slow_fd),
+                cgroup: None,
+            },
+            Straggler {
+                pid: Some(quick),
+                _pidfd: Some(quick_fd),
+                cgroup: None,
+            },
+        ];
+        let started = Instant::now();
+        reap_independently(&mut stragglers, Instant::now() + Duration::from_millis(800));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            stragglers.len(),
+            1,
+            "the quick child should be reaped while the slow one lingers"
+        );
+        assert_eq!(stragglers[0].pid, Some(slow));
+        assert!(
+            procscan::state_of(quick).is_none(),
+            "the quick child is still a zombie"
+        );
+        unsafe { libc::kill(slow, libc::SIGKILL) };
+        reap_independently(&mut stragglers, Instant::now() + Duration::from_secs(2));
+        assert!(stragglers.is_empty());
+    }
 
     #[test]
     fn plugin_names_are_plain_folder_names() {
