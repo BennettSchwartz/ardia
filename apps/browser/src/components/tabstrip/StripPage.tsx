@@ -1,4 +1,4 @@
-import { memo, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Animated, type NativeScrollEvent, type NativeSyntheticEvent, type ScrollView, StyleSheet, View } from "react-native";
 import { PageProfileContext, useWindowId } from "../../state/browser/hooks";
 import { tabDragging } from "../../state/drag/tabDrag";
@@ -6,7 +6,7 @@ import { useShownTabIdFor, useStripEntries, useStripTitleNeeds } from "../../sta
 import { setMeasuredWidth, useMeasuredWidths } from "../../state/windows/measuredWidths";
 import { dismissStripHoverIn, stripPageOffstage } from "../../state/tabs/stripHover";
 import { onTabPressEnd, tabPressHeld } from "../../state/sidebar/heldTabPress";
-import { noteTabStripChipsMeasured, noteTabStripCompact, noteTabStripReadable, noteTabStripHeldClose, noteTabStripOverflow, noteTabStripTabsInOverflow, noteTabStripRevealAfterPress, noteTabStripRevealHeldForScroll, noteTabStripScrolled, noteTabStripTitledTabs } from "../../state/telemetry/tabStripCounts";
+import { noteTabStripChipsMeasured, noteTabStripCompact, noteTabStripToggleReveal, noteTabStripReadable, noteTabStripHeldClose, noteTabStripOverflow, noteTabStripTabsInOverflow, noteTabStripRevealAfterPress, noteTabStripRevealHeldForScroll, noteTabStripScrolled, noteTabStripTitledTabs } from "../../state/telemetry/tabStripCounts";
 import { Offstage } from "../ui/useHover";
 import { usePageStyle } from "../../state/windows/profilePager";
 import { ThemeScope } from "../window/ThemeScope";
@@ -18,7 +18,8 @@ import { NewTabButton } from "./NewTabButton";
 import { PinnedDock } from "./PinnedDock";
 import { SplitChip } from "./SplitChip";
 import { heldWideTab, keyedWidths, namesStayTight, layoutDock, layoutStrip, newTabPinned, overflowIn, revealOffset, stripOverflow, withActiveShown, tabsOf, withOverflowCounts, withoutTabs, type DragGeometry, type StripOverflow, type TabWidths } from "./stripGroups";
-import { groupChipWidth } from "./stripToggle";
+import { groupChipWidth, TOGGLE_MS, toggleFrame, toggleRevealOffset } from "./stripToggle";
+import { reduceMotion } from "../ui/reduceMotion";
 import { StripGroup } from "./StripGroup";
 import { DraggableChip } from "./TabChip";
 import { edgeMaskAt, edgeStrength } from "./edgeFade";
@@ -31,6 +32,7 @@ type Wide = { tabId: string; slot: number };
 type Hold = { widths: TabWidths; end: number; wide: Wide; lead: boolean; needsTitle: (tabId: string) => boolean; overflow: StripOverflow };
 
 const USER_SCROLL_QUIET_MS = 200;
+const REVEAL_SETTLE_MS = 300;
 const OWN_SCROLL_MS = 80;
 const OWN_ANIMATED_SCROLL_MS = 600;
 
@@ -122,7 +124,9 @@ export const StripPage = memo(function StripPage({ profileId, slot, pageWidth, c
     ownScrollUntil.current = performance.now() + (animated ? OWN_ANIMATED_SCROLL_MS : OWN_SCROLL_MS);
     scroll.current?.scrollTo({ x, animated });
   };
+  const toggleReveal = useRef<{ x: number; floor: number; issued: boolean } | null>(null);
   const keepInRange = () => {
+    if (toggleReveal.current) return;
     const end = Math.max(0, content.current - viewport.current);
     if (scrolled.current > end + 0.5 && !userScrolling()) scrollStrip(end, false);
   };
@@ -188,6 +192,40 @@ export const StripPage = memo(function StripPage({ profileId, slot, pageWidth, c
   };
   const latestSpan = useRef(spanOf);
   latestSpan.current = spanOf;
+  const groupsShape = entries.map((e) => (e.kind === "group" ? `${e.id}:${e.collapsed}` : "")).join("|");
+  const shapeShown = useRef(groupsShape);
+  if (shapeShown.current !== groupsShape) {
+    shapeShown.current = groupsShape;
+    const span = current && activeId && !tabDragging() && !userScrolling() ? spanOf(activeId) : null;
+    const after = pageWidth + flare * 2 - (pinned ? flare + NEW_TAB_ROOM : 0);
+    const contentAfter = flare + tabsEnd + spare + (pinned ? Math.max(flare, GAP) : GAP + NEW_TAB_ROOM + flare);
+    const x = span && toggleRevealOffset(span, flare, scrolled.current, after, contentAfter, EDGE_FADE + GAP);
+    toggleReveal.current = x === null ? null : { x, floor: x + after, issued: false };
+  }
+  useLayoutEffect(() => {
+    const pending = toggleReveal.current;
+    if (!pending || pending.issued) return;
+    pending.issued = true;
+    noteTabStripToggleReveal();
+    const from = scrolled.current;
+    const started = performance.now();
+    let frame = 0;
+    const glide = () => {
+      const t = reduceMotion() ? 1 : (performance.now() - started) / TOGGLE_MS;
+      scrollStrip(toggleFrame(from, pending.x, t), false);
+      if (t < 1) frame = requestAnimationFrame(glide);
+    };
+    glide();
+    const done = setTimeout(() => {
+      if (toggleReveal.current === pending) toggleReveal.current = null;
+      keepInRange();
+      release();
+    }, TOGGLE_MS + REVEAL_SETTLE_MS);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(done);
+    };
+  }, [groupsShape]);
   const revealed = useRef(activeId);
   const reveal = (tabId: string, animated: boolean) => {
     const span = latestSpan.current(tabId);
@@ -286,7 +324,7 @@ export const StripPage = memo(function StripPage({ profileId, slot, pageWidth, c
                         const narrower = e.nativeEvent.layout.width < viewport.current - 0.5;
                         viewport.current = e.nativeEvent.layout.width;
                         keepInRange();
-                        if (narrower) latestReveal.current();
+                        if (narrower && !toggleReveal.current) latestReveal.current();
                       }}
                       onContentSizeChange={(width) => {
                         content.current = width;
@@ -294,7 +332,7 @@ export const StripPage = memo(function StripPage({ profileId, slot, pageWidth, c
                       }}
                       onScroll={onScroll}
                       style={{ flex: 1 }}
-                      contentContainerStyle={{ alignItems: "flex-start", gap: GAP, paddingLeft: flare, paddingRight: pinned ? Math.max(flare, GAP) : flare }}
+                      contentContainerStyle={{ alignItems: "flex-start", gap: GAP, paddingLeft: flare, paddingRight: pinned ? Math.max(flare, GAP) : flare, minWidth: toggleReveal.current?.floor }}
                     >
                       {parsed.flatMap((e) => {
                         if (e.kind === "dock") return <PinnedDock key="dock" tabIds={e.ids} />;

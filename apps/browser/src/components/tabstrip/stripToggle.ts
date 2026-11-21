@@ -1,4 +1,4 @@
-import { TAIL_EXPANDED } from "./stripGroups";
+import { revealOffset, TAIL_EXPANDED } from "./stripGroups";
 import { GROUP_TITLE_GAP } from "./tokens";
 
 export const GROUP_NAME_INSET = 2;
@@ -24,3 +24,10 @@ export function revealedMembers(start: number, offsets: readonly number[], width
 }
 
 export const toggleFrame = (from: number, to: number, t: number) => from + (to - from) * toggleEase(Math.max(0, Math.min(1, t)));
+
+export function toggleRevealOffset(span: readonly [number, number], flare: number, scrolled: number, viewport: number, content: number, pad: number): number | null {
+  const wanted = revealOffset(span[0] - flare, span[1], scrolled, viewport - flare, pad);
+  if (wanted === null) return null;
+  const x = Math.min(wanted, Math.max(0, content - viewport));
+  return Math.abs(x - scrolled) < 0.5 ? null : x;
+}

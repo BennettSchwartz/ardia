@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 const { groupLayout, layoutStrip, MEMBERS_INSET, nameGrowth, stripOverflow, withOverflowCounts, withoutTabs } = await import("./stripGroups.ts");
-const { groupChipWidth, revealedMembers, toggleFrame } = await import("./stripToggle.ts");
+const { groupChipWidth, revealedMembers, toggleFrame, toggleRevealOffset } = await import("./stripToggle.ts");
 const { GAP, GROUP_TITLE_MAX, GROUP_TITLE_TIGHT, TITLE_MIN_CHIP } = await import("./tokens.ts");
 
 const own = (id, group = null) => ({ kind: "tab", id, group });
@@ -78,5 +78,22 @@ test("a group's chip width comes from its icon, its measured name and the name c
   for (const natural of [20, 79, 81, 119, 121, 300]) {
     assert.equal(groupChipWidth(frame, natural, GROUP_TITLE_MAX) - groupChipWidth(frame, natural, GROUP_TITLE_TIGHT), nameGrowth(natural));
     assert.ok(groupChipWidth(frame, natural, GROUP_TITLE_TIGHT) > frame + Math.min(natural, GROUP_TITLE_TIGHT));
+  }
+});
+
+test("after a group opens or closes, the strip scrolls just far enough that the selected tab is wholly in view, never past its content's end", () => {
+  const FLARE = 15;
+  const PAD = 92;
+  const viewport = 887;
+  const content = 1017;
+  const span = [874, 128];
+  const x = toggleRevealOffset(span, FLARE, 0, viewport, content, PAD);
+  assert.equal(x, content - viewport);
+  assert.ok(span[0] - x >= 0 && span[0] + span[1] - x <= viewport, "the selected tab is wholly inside the viewport");
+  assert.equal(toggleRevealOffset([300, 128], FLARE, 0, viewport, content, PAD), null, "a tab already in view doesn't scroll the strip");
+  assert.equal(toggleRevealOffset([40, 128], FLARE, 200, viewport, content, PAD), 0, "a tab off the start scrolls back to it");
+  for (const scrolled of [0, 50, 130]) {
+    const to = toggleRevealOffset(span, FLARE, scrolled, viewport, content, PAD) ?? scrolled;
+    assert.ok(to >= 0 && to <= content - viewport && span[0] + span[1] - to <= viewport, `from ${scrolled}`);
   }
 });
