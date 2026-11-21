@@ -44,12 +44,22 @@ fn main() {
                 let probe = std::fs::read_to_string("probe-context")
                     .ok()
                     .map(|text| probes::Context::from_text(&text, handoff.level.name(), "host"));
-                let jail::HostHandoff { args, started, .. } = handoff;
+                let jail::HostHandoff {
+                    args,
+                    started,
+                    entry,
+                    ..
+                } = handoff;
                 let mut sandbox = JailConfinement {
                     started: Some(started),
                     probe,
                 };
-                ardia_plugin_host::run_host(&args, &mut sandbox)
+                match entry {
+                    Some((_, fd)) => {
+                        ardia_plugin_host::host::run_host_with_entry(&args, fd, &mut sandbox)
+                    }
+                    None => Exit::SandboxSetup,
+                }
             }
         },
         _ => {

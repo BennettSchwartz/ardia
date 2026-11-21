@@ -3,6 +3,7 @@ set -euo pipefail
 
 BWRAP_VERSION=0.13.1
 BWRAP_SHA256=0e85c8702248b8dd64144f594147553650cdd0e4c951690345faace79c217c4d
+BWRAP_OUTPUT_SHA256=8692c364f47c179003f5e8f950ef7f1ad7a3e0ef3708367e86486f64d75e1252
 BWRAP_URL="https://github.com/containers/bubblewrap/releases/download/v${BWRAP_VERSION}/bubblewrap-${BWRAP_VERSION}.tar.xz"
 ALPINE_IMAGE=alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
 REQUIRED_FLAGS=(--ro-bind-fd --bind-fd --add-seccomp-fd --block-fd --info-fd --disable-userns --size --die-with-parent)
@@ -22,7 +23,8 @@ as DIR/ardia-bwrap, the bwrap Ardia's plugin broker binds plugin folders with.
 The tarball is checked against the pinned sha256 before anything is built. The build
 lands in a scratch folder and reaches DIR only after it reports version ${BWRAP_VERSION},
 offers ${REQUIRED_FLAGS[*]}
-and, for --mode static, links no loader. Linux only. The binary is never setuid.
+and, for --mode static, links no loader and hashes to the pinned
+${BWRAP_OUTPUT_SHA256}. Linux only. The binary is never setuid.
 EOF
 }
 
@@ -100,6 +102,11 @@ for flag in "${REQUIRED_FLAGS[@]}"; do
 done
 if [ "$mode" = static ] && ldd "$binary" >/dev/null 2>&1; then
   echo "build-bwrap.sh: --mode static produced a dynamically linked binary" >&2
+  exit 1
+fi
+produced="$(sha256sum "$binary" | cut -d' ' -f1)"
+if [ "$mode" = static ] && [ "$produced" != "$BWRAP_OUTPUT_SHA256" ]; then
+  echo "build-bwrap.sh: the static build hashes to $produced, not the pinned $BWRAP_OUTPUT_SHA256" >&2
   exit 1
 fi
 install -m 0755 "$binary" "$out/.ardia-bwrap.$$"

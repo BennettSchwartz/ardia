@@ -8,8 +8,14 @@ fn write_fd(fd: i32, text: &str) {
     unsafe { libc::write(fd, data.as_ptr().cast(), data.len()) };
 }
 
-fn host_sim(handoff: jail::HostHandoff) -> i32 {
-    let entry = std::fs::read_to_string("main.js");
+fn host_sim(mut handoff: jail::HostHandoff) -> i32 {
+    let entry = match handoff.entry.take() {
+        Some((_, fd)) => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::fs::File::from(fd), &mut text).map(|_| text)
+        }
+        None => Err(std::io::Error::other("the launcher handed over no entry")),
+    };
     let context_text = std::fs::read_to_string("probe-context").unwrap_or_default();
     let context = probes::Context::from_text(&context_text, handoff.level.name(), "host");
     let mode = match context.get("JAIL_HOST_MODE") {
@@ -78,6 +84,34 @@ fn sidecar(mode: &str) -> i32 {
             let context = probes::Context::from_env("full", "sidecar", true);
             probes::run_all(&mut report, &context);
             report.finish();
+            0
+        }
+        "mountwatch" => {
+            write_fd(3, "READY");
+            let mut byte = [0u8; 1];
+            let mut line = Vec::new();
+            while unsafe { libc::read(3, byte.as_mut_ptr().cast(), 1) } == 1 && byte[0] != b'\n' {
+                line.push(byte[0]);
+            }
+            let info = std::fs::read("/proc/self/mountinfo").unwrap_or_default();
+            let lines: Vec<&[u8]> = info.split(|b| *b == b'\n').collect();
+            let count = |needle: &[u8]| {
+                lines
+                    .iter()
+                    .filter(|l| l.windows(needle.len()).any(|w| w == needle))
+                    .count()
+            };
+            let late = count(b"/run/ardia/plugin/late");
+            let usr_local = count(b" /usr/local ");
+            let tagged = count(b" shared:") + count(b" master:");
+            let marker = std::fs::read_to_string("/run/ardia/plugin/late/marker")
+                .map(|text| text.trim().to_string())
+                .unwrap_or_else(|e| format!("unreadable({})", e.raw_os_error().unwrap_or(0)));
+            write_fd(
+                3,
+                &format!("MOUNTWATCH late_visible={late} usr_local_visible={usr_local} tagged={tagged} marker={marker}"),
+            );
+            write_fd(3, "DONE");
             0
         }
         "marker" => {

@@ -63,10 +63,6 @@ unsafe fn run_child(
     parent: i32,
 ) -> ! {
     reset_signals();
-    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) != 0 || libc::getppid() != parent
-    {
-        libc::_exit(127);
-    }
     match error_source {
         Some(source) => {
             if libc::dup2(source, SPAWN_ERROR_FD) < 0 {
@@ -76,6 +72,12 @@ unsafe fn run_child(
         None => {
             libc::close(SPAWN_ERROR_FD);
         }
+    }
+    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) != 0 {
+        child_fail(b"error spawn-parent-death-signal\n");
+    }
+    if libc::getppid() != parent {
+        child_fail(b"error spawn-parent-gone\n");
     }
     if spec.new_session {
         libc::setsid();

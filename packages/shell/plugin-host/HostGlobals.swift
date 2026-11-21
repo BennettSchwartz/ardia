@@ -5,6 +5,7 @@ import JavaScriptCore
 final class HostGlobals {
   static let maxTimerMs = Double(Int32.max)
   static let maxRandomBytes = 65536
+  static let maxTimers = 10_000
 
   private let context: JSContext
   private let queue: DispatchQueue
@@ -12,6 +13,7 @@ final class HostGlobals {
   private var lineHandler: JSValue?
   private var timerHandler: JSValue?
   private var earlyLines: [String] = []
+  private var pendingTimers: [Double: DispatchWorkItem] = [:]
 
   init(context: JSContext, queue: DispatchQueue) {
     self.context = context
@@ -48,12 +50,21 @@ final class HostGlobals {
       for line in early { handler.call(withArguments: [line]) }
     }
     let onTimer: @convention(block) (JSValue) -> Void = { [weak self] handler in self?.timerHandler = handler }
-    let schedule: @convention(block) (Double, Double) -> Void = { [weak self] id, ms in
-      guard let self else { return }
+    let schedule: @convention(block) (Double, Double) -> Bool = { [weak self] id, ms in
+      guard let self else { return false }
+      self.pendingTimers.removeValue(forKey: id)?.cancel()
+      guard self.pendingTimers.count < Self.maxTimers else { return false }
       let delay = ms.isFinite ? min(Self.maxTimerMs, max(0, ms)) : 0
-      self.queue.asyncAfter(deadline: .now() + .milliseconds(Int(delay))) { [weak self] in
-        self?.timerHandler?.call(withArguments: [id])
+      let item = DispatchWorkItem { [weak self] in
+        guard let self, self.pendingTimers.removeValue(forKey: id) != nil else { return }
+        self.timerHandler?.call(withArguments: [id])
       }
+      self.pendingTimers[id] = item
+      self.queue.asyncAfter(deadline: .now() + .milliseconds(Int(delay)), execute: item)
+      return true
+    }
+    let cancel: @convention(block) (Double) -> Void = { [weak self] id in
+      self?.pendingTimers.removeValue(forKey: id)?.cancel()
     }
     let send: @convention(block) (String) -> Any = { [weak self] line in
       guard let channel = self?.channel else { return "the channel to Ardia is closed" }
@@ -71,7 +82,7 @@ final class HostGlobals {
       PluginURLParser.parse(input, base: base.isString ? base.toString() : nil) ?? NSNull()
     }
     let functions: [String: Any] = [
-      "log": log, "onLine": onLine, "onTimer": onTimer, "schedule": schedule, "send": send, "btoa": btoa, "atob": atob, "randomUUID": randomUUID,
+      "log": log, "onLine": onLine, "onTimer": onTimer, "schedule": schedule, "cancel": cancel, "send": send, "btoa": btoa, "atob": atob, "randomUUID": randomUUID,
       "randomBytes": randomBytes, "parseURL": parseURL,
     ]
     for (name, function) in functions { object.setObject(function, forKeyedSubscript: name as NSString) }

@@ -133,8 +133,7 @@ pub enum ProgramPlacement {
     Separate,
 }
 
-fn unescape_mount_path(field: &str) -> PathBuf {
-    let bytes = field.as_bytes();
+fn unescape_mount_path(bytes: &[u8]) -> PathBuf {
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
     while at < bytes.len() {
@@ -144,9 +143,10 @@ fn unescape_mount_path(field: &str) -> PathBuf {
                 .iter()
                 .all(|b| (b'0'..=b'7').contains(b))
         {
-            let value =
-                (bytes[at + 1] - b'0') * 64 + (bytes[at + 2] - b'0') * 8 + (bytes[at + 3] - b'0');
-            out.push(value);
+            let value = (bytes[at + 1] - b'0') as u32 * 64
+                + (bytes[at + 2] - b'0') as u32 * 8
+                + (bytes[at + 3] - b'0') as u32;
+            out.push(value as u8);
             at += 4;
         } else {
             out.push(bytes[at]);
@@ -156,12 +156,71 @@ fn unescape_mount_path(field: &str) -> PathBuf {
     PathBuf::from(std::ffi::OsString::from_vec(out))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountEntry {
+    pub id: u64,
+    pub parent: u64,
+    pub point: PathBuf,
+    pub options: Vec<Vec<u8>>,
+    pub tags: Vec<Vec<u8>>,
+}
+
+impl MountEntry {
+    pub fn read_only(&self) -> bool {
+        self.options.iter().any(|option| option == b"ro")
+    }
+
+    pub fn propagates(&self) -> bool {
+        self.tags.iter().any(|tag| {
+            tag.starts_with(b"shared:")
+                || tag.starts_with(b"master:")
+                || tag.starts_with(b"propagate_from:")
+        })
+    }
+}
+
+pub fn parse_mountinfo(data: &[u8]) -> io::Result<Vec<MountEntry>> {
+    let mut entries = Vec::new();
+    for line in data.split(|b| *b == b'\n').filter(|line| !line.is_empty()) {
+        let fields: Vec<&[u8]> = line.split(|b| *b == b' ').collect();
+        let separator = fields
+            .iter()
+            .position(|field| *field == b"-")
+            .ok_or_else(|| sys::invalid("a mountinfo line has no separator"))?;
+        if separator < 6 {
+            return Err(sys::invalid("a mountinfo line is too short"));
+        }
+        let number = |field: &[u8]| -> io::Result<u64> {
+            std::str::from_utf8(field)
+                .ok()
+                .and_then(|text| text.parse().ok())
+                .ok_or_else(|| sys::invalid("a mountinfo id isn't a number"))
+        };
+        entries.push(MountEntry {
+            id: number(fields[0])?,
+            parent: number(fields[1])?,
+            point: unescape_mount_path(fields[4]),
+            options: fields[5]
+                .split(|b| *b == b',')
+                .map(<[u8]>::to_vec)
+                .collect(),
+            tags: fields[6..separator]
+                .iter()
+                .map(|tag| tag.to_vec())
+                .collect(),
+        });
+    }
+    Ok(entries)
+}
+
+pub fn read_mountinfo() -> io::Result<Vec<MountEntry>> {
+    parse_mountinfo(&std::fs::read("/proc/self/mountinfo")?)
+}
+
 pub fn mount_points() -> io::Result<Vec<PathBuf>> {
-    let text = std::fs::read_to_string("/proc/self/mountinfo")?;
-    Ok(text
-        .lines()
-        .filter_map(|line| line.split(' ').nth(4))
-        .map(unescape_mount_path)
+    Ok(read_mountinfo()?
+        .into_iter()
+        .map(|entry| entry.point)
         .collect())
 }
 
@@ -188,6 +247,7 @@ pub fn refuse_nested_mounts(name: &str, fd: RawFd) -> Result<(), Refusal> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::os::unix::ffi::OsStrExt;
 
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("jail-roots-{}-{name}", std::process::id()));
@@ -203,7 +263,17 @@ mod tests {
 
     #[test]
     fn mount_points_are_unescaped_and_matched_below_a_root() {
-        assert_eq!(unescape_mount_path("/a\\040b"), PathBuf::from("/a b"));
+        assert_eq!(unescape_mount_path(b"/a\\040b"), PathBuf::from("/a b"));
+        let entries = parse_mountinfo(
+            b"22 1 0:21 / /run/ardia/plugin ro,nosuid master:7 - ext4 /dev/vda1 rw\n23 22 0:22 / /odd\\377name rw shared:3 propagate_from:2 - tmpfs t rw\n24 1 0:23 / /plain rw - tmpfs t rw\n",
+        )
+        .unwrap();
+        assert_eq!(entries.len(), 3);
+        assert!(entries[0].read_only() && entries[0].propagates());
+        assert_eq!(entries[1].parent, 22);
+        assert_eq!(entries[1].point.as_os_str().as_bytes(), b"/odd\xffname");
+        assert!(!entries[2].read_only() && !entries[2].propagates());
+        assert!(parse_mountinfo(b"bad line\n").is_err());
         assert!(mount_points().unwrap().contains(&PathBuf::from("/")));
         assert!(mounts_beneath(Path::new("/"))
             .unwrap()

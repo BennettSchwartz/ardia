@@ -17,8 +17,6 @@ pub struct HostState {
     line_handler: q::JSValue,
     timer_handler: q::JSValue,
     early_lines: Vec<String>,
-    refused: Option<u64>,
-    refuse_next_send: bool,
 }
 
 pub struct Thrown {
@@ -197,11 +195,7 @@ unsafe extern "C" fn native_on_timer(ctx: *mut q::JSContext, _this: q::JSValue, 
 unsafe extern "C" fn native_schedule(ctx: *mut q::JSContext, _this: q::JSValue, argc: c_int, argv: *mut q::JSValue) -> q::JSValue {
     let Some(id) = number_of(ctx, arg(argc, argv, 0)) else { return q::JS_EXCEPTION };
     let Some(ms) = number_of(ctx, arg(argc, argv, 1)) else { return q::JS_EXCEPTION };
-    let host = state(ctx);
-    if host.timers.schedule(Instant::now(), id, ms).is_err() {
-        host.refused = Some(id.to_bits());
-    }
-    q::JS_UNDEFINED
+    new_bool(state(ctx).timers.schedule(Instant::now(), id, ms).is_ok())
 }
 
 unsafe extern "C" fn native_cancel(ctx: *mut q::JSContext, _this: q::JSValue, argc: c_int, argv: *mut q::JSValue) -> q::JSValue {
@@ -209,20 +203,9 @@ unsafe extern "C" fn native_cancel(ctx: *mut q::JSContext, _this: q::JSValue, ar
     new_bool(state(ctx).timers.cancel(id))
 }
 
-unsafe extern "C" fn native_refused(ctx: *mut q::JSContext, _this: q::JSValue, argc: c_int, argv: *mut q::JSValue) -> q::JSValue {
-    let Some(id) = number_of(ctx, arg(argc, argv, 0)) else { return q::JS_EXCEPTION };
-    let host = state(ctx);
-    let refused = host.refused.take() == Some(id.to_bits());
-    new_bool(refused)
-}
-
 unsafe extern "C" fn native_send(ctx: *mut q::JSContext, _this: q::JSValue, argc: c_int, argv: *mut q::JSValue) -> q::JSValue {
     let Some(line) = string_of(ctx, arg(argc, argv, 0)) else { return q::JS_EXCEPTION };
-    let host = state(ctx);
-    if std::mem::take(&mut host.refuse_next_send) {
-        return new_string(ctx, crate::timers::TOO_MANY_TIMERS);
-    }
-    match host.channel.send(&line) {
+    match state(ctx).channel.send(&line) {
         None => q::JS_NULL,
         Some(refusal) => new_string(ctx, refusal.message()),
     }
@@ -312,11 +295,12 @@ unsafe extern "C" fn native_parse_url(ctx: *mut q::JSContext, _this: q::JSValue,
 
 type Native = unsafe extern "C" fn(*mut q::JSContext, q::JSValue, c_int, *mut q::JSValue) -> q::JSValue;
 
-pub const NATIVES: [(&str, Native, c_int); 10] = [
+pub const NATIVES: [(&str, Native, c_int); 11] = [
     ("log", native_log, 2),
     ("onLine", native_on_line, 1),
     ("onTimer", native_on_timer, 1),
     ("schedule", native_schedule, 2),
+    ("cancel", native_cancel, 1),
     ("send", native_send, 1),
     ("btoa", native_btoa, 1),
     ("atob", native_atob, 1),
@@ -324,15 +308,6 @@ pub const NATIVES: [(&str, Native, c_int); 10] = [
     ("randomBytes", native_random_bytes, 1),
     ("parseURL", native_parse_url, 2),
 ];
-
-unsafe extern "C" fn native_refuse_next_send(ctx: *mut q::JSContext, _this: q::JSValue, _argc: c_int, _argv: *mut q::JSValue) -> q::JSValue {
-    state(ctx).refuse_next_send = true;
-    q::JS_UNDEFINED
-}
-
-const TIMER_CANCEL_NATIVES: [(&str, Native, c_int); 3] = [("cancel", native_cancel, 1), ("refused", native_refused, 1), ("refuseNextSend", native_refuse_next_send, 0)];
-
-pub const TIMER_CANCEL: &str = include_str!("timer_cancel.js");
 
 include!(concat!(env!("OUT_DIR"), "/prelude_hooks.rs"));
 
@@ -409,8 +384,6 @@ impl Engine {
             line_handler: q::JS_UNDEFINED,
             timer_handler: q::JS_UNDEFINED,
             early_lines: Vec::new(),
-            refused: None,
-            refuse_next_send: false,
         });
         unsafe {
             let opaque = &*governor as *const Governor as *mut c_void;
@@ -492,17 +465,6 @@ impl Engine {
             ))?;
             let native = self.native_object(&NATIVES);
             self.call_installer(installer, native)?;
-            let code = nul_terminated(TIMER_CANCEL);
-            let installer = self.settle(q::JS_Eval(
-                self.ctx,
-                code.as_ptr() as *const c_char,
-                TIMER_CANCEL.len() as q::size_t,
-                c"ardia://plugin-host/timer-cancel.js".as_ptr(),
-                q::JS_EVAL_TYPE_GLOBAL as c_int,
-            ))?;
-            let native = self.native_object(&TIMER_CANCEL_NATIVES);
-            set_string(self.ctx, native, c"tooMany", crate::timers::TOO_MANY_TIMERS);
-            self.call_installer(installer, native)?;
         }
         Ok(())
     }
@@ -583,11 +545,6 @@ impl Engine {
             }
         }
         failures
-    }
-
-    pub fn end_turn_state(&mut self) {
-        self.state.refuse_next_send = false;
-        self.state.refused = None;
     }
 
     pub fn heap_peak(&self) -> usize {

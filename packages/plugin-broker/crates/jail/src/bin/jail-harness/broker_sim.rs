@@ -241,6 +241,17 @@ pub fn main(args: &[String]) -> i32 {
                 return 0;
             }
         };
+        if get("swap_program") == "link" {
+            let target = get("program");
+            let moved = format!("{target}.real");
+            std::fs::rename(&target, &moved).expect("move the program");
+            std::os::unix::fs::symlink(&moved, &target).expect("link the program");
+            say("LINKED-PROGRAM");
+        }
+        if get("swap_program") == "delete" {
+            std::fs::remove_file(get("program")).expect("delete the program");
+            say("DELETED-PROGRAM");
+        }
         if get("swap_program") == "1" {
             let target = get("program");
             let decoy = format!("{target}.decoy");
@@ -257,7 +268,19 @@ pub fn main(args: &[String]) -> i32 {
         Work::Sidecar { program, args }
     } else {
         Work::Host {
-            args: vec!["--entry".into(), "main.js".into()],
+            args: {
+                let mut args = vec![
+                    "--entry".to_string(),
+                    match get("entry") {
+                        entry if entry.is_empty() => "main.js".to_string(),
+                        entry => entry,
+                    },
+                ];
+                if !get("entry2").is_empty() {
+                    args.extend(["--entry".to_string(), get("entry2")]);
+                }
+                args
+            },
         }
     };
     let probe_env: Vec<(String, String)> = std::env::vars()
@@ -327,6 +350,32 @@ pub fn main(args: &[String]) -> i32 {
     };
     let soon = |seconds| Instant::now() + Duration::from_secs(seconds);
     match event.as_str() {
+        "mount-after-start" => {
+            if !lines.until("READY", soon(20)) {
+                say("NOT-READY");
+            }
+            let plugin = get("plugin");
+            let late = format!("{plugin}/late");
+            let _ = std::fs::create_dir_all(&late);
+            for (target, label) in [(late.as_str(), "late"), ("/usr/local", "usr-local")] {
+                let path = std::ffi::CString::new(target).unwrap();
+                let mounted = unsafe {
+                    libc::mount(
+                        c"upstream".as_ptr(),
+                        path.as_ptr(),
+                        c"tmpfs".as_ptr(),
+                        0,
+                        std::ptr::null(),
+                    )
+                };
+                say(&format!("UPSTREAM-MOUNT {label} result={mounted}"));
+            }
+            let _ = std::fs::write(format!("{late}/marker"), "upstream");
+            let _ = jail::sys::write_all(ours.as_raw_fd(), b"CHECK\n");
+            lines.until("DONE", soon(20));
+            report(supervisor.stop(launched.id, Duration::from_secs(1)));
+            dump_log(log.as_raw_fd());
+        }
         "probe" | "marker" => {
             lines.until("DONE", soon(30));
             report(supervisor.stop(launched.id, Duration::from_secs(1)));

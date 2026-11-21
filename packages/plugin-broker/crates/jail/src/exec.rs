@@ -10,11 +10,6 @@ pub const EXIT_SANDBOX_SETUP: i32 = 76;
 pub const EXIT_EXEC_FAILED: i32 = 127;
 pub const READY_FD: RawFd = 5;
 
-const RESOLVE_NO_XDEV: u64 = 0x01;
-const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
-const RESOLVE_NO_SYMLINKS: u64 = 0x04;
-const RESOLVE_BENEATH: u64 = 0x08;
-
 #[derive(Debug)]
 pub struct StartedSignal {
     fd: RawFd,
@@ -41,6 +36,7 @@ pub struct HostHandoff {
     pub landlock_abi: u32,
     pub args: Vec<String>,
     pub started: StartedSignal,
+    pub entry: Option<(String, OwnedFd)>,
 }
 
 #[derive(Debug)]
@@ -124,64 +120,191 @@ fn check_mount_view(frame: &Frame) -> io::Result<()> {
     if frame.mount_checks.is_empty() {
         return Ok(());
     }
-    let points = roots::mount_points()?;
-    let unexpected = unexpected_mounts(&points, &frame.mount_checks, &frame.expected_mounts);
-    match unexpected.first() {
-        None => Ok(()),
-        Some(point) => Err(sys::invalid(format!(
+    let entries = roots::read_mountinfo()?;
+    let points: Vec<PathBuf> = entries.iter().map(|entry| entry.point.clone()).collect();
+    let trees: Vec<PathBuf> = frame
+        .mount_checks
+        .iter()
+        .map(|check| check.path.clone())
+        .collect();
+    let unexpected = unexpected_mounts(&points, &trees, &frame.expected_mounts);
+    if let Some(point) = unexpected.first() {
+        return Err(sys::invalid(format!(
             "an unexpected filesystem is mounted at {} inside a granted folder",
             point.display()
-        ))),
+        )));
     }
+    if !frame.private_mounts {
+        return Ok(());
+    }
+    if let Some(entry) = entries.iter().find(|entry| entry.propagates()) {
+        return Err(sys::invalid(format!(
+            "{} still takes part in mount propagation",
+            entry.point.display()
+        )));
+    }
+    let expected = frame.expected_mounts.iter().map(|path| (path, false));
+    let checks = frame
+        .mount_checks
+        .iter()
+        .map(|check| (&check.path, check.writable))
+        .chain(expected);
+    for (path, writable) in checks {
+        let entry = mount_root(&entries, path)?;
+        if entry.point != Path::new("/") && !entries.iter().any(|other| other.id == entry.parent) {
+            return Err(sys::invalid(format!(
+                "{} hangs off a mount the sandbox can't see",
+                path.display()
+            )));
+        }
+        if entry.read_only() == writable {
+            return Err(sys::invalid(format!(
+                "{} is mounted {} but the policy wants it {}",
+                path.display(),
+                if entry.read_only() {
+                    "read-only"
+                } else {
+                    "writable"
+                },
+                if writable { "writable" } else { "read-only" }
+            )));
+        }
+    }
+    Ok(())
 }
 
-#[repr(C)]
-struct OpenHow {
-    flags: u64,
-    mode: u64,
-    resolve: u64,
+fn mount_root<'a>(
+    entries: &'a [roots::MountEntry],
+    path: &Path,
+) -> io::Result<&'a roots::MountEntry> {
+    let fd = sys::openat(libc::AT_FDCWD, path, libc::O_PATH | libc::O_NOFOLLOW, 0)?;
+    let id = sys::mount_id(fd.as_raw_fd())?;
+    let entry = entries.iter().find(|entry| entry.id == id).ok_or_else(|| {
+        sys::invalid(format!(
+            "{} sits on a mount missing from mountinfo",
+            path.display()
+        ))
+    })?;
+    if entry.point != path {
+        return Err(sys::invalid(format!(
+            "{} isn't the root of its own mount (it sits on {})",
+            path.display(),
+            entry.point.display()
+        )));
+    }
+    Ok(entry)
+}
+
+fn make_mounts_private_and_drop_capabilities() -> io::Result<()> {
+    sys::check(unsafe { libc::unshare(libc::CLONE_NEWNS) })?;
+    let root = c"/";
+    sys::check(unsafe {
+        libc::mount(
+            std::ptr::null(),
+            root.as_ptr(),
+            std::ptr::null(),
+            libc::MS_REC | libc::MS_PRIVATE,
+            std::ptr::null(),
+        )
+    })?;
+    unsafe {
+        libc::prctl(
+            libc::PR_CAP_AMBIENT,
+            libc::PR_CAP_AMBIENT_CLEAR_ALL,
+            0,
+            0,
+            0,
+        )
+    };
+    for capability in 0..64 {
+        if unsafe { libc::prctl(libc::PR_CAPBSET_DROP, capability, 0, 0, 0) } != 0 {
+            let error = sys::last_error();
+            if error.raw_os_error() != Some(libc::EINVAL) {
+                return Err(error);
+            }
+        }
+    }
+    #[repr(C)]
+    struct Header {
+        version: u32,
+        pid: i32,
+    }
+    #[repr(C)]
+    struct Data {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+    let header = Header {
+        version: 0x2008_0522,
+        pid: 0,
+    };
+    let data = [
+        Data {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        },
+        Data {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        },
+    ];
+    sys::check_long(unsafe { libc::syscall(libc::SYS_capset, &header, data.as_ptr()) })?;
+    let status = std::fs::read_to_string("/proc/self/status")?;
+    for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+        let value = status
+            .lines()
+            .find_map(|line| line.strip_prefix(field))
+            .map(str::trim)
+            .unwrap_or("missing");
+        if value.trim_start_matches('0').is_empty() {
+            continue;
+        }
+        return Err(sys::invalid(format!(
+            "{field} is still {value} after dropping"
+        )));
+    }
+    Ok(())
 }
 
 pub fn open_beneath(dir: RawFd, relative: &str) -> io::Result<OwnedFd> {
-    let name = sys::cstring(Path::new(relative))?;
-    let how = OpenHow {
-        flags: (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW) as u64,
-        mode: 0,
-        resolve: RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_SYMLINKS,
-    };
-    let fd = sys::check_long(unsafe {
-        libc::syscall(
-            libc::SYS_openat2,
-            dir,
-            name.as_ptr(),
-            &how as *const OpenHow,
-            std::mem::size_of::<OpenHow>(),
-        )
-    })?;
-    let fd = sys::owned(fd as RawFd);
+    let fd = sys::openat2(
+        dir,
+        Path::new(relative),
+        libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        sys::RESOLVE_BENEATH
+            | sys::RESOLVE_NO_XDEV
+            | sys::RESOLVE_NO_MAGICLINKS
+            | sys::RESOLVE_NO_SYMLINKS,
+    )?;
     if sys::fstat(fd.as_raw_fd())?.st_mode & libc::S_IFMT != libc::S_IFREG {
         return Err(sys::invalid("the entry isn't a regular file"));
     }
     Ok(fd)
 }
 
-fn check_entry(frame: &Frame) -> io::Result<()> {
+fn check_entry(frame: &Frame) -> io::Result<Option<(String, OwnedFd)>> {
     let Some(entry) = &frame.entry else {
-        return Ok(());
+        return Ok(None);
     };
     let dir = match &frame.cwd {
         Target::Path(path) => sys::open_dir(path)?,
         Target::Fd(fd) => sys::dup_above(*fd, 3)?,
     };
-    open_beneath(dir.as_raw_fd(), entry).map(drop).map_err(|error| {
+    let file = open_beneath(dir.as_raw_fd(), entry).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("the entry {entry} can't be opened inside the plugin folder on its own filesystem: {error}"),
         )
-    })
+    })?;
+    let flags = sys::check(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) })?;
+    sys::check(unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK) })?;
+    Ok(Some((entry.clone(), file)))
 }
 
-fn open_program(program: &PinnedProgram) -> io::Result<OwnedFd> {
+fn open_program(program: &PinnedProgram, private_mounts: bool) -> io::Result<OwnedFd> {
     let fd = sys::openat(
         libc::AT_FDCWD,
         &program.path,
@@ -192,6 +315,15 @@ fn open_program(program: &PinnedProgram) -> io::Result<OwnedFd> {
         return Err(sys::invalid(
             "the program inside the sandbox isn't the one the broker verified",
         ));
+    }
+    if private_mounts {
+        let entries = roots::read_mountinfo()?;
+        let mount = mount_root(&entries, &program.path)?;
+        if sys::mount_id(fd.as_raw_fd())? != mount.id || !mount.read_only() || mount.propagates() {
+            return Err(sys::invalid(
+                "the program didn't come from its own read-only, private mount",
+            ));
+        }
     }
     Ok(fd)
 }
@@ -205,6 +337,11 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
         sys::die_with_parent(frame.expected_parent).map_err(fail("parent-gone"))?;
     }
     sys::set_no_new_privs().map_err(fail("no-new-privs"))?;
+    if frame.private_mounts {
+        make_mounts_private_and_drop_capabilities().map_err(fail("private-mounts"))?;
+        let program = seccomp::compile(&seccomp::baseline()).map_err(fail("baseline"))?;
+        seccomp::install(&program, false).map_err(fail("baseline"))?;
+    }
     if !frame.baseline.is_empty() {
         let program = seccomp::from_bytes(&frame.baseline).map_err(fail("baseline-invalid"))?;
         seccomp::install(&program, false).map_err(fail("baseline"))?;
@@ -230,9 +367,11 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
         });
     }
     check_mount_view(&frame).map_err(fail("unexpected-mount"))?;
-    check_entry(&frame).map_err(fail("entry-check"))?;
+    let entry = check_entry(&frame).map_err(fail("entry-check"))?;
     let program_fd = match &frame.program {
-        Some(program) => Some(open_program(program).map_err(fail("program-identity"))?),
+        Some(program) => {
+            Some(open_program(program, frame.private_mounts).map_err(fail("program-identity"))?)
+        }
         None => None,
     };
     let mut opened = Vec::new();
@@ -291,12 +430,14 @@ fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
             error: sys::invalid("a sidecar frame came without its program"),
         }),
         (RunKind::Host, _, _) => {
-            keep_only(&[]).map_err(fail("close-fds"))?;
+            let kept: Vec<RawFd> = entry.iter().map(|(_, fd)| fd.as_raw_fd()).collect();
+            keep_only(&kept).map_err(fail("close-fds"))?;
             Ok(HostHandoff {
                 level: frame.level,
                 landlock_abi: frame.landlock_abi,
                 args: frame.host_args,
                 started: StartedSignal { fd: READY_FD },
+                entry,
             })
         }
     }
@@ -410,6 +551,12 @@ mod tests {
         assert!(open_beneath(root.as_raw_fd(), "dist/link.js").is_err());
         assert!(open_beneath(root.as_raw_fd(), "../etc/passwd").is_err());
         assert!(open_beneath(root.as_raw_fd(), "dist").is_err());
+        let fifo = dir.join("dist/pipe.js");
+        let fifo_name = sys::cstring(&fifo).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+        let started = std::time::Instant::now();
+        assert!(open_beneath(root.as_raw_fd(), "dist/pipe.js").is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
         let proc_root = sys::open_dir(Path::new("/")).unwrap();
         assert!(open_beneath(proc_root.as_raw_fd(), "proc/self/status").is_err());
         std::fs::remove_dir_all(dir).unwrap();

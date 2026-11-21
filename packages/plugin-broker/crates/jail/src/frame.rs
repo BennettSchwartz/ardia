@@ -37,8 +37,15 @@ pub struct Frame {
     pub env: Vec<String>,
     pub host_args: Vec<String>,
     pub entry: Option<String>,
-    pub mount_checks: Vec<PathBuf>,
+    pub mount_checks: Vec<MountCheck>,
     pub expected_mounts: Vec<PathBuf>,
+    pub private_mounts: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MountCheck {
+    pub path: PathBuf,
+    pub writable: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -201,8 +208,13 @@ impl Frame {
             }
             None => out.u8(0),
         }
-        out.paths(&self.mount_checks);
+        out.u32(self.mount_checks.len() as u32);
+        for check in &self.mount_checks {
+            out.bytes(check.path.as_os_str().as_bytes());
+            out.u8(u8::from(check.writable));
+        }
         out.paths(&self.expected_mounts);
+        out.u8(u8::from(self.private_mounts));
         out.0
     }
 
@@ -257,8 +269,29 @@ impl Frame {
             1 => Some(input.string()?),
             _ => return Err(invalid("the policy frame's entry flag is wrong")),
         };
-        let mount_checks = input.paths()?;
+        let count = input.u32()? as usize;
+        if count > 256 {
+            return Err(invalid("the policy frame lists too many mount checks"));
+        }
+        let mut mount_checks = Vec::with_capacity(count);
+        for _ in 0..count {
+            let path = input.path()?;
+            let writable = match input.u8()? {
+                0 => false,
+                1 => true,
+                _ => return Err(invalid("a mount check's flag is wrong")),
+            };
+            mount_checks.push(MountCheck { path, writable });
+        }
         let expected_mounts = input.paths()?;
+        let private_mounts = match input.u8()? {
+            0 => false,
+            1 => true,
+            _ => return Err(invalid("the private-mounts flag is wrong")),
+        };
+        if private_mounts && level != Level::Full {
+            return Err(invalid("only a full sandbox owns a mount namespace"));
+        }
         if entry
             .as_deref()
             .map(|e| e.is_empty() || e.starts_with('/') || e.split('/').any(|p| p == ".."))
@@ -308,6 +341,7 @@ impl Frame {
             entry,
             mount_checks,
             expected_mounts,
+            private_mounts,
         })
     }
 }
@@ -345,8 +379,18 @@ mod tests {
             env: vec!["HOME=/run/ardia/data/home".into()],
             host_args: Vec::new(),
             entry: None,
-            mount_checks: vec!["/usr".into(), "/run/ardia/program".into()],
+            mount_checks: vec![
+                MountCheck {
+                    path: "/usr".into(),
+                    writable: false,
+                },
+                MountCheck {
+                    path: "/run/ardia/data".into(),
+                    writable: true,
+                },
+            ],
             expected_mounts: vec!["/run/ardia/program/bin/x".into()],
+            private_mounts: true,
         }
     }
 

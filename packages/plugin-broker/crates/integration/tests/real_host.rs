@@ -65,52 +65,96 @@ fn skip_or_fail(test: &str, why: String) {
     eprintln!("SUMMARY {test} not-applicable ({why})");
 }
 
-fn committed_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../host/tests/fixtures/sdk-bench")
+const BUILD_SCRIPT: &str = include_str!("../../../scripts/build-bwrap.sh");
+const OUTFILE_EXPRESSION: &str = r#"here("dist/index.js")"#;
+
+fn fixture_source() -> PathBuf {
+    std::env::var_os("JAIL_IT_FIXTURE_SOURCE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../host/tests/fixtures/sdk-bench")
+        })
 }
 
-fn build_fixture() -> PathBuf {
-    let source = committed_fixture();
-    let bundle = source.join("dist/index.js");
-    let committed = std::fs::read(&bundle).unwrap();
-    let status = Command::new("node")
-        .arg(source.join("build.mjs"))
-        .status()
-        .unwrap_or_else(|error| {
-            panic!("required mode builds sdk-bench with node build.mjs: {error}")
-        });
-    let built = std::fs::read(&bundle).unwrap();
-    std::fs::write(&bundle, &committed).unwrap();
-    assert!(status.success(), "node build.mjs failed for sdk-bench");
-    assert!(built.len() > 1000, "the fresh sdk-bench bundle is empty");
+fn build_fixture() -> Result<PathBuf, String> {
+    let source = fixture_source();
+    let script =
+        std::fs::read_to_string(source.join("build.mjs")).map_err(|e| format!("build.mjs: {e}"))?;
+    if !script.contains(OUTFILE_EXPRESSION) {
+        return Err(format!("build.mjs no longer writes {OUTFILE_EXPRESSION}, so it can't be pointed at a scratch folder"));
+    }
     let out = std::env::temp_dir().join(format!("ri-fixture-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&out);
-    copy_tree(&source, &out);
-    std::fs::write(out.join("dist/index.js"), &built).unwrap();
+    std::fs::create_dir_all(out.join("dist")).unwrap();
+    std::fs::copy(source.join("plugin.json"), out.join("plugin.json"))
+        .map_err(|e| format!("plugin.json: {e}"))?;
+    let outfile = out.join("dist/index.js");
+    let literal = serde_json::to_string(&outfile.to_string_lossy()).unwrap();
+    let node = std::env::var_os("JAIL_IT_NODE").unwrap_or_else(|| "node".into());
+    let status = Command::new(node)
+        .args(["--input-type=module", "-e"])
+        .arg(script.replace(OUTFILE_EXPRESSION, &literal))
+        .current_dir(&source)
+        .status()
+        .map_err(|e| format!("node couldn't start: {e}"))?;
+    if !status.success() {
+        return Err(format!("the sdk-bench build failed ({status})"));
+    }
+    let built = std::fs::read(&outfile).map_err(|e| format!("the build wrote nothing: {e}"))?;
+    if built.len() < 1000 {
+        return Err("the fresh sdk-bench bundle is empty".into());
+    }
+    let committed = std::fs::read(source.join("dist/index.js")).ok();
     eprintln!(
-        "FIXTURE sdk-bench rebuilt: {} bytes, identical to the committed bundle: {}",
+        "FIXTURE sdk-bench built into {}: {} bytes; the source tree's own bundle {}",
+        out.display(),
         built.len(),
-        built == committed
+        match committed {
+            None => "doesn't exist".to_string(),
+            Some(bytes) => format!("is {} bytes, identical: {}", bytes.len(), bytes == built),
+        }
     );
-    out
+    Ok(out)
 }
 
-fn fixture() -> PathBuf {
-    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+fn fixture() -> Option<PathBuf> {
+    static BUILT: std::sync::OnceLock<Result<PathBuf, String>> = std::sync::OnceLock::new();
+    if required() {
+        assert!(
+            std::env::var_os("JAIL_IT_FIXTURE").is_none(),
+            "required mode builds the fixture itself; unset JAIL_IT_FIXTURE"
+        );
+        return Some(
+            BUILT
+                .get_or_init(build_fixture)
+                .clone()
+                .unwrap_or_else(|why| panic!("required mode: {why}")),
+        );
+    }
     if let Some(path) = std::env::var_os("JAIL_IT_FIXTURE") {
-        return PathBuf::from(path);
+        return Some(PathBuf::from(path));
     }
-    if !required() {
-        return committed_fixture();
+    match BUILT.get_or_init(build_fixture) {
+        Ok(path) => Some(path.clone()),
+        Err(why) => {
+            eprintln!("SUMMARY real_host not-applicable (no fixture: {why})");
+            None
+        }
     }
-    BUILT.get_or_init(build_fixture).clone()
+}
+
+fn pinned_output_hash() -> &'static str {
+    BUILD_SCRIPT
+        .lines()
+        .find_map(|line| line.strip_prefix("BWRAP_OUTPUT_SHA256="))
+        .expect("build-bwrap.sh pins its output hash")
 }
 
 fn pinned_bwrap() -> Option<OwnedFd> {
     let Some(path) = std::env::var_os("ARDIA_BWRAP") else {
         assert!(
             !required(),
-            "required mode needs ARDIA_BWRAP pointing at the pinned bwrap"
+            "required mode needs ARDIA_BWRAP pointing at build-bwrap.sh's output"
         );
         return None;
     };
@@ -118,7 +162,21 @@ fn pinned_bwrap() -> Option<OwnedFd> {
     if required() {
         let version = Command::new(&path).arg("--version").output().unwrap();
         let version = String::from_utf8_lossy(&version.stdout).trim().to_string();
-        assert_eq!(version, PINNED_BWRAP, "ARDIA_BWRAP isn't the pinned build");
+        assert_eq!(
+            version, PINNED_BWRAP,
+            "ARDIA_BWRAP isn't the pinned version"
+        );
+        let hash = Command::new("sha256sum").arg(&path).output().unwrap();
+        let hash = String::from_utf8_lossy(&hash.stdout)
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string();
+        assert_eq!(
+            hash,
+            pinned_output_hash(),
+            "ARDIA_BWRAP isn't build-bwrap.sh's pinned output"
+        );
         assert!(
             jail::elf::needs_no_loader(fd.as_raw_fd()).unwrap(),
             "the pinned bwrap must be static"
@@ -180,7 +238,7 @@ impl World {
         let plugin = plugins.join("sdk-bench");
         let data_root = home.join(".local/share/ardia-data");
         let data = data_root.join("PluginData/sdk-bench");
-        copy_tree(&fixture(), &plugin);
+        copy_tree(&fixture().expect("a fixture"), &plugin);
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(home.join("secret.txt"), "home secret").unwrap();
         std::fs::create_dir_all(data_root.join("PluginData/other")).unwrap();
@@ -329,6 +387,9 @@ fn status_field(pid: i32, name: &str) -> String {
 }
 
 fn run_sdk_bench(level: &str) {
+    if fixture().is_none() {
+        return;
+    }
     let world = World::new(level);
     let launcher_fd = open(&launcher(), libc::O_RDONLY);
     let static_launcher = jail::elf::needs_no_loader(launcher_fd.as_raw_fd()).unwrap();

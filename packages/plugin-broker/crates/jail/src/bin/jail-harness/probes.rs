@@ -725,10 +725,11 @@ pub fn run_all(report: &mut Report, context: &Context) {
         context.level, context.kind
     ));
     if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
-        for line in status
-            .lines()
-            .filter(|line| line.starts_with("NoNewPrivs") || line.starts_with("Seccomp:"))
-        {
+        for line in status.lines().filter(|line| {
+            line.starts_with("NoNewPrivs")
+                || line.starts_with("Seccomp:")
+                || line.starts_with("Cap")
+        }) {
             report.line(&format!("INFO {}", line.replace('\t', " ")));
         }
     }

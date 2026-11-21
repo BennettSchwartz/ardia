@@ -5,7 +5,7 @@ use crate::entry;
 use crate::exit::Exit;
 use crate::governor::{spawn_watchdog, Governor, Limits, TERMINATE, WAKE_FD};
 use crate::sandbox::{ConfinePoint, Sandbox};
-use std::os::fd::RawFd;
+use std::os::fd::{IntoRawFd, OwnedFd, RawFd};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -16,6 +16,7 @@ pub const USAGE: &str = "usage: ardia-plugin-host host --entry <path inside the 
 #[derive(Debug, Clone)]
 pub struct Options {
     pub entry: String,
+    pub entry_fd: Option<RawFd>,
     pub limits: Limits,
 }
 
@@ -28,6 +29,7 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
         let value = args.get(at + 1).ok_or_else(|| format!("{flag} needs a value"))?;
         let number = || value.parse::<u64>().map_err(|_| format!("{flag} takes a whole number, not {value}"));
         match flag {
+            "--entry" if entry.is_some() => return Err("--entry is given more than once".into()),
             "--entry" => entry = Some(value.clone()),
             "--memory-mb" => limits.memory_bytes = (number()? as usize) << 20,
             "--stack-kb" => limits.stack_bytes = (number()? as usize) << 10,
@@ -39,7 +41,7 @@ pub fn parse_options(args: &[String]) -> Result<Options, String> {
         }
         at += 2;
     }
-    Ok(Options { entry: entry.ok_or("--entry is required")?, limits })
+    Ok(Options { entry: entry.ok_or("--entry is required")?, entry_fd: None, limits })
 }
 
 pub fn hard_exit(exit: Exit, message: &'static str) -> ! {
@@ -114,7 +116,15 @@ pub fn prepare(options: &Options) -> Result<Prepared, Exit> {
         stderr::note(&format!("[ardia] {problem}"));
         Exit::Usage
     })?;
-    let source = entry::read(&options.entry).map_err(|problem| {
+    let read = match options.entry_fd {
+        Some(fd) => {
+            let read = entry::read_open(fd, &options.entry);
+            unsafe { libc::close(fd) };
+            read
+        }
+        None => entry::read(&options.entry),
+    };
+    let source = read.map_err(|problem| {
         stderr::note(&format!("[ardia] {problem}"));
         Exit::LoadFailed
     })?;
@@ -186,7 +196,6 @@ impl Confined {
         let loaded = engine.eval_global(&source, &filename);
         drop(source);
         let failures = engine.drain_jobs();
-        engine.end_turn_state();
         let failed_at_start = loaded.as_ref().err().map(|thrown| (thrown.uncatchable, thrown.stack_overflow));
         let stopped = report(&engine, loaded.err(), failures);
         engine.governor().end_turn();
@@ -214,7 +223,6 @@ fn turn<F: FnOnce(&mut Engine) -> Result<(), Thrown>>(engine: &mut Engine, work:
     engine.governor().begin_turn();
     let outcome = work(engine);
     let failures = engine.drain_jobs();
-    engine.end_turn_state();
     let stopped = report(engine, outcome.err(), failures);
     engine.governor().end_turn();
     stopped
@@ -311,6 +319,25 @@ pub fn run_host<S: Sandbox + ?Sized>(args: &[String], sandbox: &mut S) -> Exit {
     }
 }
 
+pub fn run_host_with_entry<S: Sandbox + ?Sized>(args: &[String], entry: OwnedFd, sandbox: &mut S) -> Exit {
+    let mut options = match parse_options(args) {
+        Ok(options) => options,
+        Err(problem) => {
+            stderr::note(&format!("[ardia] {problem}\n{USAGE}"));
+            return Exit::Usage;
+        }
+    };
+    options.entry_fd = Some(entry.into_raw_fd());
+    let prepared = match prepare(&options) {
+        Ok(prepared) => prepared,
+        Err(exit) => return exit,
+    };
+    match prepared.confine(sandbox) {
+        Ok(confined) => confined.run(),
+        Err(exit) => exit,
+    }
+}
+
 pub fn main_with<S: Sandbox + ?Sized>(sandbox: &mut S) -> ! {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exit = match args.first().map(String::as_str) {
@@ -342,6 +369,7 @@ mod tests {
         assert!(parse_options(&strings(&["--entry"])).is_err());
         assert!(parse_options(&strings(&["--entry", "a", "--bogus", "1"])).is_err());
         assert!(parse_options(&strings(&["--entry", "a", "--memory-mb", "lots"])).is_err());
+        assert!(parse_options(&strings(&["--entry", "a", "--entry", "b"])).unwrap_err().contains("more than once"));
     }
 
     #[test]
@@ -362,7 +390,7 @@ mod tests {
         let mut sorted = implemented.clone();
         sorted.sort_unstable();
         assert_eq!(called, sorted);
-        assert_eq!(called.len(), 10);
+        assert_eq!(called.len(), 11);
         let swift = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../shell/plugin-host/HostPrelude.swift"));
         assert!(swift.contains(PRELUDE));
     }

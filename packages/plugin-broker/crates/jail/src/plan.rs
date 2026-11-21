@@ -1,7 +1,7 @@
 use std::os::fd::RawFd;
 use std::path::{Path, PathBuf};
 
-use crate::frame::{Rule, Target};
+use crate::frame::{MountCheck, Rule, Target};
 use crate::landlock::{
     DEVICE_READ, DEVICE_READ_WRITE, EXECUTE, READ, READ_EXECUTE, READ_FILE, READ_WRITE,
 };
@@ -183,16 +183,21 @@ pub fn build(input: &Input) -> Plan {
 }
 
 impl Plan {
-    pub fn mount_check_roots(&self) -> Vec<PathBuf> {
+    pub fn mount_checks(&self) -> Vec<MountCheck> {
         self.entries
             .iter()
-            .filter(|entry| {
-                matches!(
-                    entry.source,
-                    Source::System | Source::Fd { .. } | Source::Tmpfs { .. }
-                )
+            .filter_map(|entry| {
+                let writable = match entry.source {
+                    Source::System => false,
+                    Source::Tmpfs { .. } => true,
+                    Source::Fd { writable, .. } => writable,
+                    _ => return None,
+                };
+                Some(MountCheck {
+                    path: entry.dest.clone(),
+                    writable,
+                })
             })
-            .map(|entry| entry.dest.clone())
             .collect()
     }
 

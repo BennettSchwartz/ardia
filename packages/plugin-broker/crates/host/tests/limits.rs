@@ -330,7 +330,7 @@ fn fetches_at_the_timer_cap_reject_and_release_their_slots() {
     };
     let rejected = report["rejected"].as_array().unwrap();
     assert_eq!(rejected.len(), 20, "{report}");
-    assert!(rejected.iter().all(|r| r == "TypeError: a plugin can have at most 10000 timers waiting"), "{report}");
+    assert!(rejected.iter().all(|r| r == "RangeError: a plugin can have at most 10000 timers waiting"), "{report}");
     assert_eq!(report["thrown"], "RangeError");
     assert_eq!(fetched.len(), 20, "no refused fetch reached Ardia: {fetched:?}");
     assert!(fetched.iter().all(|url| url.contains("/later/")), "{fetched:?}");
@@ -346,4 +346,25 @@ fn clear_timer_coerces_its_argument_once() {
     let mut host = Host::spawn(&folder, "main.js", &[]);
     let report = host.expect(WAIT, "the coercion report");
     assert_eq!(report, json!({ "afterTimeout": 1, "calls": 2 }));
+}
+
+#[test]
+fn a_plugin_that_spoofs_stack_and_string_methods_cannot_make_an_unrelated_send_fail() {
+    let source = "const frame = '    at launch (ardia://plugin-host/prelude.js:1:1)';\nglobalThis.Error = function () { return { stack: frame }; };\nString.prototype.includes = () => true;\nString.prototype.split = function () { return [frame]; };\nString.prototype.trim = function () { return frame; };\nArray.prototype.filter = function () { return this; };\nRegExp.prototype.test = () => true;\nconst live = [];\nfor (let i = 0; i < 10000; i++) live.push(setTimeout(() => {}, 1e9));\nlet thrown = 'nothing';\ntry { setTimeout(() => {}, 1); } catch (e) { thrown = e instanceof RangeError ? 'RangeError' : 'other'; }\n__ardiaBridge.send('unrelated after a refused timer');\nfetch('https://example.com/x').then(() => 'resolved', (e) => (e instanceof RangeError ? 'RangeError' : 'other')).then((outcome) => {\n  __ardiaBridge.send('unrelated after a refused fetch');\n  __ardiaBridge.send(JSON.stringify({ thrown, outcome }));\n});\n";
+    let folder = scratch_plugin("spoof", source);
+    let mut host = Host::spawn(&folder, "main.js", &[]);
+    assert_eq!(host.line(WAIT).as_deref(), Some("unrelated after a refused timer"));
+    assert_eq!(host.line(WAIT).as_deref(), Some("unrelated after a refused fetch"));
+    assert_eq!(host.expect(WAIT, "the spoof report"), json!({ "thrown": "RangeError", "outcome": "RangeError" }));
+    assert_eq!(host.line(Duration::from_millis(200)), None, "a refused fetch reached Ardia");
+}
+
+#[test]
+fn abort_signal_timeout_at_the_cap_throws_and_leaves_nothing_behind() {
+    let source = "const live = [];\nfor (let i = 0; i < 10000; i++) live.push(setTimeout(() => {}, 1e9));\nlet thrown = '';\ntry { AbortSignal.timeout(10); } catch (e) { thrown = e.name + ': ' + e.message; }\nclearTimeout(live.pop());\nconst signal = AbortSignal.timeout(10);\nsignal.addEventListener('abort', () => __ardiaBridge.send(JSON.stringify({ thrown, reason: signal.reason.name })));\n";
+    let folder = scratch_plugin("abort-timeout-cap", source);
+    let mut host = Host::spawn(&folder, "main.js", &[]);
+    let report = host.expect(WAIT, "the abort report");
+    assert_eq!(report["thrown"], "RangeError: a plugin can have at most 10000 timers waiting");
+    assert_eq!(report["reason"], "TimeoutError");
 }

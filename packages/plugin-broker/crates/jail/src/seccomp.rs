@@ -420,6 +420,23 @@ pub fn baseline() -> Filter {
     }
 }
 
+pub fn launcher_baseline() -> Filter {
+    let mut filter = baseline();
+    filter
+        .rules
+        .retain(|rule| rule.nr != libc::SYS_mount && rule.nr != libc::SYS_unshare);
+    filter.rules.insert(
+        0,
+        Rule::when(
+            libc::SYS_unshare,
+            vec![LowWordMatch::equals(0, libc::CLONE_NEWNS as u32)],
+            Action::Allow,
+        ),
+    );
+    filter.rules.insert(1, Rule::plain(libc::SYS_unshare, DENY));
+    filter
+}
+
 pub fn sidecar_offline(landlock_abi: u32) -> Filter {
     let mut rules = vec![
         Rule::plain(libc::SYS_socket, DENY),
@@ -716,6 +733,25 @@ mod tests {
             run(&program, libc::SYS_read as u32, 0x4000_0003, [0; 6]),
             RET_KILL_PROCESS
         );
+    }
+
+    #[test]
+    fn the_launcher_baseline_only_lets_mount_through() {
+        let launcher = compile(&launcher_baseline()).unwrap();
+        let full = compile(&baseline()).unwrap();
+        assert_eq!(call(&launcher, libc::SYS_mount, [0; 6]), RET_ALLOW);
+        assert_eq!(call(&full, libc::SYS_mount, [0; 6]), DENY.code());
+        let new_mount_ns = [libc::CLONE_NEWNS as u64, 0, 0, 0, 0, 0];
+        let new_user_ns = [libc::CLONE_NEWUSER as u64, 0, 0, 0, 0, 0];
+        assert_eq!(call(&launcher, libc::SYS_unshare, new_mount_ns), RET_ALLOW);
+        assert_eq!(call(&launcher, libc::SYS_unshare, new_user_ns), DENY.code());
+        assert_eq!(call(&full, libc::SYS_unshare, new_mount_ns), DENY.code());
+        for nr in DENIED_FOR_EVERY_PLUGIN
+            .iter()
+            .filter(|nr| **nr != libc::SYS_mount && **nr != libc::SYS_unshare)
+        {
+            assert_eq!(call(&launcher, *nr, [0; 6]), DENY.code(), "syscall {nr}");
+        }
     }
 
     #[test]

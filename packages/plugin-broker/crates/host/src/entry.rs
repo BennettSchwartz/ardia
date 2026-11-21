@@ -33,8 +33,12 @@ pub fn read_from(root: RawFd, relative: &str) -> Result<String, String> {
     }
     let file = open_at(directory.0, parts[parts.len() - 1], libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK).ok_or_else(|| format!("{relative} wasn't found, or is a link"))?;
     drop(directory);
+    read_open(file.0, relative)
+}
+
+pub fn read_open(fd: RawFd, relative: &str) -> Result<String, String> {
     let mut info: libc::stat = unsafe { std::mem::zeroed() };
-    if unsafe { libc::fstat(file.0, &mut info) } != 0 || (info.st_mode & libc::S_IFMT) != libc::S_IFREG {
+    if unsafe { libc::fstat(fd, &mut info) } != 0 || (info.st_mode & libc::S_IFMT) != libc::S_IFREG {
         return Err(format!("{relative} isn't a file"));
     }
     if info.st_size as u64 > LIMIT as u64 {
@@ -43,7 +47,7 @@ pub fn read_from(root: RawFd, relative: &str) -> Result<String, String> {
     let mut data = Vec::with_capacity(info.st_size as usize);
     let mut chunk = vec![0u8; 64 << 10];
     loop {
-        let got = unsafe { libc::read(file.0, chunk.as_mut_ptr().cast(), chunk.len()) };
+        let got = unsafe { libc::read(fd, chunk.as_mut_ptr().cast(), chunk.len()) };
         if got < 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
             continue;
         }

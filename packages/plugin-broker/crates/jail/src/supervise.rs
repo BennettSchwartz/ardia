@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::cgroup::{CgroupDelegate, RunCgroup};
 use crate::elf::{self, Linkage};
-use crate::frame::{Frame, PinnedProgram, Rule, Target};
+use crate::frame::{Frame, MountCheck, PinnedProgram, Rule, Target};
 use crate::landlock::{self, Unavailable};
 use crate::plan;
 use crate::restart::SpawnLimiter;
@@ -177,17 +177,59 @@ impl Program {
         }
     }
 
-    fn still_at_its_path(&self) -> io::Result<bool> {
-        let again = match sys::openat(
-            libc::AT_FDCWD,
-            &self.path,
-            libc::O_PATH | libc::O_NOFOLLOW,
-            0,
-        ) {
+    fn verify_at(&self, dir: RawFd, relative: &Path, resolve: u64) -> Result<(), String> {
+        let found = sys::openat2(dir, relative, libc::O_PATH | libc::O_NOFOLLOW, resolve);
+        let found = match found {
             Ok(fd) => fd,
-            Err(_) => return Ok(false),
+            Err(error) => {
+                return Err(match error.raw_os_error() {
+                    Some(libc::ELOOP) => "the program's path now ends in a link".into(),
+                    Some(libc::ENOENT) => "the program is no longer at its path".into(),
+                    Some(libc::EXDEV) => {
+                        "the program's path crosses into another filesystem".into()
+                    }
+                    _ => format!("the program's path can't be checked: {error}"),
+                })
+            }
         };
-        Ok(sys::identity(again.as_raw_fd())? == sys::identity(self.file.as_raw_fd())?)
+        let kind = sys::fstat(found.as_raw_fd()).map(|info| info.st_mode & libc::S_IFMT);
+        if kind.ok() == Some(libc::S_IFLNK) {
+            return Err("the program's path now ends in a link".into());
+        }
+        let same =
+            sys::identity(found.as_raw_fd()).ok() == sys::identity(self.file.as_raw_fd()).ok();
+        if !same {
+            return Err("the program changed after it was checked".into());
+        }
+        Ok(())
+    }
+
+    fn verify_destination(&self, placement: ProgramPlacement, plugin: RawFd) -> Result<(), String> {
+        let beneath = sys::RESOLVE_BENEATH
+            | sys::RESOLVE_NO_XDEV
+            | sys::RESOLVE_NO_SYMLINKS
+            | sys::RESOLVE_NO_MAGICLINKS;
+        let relative_to = |root: RawFd| -> Result<(), String> {
+            let root_path = sys::fd_path(root).map_err(|e| e.to_string())?;
+            let relative = self
+                .path
+                .strip_prefix(&root_path)
+                .map_err(|_| "the program isn't inside the folder it was checked in".to_string())?;
+            self.verify_at(root, relative, beneath)
+        };
+        match (placement, &self.folder) {
+            (ProgramPlacement::Separate, Some(folder)) => relative_to(folder.as_raw_fd())?,
+            (ProgramPlacement::InsidePluginFolder, _) => relative_to(plugin)?,
+            _ => {}
+        }
+        let parent = sys::open_dir(self.path.parent().unwrap_or(Path::new("/")))
+            .map_err(|e| e.to_string())?;
+        let name = Path::new(self.path.file_name().unwrap_or_default());
+        self.verify_at(
+            parent.as_raw_fd(),
+            name,
+            sys::RESOLVE_NO_SYMLINKS | sys::RESOLVE_NO_MAGICLINKS,
+        )
     }
 
     fn check_dir(&self) -> io::Result<OwnedFd> {
@@ -356,6 +398,29 @@ fn valid_env_name(name: &str) -> bool {
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
 }
 
+fn host_entry(args: &[String]) -> Result<String, SpawnError> {
+    let mut entries = Vec::new();
+    let mut at = 0;
+    while at < args.len() {
+        let value = args.get(at + 1).ok_or_else(|| {
+            SpawnError::Refused(format!("the host option {} has no value", args[at]))
+        })?;
+        if args[at] == "--entry" {
+            entries.push(value.clone());
+        }
+        at += 2;
+    }
+    match entries.as_slice() {
+        [entry] => Ok(entry.clone()),
+        [] => Err(SpawnError::Refused(
+            "the extension host needs an --entry".into(),
+        )),
+        _ => Err(SpawnError::Refused(
+            "--entry is given more than once".into(),
+        )),
+    }
+}
+
 pub fn valid_plugin_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
@@ -369,6 +434,7 @@ enum Readiness {
     Line(String),
     Closed,
     TimedOut,
+    Failed(String),
 }
 
 struct ReadyLines {
@@ -381,22 +447,51 @@ impl ReadyLines {
         loop {
             if let Some(at) = self.pending.iter().position(|b| *b == b'\n') {
                 let line: Vec<u8> = self.pending.drain(..=at).collect();
-                return Readiness::Line(String::from_utf8_lossy(&line[..at]).into_owned());
+                return match String::from_utf8(line[..at].to_vec()) {
+                    Ok(text) => Readiness::Line(text),
+                    Err(_) => Readiness::Failed("the readiness record isn't text".into()),
+                };
             }
             if self.pending.len() > 512 {
-                return Readiness::Line(String::from_utf8_lossy(&self.pending).into_owned());
+                return Readiness::Failed("the readiness record is too long".into());
             }
             match sys::wait_readable(self.fd, deadline) {
                 Ok(true) => {}
-                _ => return Readiness::TimedOut,
+                Ok(false) => return Readiness::TimedOut,
+                Err(error) => {
+                    return Readiness::Failed(format!("the readiness pipe failed: {error}"))
+                }
             }
             let mut chunk = [0u8; 256];
             match sys::read_some(self.fd, &mut chunk) {
-                Ok(0) | Err(_) => return Readiness::Closed,
+                Ok(0) if self.pending.is_empty() => return Readiness::Closed,
+                Ok(0) => return Readiness::Failed("the readiness record was cut short".into()),
                 Ok(count) => self.pending.extend_from_slice(&chunk[..count]),
+                Err(error) => {
+                    return Readiness::Failed(format!("the readiness pipe failed: {error}"))
+                }
             }
         }
     }
+}
+
+fn peek_exit(pid: i32) -> Option<libc::siginfo_t> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as libc::id_t,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    };
+    (result == 0 && unsafe { info.si_pid() } == pid).then_some(info)
+}
+
+fn exe_identity(pid: i32) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(format!("/proc/{pid}/exe")).ok()?;
+    Some((meta.dev(), meta.ino()))
 }
 
 fn read_child_pid(fd: RawFd, deadline: Instant) -> io::Result<Option<i32>> {
@@ -594,6 +689,10 @@ impl Supervisor {
             "--new-session",
             "--cap-drop",
             "ALL",
+            "--cap-add",
+            "CAP_SYS_ADMIN",
+            "--cap-add",
+            "CAP_SETPCAP",
             "--clearenv",
         ])
     }
@@ -716,12 +815,8 @@ impl Supervisor {
                 "the extension host takes no environment from the request".into(),
             ));
         }
-        if let Work::Sidecar { program, .. } = &request.work {
-            if !program.still_at_its_path()? {
-                return Err(SpawnError::Refused(
-                    "the program changed after it was checked".into(),
-                ));
-            }
+        if let Work::Host { args } = &request.work {
+            host_entry(args)?;
         }
         let program_dir = match &request.work {
             Work::Sidecar { program, .. } => Some(program.check_dir()?),
@@ -738,6 +833,11 @@ impl Supervisor {
         let refuse = |refusal: roots::Refusal| SpawnError::Refused(refusal.0);
         roots::refuse_nested_mounts("the plugin folder", request.plugin_dir.as_raw_fd())
             .map_err(refuse)?;
+        if let Work::Sidecar { program, .. } = &request.work {
+            program
+                .verify_destination(placement, request.plugin_dir.as_raw_fd())
+                .map_err(SpawnError::Refused)?;
+        }
         if let Work::Sidecar { program, .. } = &request.work {
             roots::refuse_nested_mounts("the plugin's data", request.data_dir.as_raw_fd())
                 .map_err(refuse)?;
@@ -791,17 +891,14 @@ impl Supervisor {
             entry: None,
             mount_checks: Vec::new(),
             expected_mounts: Vec::new(),
+            private_mounts: false,
         };
         let plugin_path = sys::fd_path(request.plugin_dir.as_raw_fd())?;
         let mut program_file = None;
         match &request.work {
             Work::Host { args } => {
                 frame.host_args = args.clone();
-                frame.entry = args
-                    .iter()
-                    .position(|arg| arg == "--entry")
-                    .and_then(|at| args.get(at + 1))
-                    .cloned();
+                frame.entry = Some(host_entry(args)?);
             }
             Work::Sidecar { program, args } => {
                 let name = program
@@ -840,7 +937,10 @@ impl Supervisor {
                 rights: landlock::READ,
             }];
             frame.cwd = Target::Fd(6);
-            frame.mount_checks = vec![plugin_path];
+            frame.mount_checks = vec![MountCheck {
+                path: plugin_path,
+                writable: false,
+            }];
             return Ok(Prepared {
                 exe: self.broker_exe.as_raw_fd(),
                 argv: strings(&[
@@ -865,7 +965,7 @@ impl Supervisor {
         let (info_r, info_w) = sys::pipe()?;
         let (block_r, block_w) = sys::pipe()?;
         let (seccomp_r, seccomp_w) = sys::pipe()?;
-        let baseline = seccomp::to_bytes(&seccomp::compile(&seccomp::baseline())?);
+        let baseline = seccomp::to_bytes(&seccomp::compile(&seccomp::launcher_baseline())?);
         if baseline.len() >= 65536 {
             return Err(SpawnError::SetupFailed(
                 "the baseline filter doesn't fit a pipe".into(),
@@ -897,7 +997,8 @@ impl Supervisor {
             broker: 12,
         });
         frame.rules.extend(plan.landlock_rules());
-        frame.mount_checks = plan.mount_check_roots();
+        frame.mount_checks = plan.mount_checks();
+        frame.private_mounts = true;
         let mut argv = vec!["ardia-bwrap".to_string()];
         argv.extend(Self::namespace_flags());
         for (name, value) in &launcher_env {
@@ -1102,6 +1203,7 @@ impl Supervisor {
             Readiness::Line(line) if line == accepted => None,
             Readiness::Line(line) => Some(format!("the sandbox answered \"{line}\"")),
             Readiness::Closed => Some("the sandbox closed before accepting its policy".into()),
+            Readiness::Failed(why) => Some(why),
             Readiness::TimedOut => Some("the sandbox didn't get ready in time".into()),
         };
         if let Some(problem) = problem {
@@ -1110,12 +1212,13 @@ impl Supervisor {
         drop(withheld);
         let problem = match (kind, ready.next(deadline)) {
             (RunKind::Host, Readiness::Line(line)) if line == "started" => None,
-            (RunKind::Sidecar, Readiness::Closed) => None,
+            (RunKind::Sidecar, Readiness::Closed) => self.classify_exec(id, outer),
             (_, Readiness::Line(line)) => Some(format!("the runtime didn't start: {line}")),
             (RunKind::Host, Readiness::Closed) => {
                 Some("the host exited before it confined itself".into())
             }
             (_, Readiness::TimedOut) => Some("the runtime didn't start in time".into()),
+            (_, Readiness::Failed(why)) => Some(why),
         };
         if let Some(problem) = problem {
             return Err(self.abort(id, &log_r, problem));
@@ -1130,6 +1233,38 @@ impl Supervisor {
             init_pid,
             main_pid,
         })
+    }
+
+    fn classify_exec(&self, id: RunId, outer: i32) -> Option<String> {
+        let launcher = sys::identity(self.broker_exe.as_raw_fd()).ok();
+        let run = self.runs.get(&id)?;
+        let main = run.main?;
+        let alive = run
+            .main_pidfd
+            .as_ref()
+            .map(|fd| !sys::wait_readable(fd.as_raw_fd(), Instant::now()).unwrap_or(true))
+            .unwrap_or(false);
+        if alive {
+            return match exe_identity(main) {
+                Some(running) if Some(running) != launcher => None,
+                _ => Some(
+                    "the launcher closed its readiness pipe without running the program".into(),
+                ),
+            };
+        }
+        let settle = Instant::now() + Duration::from_millis(500);
+        let _ = sys::wait_readable(run.outer_pidfd.as_raw_fd(), settle);
+        match peek_exit(outer) {
+            Some(info) if info.si_code == libc::CLD_EXITED && unsafe { info.si_status() } < 128 => {
+                None
+            }
+            Some(info) => Some(format!(
+                "the sandbox died while starting the program (code {}, status {})",
+                info.si_code,
+                unsafe { info.si_status() }
+            )),
+            None => Some("the program's process vanished during startup".into()),
+        }
     }
 
     fn abort(&mut self, id: RunId, log: &OwnedFd, why: String) -> SpawnError {

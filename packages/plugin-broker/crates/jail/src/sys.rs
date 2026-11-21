@@ -295,3 +295,60 @@ pub fn wait_child(pid: i32) -> io::Result<libc::c_int> {
         }
     }
 }
+
+pub fn mount_id(fd: RawFd) -> io::Result<u64> {
+    const STATX_MNT_ID: u32 = 0x1000;
+    let mut buffer = [0u8; 256];
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_statx,
+            fd,
+            c"".as_ptr(),
+            libc::AT_EMPTY_PATH | libc::AT_SYMLINK_NOFOLLOW,
+            STATX_MNT_ID,
+            buffer.as_mut_ptr(),
+        )
+    };
+    if result == 0 {
+        let mask = u32::from_ne_bytes(buffer[0..4].try_into().unwrap());
+        if mask & STATX_MNT_ID != 0 {
+            return Ok(u64::from_ne_bytes(buffer[0x90..0x98].try_into().unwrap()));
+        }
+    }
+    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{fd}"))?;
+    info.lines()
+        .find_map(|line| line.strip_prefix("mnt_id:"))
+        .and_then(|value| value.trim().parse().ok())
+        .ok_or_else(|| invalid("the kernel reported no mount id"))
+}
+
+pub const RESOLVE_NO_XDEV: u64 = 0x01;
+pub const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+pub const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+pub const RESOLVE_BENEATH: u64 = 0x08;
+
+#[repr(C)]
+struct OpenHow {
+    flags: u64,
+    mode: u64,
+    resolve: u64,
+}
+
+pub fn openat2(dir: RawFd, relative: &Path, flags: i32, resolve: u64) -> io::Result<OwnedFd> {
+    let name = cstring(relative)?;
+    let how = OpenHow {
+        flags: (flags | libc::O_CLOEXEC) as u64,
+        mode: 0,
+        resolve,
+    };
+    let fd = check_long(unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            dir,
+            name.as_ptr(),
+            &how as *const OpenHow,
+            std::mem::size_of::<OpenHow>(),
+        )
+    })?;
+    Ok(owned(fd as RawFd))
+}

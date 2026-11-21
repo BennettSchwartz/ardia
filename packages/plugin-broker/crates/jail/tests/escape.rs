@@ -477,6 +477,16 @@ fn full_sidecar_escape() {
         }
         Some(_) => {
             assert_contained("full_sidecar_escape", &world, &lines, "full", 28);
+            for field in ["CapInh:", "CapPrm:", "CapEff:", "CapBnd:", "CapAmb:"] {
+                let line = lines
+                    .iter()
+                    .find(|l| l.starts_with(&format!("LINE INFO {field}")))
+                    .unwrap_or_else(|| panic!("{field} wasn't reported"));
+                assert!(
+                    line.ends_with(" 0000000000000000"),
+                    "the sidecar kept capabilities: {line}"
+                );
+            }
             for name in ["fcntl-setown-outside", "exec-from-data"] {
                 let line =
                     result_detail(&lines, name).unwrap_or_else(|| panic!("{name} didn't run"));
@@ -1464,4 +1474,139 @@ fn nested_mounts_inside_granted_trees_are_refused() {
         "{lines:#?}"
     );
     assert!(!lines.iter().any(|l| l.starts_with("SPAWNED")));
+}
+
+#[test]
+fn a_mount_added_upstream_after_acceptance_never_reaches_the_jail() {
+    let world = World::new("upstream");
+    if !userns_wrapper_works() {
+        skip(
+            "upstream_mount",
+            "the test can't make a user namespace to mount in",
+            "tool",
+        );
+        return;
+    }
+    let wrap = [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--propagation",
+        "shared",
+    ];
+    let mut args = world.sim_args("sidecar", "mount-after-start");
+    args.push("probe=mountwatch".into());
+    let lines = Sim::start(&world, args, &wrap).finish(Duration::from_secs(30));
+    if !full_sidecars_available(&lines) {
+        skip(
+            "upstream_mount",
+            "sidecars aren't available inside the test's namespace",
+            "full",
+        );
+        return;
+    }
+    let watch = lines
+        .iter()
+        .find(|l| l.starts_with("LINE MOUNTWATCH"))
+        .cloned()
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    eprintln!("SUMMARY upstream_mount {watch}");
+    assert!(
+        lines.iter().any(|l| l == "UPSTREAM-MOUNT late result=0"),
+        "{lines:#?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "UPSTREAM-MOUNT usr-local result=0"),
+        "{lines:#?}"
+    );
+    assert!(watch.contains("late_visible=0"), "{watch}");
+    assert!(watch.contains("usr_local_visible=0"), "{watch}");
+    assert!(watch.contains("tagged=0"), "{watch}");
+    assert!(watch.contains("marker=unreadable(2)"), "{watch}");
+}
+
+#[test]
+fn a_fifo_entry_is_refused_without_stalling() {
+    let world = World::new("fifo-entry");
+    let fifo = world.plugin.join("pipe.js");
+    let name = std::ffi::CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+    for level in ["auto", "reduced"] {
+        let mut args = world.sim_args("host", "probe");
+        args.push("entry=pipe.js".into());
+        args.push(format!("level={level}"));
+        let started = Instant::now();
+        let lines = run_to_end(&world, args);
+        let took = started.elapsed();
+        if caps_from(&lines).abi.is_none() {
+            expect_landlock_refusal("fifo_entry", &lines);
+            return;
+        }
+        let failed = lines
+            .iter()
+            .find(|l| l.starts_with("SETUP-FAILED"))
+            .cloned()
+            .unwrap_or_default();
+        eprintln!("SUMMARY fifo_entry/{level} took={took:?} {failed}");
+        assert!(failed.contains("entry-check"), "{lines:#?}");
+        assert!(
+            took < Duration::from_secs(3),
+            "the FIFO stalled setup for {took:?}"
+        );
+    }
+}
+
+#[test]
+fn a_duplicate_entry_is_refused() {
+    let world = World::new("duplicate-entry");
+    write(&world.plugin.join("other.js"), "x");
+    let mut args = world.sim_args("host", "probe");
+    args.push("entry2=other.js".into());
+    let lines = run_to_end(&world, args);
+    if caps_from(&lines).abi.is_none() {
+        expect_landlock_refusal("duplicate_entry", &lines);
+        return;
+    }
+    let refused = lines
+        .iter()
+        .find(|l| l.starts_with("REFUSED"))
+        .cloned()
+        .unwrap_or_default();
+    eprintln!("SUMMARY duplicate_entry {refused}");
+    assert!(
+        refused.contains("--entry is given more than once"),
+        "{lines:#?}"
+    );
+}
+
+#[test]
+fn a_program_path_that_became_a_link_or_vanished_is_refused() {
+    for (mode, expected) in [
+        ("link", "the program's path now ends in a link"),
+        ("delete", "the program is no longer at its path"),
+    ] {
+        let world = World::new(&format!("program-{mode}"));
+        let mut args = world.sim_args("sidecar", "marker");
+        args.push("probe=marker".into());
+        args.push(format!("swap_program={mode}"));
+        let lines = run_to_end(&world, args);
+        if !full_sidecars_available(&lines) {
+            skip("program_path", "sidecars aren't available", "full");
+            return;
+        }
+        let refused = lines
+            .iter()
+            .find(|l| l.starts_with("REFUSED"))
+            .cloned()
+            .unwrap_or_default();
+        eprintln!("SUMMARY program_path/{mode} {refused}");
+        assert!(refused.contains(expected), "{lines:#?}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("SPAWNED")),
+            "{lines:#?}"
+        );
+    }
 }
