@@ -88,6 +88,7 @@ export async function leakCheck(world, { out, asJson, warmup = 10, cycles = 80, 
     for (let n = from; n < from + count; n++) {
       await cycle(world, n, syncRows);
       eachCycle?.(world);
+      loaded.runner.settleAll();
       syncRows();
     }
   };

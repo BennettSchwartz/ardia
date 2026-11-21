@@ -59,6 +59,7 @@ export async function rowProbe(world, probe, { extraHooks = [] } = {}) {
     for (const i of instances) i.instance.notified = 0;
     act();
     await turn();
+    loaded.runner.settleAll();
     for (const { hook, row, instance } of instances) {
       if (row.tabId === tabId || !instance.notified) continue;
       const key = label(hook);
@@ -141,6 +142,7 @@ export async function actionCosts(world, probe, { seeds, steps }) {
           entry.outOfScopeRowWakes += instance.notified;
           entry.outOfScopeByHook[label(hook)] = (entry.outOfScopeByHook[label(hook)] ?? 0) + instance.notified;
         }
+      loaded.runner.settleAll();
       sync();
     }
     for (const m of mounted.values()) m.instances.forEach((i) => i.instance.unmount());
@@ -194,7 +196,7 @@ export function dependencyMap(probe, rows) {
     const id = `${e.via}|${e.site}|${e.rowHook ?? ""}`;
     if (!sites.has(id)) sites.set(id, { ...e, count: 0, reads: new Set(), calls: {} });
     const s = sites.get(id);
-    s.count++;
+    if (e.alive) s.count++;
     for (const r of e.reads) s.reads.add(r);
     for (const [k, v] of Object.entries(e.calls)) s.calls[k] = (s.calls[k] ?? 0) + v;
   }
@@ -212,7 +214,7 @@ export function dependencyMap(probe, rows) {
   const totalCalls = (s) => Object.values(s.calls).reduce((a, b) => a + b, 0);
   lines.push("## Summary", "");
   lines.push("- listeners registered before the probe was installed (the store's own session persistence and live-tab bookkeeping, set up when the store loads) are not in this map");
-  lines.push(`- ${all.length} registration sites (${all.reduce((n, s) => n + s.count, 0)} live listeners): ${all.filter((s) => s.via === "subscribe" && !s.rowHook).length} plain service listeners, ${all.filter((s) => s.via === "subscribeTo").length} keyed (subscribeTo), ${all.filter((s) => s.via === "keyed watch").length} keyed watches, ${all.filter((s) => s.rowHook).length} from per-row hooks`);
+  lines.push(`- ${all.length} registration sites (${all.reduce((n, s) => n + s.count, 0)} live at the end; per-row hook registrations are listed once per site, not counted): ${all.filter((s) => s.via === "subscribe" && !s.rowHook).length} plain service listeners, ${all.filter((s) => s.via === "subscribeTo").length} keyed (subscribeTo), ${all.filter((s) => s.via === "keyed watch").length} keyed watches, ${all.filter((s) => s.rowHook).length} from per-row hooks`);
   const plainNarrow = all.filter((s) => s.via === "subscribe" && !s.rowHook && s.reads.size && s.reads.size <= 3);
   if (plainNarrow.length) lines.push(`- plain listeners that read three keys or fewer (candidates for subscribeTo): ${plainNarrow.map((s) => `${s.site} (${[...s.reads].join(", ")})`).join("; ")}`);
   const busiest = [...all].sort((a, b) => totalCalls(b) - totalCalls(a)).slice(0, 8);
@@ -220,7 +222,7 @@ export function dependencyMap(probe, rows) {
   lines.push("", "## By store key", "");
   for (const [key, entries] of [...byKey].sort((a, b) => b[1].length - a[1].length)) {
     lines.push(`### ${key} (${entries.length})`, "");
-    for (const s of entries.sort((a, b) => a.site.localeCompare(b.site))) lines.push(`- ${s.via}${s.count > 1 ? ` ×${s.count}` : ""}: \`${s.site}\` → ${s.rowHook ? `per-row hook ${s.rowHook}` : owner(s.site)}; called ${totalCalls(s)} times`);
+    for (const s of entries.sort((a, b) => a.site.localeCompare(b.site))) lines.push(`- ${s.via}${s.rowHook ? " (one per row)" : s.count > 1 ? ` ×${s.count}` : ""}: \`${s.site}\` → ${s.rowHook ? `per-row hook ${s.rowHook}` : owner(s.site)}; called ${totalCalls(s)} times`);
     lines.push("");
   }
   if (rows) {
