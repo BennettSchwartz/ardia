@@ -1,11 +1,21 @@
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::sys;
 
 pub const RUN_PIDS_MAX: u64 = 512;
+
+fn random_u64() -> io::Result<u64> {
+    let mut bytes = [0u8; 8];
+    let got = unsafe { libc::getrandom(bytes.as_mut_ptr().cast(), 8, 0) };
+    if got != 8 {
+        return Err(sys::last_error());
+    }
+    Ok(u64::from_ne_bytes(bytes))
+}
 
 fn write_at(dir: RawFd, name: &str, value: &str) -> io::Result<()> {
     let file = sys::openat(dir, Path::new(name), libc::O_WRONLY, 0)?;
@@ -36,6 +46,7 @@ pub fn own_cgroup_path() -> io::Result<PathBuf> {
 
 #[derive(Debug)]
 pub struct CgroupDelegate {
+    counter: AtomicU64,
     root: OwnedFd,
     path: PathBuf,
     memory: bool,
@@ -86,6 +97,7 @@ impl CgroupDelegate {
             }
         }
         Ok(Some(CgroupDelegate {
+            counter: AtomicU64::new(0),
             root,
             path,
             memory,
@@ -97,8 +109,38 @@ impl CgroupDelegate {
         &self.path
     }
 
-    pub fn create_run(&self, name: &str, memory_max: u64) -> io::Result<RunCgroup> {
-        sys::mkdir_at(self.root.as_raw_fd(), name, 0o755)?;
+    pub fn create_run(&self, memory_max: u64) -> io::Result<RunCgroup> {
+        let mut collision = None;
+        for _ in 0..4 {
+            let name = format!(
+                "run-{}-{}-{:016x}",
+                std::process::id(),
+                self.counter.fetch_add(1, Ordering::Relaxed),
+                random_u64()?
+            );
+            let cname = sys::cstring(Path::new(&name))?;
+            if unsafe { libc::mkdirat(self.root.as_raw_fd(), cname.as_ptr(), 0o755) } != 0 {
+                let error = sys::last_error();
+                if error.raw_os_error() == Some(libc::EEXIST) {
+                    collision = Some(error);
+                    continue;
+                }
+                return Err(error);
+            }
+            return match self.configure(&name, memory_max) {
+                Ok(run) => Ok(run),
+                Err(error) => {
+                    unsafe {
+                        libc::unlinkat(self.root.as_raw_fd(), cname.as_ptr(), libc::AT_REMOVEDIR)
+                    };
+                    Err(error)
+                }
+            };
+        }
+        Err(collision.unwrap_or_else(|| sys::invalid("no free cgroup name")))
+    }
+
+    fn configure(&self, name: &str, memory_max: u64) -> io::Result<RunCgroup> {
         let dir = sys::openat(
             self.root.as_raw_fd(),
             Path::new(name),
@@ -187,21 +229,28 @@ impl RunCgroup {
         &self.name
     }
 
-    pub fn empty_and_remove(self, deadline: Instant) -> io::Result<()> {
-        while self.populated() {
-            if Instant::now() >= deadline {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "the run's cgroup didn't empty",
-                ));
-            }
+    pub fn try_remove(&self) -> bool {
+        if self.populated() {
             let _ = self.kill();
+            return false;
+        }
+        let Ok(name) = sys::cstring(Path::new(&self.name)) else {
+            return false;
+        };
+        let removed =
+            unsafe { libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR) };
+        removed == 0 || sys::last_error().raw_os_error() == Some(libc::ENOENT)
+    }
+
+    pub fn empty_and_remove(self, deadline: Instant) -> Result<(), RunCgroup> {
+        loop {
+            if self.try_remove() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(self);
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
-        let name = sys::cstring(Path::new(&self.name))?;
-        sys::check(unsafe {
-            libc::unlinkat(self.parent.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR)
-        })?;
-        Ok(())
     }
 }

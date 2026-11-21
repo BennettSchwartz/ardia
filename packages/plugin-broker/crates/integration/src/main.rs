@@ -5,12 +5,17 @@ mod probes;
 use ardia_plugin_host::{ConfinePoint, Exit, Sandbox};
 
 struct JailConfinement {
+    started: Option<jail::StartedSignal>,
     probe: Option<probes::Context>,
 }
 
 impl Sandbox for JailConfinement {
     fn confine(&mut self, point: &ConfinePoint<'_>) -> Result<(), String> {
-        jail::confine_host(point.kept_fds)?;
+        let started = self
+            .started
+            .take()
+            .ok_or("the host tried to confine itself twice")?;
+        started.confine(point.kept_fds)?;
         if let Some(context) = self.probe.as_mut() {
             context.allowed_fds = point
                 .kept_fds
@@ -20,7 +25,7 @@ impl Sandbox for JailConfinement {
                 .collect();
             let mut report = probes::Report::new(2);
             report.line(&format!(
-                "INFO probes inside the real QuickJS host after confine_host, {} host threads",
+                "INFO probes inside the real QuickJS host after the started signal, {} host threads",
                 point.threads
             ));
             probes::run_all(&mut report, context);
@@ -39,8 +44,12 @@ fn main() {
                 let probe = std::fs::read_to_string("probe-context")
                     .ok()
                     .map(|text| probes::Context::from_text(&text, handoff.level.name(), "host"));
-                let mut sandbox = JailConfinement { probe };
-                ardia_plugin_host::run_host(&handoff.args, &mut sandbox)
+                let jail::HostHandoff { args, started, .. } = handoff;
+                let mut sandbox = JailConfinement {
+                    started: Some(started),
+                    probe,
+                };
+                ardia_plugin_host::run_host(&args, &mut sandbox)
             }
         },
         _ => {

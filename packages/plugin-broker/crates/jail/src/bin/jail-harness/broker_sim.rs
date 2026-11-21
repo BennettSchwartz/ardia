@@ -32,11 +32,30 @@ fn dir(path: &str) -> OwnedFd {
 
 struct Observer {
     event: String,
+    mount_after_record: String,
 }
 
 impl LaunchObserver for Observer {
     fn recorded(&mut self, outer: i32, init: i32) {
         say(&format!("RECORDED outer={outer} init={init}"));
+        if !self.mount_after_record.is_empty() {
+            let _ = std::fs::create_dir_all(&self.mount_after_record);
+            let target = std::ffi::CString::new(self.mount_after_record.as_str()).unwrap();
+            let mounted = unsafe {
+                libc::mount(
+                    c"latetmp".as_ptr(),
+                    target.as_ptr(),
+                    c"tmpfs".as_ptr(),
+                    0,
+                    std::ptr::null(),
+                )
+            };
+            say(&format!(
+                "MOUNTED {} result={mounted} errno={}",
+                self.mount_after_record,
+                std::io::Error::last_os_error()
+            ));
+        }
         if self.event == "crash-before-release" {
             unsafe { libc::raise(libc::SIGKILL) };
         }
@@ -279,6 +298,7 @@ pub fn main(args: &[String]) -> i32 {
     };
     let mut observer = Observer {
         event: event.clone(),
+        mount_after_record: get("mount_after_record"),
     };
     let launched = match supervisor.spawn(request, &mut observer) {
         Ok(launched) => launched,

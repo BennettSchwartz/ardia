@@ -60,6 +60,7 @@ pub struct Input {
     pub plugin: RawFd,
     pub data: Option<RawFd>,
     pub program_folder: Option<RawFd>,
+    pub program_file: Option<(RawFd, PathBuf)>,
     pub broker: RawFd,
 }
 
@@ -168,10 +169,33 @@ pub fn build(input: &Input) -> Plan {
             sidecar_only(kind, READ_EXECUTE),
         );
     }
+    if let Some((fd, dest)) = &input.program_file {
+        entries.push(Entry {
+            dest: dest.clone(),
+            source: Source::Fd {
+                fd: *fd,
+                writable: false,
+            },
+            rights: READ_FILE | EXECUTE,
+        });
+    }
     Plan { entries }
 }
 
 impl Plan {
+    pub fn mount_check_roots(&self) -> Vec<PathBuf> {
+        self.entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.source,
+                    Source::System | Source::Fd { .. } | Source::Tmpfs { .. }
+                )
+            })
+            .map(|entry| entry.dest.clone())
+            .collect()
+    }
+
     pub fn bwrap_mounts(&self) -> Vec<String> {
         let mut args = Vec::new();
         let mut push = |items: &[&str]| args.extend(items.iter().map(|item| item.to_string()));
@@ -221,6 +245,8 @@ mod tests {
             plugin: 9,
             data: (kind == RunKind::Sidecar).then_some(10),
             program_folder: (kind == RunKind::Sidecar).then_some(11),
+            program_file: (kind == RunKind::Sidecar)
+                .then(|| (13, PathBuf::from("/run/ardia/program/bin/tool"))),
             broker: 12,
         }
     }
@@ -270,14 +296,16 @@ mod tests {
             .iter()
             .filter(|e| matches!(e.source, Source::Fd { .. }))
             .collect();
-        assert_eq!(granted.len(), 4);
+        assert_eq!(granted.len(), 5);
         for entry in &granted {
             assert!(entry.dest.starts_with("/run/ardia"), "{:?}", entry.dest);
         }
         let ruled: Vec<&Entry> = plan.entries.iter().filter(|e| e.rights != 0).collect();
         for a in &ruled {
             for b in &ruled {
-                if a.dest != b.dest {
+                let pinned_file_inside_its_folder =
+                    b.dest == Path::new("/run/ardia/program/bin/tool") && b.rights & !a.rights == 0;
+                if a.dest != b.dest && !pinned_file_inside_its_folder {
                     assert!(
                         !b.dest.starts_with(&a.dest),
                         "{:?} sits under {:?}, so their grants would add up",

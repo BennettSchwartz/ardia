@@ -1,8 +1,9 @@
 use std::ffi::CString;
 use std::io;
 use std::os::fd::{OwnedFd, RawFd};
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::sys;
 
@@ -56,6 +57,7 @@ unsafe fn child_fail(what: &[u8]) -> ! {
 unsafe fn run_child(
     spec: &ForkSpec,
     holes: &[(u32, u32)],
+    error_source: Option<RawFd>,
     argv: &[*const libc::c_char],
     envp: &[*const libc::c_char],
     parent: i32,
@@ -64,6 +66,16 @@ unsafe fn run_child(
     if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) != 0 || libc::getppid() != parent
     {
         libc::_exit(127);
+    }
+    match error_source {
+        Some(source) => {
+            if libc::dup2(source, SPAWN_ERROR_FD) < 0 {
+                libc::_exit(127);
+            }
+        }
+        None => {
+            libc::close(SPAWN_ERROR_FD);
+        }
     }
     if spec.new_session {
         libc::setsid();
@@ -120,8 +132,13 @@ pub fn holes(targets: &[RawFd]) -> Vec<(u32, u32)> {
     holes
 }
 
-fn fork_exec(spec: ForkSpec) -> io::Result<(i32, OwnedFd)> {
+fn fork_exec(spec: ForkSpec, orphans: &Mutex<Vec<i32>>) -> io::Result<(i32, OwnedFd)> {
     spec.check()?;
+    let error_source = spec
+        .fds
+        .iter()
+        .find(|(_, target)| *target == SPAWN_ERROR_FD)
+        .map(|(source, _)| *source);
     let targets: Vec<RawFd> = spec.fds.iter().map(|(_, target)| *target).collect();
     let holes = holes(&targets);
     let mut argv: Vec<*const libc::c_char> = spec.argv.iter().map(|arg| arg.as_ptr()).collect();
@@ -134,13 +151,27 @@ fn fork_exec(spec: ForkSpec) -> io::Result<(i32, OwnedFd)> {
         return Err(sys::last_error());
     }
     if pid == 0 {
-        unsafe { run_child(&spec, &holes, &argv, &envp, parent) }
+        unsafe { run_child(&spec, &holes, error_source, &argv, &envp, parent) }
     }
     match sys::pidfd_open(pid) {
         Ok(pidfd) => Ok((pid, pidfd)),
         Err(error) => {
             unsafe { libc::kill(pid, libc::SIGKILL) };
-            let _ = sys::wait_child(pid);
+            let deadline = Instant::now() + Duration::from_secs(1);
+            loop {
+                match sys::try_wait_child(pid) {
+                    Ok(None) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(5))
+                    }
+                    Ok(None) => {
+                        if let Ok(mut list) = orphans.lock() {
+                            list.push(pid);
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+            }
             Err(error)
         }
     }
@@ -151,6 +182,7 @@ type Job = Box<dyn FnOnce() + Send>;
 pub struct Spawner {
     jobs: Option<mpsc::Sender<Job>>,
     thread: Option<thread::JoinHandle<()>>,
+    orphans: Arc<Mutex<Vec<i32>>>,
 }
 
 impl Spawner {
@@ -166,13 +198,15 @@ impl Spawner {
         Ok(Spawner {
             jobs: Some(jobs),
             thread: Some(thread),
+            orphans: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     pub fn spawn(&self, spec: ForkSpec) -> io::Result<(i32, OwnedFd)> {
         let (reply, answer) = mpsc::channel();
+        let orphans = Arc::clone(&self.orphans);
         let job: Job = Box::new(move || {
-            let _ = reply.send(fork_exec(spec));
+            let _ = reply.send(fork_exec(spec, &orphans));
         });
         self.jobs
             .as_ref()
@@ -182,6 +216,16 @@ impl Spawner {
         answer
             .recv()
             .map_err(|_| sys::invalid("the spawner thread didn't answer"))?
+    }
+}
+
+impl Spawner {
+    pub fn reap_orphans(&self) -> usize {
+        let Ok(mut list) = self.orphans.lock() else {
+            return 0;
+        };
+        list.retain(|pid| matches!(sys::try_wait_child(*pid), Ok(None)));
+        list.len()
     }
 }
 

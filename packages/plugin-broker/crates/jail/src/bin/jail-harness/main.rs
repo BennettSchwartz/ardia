@@ -23,7 +23,9 @@ fn host_sim(handoff: jail::HostHandoff) -> i32 {
         let fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
         let _ = thread_tx.send(fd);
     });
-    if let Err(problem) = jail::confine_host(&[0, 1, 2, 3]) {
+    let level = handoff.level;
+    let abi = handoff.landlock_abi;
+    if let Err(problem) = handoff.started.confine(&[0, 1, 2, 3]) {
         write_fd(2, &format!("confine failed: {problem}"));
         return 76;
     }
@@ -42,8 +44,8 @@ fn host_sim(handoff: jail::HostHandoff) -> i32 {
             let mut report = probes::Report::new(3);
             report.line(&format!(
                 "INFO host level={} abi={} trusted-init-read-entry={}",
-                handoff.level.name(),
-                handoff.landlock_abi,
+                level.name(),
+                abi,
                 entry
                     .as_ref()
                     .map(|text| text.len().to_string())

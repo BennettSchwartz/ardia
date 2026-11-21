@@ -16,7 +16,7 @@ use crate::roots::{self, Granted, ProgramPlacement};
 use crate::spawn::{self, ForkSpec, Spawner};
 use crate::{
     procscan, seccomp, sys, Level, RunKind, BROKER_PATH_IN_JAIL, DATA_IN_JAIL, LANDLOCK_MISSING,
-    PLUGIN_IN_JAIL, PROGRAM_FD_IN_JAIL,
+    PLUGIN_IN_JAIL, PROGRAM_FD_IN_JAIL, PROGRAM_IN_JAIL,
 };
 
 pub type RunId = u64;
@@ -156,6 +156,40 @@ impl Program {
         Ok(Some(folder))
     }
 
+    fn jail_path(&self, placement: ProgramPlacement, plugin: &Path) -> io::Result<PathBuf> {
+        let inside = |root: &Path, jail_root: &str| -> io::Result<PathBuf> {
+            let relative = self
+                .path
+                .strip_prefix(root)
+                .map_err(|_| sys::invalid("the program isn't where its folder says"))?;
+            Ok(Path::new(jail_root).join(relative))
+        };
+        match (placement, &self.folder) {
+            (ProgramPlacement::Separate, Some(folder)) => {
+                inside(&sys::fd_path(folder.as_raw_fd())?, PROGRAM_IN_JAIL)
+            }
+            (ProgramPlacement::Separate, None) => {
+                Ok(Path::new(PROGRAM_IN_JAIL).join(self.path.file_name().unwrap_or_default()))
+            }
+            (ProgramPlacement::InsidePluginFolder, _) => inside(plugin, PLUGIN_IN_JAIL),
+            (ProgramPlacement::InsideUsr, _) => Ok(self.path.clone()),
+            (ProgramPlacement::None, _) => Err(sys::invalid("a sidecar needs a program")),
+        }
+    }
+
+    fn still_at_its_path(&self) -> io::Result<bool> {
+        let again = match sys::openat(
+            libc::AT_FDCWD,
+            &self.path,
+            libc::O_PATH | libc::O_NOFOLLOW,
+            0,
+        ) {
+            Ok(fd) => fd,
+            Err(_) => return Ok(false),
+        };
+        Ok(sys::identity(again.as_raw_fd())? == sys::identity(self.file.as_raw_fd())?)
+    }
+
     fn check_dir(&self) -> io::Result<OwnedFd> {
         if let Some(folder) = &self.folder {
             return folder.try_clone();
@@ -283,8 +317,9 @@ struct Run {
 }
 
 struct Straggler {
-    pid: i32,
-    _pidfd: OwnedFd,
+    pid: Option<i32>,
+    _pidfd: Option<OwnedFd>,
+    cgroup: Option<RunCgroup>,
 }
 
 pub struct Supervisor {
@@ -330,30 +365,38 @@ pub fn valid_plugin_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-fn read_until_newline(fd: RawFd, deadline: Instant, cap: usize) -> io::Result<Option<String>> {
-    let mut data = Vec::new();
-    let mut chunk = [0u8; 256];
-    loop {
-        if data.contains(&b'\n') {
-            break;
-        }
-        if !sys::wait_readable(fd, deadline)? {
-            return Ok(None);
-        }
-        let count = sys::read_some(fd, &mut chunk)?;
-        if count == 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..count]);
-        if data.len() > cap {
-            break;
+enum Readiness {
+    Line(String),
+    Closed,
+    TimedOut,
+}
+
+struct ReadyLines {
+    fd: RawFd,
+    pending: Vec<u8>,
+}
+
+impl ReadyLines {
+    fn next(&mut self, deadline: Instant) -> Readiness {
+        loop {
+            if let Some(at) = self.pending.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = self.pending.drain(..=at).collect();
+                return Readiness::Line(String::from_utf8_lossy(&line[..at]).into_owned());
+            }
+            if self.pending.len() > 512 {
+                return Readiness::Line(String::from_utf8_lossy(&self.pending).into_owned());
+            }
+            match sys::wait_readable(self.fd, deadline) {
+                Ok(true) => {}
+                _ => return Readiness::TimedOut,
+            }
+            let mut chunk = [0u8; 256];
+            match sys::read_some(self.fd, &mut chunk) {
+                Ok(0) | Err(_) => return Readiness::Closed,
+                Ok(count) => self.pending.extend_from_slice(&chunk[..count]),
+            }
         }
     }
-    if data.is_empty() {
-        return Ok(None);
-    }
-    let text = String::from_utf8_lossy(&data);
-    Ok(Some(text.lines().next().unwrap_or("").to_string()))
 }
 
 fn read_child_pid(fd: RawFd, deadline: Instant) -> io::Result<Option<i32>> {
@@ -484,7 +527,7 @@ impl Supervisor {
     }
 
     fn run_once(
-        &self,
+        &mut self,
         exe: RawFd,
         argv: Vec<String>,
         extra: Vec<(RawFd, RawFd)>,
@@ -520,8 +563,16 @@ impl Supervisor {
         }
         if !sys::wait_readable(pidfd.as_raw_fd(), deadline).unwrap_or(false) {
             let _ = sys::pidfd_signal(pidfd.as_raw_fd(), libc::SIGKILL);
+            let _ = sys::wait_readable(pidfd.as_raw_fd(), Instant::now() + Duration::from_secs(1));
         }
-        let status = sys::wait_child(pid).map_err(|e| e.to_string())?;
+        let Some(status) = sys::try_wait_child(pid).ok().flatten() else {
+            self.stragglers.push(Straggler {
+                pid: Some(pid),
+                _pidfd: Some(pidfd),
+                cgroup: None,
+            });
+            return Err("a probe process didn't end".into());
+        };
         let code = if libc::WIFEXITED(status) {
             libc::WEXITSTATUS(status)
         } else {
@@ -547,7 +598,7 @@ impl Supervisor {
         ])
     }
 
-    fn probe_full_isolation(&self) -> Result<(), String> {
+    fn probe_full_isolation(&mut self) -> Result<(), String> {
         let bwrap = self.bwrap.as_ref().ok_or("no bundled bwrap")?.as_raw_fd();
         let (code, help) = self.run_once(bwrap, strings(&["ardia-bwrap", "--help"]), Vec::new())?;
         for flag in [
@@ -665,6 +716,13 @@ impl Supervisor {
                 "the extension host takes no environment from the request".into(),
             ));
         }
+        if let Work::Sidecar { program, .. } = &request.work {
+            if !program.still_at_its_path()? {
+                return Err(SpawnError::Refused(
+                    "the program changed after it was checked".into(),
+                ));
+            }
+        }
         let program_dir = match &request.work {
             Work::Sidecar { program, .. } => Some(program.check_dir()?),
             Work::Host { .. } => None,
@@ -730,9 +788,21 @@ impl Supervisor {
             argv: Vec::new(),
             env: Vec::new(),
             host_args: Vec::new(),
+            entry: None,
+            mount_checks: Vec::new(),
+            expected_mounts: Vec::new(),
         };
+        let plugin_path = sys::fd_path(request.plugin_dir.as_raw_fd())?;
+        let mut program_file = None;
         match &request.work {
-            Work::Host { args } => frame.host_args = args.clone(),
+            Work::Host { args } => {
+                frame.host_args = args.clone();
+                frame.entry = args
+                    .iter()
+                    .position(|arg| arg == "--entry")
+                    .and_then(|at| args.get(at + 1))
+                    .cloned();
+            }
             Work::Sidecar { program, args } => {
                 let name = program
                     .path
@@ -743,16 +813,22 @@ impl Supervisor {
                 frame.argv.push(name);
                 frame.argv.extend(args.iter().cloned());
                 frame.env = Self::sidecar_environment(request)?;
+                let jail_path = program.jail_path(placement, &plugin_path)?;
+                let (device, inode) = sys::identity(program.file.as_raw_fd())?;
                 frame.program = Some(PinnedProgram {
-                    fd: PROGRAM_FD_IN_JAIL,
+                    path: jail_path.clone(),
+                    device,
+                    inode,
                     script: program.script,
                 });
+                frame.expected_mounts.push(jail_path.clone());
                 frame.final_filter =
                     seccomp::to_bytes(&seccomp::compile(&seccomp::sidecar_offline(abi))?);
                 fds.push((
                     lift(program.file.as_raw_fd(), &mut held)?,
                     PROGRAM_FD_IN_JAIL,
                 ));
+                program_file = Some((PROGRAM_FD_IN_JAIL, jail_path));
             }
         }
         if level == Level::HostReduced {
@@ -764,6 +840,7 @@ impl Supervisor {
                 rights: landlock::READ,
             }];
             frame.cwd = Target::Fd(6);
+            frame.mount_checks = vec![plugin_path];
             return Ok(Prepared {
                 exe: self.broker_exe.as_raw_fd(),
                 argv: strings(&[
@@ -809,10 +886,6 @@ impl Supervisor {
                 fds.push((lift(folder.as_raw_fd(), &mut held)?, 11));
                 program_folder = Some(11);
             }
-            frame.rules.push(Rule {
-                target: Target::Fd(PROGRAM_FD_IN_JAIL),
-                rights: landlock::READ_FILE | landlock::EXECUTE,
-            });
         }
         fds.push((self.broker_exe.as_raw_fd(), 12));
         let plan = plan::build(&plan::Input {
@@ -820,9 +893,11 @@ impl Supervisor {
             plugin: 9,
             data,
             program_folder,
+            program_file,
             broker: 12,
         });
         frame.rules.extend(plan.landlock_rules());
+        frame.mount_checks = plan.mount_check_roots();
         let mut argv = vec!["ardia-bwrap".to_string()];
         argv.extend(Self::namespace_flags());
         for (name, value) in &launcher_env {
@@ -906,10 +981,7 @@ impl Supervisor {
         let id = self.next_id;
         self.next_id += 1;
         let cgroup = match &self.config.cgroup {
-            Some(delegate) => Some(delegate.create_run(
-                &format!("run-{id}"),
-                request.memory_mb.saturating_mul(2 << 20),
-            )?),
+            Some(delegate) => Some(delegate.create_run(request.memory_mb.saturating_mul(2 << 20))?),
             None => None,
         };
         let spec = ForkSpec {
@@ -929,7 +1001,14 @@ impl Supervisor {
             Ok(child) => child,
             Err(error) => {
                 if let Some(cgroup) = cgroup {
-                    let _ = cgroup.empty_and_remove(Instant::now() + TEARDOWN_DEADLINE);
+                    if let Err(cgroup) = cgroup.empty_and_remove(Instant::now() + TEARDOWN_DEADLINE)
+                    {
+                        self.stragglers.push(Straggler {
+                            pid: None,
+                            _pidfd: None,
+                            cgroup: Some(cgroup),
+                        });
+                    }
                 }
                 return Err(SpawnError::Io(error));
             }
@@ -1014,18 +1093,32 @@ impl Supervisor {
             }
             PolicyDelivery::Withhold => withheld = Some(policy_w),
         }
-        let answer = read_until_newline(ready_r.as_raw_fd(), deadline, 256)
-            .ok()
-            .flatten();
-        let expected = format!("ready {} {}", level.name(), abi);
-        match answer {
-            Some(line) if line == expected => drop(withheld),
-            Some(line) => {
-                return Err(self.abort(id, &log_r, format!("the sandbox answered \"{line}\"")))
+        let mut ready = ReadyLines {
+            fd: ready_r.as_raw_fd(),
+            pending: Vec::new(),
+        };
+        let accepted = format!("accepted {} {}", level.name(), abi);
+        let problem = match ready.next(deadline) {
+            Readiness::Line(line) if line == accepted => None,
+            Readiness::Line(line) => Some(format!("the sandbox answered \"{line}\"")),
+            Readiness::Closed => Some("the sandbox closed before accepting its policy".into()),
+            Readiness::TimedOut => Some("the sandbox didn't get ready in time".into()),
+        };
+        if let Some(problem) = problem {
+            return Err(self.abort(id, &log_r, problem));
+        }
+        drop(withheld);
+        let problem = match (kind, ready.next(deadline)) {
+            (RunKind::Host, Readiness::Line(line)) if line == "started" => None,
+            (RunKind::Sidecar, Readiness::Closed) => None,
+            (_, Readiness::Line(line)) => Some(format!("the runtime didn't start: {line}")),
+            (RunKind::Host, Readiness::Closed) => {
+                Some("the host exited before it confined itself".into())
             }
-            None => {
-                return Err(self.abort(id, &log_r, "the sandbox didn't get ready in time".into()))
-            }
+            (_, Readiness::TimedOut) => Some("the runtime didn't start in time".into()),
+        };
+        if let Some(problem) = problem {
+            return Err(self.abort(id, &log_r, problem));
         }
         let main_pid = self.runs.get(&id).and_then(|run| run.main);
         Ok(Launched {
@@ -1103,23 +1196,40 @@ impl Supervisor {
         for (_, run) in &runs {
             Self::ask_to_stop(run);
         }
-        let deadline = Instant::now() + grace;
+        let graceful = Instant::now() + grace;
+        let deadline = graceful + TEARDOWN_DEADLINE;
         for (_, run) in &runs {
-            if !sys::wait_readable(run.outer_pidfd.as_raw_fd(), deadline).unwrap_or(true) {
+            if !sys::wait_readable(run.outer_pidfd.as_raw_fd(), graceful).unwrap_or(true) {
                 Self::force_kill(run);
             }
         }
         let reports = runs
             .into_iter()
-            .map(|(id, run)| (id, self.reap(run)))
+            .map(|(id, run)| (id, self.reap(run, deadline)))
             .collect();
         self.reap_stragglers();
         reports
     }
 
     pub fn reap_stragglers(&mut self) {
-        self.stragglers
-            .retain(|straggler| matches!(sys::try_wait_child(straggler.pid), Ok(None)));
+        self.spawner.reap_orphans();
+        self.stragglers.retain_mut(|straggler| {
+            if let Some(pid) = straggler.pid {
+                if !matches!(sys::try_wait_child(pid), Ok(None)) {
+                    straggler.pid = None;
+                    straggler._pidfd = None;
+                }
+            }
+            if straggler
+                .cgroup
+                .as_ref()
+                .map(|c| c.try_remove())
+                .unwrap_or(false)
+            {
+                straggler.cgroup = None;
+            }
+            straggler.pid.is_some() || straggler.cgroup.is_some()
+        });
     }
 
     fn ask_to_stop(run: &Run) {
@@ -1142,20 +1252,19 @@ impl Supervisor {
     }
 
     fn teardown(&mut self, run: Run, grace: Duration) -> ExitReport {
+        let graceful = Instant::now() + grace;
+        let deadline = graceful + TEARDOWN_DEADLINE;
         if !grace.is_zero() {
             Self::ask_to_stop(&run);
-            if sys::wait_readable(run.outer_pidfd.as_raw_fd(), Instant::now() + grace)
-                .unwrap_or(true)
-            {
-                return self.reap(run);
+            if sys::wait_readable(run.outer_pidfd.as_raw_fd(), graceful).unwrap_or(true) {
+                return self.reap(run, deadline);
             }
         }
         Self::force_kill(&run);
-        self.reap(run)
+        self.reap(run, deadline)
     }
 
-    fn reap(&mut self, run: Run) -> ExitReport {
-        let deadline = Instant::now() + TEARDOWN_DEADLINE;
+    fn reap(&mut self, run: Run, deadline: Instant) -> ExitReport {
         let ended = sys::wait_readable(run.outer_pidfd.as_raw_fd(), deadline).unwrap_or(false);
         Self::force_kill(&run);
         let status = if ended {
@@ -1190,13 +1299,17 @@ impl Supervisor {
                 std::thread::sleep(Duration::from_millis(5));
             }
         }
-        if let Some(cgroup) = run.cgroup {
-            tree_gone &= cgroup.empty_and_remove(deadline).is_ok();
-        }
-        if status.is_none() {
+        let leftover_cgroup = match run.cgroup {
+            Some(cgroup) => cgroup.empty_and_remove(deadline).err(),
+            None => None,
+        };
+        tree_gone &= leftover_cgroup.is_none();
+        let leftover_pid = status.is_none();
+        if leftover_pid || leftover_cgroup.is_some() {
             self.stragglers.push(Straggler {
-                pid: run.outer,
-                _pidfd: run.outer_pidfd,
+                pid: leftover_pid.then_some(run.outer),
+                _pidfd: leftover_pid.then_some(run.outer_pidfd),
+                cgroup: leftover_cgroup,
             });
         }
         let (code, signal) = match status {

@@ -1,18 +1,46 @@
 use std::ffi::CString;
 use std::io;
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::path::{Path, PathBuf};
 
-use crate::frame::{Frame, Target};
-use crate::{landlock, seccomp, sys, Level, RunKind};
+use crate::frame::{Frame, PinnedProgram, Target};
+use crate::{landlock, roots, seccomp, sys, Level, RunKind};
 
 pub const EXIT_SANDBOX_SETUP: i32 = 76;
 pub const EXIT_EXEC_FAILED: i32 = 127;
+pub const READY_FD: RawFd = 5;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+const RESOLVE_NO_XDEV: u64 = 0x01;
+const RESOLVE_NO_MAGICLINKS: u64 = 0x02;
+const RESOLVE_NO_SYMLINKS: u64 = 0x04;
+const RESOLVE_BENEATH: u64 = 0x08;
+
+#[derive(Debug)]
+pub struct StartedSignal {
+    fd: RawFd,
+}
+
+impl StartedSignal {
+    pub fn confine(self, kept_fds: &[RawFd]) -> Result<(), String> {
+        let mut kept = kept_fds.to_vec();
+        kept.push(self.fd);
+        let result = confine_host_threads(&kept);
+        let line: &[u8] = match &result {
+            Ok(()) => b"started\n",
+            Err(_) => b"error host-filter\n",
+        };
+        let _ = sys::write_all(self.fd, line);
+        unsafe { libc::close(self.fd) };
+        result
+    }
+}
+
+#[derive(Debug)]
 pub struct HostHandoff {
     pub level: Level,
     pub landlock_abi: u32,
     pub args: Vec<String>,
+    pub started: StartedSignal,
 }
 
 #[derive(Debug)]
@@ -44,10 +72,13 @@ pub fn exec_main(args: &[String]) -> ExecOutcome {
         let _ = sys::write_all(2, b"[ardia] usage: exec --policy-fd N --ready-fd N\n");
         return ExecOutcome::Exit(64);
     };
-    match enter(sys::owned(policy), ready) {
-        Ok(Entered::Host(handoff)) => ExecOutcome::Host(handoff),
+    if ready != READY_FD {
+        let _ = sys::write_all(2, b"[ardia] the readiness pipe must be fd 5\n");
+        return ExecOutcome::Exit(64);
+    }
+    match enter(sys::owned(policy)) {
+        Ok(handoff) => ExecOutcome::Host(handoff),
         Err(failure) => {
-            let _ = sys::write_all(ready, format!("error {}\n", failure.code).as_bytes());
             let _ = sys::write_all(
                 2,
                 format!(
@@ -56,13 +87,10 @@ pub fn exec_main(args: &[String]) -> ExecOutcome {
                 )
                 .as_bytes(),
             );
+            let _ = sys::write_all(READY_FD, format!("error {}\n", failure.code).as_bytes());
             ExecOutcome::Exit(EXIT_SANDBOX_SETUP)
         }
     }
-}
-
-enum Entered {
-    Host(HostHandoff),
 }
 
 fn open_target(target: &Target) -> io::Result<Option<OwnedFd>> {
@@ -72,7 +100,103 @@ fn open_target(target: &Target) -> io::Result<Option<OwnedFd>> {
     }
 }
 
-fn enter(policy: OwnedFd, ready: RawFd) -> Result<Entered, Failure> {
+pub fn unexpected_mounts(
+    mount_points: &[PathBuf],
+    trees: &[PathBuf],
+    expected: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut found: Vec<PathBuf> = mount_points
+        .iter()
+        .filter(|point| {
+            trees
+                .iter()
+                .any(|tree| point.as_path() != tree.as_path() && point.starts_with(tree))
+        })
+        .filter(|point| !expected.contains(point))
+        .cloned()
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+fn check_mount_view(frame: &Frame) -> io::Result<()> {
+    if frame.mount_checks.is_empty() {
+        return Ok(());
+    }
+    let points = roots::mount_points()?;
+    let unexpected = unexpected_mounts(&points, &frame.mount_checks, &frame.expected_mounts);
+    match unexpected.first() {
+        None => Ok(()),
+        Some(point) => Err(sys::invalid(format!(
+            "an unexpected filesystem is mounted at {} inside a granted folder",
+            point.display()
+        ))),
+    }
+}
+
+#[repr(C)]
+struct OpenHow {
+    flags: u64,
+    mode: u64,
+    resolve: u64,
+}
+
+pub fn open_beneath(dir: RawFd, relative: &str) -> io::Result<OwnedFd> {
+    let name = sys::cstring(Path::new(relative))?;
+    let how = OpenHow {
+        flags: (libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW) as u64,
+        mode: 0,
+        resolve: RESOLVE_BENEATH | RESOLVE_NO_XDEV | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_SYMLINKS,
+    };
+    let fd = sys::check_long(unsafe {
+        libc::syscall(
+            libc::SYS_openat2,
+            dir,
+            name.as_ptr(),
+            &how as *const OpenHow,
+            std::mem::size_of::<OpenHow>(),
+        )
+    })?;
+    let fd = sys::owned(fd as RawFd);
+    if sys::fstat(fd.as_raw_fd())?.st_mode & libc::S_IFMT != libc::S_IFREG {
+        return Err(sys::invalid("the entry isn't a regular file"));
+    }
+    Ok(fd)
+}
+
+fn check_entry(frame: &Frame) -> io::Result<()> {
+    let Some(entry) = &frame.entry else {
+        return Ok(());
+    };
+    let dir = match &frame.cwd {
+        Target::Path(path) => sys::open_dir(path)?,
+        Target::Fd(fd) => sys::dup_above(*fd, 3)?,
+    };
+    open_beneath(dir.as_raw_fd(), entry).map(drop).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("the entry {entry} can't be opened inside the plugin folder on its own filesystem: {error}"),
+        )
+    })
+}
+
+fn open_program(program: &PinnedProgram) -> io::Result<OwnedFd> {
+    let fd = sys::openat(
+        libc::AT_FDCWD,
+        &program.path,
+        libc::O_RDONLY | libc::O_NOFOLLOW,
+        0,
+    )?;
+    if sys::identity(fd.as_raw_fd())? != (program.device, program.inode) {
+        return Err(sys::invalid(
+            "the program inside the sandbox isn't the one the broker verified",
+        ));
+    }
+    Ok(fd)
+}
+
+fn enter(policy: OwnedFd) -> Result<HostHandoff, Failure> {
     let bytes = sys::read_to_end_capped(policy.as_raw_fd(), crate::frame::MAX_FRAME)
         .map_err(fail("policy-read"))?;
     drop(policy);
@@ -105,6 +229,12 @@ fn enter(policy: OwnedFd, ready: RawFd) -> Result<Entered, Failure> {
             )),
         });
     }
+    check_mount_view(&frame).map_err(fail("unexpected-mount"))?;
+    check_entry(&frame).map_err(fail("entry-check"))?;
+    let program_fd = match &frame.program {
+        Some(program) => Some(open_program(program).map_err(fail("program-identity"))?),
+        None => None,
+    };
     let mut opened = Vec::new();
     let mut rules = Vec::new();
     for rule in &frame.rules {
@@ -135,35 +265,47 @@ fn enter(policy: OwnedFd, ready: RawFd) -> Result<Entered, Failure> {
             sys::check(unsafe { libc::fchdir(*fd) }).map_err(fail("cwd"))?;
         }
     }
-    let line = format!("ready {} {}\n", frame.level.name(), frame.landlock_abi);
-    sys::write_all(ready, line.as_bytes()).map_err(fail("ready"))?;
-    match (frame.kind, frame.program) {
-        (RunKind::Sidecar, Some(program)) => {
-            keep_only_standard_fds_and(program.fd).map_err(fail("close-fds"))?;
-            let flags = if program.script { 0 } else { libc::FD_CLOEXEC };
-            sys::check(unsafe { libc::fcntl(program.fd, libc::F_SETFD, flags) })
-                .map_err(fail("program-fd"))?;
-            exec_pinned(program.fd, &frame.argv, &frame.env)
+    let line = format!("accepted {} {}\n", frame.level.name(), frame.landlock_abi);
+    sys::write_all(READY_FD, line.as_bytes()).map_err(fail("accepted"))?;
+    match (frame.kind, frame.program, program_fd) {
+        (RunKind::Sidecar, Some(program), Some(fd)) => {
+            let kept = if program.script {
+                vec![]
+            } else {
+                vec![fd.as_raw_fd()]
+            };
+            keep_only(&kept).map_err(fail("close-fds"))?;
+            sys::check(unsafe { libc::fcntl(READY_FD, libc::F_SETFD, libc::FD_CLOEXEC) })
+                .map_err(fail("ready-fd"))?;
+            if program.script {
+                std::mem::forget(fd);
+                exec_path(&program.path, &frame.argv, &frame.env)
+            } else {
+                let raw = fd.as_raw_fd();
+                std::mem::forget(fd);
+                exec_fd(raw, &frame.argv, &frame.env)
+            }
         }
-        _ => {
-            sys::close_range(4, u32::MAX, sys::CLOSE_RANGE_UNSHARE).map_err(fail("close-fds"))?;
-            Ok(Entered::Host(HostHandoff {
+        (RunKind::Sidecar, _, _) => Err(Failure {
+            code: "program-missing",
+            error: sys::invalid("a sidecar frame came without its program"),
+        }),
+        (RunKind::Host, _, _) => {
+            keep_only(&[]).map_err(fail("close-fds"))?;
+            Ok(HostHandoff {
                 level: frame.level,
                 landlock_abi: frame.landlock_abi,
                 args: frame.host_args,
-            }))
+                started: StartedSignal { fd: READY_FD },
+            })
         }
     }
 }
 
-fn keep_only_standard_fds_and(fd: RawFd) -> io::Result<()> {
-    if fd <= 3 {
-        return Err(sys::invalid("the program fd sits among the standard fds"));
-    }
-    if fd > 4 {
-        sys::close_range(4, (fd - 1) as u32, sys::CLOSE_RANGE_UNSHARE)?;
-    }
-    sys::close_range((fd + 1) as u32, u32::MAX, 0)
+fn keep_only(extra: &[RawFd]) -> io::Result<()> {
+    let mut kept = vec![0, 1, 2, 3, READY_FD];
+    kept.extend_from_slice(extra);
+    sys::close_all_except(&kept)
 }
 
 fn cstrings(items: &[String]) -> Option<Vec<CString>> {
@@ -173,37 +315,103 @@ fn cstrings(items: &[String]) -> Option<Vec<CString>> {
         .collect()
 }
 
-fn exec_pinned(fd: RawFd, argv: &[String], env: &[String]) -> ! {
-    if let (Some(args), Some(vars)) = (cstrings(argv), cstrings(env)) {
-        let mut arg_pointers: Vec<*const libc::c_char> = args.iter().map(|a| a.as_ptr()).collect();
-        arg_pointers.push(std::ptr::null());
-        let mut env_pointers: Vec<*const libc::c_char> = vars.iter().map(|v| v.as_ptr()).collect();
-        env_pointers.push(std::ptr::null());
-        unsafe {
-            libc::syscall(
-                libc::SYS_execveat,
-                fd,
-                c"".as_ptr(),
-                arg_pointers.as_ptr(),
-                env_pointers.as_ptr(),
-                libc::AT_EMPTY_PATH,
-            )
-        };
-    }
+fn pointers(items: &[CString]) -> Vec<*const libc::c_char> {
+    let mut list: Vec<*const libc::c_char> = items.iter().map(|item| item.as_ptr()).collect();
+    list.push(std::ptr::null());
+    list
+}
+
+fn exec_failed(argv: &[String]) -> ! {
     let error = sys::last_error();
     let name = argv.first().map(String::as_str).unwrap_or("the program");
     let _ = sys::write_all(
         2,
         format!("[ardia] {name} couldn't start: {error}\n").as_bytes(),
     );
+    let _ = sys::write_all(READY_FD, b"error exec\n");
     unsafe { libc::_exit(EXIT_EXEC_FAILED) }
 }
 
-pub fn confine_host(kept_fds: &[RawFd]) -> Result<(), String> {
+fn exec_fd(fd: RawFd, argv: &[String], env: &[String]) -> ! {
+    if let (Some(args), Some(vars)) = (cstrings(argv), cstrings(env)) {
+        let (args, vars) = (pointers(&args), pointers(&vars));
+        sys::check(unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) }).ok();
+        unsafe {
+            libc::syscall(
+                libc::SYS_execveat,
+                fd,
+                c"".as_ptr(),
+                args.as_ptr(),
+                vars.as_ptr(),
+                libc::AT_EMPTY_PATH,
+            )
+        };
+    }
+    exec_failed(argv)
+}
+
+fn exec_path(path: &Path, argv: &[String], env: &[String]) -> ! {
+    if let (Ok(path), Some(args), Some(vars)) = (sys::cstring(path), cstrings(argv), cstrings(env))
+    {
+        let (args, vars) = (pointers(&args), pointers(&vars));
+        unsafe { libc::execve(path.as_ptr(), args.as_ptr(), vars.as_ptr()) };
+    }
+    exec_failed(argv)
+}
+
+fn confine_host_threads(kept_fds: &[RawFd]) -> Result<(), String> {
     sys::close_all_except(kept_fds)
         .map_err(|error| format!("the extra fds couldn't be closed: {error}"))?;
     let program = seccomp::compile(&seccomp::host_final(std::process::id() as i32))
         .map_err(|error| format!("the host filter didn't compile: {error}"))?;
     seccomp::install(&program, true)
         .map_err(|error| format!("the host filter couldn't be installed: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn paths(items: &[&str]) -> Vec<PathBuf> {
+        items.iter().map(PathBuf::from).collect()
+    }
+
+    #[test]
+    fn only_expected_mounts_may_sit_inside_granted_trees() {
+        let points = paths(&[
+            "/",
+            "/usr",
+            "/usr/local",
+            "/proc",
+            "/proc/sys",
+            "/run/ardia/plugin",
+            "/run/ardia/program",
+            "/run/ardia/program/bin/tool",
+            "/run/ardia/plugin/nested",
+        ]);
+        let trees = paths(&["/usr", "/run/ardia/plugin", "/run/ardia/program"]);
+        let expected = paths(&["/run/ardia/program/bin/tool"]);
+        assert_eq!(
+            unexpected_mounts(&points, &trees, &expected),
+            paths(&["/run/ardia/plugin/nested", "/usr/local"])
+        );
+        assert!(unexpected_mounts(&paths(&["/usr", "/proc/sys"]), &trees, &expected).is_empty());
+    }
+
+    #[test]
+    fn the_entry_must_stay_beneath_its_folder_and_filesystem() {
+        let dir = std::env::temp_dir().join(format!("jail-entry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("dist")).unwrap();
+        std::fs::write(dir.join("dist/index.js"), "x").unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", dir.join("dist/link.js")).unwrap();
+        let root = sys::open_dir(&dir).unwrap();
+        assert!(open_beneath(root.as_raw_fd(), "dist/index.js").is_ok());
+        assert!(open_beneath(root.as_raw_fd(), "dist/link.js").is_err());
+        assert!(open_beneath(root.as_raw_fd(), "../etc/passwd").is_err());
+        assert!(open_beneath(root.as_raw_fd(), "dist").is_err());
+        let proc_root = sys::open_dir(Path::new("/")).unwrap();
+        assert!(open_beneath(proc_root.as_raw_fd(), "proc/self/status").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

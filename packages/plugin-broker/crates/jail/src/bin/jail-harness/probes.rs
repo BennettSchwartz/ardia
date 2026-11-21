@@ -198,6 +198,55 @@ fn try_rename(from: &str, to: &str) -> (bool, String) {
     )
 }
 
+fn same_times(info: &libc::stat) -> [libc::timespec; 2] {
+    [
+        libc::timespec {
+            tv_sec: info.st_atime,
+            tv_nsec: info.st_atime_nsec,
+        },
+        libc::timespec {
+            tv_sec: info.st_mtime,
+            tv_nsec: info.st_mtime_nsec,
+        },
+    ]
+}
+
+fn try_metadata() -> (bool, String) {
+    let mut attempts = Vec::new();
+    let exe = c("/proc/self/exe");
+    let mut info: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::stat(exe.as_ptr(), &mut info) } == 0 {
+        let chmod = unsafe { libc::chmod(exe.as_ptr(), info.st_mode & 0o7777) };
+        let chmod_errno = if chmod == 0 { 0 } else { errno() };
+        let times = same_times(&info);
+        let touch = unsafe { libc::utimensat(libc::AT_FDCWD, exe.as_ptr(), times.as_ptr(), 0) };
+        let touch_errno = if touch == 0 { 0 } else { errno() };
+        attempts.push((chmod == 0, format!("chmod(exe) errno={chmod_errno}")));
+        attempts.push((touch == 0, format!("utimensat(exe) errno={touch_errno}")));
+    } else {
+        attempts.push((false, format!("stat(exe) errno={}", errno())));
+    }
+    let mut files = 0;
+    for fd in 0..1024 {
+        let mut info: libc::stat = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstat(fd, &mut info) } != 0
+            || info.st_mode & libc::S_IFMT != libc::S_IFREG
+        {
+            continue;
+        }
+        files += 1;
+        let chmod = unsafe { libc::fchmod(fd, info.st_mode & 0o7777) };
+        let chmod_errno = if chmod == 0 { 0 } else { errno() };
+        let times = same_times(&info);
+        let touch = unsafe { libc::futimens(fd, times.as_ptr()) };
+        let touch_errno = if touch == 0 { 0 } else { errno() };
+        attempts.push((chmod == 0, format!("fchmod({fd}) errno={chmod_errno}")));
+        attempts.push((touch == 0, format!("futimens({fd}) errno={touch_errno}")));
+    }
+    attempts.push((false, format!("regular-file fds={files}")));
+    any(&attempts)
+}
+
 pub struct Context {
     pub level: String,
     pub kind: String,
@@ -552,6 +601,9 @@ pub fn run_all(report: &mut Report, context: &Context) {
         bpf >= 0,
         format!("errno={}", if bpf >= 0 { 0 } else { errno() }),
     );
+
+    let (escaped, detail) = try_metadata();
+    report.record("exe-metadata", escaped, detail);
 
     let mut pipe = [-1; 2];
     let piped = unsafe { libc::pipe2(pipe.as_mut_ptr(), libc::O_CLOEXEC) } == 0;

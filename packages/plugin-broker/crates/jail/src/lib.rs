@@ -20,7 +20,7 @@ pub mod spawn;
 pub mod supervise;
 pub mod sys;
 
-pub use exec::{confine_host, exec_main, ExecOutcome, HostHandoff};
+pub use exec::{exec_main, ExecOutcome, HostHandoff, StartedSignal};
 pub use supervise::{
     Capabilities, ExitReport, LaunchObserver, Launched, PolicyDelivery, Program, Quiet, RunId,
     SpawnError, SpawnRequest, Supervisor, SupervisorConfig, Work,

@@ -18,6 +18,35 @@ fn harness() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_jail-harness")))
 }
 
+type Stamp = (u32, i64, i64, i64, i64);
+
+fn stamp(path: &Path) -> Stamp {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata(path).unwrap();
+    (
+        meta.mode(),
+        meta.mtime(),
+        meta.mtime_nsec(),
+        meta.ctime(),
+        meta.ctime_nsec(),
+    )
+}
+
+fn required() -> Option<String> {
+    std::env::var("ARDIA_JAIL_REQUIRED")
+        .ok()
+        .filter(|v| !v.is_empty())
+}
+
+fn skip(test: &str, why: &str, needs: &str) {
+    if let Some(level) = required() {
+        if level == "full" || needs == "host" {
+            panic!("{test}: ARDIA_JAIL_REQUIRED={level} but {why}");
+        }
+    }
+    eprintln!("SUMMARY {test} not-applicable ({why})");
+}
+
 fn harness_is_static() -> bool {
     let file = std::fs::File::open(harness()).unwrap();
     jail::elf::needs_no_loader(std::os::fd::AsRawFd::as_raw_fd(&file)).unwrap()
@@ -46,6 +75,7 @@ struct World {
     victim_dir: PathBuf,
     victim_file: PathBuf,
     program: PathBuf,
+    program_stamp: Stamp,
     canary: Child,
     abstract_name: String,
     _listeners: Vec<UnixListener>,
@@ -90,7 +120,9 @@ impl World {
         let abstract_name = format!("ardia-x11-{}-{test}", std::process::id());
         let abstract_listener = abstract_listen(&abstract_name);
         let canary = Command::new("sleep").arg("600").spawn().unwrap();
+        let program_stamp = stamp(&program);
         World {
+            program_stamp,
             root,
             name,
             home,
@@ -160,6 +192,11 @@ impl World {
     }
 
     fn check_untouched(&self) {
+        assert_eq!(
+            stamp(&self.program),
+            self.program_stamp,
+            "the program file's mode or times changed on the host"
+        );
         assert_eq!(
             std::fs::read_to_string(&self.victim_file).unwrap(),
             "victim contents"
@@ -367,6 +404,9 @@ fn summarize(test: &str, lines: &[String]) -> (u32, u32) {
 }
 
 fn expect_landlock_refusal(test: &str, lines: &[String]) {
+    if let Some(level) = required() {
+        panic!("{test}: ARDIA_JAIL_REQUIRED={level} but this kernel has no Landlock: {lines:#?}");
+    }
     eprintln!("SUMMARY {test} refused-without-landlock");
     for line in lines {
         eprintln!("  {line}");
@@ -426,6 +466,7 @@ fn full_sidecar_escape() {
     match caps.abi {
         None => expect_landlock_refusal("full_sidecar_escape", &lines),
         Some(abi) if abi < 2 || !caps.full => {
+            skip("full_sidecar_escape", "sidecars aren't available", "full");
             summarize("full_sidecar_escape", &lines);
             assert!(
                 lines
@@ -465,6 +506,11 @@ fn full_sidecar_escape_on_landlock_abi_2() {
     match caps.abi {
         None => expect_landlock_refusal("full_sidecar_escape_on_landlock_abi_2", &lines),
         Some(abi) if abi < 2 || !caps.full => {
+            skip(
+                "full_sidecar_escape_on_landlock_abi_2",
+                "sidecars aren't available",
+                "full",
+            );
             summarize("full_sidecar_escape_on_landlock_abi_2", &lines);
             assert!(lines.iter().any(|l| l.starts_with("REFUSED")));
         }
@@ -503,6 +549,7 @@ fn full_host_escape() {
     match caps.abi {
         None => expect_landlock_refusal("full_host_escape", &lines),
         Some(_) if !caps.full => {
+            skip("full_host_escape", "full isolation isn't available", "full");
             summarize("full_host_escape", &lines);
             assert!(lines.iter().any(|l| l.contains("level=hostReduced")));
         }
@@ -961,6 +1008,9 @@ fn build_preload(world: &World) -> Option<PathBuf> {
     )
     .unwrap();
     let output = world.plugin.join("preload.so");
+    if let Some(prebuilt) = std::env::var_os("JAIL_PRELOAD_SO") {
+        return std::fs::copy(prebuilt, &output).ok().map(|_| output);
+    }
     let built = Command::new("cc")
         .args(["-shared", "-fPIC", "-o"])
         .arg(&output)
@@ -975,7 +1025,7 @@ fn build_preload(world: &World) -> Option<PathBuf> {
 fn a_loader_variable_in_the_request_never_reaches_the_launcher() {
     let world = World::new("preload");
     let Some(_library) = build_preload(&world) else {
-        eprintln!("SUMMARY preload not-applicable (no C compiler)");
+        skip("preload", "no C compiler and no JAIL_PRELOAD_SO", "host");
         return;
     };
     let mut host = world.sim_args("host", "probe");
@@ -996,7 +1046,7 @@ fn a_loader_variable_in_the_request_never_reaches_the_launcher() {
     sidecar.push(format!("preload={}/preload.so", jail::PLUGIN_IN_JAIL));
     let lines = run_to_end(&world, sidecar);
     if !full_sidecars_available(&lines) {
-        eprintln!("SUMMARY preload/sidecar not-applicable (no full isolation)");
+        skip("preload/sidecar", "sidecars aren't available", "full");
         return;
     }
     let preloaded: Vec<&String> = lines.iter().filter(|l| l.contains("PRELOADED")).collect();
@@ -1060,20 +1110,23 @@ fn a_program_swapped_after_verification_still_runs_the_verified_inode() {
     args.push("swap_program=1".into());
     let lines = run_to_end(&world, args);
     if !full_sidecars_available(&lines) {
-        eprintln!("SUMMARY program_swap not-applicable");
+        skip("program_swap", "sidecars aren't available", "full");
         assert!(lines.iter().any(|l| l.starts_with("REFUSED")));
         return;
     }
     summarize("program_swap", &lines);
     assert!(lines.iter().any(|l| l == "SWAPPED-PROGRAM"), "{lines:#?}");
     assert!(
-        lines.iter().any(|l| l.starts_with("LINE MARKER")),
-        "{lines:#?}"
-    );
-    assert!(
         !lines.iter().any(|l| l.contains("DECOY")),
         "the swapped-in program ran: {lines:#?}"
     );
+    let refused = lines
+        .iter()
+        .find(|l| l.starts_with("REFUSED") || l.starts_with("SETUP-FAILED"))
+        .cloned();
+    let verified_ran = lines.iter().any(|l| l.starts_with("LINE MARKER"));
+    eprintln!("SUMMARY program_swap verified_ran={verified_ran} refused={refused:?}");
+    assert!(verified_ran || refused.is_some(), "{lines:#?}");
     let on_disk = std::fs::read_to_string(&world.program).unwrap_or_default();
     assert!(on_disk.contains("DECOY"), "the swap didn't happen on disk");
 }
@@ -1084,7 +1137,7 @@ fn a_script_program_runs_from_its_pinned_fd() {
     let script = world.root.join("progs/script-pkg/bin/hello.sh");
     write(
         &script,
-        "#!/bin/sh\necho \"SCRIPT-RAN args=$1 home=$HOME\" >&3\necho DONE >&3\n",
+        "#!/bin/sh\nchmod 755 \"$0\" 2>/dev/null && echo \"META-OK chmod $0\" >&3\ntouch -r \"$0\" \"$0\" 2>/dev/null && echo \"META-OK touch $0\" >&3\nfor f in /proc/self/fd/* /proc/$$/fd/*; do [ -f \"$f\" ] && chmod 755 \"$f\" 2>/dev/null && echo \"META-OK chmod $f\" >&3; done\necho \"SCRIPT-RAN args=$1 home=$HOME self=$0\" >&3\necho DONE >&3\n",
     );
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let mut args: Vec<String> = world
@@ -1094,11 +1147,18 @@ fn a_script_program_runs_from_its_pinned_fd() {
         .collect();
     args.push(format!("program={}", script.display()));
     args.push("probe=from-script".into());
+    let before = stamp(&script);
     let lines = run_to_end(&world, args);
     if !full_sidecars_available(&lines) {
-        eprintln!("SUMMARY script not-applicable");
+        skip("script", "sidecars aren't available", "full");
         return;
     }
+    assert_eq!(
+        stamp(&script),
+        before,
+        "the script's mode or times changed on the host"
+    );
+    assert!(!lines.iter().any(|l| l.contains("META-OK")), "{lines:#?}");
     summarize("script_program", &lines);
     let ran = lines
         .iter()
@@ -1106,6 +1166,251 @@ fn a_script_program_runs_from_its_pinned_fd() {
         .unwrap_or_else(|| panic!("{lines:#?}"));
     assert!(ran.contains("args=probe"), "{ran}");
     assert!(ran.contains("home=/run/ardia/data/home"), "{ran}");
+    assert!(
+        ran.contains("self=/run/ardia/program/bin/hello.sh"),
+        "{ran}"
+    );
+}
+
+const SIBLING_LIB: &str =
+    "#include <unistd.h>\nvoid sib_hello(void) { write(3, \"SIBLING-OK\\n\", 11); }\n";
+
+const SIBLING_MAIN: &str = r#"#define _GNU_SOURCE
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+void sib_hello(void);
+static void say(const char *s) { write(3, s, strlen(s)); }
+int main(void) {
+  char line[600];
+  struct stat st;
+  sib_hello();
+  if (stat("/proc/self/exe", &st) == 0) {
+    struct timespec t[2] = {st.st_atim, st.st_mtim};
+    if (chmod("/proc/self/exe", st.st_mode & 07777) == 0) say("META-OK chmod exe\n");
+    if (utimensat(AT_FDCWD, "/proc/self/exe", t, 0) == 0) say("META-OK utimensat exe\n");
+  }
+  for (int fd = 0; fd < 1024; fd++) {
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+    struct timespec t[2] = {st.st_atim, st.st_mtim};
+    if (fchmod(fd, st.st_mode & 07777) == 0) { snprintf(line, sizeof line, "META-OK fchmod %d\n", fd); say(line); }
+    if (futimens(fd, t) == 0) { snprintf(line, sizeof line, "META-OK futimens %d\n", fd); say(line); }
+  }
+  char exe[512] = {0};
+  if (readlink("/proc/self/exe", exe, sizeof exe - 1) > 0) { snprintf(line, sizeof line, "EXE %s\n", exe); say(line); }
+  say("DONE\n");
+  return 0;
+}
+"#;
+
+fn sibling_package(world: &World) -> Option<PathBuf> {
+    let package = world.root.join("progs/sib-pkg");
+    std::fs::create_dir_all(package.join("bin")).unwrap();
+    std::fs::create_dir_all(package.join("lib")).unwrap();
+    if let Some(prebuilt) = std::env::var_os("JAIL_SIBLING_DIR").map(PathBuf::from) {
+        std::fs::copy(prebuilt.join("bin/sibprog"), package.join("bin/sibprog")).ok()?;
+        std::fs::copy(
+            prebuilt.join("lib/libsib.so"),
+            package.join("lib/libsib.so"),
+        )
+        .ok()?;
+        return Some(package);
+    }
+    std::fs::write(world.root.join("sib.c"), SIBLING_LIB).unwrap();
+    std::fs::write(world.root.join("main.c"), SIBLING_MAIN).unwrap();
+    let lib = Command::new("cc")
+        .args(["-shared", "-fPIC", "-o"])
+        .arg(package.join("lib/libsib.so"))
+        .arg(world.root.join("sib.c"))
+        .status()
+        .ok()?
+        .success();
+    let main = lib
+        && Command::new("cc")
+            .arg("-o")
+            .arg(package.join("bin/sibprog"))
+            .arg(world.root.join("main.c"))
+            .arg(format!("-L{}", package.join("lib").display()))
+            .args(["-lsib", "-Wl,-rpath,$ORIGIN/../lib"])
+            .status()
+            .ok()?
+            .success();
+    main.then_some(package)
+}
+
+#[test]
+fn an_elf_with_a_sibling_library_resolves_origin_inside_the_jail() {
+    let world = World::new("sibling");
+    let Some(package) = sibling_package(&world) else {
+        skip("sibling", "no C compiler and no JAIL_SIBLING_DIR", "host");
+        return;
+    };
+    let program = package.join("bin/sibprog");
+    let library = package.join("lib/libsib.so");
+    let (program_before, library_before) = (stamp(&program), stamp(&library));
+    let mut args: Vec<String> = world
+        .sim_args("sidecar", "probe")
+        .into_iter()
+        .filter(|a| !a.starts_with("program="))
+        .collect();
+    args.push(format!("program={}", program.display()));
+    args.push("probe=sibling".into());
+    let lines = run_to_end(&world, args);
+    if !full_sidecars_available(&lines) {
+        skip("sibling", "sidecars aren't available", "full");
+        return;
+    }
+    summarize("sibling", &lines);
+    assert!(lines.iter().any(|l| l == "LINE SIBLING-OK"), "{lines:#?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l == "LINE EXE /run/ardia/program/bin/sibprog"),
+        "{lines:#?}"
+    );
+    assert!(!lines.iter().any(|l| l.contains("META-OK")), "{lines:#?}");
+    assert_eq!(
+        stamp(&program),
+        program_before,
+        "the program's metadata changed on the host"
+    );
+    assert_eq!(
+        stamp(&library),
+        library_before,
+        "the library's metadata changed on the host"
+    );
+}
+
+fn userns_wrapper_works() -> bool {
+    Command::new("unshare")
+        .args(["--user", "--map-root-user", "--mount", "true"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[test]
+fn a_submount_under_a_system_root_is_refused_inside_the_jail() {
+    let world = World::new("usr-submount");
+    if !userns_wrapper_works() {
+        skip(
+            "usr_submount",
+            "the test can't make a user namespace to mount in",
+            "tool",
+        );
+        return;
+    }
+    let script = "mount -t tmpfs extra /usr/local && exec \"$@\"";
+    let wrap = [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--propagation",
+        "private",
+        "sh",
+        "-c",
+        script,
+        "sh",
+    ];
+    for kind in ["host", "sidecar"] {
+        let mut args = world.sim_args(kind, "probe");
+        args.push("host_mode=probe".into());
+        args.push("probe=escape".into());
+        let lines = Sim::start(&world, args, &wrap).finish(Duration::from_secs(30));
+        let caps = caps_from(&lines);
+        if kind == "sidecar" && caps.full && !full_sidecars_available(&lines) {
+            skip(
+                "usr_submount/sidecar",
+                "sidecars need Landlock ABI 2",
+                "full",
+            );
+            continue;
+        }
+        if !caps.full {
+            skip(
+                "usr_submount",
+                "full isolation isn't available inside the test's namespace",
+                "full",
+            );
+            return;
+        }
+        let failed = lines
+            .iter()
+            .find(|l| l.starts_with("SETUP-FAILED"))
+            .cloned()
+            .unwrap_or_default();
+        eprintln!("SUMMARY usr_submount/{kind} {failed}");
+        assert!(
+            failed.contains("unexpected-mount") || failed.contains("unexpected filesystem"),
+            "{lines:#?}"
+        );
+        assert!(failed.contains("/usr/local"), "{failed}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("LINE RESULT")),
+            "plugin code ran: {lines:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_submount_that_appears_after_the_source_check_is_refused_inside_the_jail() {
+    let world = World::new("late-submount");
+    if !userns_wrapper_works() {
+        skip(
+            "late_submount",
+            "the test can't make a user namespace to mount in",
+            "tool",
+        );
+        return;
+    }
+    let wrap = [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--propagation",
+        "shared",
+    ];
+    for level in ["full", "reduced"] {
+        let late = world.plugin.join(format!("late-{level}"));
+        let mut args = world.sim_args("host", "probe");
+        args.push("host_mode=probe".into());
+        args.push(format!("mount_after_record={}", late.display()));
+        if level == "reduced" {
+            args.push("level=reduced".into());
+        }
+        let lines = Sim::start(&world, args, &wrap).finish(Duration::from_secs(30));
+        let caps = caps_from(&lines);
+        if level == "full" && !caps.full {
+            skip(
+                "late_submount/full",
+                "full isolation isn't available inside the test's namespace",
+                "full",
+            );
+            continue;
+        }
+        let failed = lines
+            .iter()
+            .find(|l| l.starts_with("SETUP-FAILED"))
+            .cloned()
+            .unwrap_or_default();
+        eprintln!("SUMMARY late_submount/{level} {failed}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("MOUNTED") && l.contains("result=0")),
+            "{lines:#?}"
+        );
+        assert!(failed.contains("unexpected filesystem"), "{lines:#?}");
+        assert!(failed.contains(&format!("late-{level}")), "{failed}");
+        assert!(
+            !lines.iter().any(|l| l.starts_with("LINE RESULT")),
+            "plugin code ran: {lines:#?}"
+        );
+    }
 }
 
 #[test]

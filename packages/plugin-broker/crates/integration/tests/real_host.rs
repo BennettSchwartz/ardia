@@ -1,6 +1,6 @@
 #![cfg(target_os = "linux")]
 
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::{Duration, Instant};
@@ -16,12 +16,115 @@ fn launcher() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ardia-plugins")))
 }
 
+const HOST_PROBES: &[&str] = &[
+    "socket-unix-stream",
+    "socket-unix-dgram",
+    "socket-netlink",
+    "socket-inet-tcp",
+    "socket-inet-udp",
+    "socket-inet6-tcp",
+    "socket-packet",
+    "socketpair-unix-dgram",
+    "connect-control-socket",
+    "connect-session-bus",
+    "connect-abstract-x11",
+    "read-home",
+    "list-home",
+    "read-other-plugin-data",
+    "read-browser-proc",
+    "signal-outside",
+    "ptrace-outside",
+    "write-outside",
+    "truncate-path-outside",
+    "rename-across-roots",
+    "inherited-fd",
+    "io-uring",
+    "tiocsti",
+    "unshare-user-namespace",
+    "keyctl",
+    "bpf",
+    "exe-metadata",
+    "fcntl-setown-outside",
+    "fork",
+    "execve-permitted",
+    "open-outside-plugin-folder",
+    "open-after-confine",
+    "mmap-exec",
+];
+
+const PINNED_BWRAP: &str = "bubblewrap 0.13.1";
+
+fn required() -> bool {
+    std::env::var("ARDIA_JAIL_REQUIRED")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+}
+
+fn skip_or_fail(test: &str, why: String) {
+    assert!(!required(), "{test}: ARDIA_JAIL_REQUIRED is set but {why}");
+    eprintln!("SUMMARY {test} not-applicable ({why})");
+}
+
+fn committed_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../host/tests/fixtures/sdk-bench")
+}
+
+fn build_fixture() -> PathBuf {
+    let source = committed_fixture();
+    let bundle = source.join("dist/index.js");
+    let committed = std::fs::read(&bundle).unwrap();
+    let status = Command::new("node")
+        .arg(source.join("build.mjs"))
+        .status()
+        .unwrap_or_else(|error| {
+            panic!("required mode builds sdk-bench with node build.mjs: {error}")
+        });
+    let built = std::fs::read(&bundle).unwrap();
+    std::fs::write(&bundle, &committed).unwrap();
+    assert!(status.success(), "node build.mjs failed for sdk-bench");
+    assert!(built.len() > 1000, "the fresh sdk-bench bundle is empty");
+    let out = std::env::temp_dir().join(format!("ri-fixture-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    copy_tree(&source, &out);
+    std::fs::write(out.join("dist/index.js"), &built).unwrap();
+    eprintln!(
+        "FIXTURE sdk-bench rebuilt: {} bytes, identical to the committed bundle: {}",
+        built.len(),
+        built == committed
+    );
+    out
+}
+
 fn fixture() -> PathBuf {
-    std::env::var_os("JAIL_IT_FIXTURE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../host/tests/fixtures/sdk-bench")
-        })
+    static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    if let Some(path) = std::env::var_os("JAIL_IT_FIXTURE") {
+        return PathBuf::from(path);
+    }
+    if !required() {
+        return committed_fixture();
+    }
+    BUILT.get_or_init(build_fixture).clone()
+}
+
+fn pinned_bwrap() -> Option<OwnedFd> {
+    let Some(path) = std::env::var_os("ARDIA_BWRAP") else {
+        assert!(
+            !required(),
+            "required mode needs ARDIA_BWRAP pointing at the pinned bwrap"
+        );
+        return None;
+    };
+    let fd = open(Path::new(&path), libc::O_RDONLY);
+    if required() {
+        let version = Command::new(&path).arg("--version").output().unwrap();
+        let version = String::from_utf8_lossy(&version.stdout).trim().to_string();
+        assert_eq!(version, PINNED_BWRAP, "ARDIA_BWRAP isn't the pinned build");
+        assert!(
+            jail::elf::needs_no_loader(fd.as_raw_fd()).unwrap(),
+            "the pinned bwrap must be static"
+        );
+    }
+    Some(fd)
 }
 
 fn open(path: &Path, flags: i32) -> OwnedFd {
@@ -225,24 +328,11 @@ fn status_field(pid: i32, name: &str) -> String {
         .unwrap_or_default()
 }
 
-fn drain(fd: RawFd) -> String {
-    let _ = jail::sys::set_nonblocking(fd);
-    let mut data = Vec::new();
-    let mut chunk = [0u8; 8192];
-    while let Ok(count) = jail::sys::read_some(fd, &mut chunk) {
-        if count == 0 {
-            break;
-        }
-        data.extend_from_slice(&chunk[..count]);
-    }
-    String::from_utf8_lossy(&data).into_owned()
-}
-
 fn run_sdk_bench(level: &str) {
     let world = World::new(level);
     let launcher_fd = open(&launcher(), libc::O_RDONLY);
     let static_launcher = jail::elf::needs_no_loader(launcher_fd.as_raw_fd()).unwrap();
-    let bwrap = std::env::var_os("ARDIA_BWRAP").map(|path| open(Path::new(&path), libc::O_PATH));
+    let bwrap = pinned_bwrap();
     let mut config = SupervisorConfig::new(launcher_fd, bwrap);
     config.require_static_launcher = static_launcher;
     config.allow_full = level == "full";
@@ -252,11 +342,14 @@ fn run_sdk_bench(level: &str) {
     let caps = supervisor.capabilities().clone();
     let test = format!("real_host/{level}");
     let Ok(_abi) = caps.landlock_abi else {
-        eprintln!("SUMMARY {test} refused-without-landlock");
+        skip_or_fail(&test, "this kernel has no Landlock".into());
         return;
     };
     if level == "full" && caps.full_isolation.is_err() {
-        eprintln!("SUMMARY {test} not-applicable: {:?}", caps.full_isolation);
+        skip_or_fail(
+            &test,
+            format!("full isolation is unavailable: {:?}", caps.full_isolation),
+        );
         return;
     }
     let mut pair = [0; 2];
@@ -296,6 +389,18 @@ fn run_sdk_bench(level: &str) {
     };
     assert_eq!(launched.level, expected);
     let main = launched.main_pid.expect("the host's pid");
+    let log_fd = launched.log;
+    let drainer = std::thread::spawn(move || {
+        let mut data = Vec::new();
+        let mut chunk = [0u8; 8192];
+        while let Ok(count) = jail::sys::read_some(log_fd.as_raw_fd(), &mut chunk) {
+            if count == 0 {
+                break;
+            }
+            data.extend_from_slice(&chunk[..count]);
+        }
+        String::from_utf8_lossy(&data).into_owned()
+    });
     let mut channel = Channel {
         fd: ours,
         pending: Vec::new(),
@@ -355,7 +460,7 @@ fn run_sdk_bench(level: &str) {
     let ended_fd = supervisor.ended_fd(launched.id).unwrap();
     let ended = jail::sys::wait_readable(ended_fd, Instant::now() + WAIT).unwrap_or(false);
     let exit = supervisor.finish(launched.id).unwrap();
-    let log = drain(launched.log.as_raw_fd());
+    let log = drainer.join().expect("the log drain thread");
     let results: Vec<&str> = log.lines().filter(|l| l.starts_with("RESULT ")).collect();
     let escaped: Vec<&&str> = results
         .iter()
@@ -383,10 +488,22 @@ fn run_sdk_bench(level: &str) {
         "{log}"
     );
     assert!(log.lines().any(|l| l.starts_with("DONE ")), "{log}");
+    let names: Vec<&str> = results
+        .iter()
+        .filter_map(|line| line.split_whitespace().nth(1))
+        .collect();
+    let mut sorted_names = names.clone();
+    sorted_names.sort_unstable();
+    let mut expected: Vec<&str> = HOST_PROBES.to_vec();
+    expected.sort_unstable();
+    assert_eq!(
+        sorted_names, expected,
+        "{test}: the probe report isn't complete\n{log}"
+    );
+    let done = format!("DONE denied={} escaped=0", HOST_PROBES.len());
     assert!(
-        results.len() >= 30,
-        "{test}: only {} probes ran\n{log}",
-        results.len()
+        log.lines().any(|l| l == done),
+        "{test}: expected {done}\n{log}"
     );
     assert!(escaped.is_empty(), "{test}: escaped {escaped:?}");
     assert_eq!(no_new_privs, "1");

@@ -36,11 +36,16 @@ pub struct Frame {
     pub argv: Vec<String>,
     pub env: Vec<String>,
     pub host_args: Vec<String>,
+    pub entry: Option<String>,
+    pub mount_checks: Vec<PathBuf>,
+    pub expected_mounts: Vec<PathBuf>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PinnedProgram {
-    pub fd: RawFd,
+    pub path: PathBuf,
+    pub device: u64,
+    pub inode: u64,
     pub script: bool,
 }
 
@@ -75,6 +80,13 @@ impl Writer {
             }
         }
     }
+    fn paths(&mut self, values: &[PathBuf]) {
+        self.u32(values.len() as u32);
+        for value in values {
+            self.bytes(value.as_os_str().as_bytes());
+        }
+    }
+
     fn strings(&mut self, values: &[String]) {
         self.u32(values.len() as u32);
         for value in values {
@@ -130,6 +142,14 @@ impl<'a> Reader<'a> {
     fn string(&mut self) -> io::Result<String> {
         String::from_utf8(self.bytes()?).map_err(|_| invalid("a policy string isn't UTF-8"))
     }
+    fn paths(&mut self) -> io::Result<Vec<PathBuf>> {
+        let count = self.u32()? as usize;
+        if count > 256 {
+            return Err(invalid("the policy frame lists too many paths"));
+        }
+        (0..count).map(|_| self.path()).collect()
+    }
+
     fn strings(&mut self) -> io::Result<Vec<String>> {
         let count = self.u32()? as usize;
         if count > 4096 {
@@ -165,13 +185,24 @@ impl Frame {
         match &self.program {
             Some(program) => {
                 out.u8(if program.script { 2 } else { 1 });
-                out.i32(program.fd);
+                out.bytes(program.path.as_os_str().as_bytes());
+                out.u64(program.device);
+                out.u64(program.inode);
             }
             None => out.u8(0),
         }
         out.strings(&self.argv);
         out.strings(&self.env);
         out.strings(&self.host_args);
+        match &self.entry {
+            Some(entry) => {
+                out.u8(1);
+                out.bytes(entry.as_bytes());
+            }
+            None => out.u8(0),
+        }
+        out.paths(&self.mount_checks);
+        out.paths(&self.expected_mounts);
         out.0
     }
 
@@ -211,7 +242,9 @@ impl Frame {
         let program = match input.u8()? {
             0 => None,
             flag @ (1 | 2) => Some(PinnedProgram {
-                fd: input.i32()?,
+                path: input.path()?,
+                device: input.u64()?,
+                inode: input.u64()?,
                 script: flag == 2,
             }),
             _ => return Err(invalid("the policy frame's program flag is wrong")),
@@ -219,6 +252,22 @@ impl Frame {
         let argv = input.strings()?;
         let env = input.strings()?;
         let host_args = input.strings()?;
+        let entry = match input.u8()? {
+            0 => None,
+            1 => Some(input.string()?),
+            _ => return Err(invalid("the policy frame's entry flag is wrong")),
+        };
+        let mount_checks = input.paths()?;
+        let expected_mounts = input.paths()?;
+        if entry
+            .as_deref()
+            .map(|e| e.is_empty() || e.starts_with('/') || e.split('/').any(|p| p == ".."))
+            .unwrap_or(false)
+        {
+            return Err(invalid(
+                "the entry isn't a plain path inside the plugin folder",
+            ));
+        }
         if env
             .iter()
             .any(|entry| !entry.contains('=') || entry.starts_with('='))
@@ -228,9 +277,7 @@ impl Frame {
         if kind == RunKind::Host && !env.is_empty() {
             return Err(invalid("the extension host takes no environment"));
         }
-        if matches!(program, Some(p) if p.fd < 3) {
-            return Err(invalid("the program fd collides with the standard fds"));
-        }
+
         if input.at != data.len() {
             return Err(invalid("the policy frame has trailing bytes"));
         }
@@ -258,6 +305,9 @@ impl Frame {
             argv,
             env,
             host_args,
+            entry,
+            mount_checks,
+            expected_mounts,
         })
     }
 }
@@ -286,12 +336,17 @@ mod tests {
             ],
             cwd: Target::Path("/plugins/x".into()),
             program: Some(PinnedProgram {
-                fd: 13,
+                path: "/run/ardia/program/bin/x".into(),
+                device: 2049,
+                inode: 77,
                 script: true,
             }),
             argv: vec!["x".into(), "--serve".into()],
             env: vec!["HOME=/run/ardia/data/home".into()],
             host_args: Vec::new(),
+            entry: None,
+            mount_checks: vec!["/usr".into(), "/run/ardia/program".into()],
+            expected_mounts: vec!["/run/ardia/program/bin/x".into()],
         }
     }
 

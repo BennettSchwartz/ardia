@@ -311,3 +311,39 @@ fn a_flood_of_small_lines_is_delivered_in_order_across_bounded_reads() {
     host.send_raw(text.as_bytes()).unwrap();
     assert_eq!(host.line(WAIT).as_deref(), Some("all 20000"));
 }
+
+#[test]
+fn fetches_at_the_timer_cap_reject_and_release_their_slots() {
+    let source = "(async () => {\nconst live = [];\nfor (let i = 0; i < 10000; i++) live.push(setTimeout(() => {}, 1e9));\nconst first = await Promise.allSettled(Array.from({ length: 20 }, (_, i) => fetch('https://example.com/' + i)));\nconst rejected = first.filter((r) => r.status === 'rejected').map((r) => r.reason.name + ': ' + r.reason.message);\nlet thrown = '';\ntry { setTimeout(() => {}, 1); } catch (e) { thrown = e.name; }\nfor (const id of live) clearTimeout(id);\nconst later = await Promise.all(Array.from({ length: 20 }, (_, i) => fetch('https://example.com/later/' + i).then((r) => r.text())));\n__ardiaBridge.send(JSON.stringify({ rejected, thrown, later }));\n})();\n";
+    let folder = scratch_plugin("fetch-at-cap", source);
+    let mut host = Host::spawn(&folder, "main.js", &[]);
+    let mut fetched = Vec::new();
+    let report = loop {
+        let message = host.expect(WAIT, "a fetch or the report");
+        if message["method"] == "net.fetch" {
+            let url = message["params"]["url"].as_str().unwrap().to_string();
+            host.send(&json!({ "id": message["id"], "result": { "ok": true, "status": 200, "statusText": "OK", "url": url, "headers": {}, "body": format!("body of {url}") } }));
+            fetched.push(url);
+            continue;
+        }
+        break message;
+    };
+    let rejected = report["rejected"].as_array().unwrap();
+    assert_eq!(rejected.len(), 20, "{report}");
+    assert!(rejected.iter().all(|r| r == "TypeError: a plugin can have at most 10000 timers waiting"), "{report}");
+    assert_eq!(report["thrown"], "RangeError");
+    assert_eq!(fetched.len(), 20, "no refused fetch reached Ardia: {fetched:?}");
+    assert!(fetched.iter().all(|url| url.contains("/later/")), "{fetched:?}");
+    let later = report["later"].as_array().unwrap();
+    assert_eq!(later.len(), 20);
+    assert_eq!(later[19], "body of https://example.com/later/19");
+}
+
+#[test]
+fn clear_timer_coerces_its_argument_once() {
+    let source = "let calls = 0;\nconst timeout = setTimeout(() => __ardiaBridge.send('timeout fired'), 20);\nconst interval = setInterval(() => __ardiaBridge.send('interval fired'), 20);\nclearTimeout({ valueOf() { calls++; return timeout; } });\nconst afterTimeout = calls;\nclearInterval({ valueOf() { calls++; return interval; } });\nsetTimeout(() => __ardiaBridge.send(JSON.stringify({ afterTimeout, calls })), 80);\n";
+    let folder = scratch_plugin("coerce-once", source);
+    let mut host = Host::spawn(&folder, "main.js", &[]);
+    let report = host.expect(WAIT, "the coercion report");
+    assert_eq!(report, json!({ "afterTimeout": 1, "calls": 2 }));
+}

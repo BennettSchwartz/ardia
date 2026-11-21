@@ -186,6 +186,7 @@ impl Confined {
         let loaded = engine.eval_global(&source, &filename);
         drop(source);
         let failures = engine.drain_jobs();
+        engine.end_turn_state();
         let failed_at_start = loaded.as_ref().err().map(|thrown| (thrown.uncatchable, thrown.stack_overflow));
         let stopped = report(&engine, loaded.err(), failures);
         engine.governor().end_turn();
@@ -213,6 +214,7 @@ fn turn<F: FnOnce(&mut Engine) -> Result<(), Thrown>>(engine: &mut Engine, work:
     engine.governor().begin_turn();
     let outcome = work(engine);
     let failures = engine.drain_jobs();
+    engine.end_turn_state();
     let stopped = report(engine, outcome.err(), failures);
     engine.governor().end_turn();
     stopped

@@ -18,6 +18,7 @@ pub struct HostState {
     timer_handler: q::JSValue,
     early_lines: Vec<String>,
     refused: Option<u64>,
+    refuse_next_send: bool,
 }
 
 pub struct Thrown {
@@ -217,7 +218,11 @@ unsafe extern "C" fn native_refused(ctx: *mut q::JSContext, _this: q::JSValue, a
 
 unsafe extern "C" fn native_send(ctx: *mut q::JSContext, _this: q::JSValue, argc: c_int, argv: *mut q::JSValue) -> q::JSValue {
     let Some(line) = string_of(ctx, arg(argc, argv, 0)) else { return q::JS_EXCEPTION };
-    match state(ctx).channel.send(&line) {
+    let host = state(ctx);
+    if std::mem::take(&mut host.refuse_next_send) {
+        return new_string(ctx, crate::timers::TOO_MANY_TIMERS);
+    }
+    match host.channel.send(&line) {
         None => q::JS_NULL,
         Some(refusal) => new_string(ctx, refusal.message()),
     }
@@ -320,7 +325,12 @@ pub const NATIVES: [(&str, Native, c_int); 10] = [
     ("parseURL", native_parse_url, 2),
 ];
 
-const TIMER_CANCEL_NATIVES: [(&str, Native, c_int); 2] = [("cancel", native_cancel, 1), ("refused", native_refused, 1)];
+unsafe extern "C" fn native_refuse_next_send(ctx: *mut q::JSContext, _this: q::JSValue, _argc: c_int, _argv: *mut q::JSValue) -> q::JSValue {
+    state(ctx).refuse_next_send = true;
+    q::JS_UNDEFINED
+}
+
+const TIMER_CANCEL_NATIVES: [(&str, Native, c_int); 3] = [("cancel", native_cancel, 1), ("refused", native_refused, 1), ("refuseNextSend", native_refuse_next_send, 0)];
 
 pub const TIMER_CANCEL: &str = include_str!("timer_cancel.js");
 
@@ -400,6 +410,7 @@ impl Engine {
             timer_handler: q::JS_UNDEFINED,
             early_lines: Vec::new(),
             refused: None,
+            refuse_next_send: false,
         });
         unsafe {
             let opaque = &*governor as *const Governor as *mut c_void;
@@ -572,6 +583,11 @@ impl Engine {
             }
         }
         failures
+    }
+
+    pub fn end_turn_state(&mut self) {
+        self.state.refuse_next_send = false;
+        self.state.refused = None;
     }
 
     pub fn heap_peak(&self) -> usize {
