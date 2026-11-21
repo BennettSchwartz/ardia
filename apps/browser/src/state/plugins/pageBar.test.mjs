@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 const stub = await import("../../test-native/index.ts");
 const { useBrowser } = await import("../browser/store.ts");
 const { startPlugins } = await import("./start.ts");
@@ -13,6 +13,7 @@ const { noteTypedAddress } = await import("./typedAddresses.ts");
 const { parsePluginRecords, pluginRecordsJson } = await import("./savedState.ts");
 const { publishPageBars, publishedPageBar, withdrawPageBars } = await import("./pageBarPanes.ts");
 const { runHostAction } = await import("./hostActions.ts");
+const { pageBarsWanted } = await import("./pageBarGate.ts");
 const { takePageBarCounts } = await import("../telemetry/pageBarCounts.ts");
 const { setConsentPeriod, consentToken } = await import("../telemetry/consentPeriod.ts");
 setConsentPeriod(true, "page-bar-test");
@@ -220,4 +221,27 @@ test("a same-document change on a shown bar counts no second show", () => {
   publishPageBars("w-count", { "t-count": { ...match, url: "http://localhost:7001/#section" } });
   assert.equal(takePageBarCounts().plugin_page_bar_shown_official, 1);
   withdrawPageBars("w-count");
+});
+
+test("with no page-bar plugin on, a page commit writes no document and starts no timer; turning the plugin off forgets what it had", async () => {
+  await enable();
+  notePageDocument("gate", LOCAL, LOCAL, Date.now(), false, R);
+  assert.ok(usePageDocuments.getState().gate, "on: the commit is kept");
+  lifecycle.disablePlugin("developer-mode", null);
+  assert.equal(pageBarsWanted(), false);
+  assert.deepEqual(usePageDocuments.getState(), {}, "off: every document and settle timer is dropped");
+  const timers = mock.method(globalThis, "setTimeout");
+  const writes = mock.fn();
+  const unsubscribe = usePageDocuments.subscribe(writes);
+  try {
+    notePageDocument("gate", LOCAL, LOCAL, Date.now(), false, R);
+    notePageDocument("gate", LOCAL, undefined, undefined, false, R);
+    forgetPageDocument("gate", R);
+    assert.equal(writes.mock.callCount(), 0, "no store write");
+    assert.equal(timers.mock.callCount(), 0, "no timer");
+  } finally {
+    unsubscribe();
+    timers.mock.restore();
+  }
+  assert.deepEqual(usePageDocuments.getState(), {});
 });

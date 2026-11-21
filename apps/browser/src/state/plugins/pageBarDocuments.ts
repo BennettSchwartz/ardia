@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { pageBarsWanted } from "./pageBarGate";
 import { consumeTypedAddress } from "./siteSwitches";
 import { dropTypedAddress } from "./typedAddresses";
 
@@ -45,6 +46,7 @@ function drop(tabId: string) {
 
 export function notePageDocument(tabId: string, shownUrl: string, committedUrl: string | undefined, committedAt: number | undefined, privatePage: boolean, reporter: DocumentReporter, now = Date.now()) {
   reporters.set(tabId, reporter);
+  if (!pageBarsWanted()) return;
   if (committedUrl === undefined) return drop(tabId);
   const before = Object.hasOwn(usePageDocuments.getState(), tabId) ? usePageDocuments.getState()[tabId] : undefined;
   const at = typeof committedAt === "number" && committedAt > 0 ? committedAt : 0;
@@ -61,6 +63,12 @@ export function notePageDocument(tabId: string, shownUrl: string, committedUrl: 
   const settled = wait <= 0;
   patch(tabId, { url: committedUrl, at, agrees, settled });
   if (!settled) settleLater(tabId, at, Math.min(wait, DOCUMENT_SETTLE_MS));
+}
+
+export function forgetAllPageDocuments() {
+  for (const timer of timers.values()) clearTimeout(timer);
+  timers.clear();
+  if (Object.keys(usePageDocuments.getState()).length) usePageDocuments.setState({}, true);
 }
 
 export function forgetPageDocument(tabId: string, reporter: DocumentReporter) {

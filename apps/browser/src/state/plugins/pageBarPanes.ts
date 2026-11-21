@@ -47,10 +47,15 @@ export function withdrawPageBars(windowId: string) {
   }, true);
 }
 
-export const publishedPageBar = (windowId: string, tabId: string): PageBarMatch | null => usePageBarPanes.getState()[windowId]?.[tabId] ?? null;
+const NO_BARS: PageBars = {};
 
-export const usePublishedPageBar = (windowId: string | undefined, tabId: string | undefined): PageBarMatch | null =>
-  usePageBarPanes((s) => (windowId && tabId ? (s[windowId]?.[tabId] ?? null) : null));
+export function watchPublishedPageBars(windowId: string, onBars: (bars: PageBars) => void): () => void {
+  const read = () => onBars(usePageBarPanes.getState()[windowId] ?? NO_BARS);
+  read();
+  return usePageBarPanes.subscribe(read);
+}
+
+export const publishedPageBar = (windowId: string, tabId: string): PageBarMatch | null => usePageBarPanes.getState()[windowId]?.[tabId] ?? null;
 
 const tabFacts = (windowId: string, ids: string[]) => (s: ReturnType<typeof useBrowser.getState>) => {
   const profile = s.windows[windowId]?.profileId ?? "";

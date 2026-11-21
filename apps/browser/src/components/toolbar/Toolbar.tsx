@@ -45,7 +45,7 @@ import { useStableHandler } from "./useStableHandler";
 import { PAGE_IDENTITY_TAG } from "../../state/tabs/tabReveal";
 import { DeveloperToolsButtons } from "./DeveloperToolsButtons";
 import { useDeveloperMode } from "../../state/site/developerMode";
-import { usePublishedPageBar } from "../../state/plugins/pageBarPanes";
+import { usePageBarOf } from "../plugins/PageBarScope";
 import { PageBarButtons } from "../plugins/PageBarButtons";
 import { HOST_ACTION_FIELD } from "../plugins/pageBarField";
 
@@ -180,7 +180,7 @@ export function ToolbarBackdrop({ tabId }: { tabId: string }) {
 }
 
 function useUrlField(tab: ToolbarTab, windowId: string, onFocus: () => void) {
-  const pageBar = usePublishedPageBar(tab.windowId, tab.id);
+  const pageBar = usePageBarOf(tab.windowId, tab.id);
   const developerMode = useDeveloperMode(tab.url) || !!pageBar;
   const showFullUrl = useSettings((s) => s.showFullUrl);
   const insecure = usePage(tab.id, insecureLevel);
