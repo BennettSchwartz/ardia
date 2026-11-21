@@ -5,7 +5,6 @@ import JavaScriptCore
 final class HostGlobals {
   static let maxTimerMs = Double(Int32.max)
   static let maxRandomBytes = 65536
-  static let maxTimers = 10_000
 
   private let context: JSContext
   private let queue: DispatchQueue
@@ -13,7 +12,9 @@ final class HostGlobals {
   private var lineHandler: JSValue?
   private var timerHandler: JSValue?
   private var earlyLines: [String] = []
-  private var pendingTimers: [Double: DispatchWorkItem] = [:]
+  private var timers = PluginTimerQueue()
+  private var timerSource: DispatchSourceTimer?
+  private var armedFor: UInt64?
 
   init(context: JSContext, queue: DispatchQueue) {
     self.context = context
@@ -36,6 +37,31 @@ final class HostGlobals {
     FileHandle.standardError.write(Data((text.hasSuffix("\n") ? text : text + "\n").utf8))
   }
 
+  private func armTimerSource() {
+    guard let due = timers.nextDue() else { return }
+    if armedFor == due { return }
+    let source: DispatchSourceTimer
+    if let existing = timerSource {
+      source = existing
+    } else {
+      source = DispatchSource.makeTimerSource(queue: queue)
+      source.setEventHandler { [weak self] in self?.fireDueTimers() }
+      timerSource = source
+      source.resume()
+    }
+    armedFor = due
+    source.schedule(deadline: DispatchTime(uptimeNanoseconds: due))
+  }
+
+  private func fireDueTimers() {
+    armedFor = nil
+    let now = DispatchTime.now().uptimeNanoseconds
+    while let id = timers.popDue(now: now) {
+      timerHandler?.call(withArguments: [id])
+    }
+    armTimerSource()
+  }
+
   func native() -> JSValue {
     let object = JSValue(newObjectIn: context)!
     let log: @convention(block) (String, String) -> Void = { level, text in
@@ -52,19 +78,14 @@ final class HostGlobals {
     let onTimer: @convention(block) (JSValue) -> Void = { [weak self] handler in self?.timerHandler = handler }
     let schedule: @convention(block) (Double, Double) -> Bool = { [weak self] id, ms in
       guard let self else { return false }
-      self.pendingTimers.removeValue(forKey: id)?.cancel()
-      guard self.pendingTimers.count < Self.maxTimers else { return false }
       let delay = ms.isFinite ? min(Self.maxTimerMs, max(0, ms)) : 0
-      let item = DispatchWorkItem { [weak self] in
-        guard let self, self.pendingTimers.removeValue(forKey: id) != nil else { return }
-        self.timerHandler?.call(withArguments: [id])
-      }
-      self.pendingTimers[id] = item
-      self.queue.asyncAfter(deadline: .now() + .milliseconds(Int(delay)), execute: item)
+      let due = DispatchTime.now().uptimeNanoseconds + UInt64(delay) * 1_000_000
+      guard self.timers.schedule(id, due: due) else { return false }
+      self.armTimerSource()
       return true
     }
     let cancel: @convention(block) (Double) -> Void = { [weak self] id in
-      self?.pendingTimers.removeValue(forKey: id)?.cancel()
+      self?.timers.cancel(id)
     }
     let send: @convention(block) (String) -> Any = { [weak self] line in
       guard let channel = self?.channel else { return "the channel to Ardia is closed" }
