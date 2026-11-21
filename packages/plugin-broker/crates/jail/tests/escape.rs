@@ -1,0 +1,1162 @@
+#![cfg(target_os = "linux")]
+
+use std::io::{BufRead, BufReader, Write};
+use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::unix::net::UnixListener;
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::{Duration, Instant};
+
+use jail::procscan;
+
+static SERIAL: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn harness() -> PathBuf {
+    std::env::var_os("JAIL_HARNESS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_jail-harness")))
+}
+
+fn harness_is_static() -> bool {
+    let file = std::fs::File::open(harness()).unwrap();
+    jail::elf::needs_no_loader(std::os::fd::AsRawFd::as_raw_fd(&file)).unwrap()
+}
+
+fn bwrap() -> String {
+    std::env::var("ARDIA_BWRAP")
+        .expect("set ARDIA_BWRAP to the bwrap that scripts/build-bwrap.sh built")
+}
+
+fn write(path: &Path, text: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+struct World {
+    root: PathBuf,
+    name: String,
+    home: PathBuf,
+    config: PathBuf,
+    plugins: PathBuf,
+    plugin: PathBuf,
+    data_root: PathBuf,
+    data: PathBuf,
+    store: PathBuf,
+    victim_dir: PathBuf,
+    victim_file: PathBuf,
+    program: PathBuf,
+    canary: Child,
+    abstract_name: String,
+    _listeners: Vec<UnixListener>,
+    _abstract: OwnedFd,
+}
+
+impl World {
+    fn new(test: &str) -> World {
+        let serial = SERIAL.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let base = std::env::var_os("JAIL_TEST_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/var/tmp"));
+        let root = base.join(format!("je{}-{serial}", std::process::id()));
+        eprintln!("WORLD {test} at {}", root.display());
+        let _ = std::fs::remove_dir_all(&root);
+        let name = "probe".to_string();
+        let home = root.join("home");
+        let config = home.join(".config/ardia");
+        let plugins = config.join("plugins");
+        let plugin = plugins.join(&name);
+        let data_root = home.join(".local/share/ardia-data");
+        let data = data_root.join("PluginData").join(&name);
+        let store = home.join(".local/share/ardia/programs");
+        let victim_dir = root.join("victim");
+        let victim_file = victim_dir.join("file.txt");
+        write(&home.join("secret.txt"), "home secret");
+        write(&plugin.join("main.js"), "globalThis.ok = true;");
+        write(&plugin.join("marker"), "original");
+        write(
+            &data_root.join("PluginData/other/secret.txt"),
+            "other plugin secret",
+        );
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        write(&victim_file, "victim contents");
+        std::fs::create_dir_all(root.join("run")).unwrap();
+        let program = root.join("progs/probe-pkg/bin/jail-harness");
+        std::fs::create_dir_all(program.parent().unwrap()).unwrap();
+        std::fs::copy(harness(), &program).unwrap();
+        let control = UnixListener::bind(data_root.join("control.sock")).unwrap();
+        let bus = UnixListener::bind(root.join("run/bus")).unwrap();
+        let abstract_name = format!("ardia-x11-{}-{test}", std::process::id());
+        let abstract_listener = abstract_listen(&abstract_name);
+        let canary = Command::new("sleep").arg("600").spawn().unwrap();
+        World {
+            root,
+            name,
+            home,
+            config,
+            plugins,
+            plugin,
+            data_root,
+            data,
+            store,
+            victim_dir,
+            victim_file,
+            program,
+            canary,
+            abstract_name,
+            _listeners: vec![control, bus],
+            _abstract: abstract_listener,
+        }
+    }
+
+    fn probe_env(&self) -> Vec<(String, String)> {
+        let real_home = std::env::var("HOME").unwrap_or_else(|_| "/root".into());
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        vec![
+            ("PROBE_PLUGIN_DIR".into(), s(&self.plugin)),
+            ("PROBE_DATA_DIR".into(), s(&self.data)),
+            ("PROBE_HOME".into(), s(&self.home)),
+            ("PROBE_REAL_HOME".into(), real_home),
+            ("PROBE_HOME_SECRET".into(), s(&self.home.join("secret.txt"))),
+            (
+                "PROBE_OTHER_DATA_SECRET".into(),
+                s(&self.data_root.join("PluginData/other/secret.txt")),
+            ),
+            (
+                "PROBE_CONTROL_SOCKET".into(),
+                s(&self.data_root.join("control.sock")),
+            ),
+            ("PROBE_DBUS_SOCKET".into(), s(&self.root.join("run/bus"))),
+            ("PROBE_ABSTRACT_SOCKET".into(), self.abstract_name.clone()),
+            ("PROBE_CANARY_PID".into(), self.canary.id().to_string()),
+            ("PROBE_BROWSER_PID".into(), std::process::id().to_string()),
+            ("PROBE_VICTIM_DIR".into(), s(&self.victim_dir)),
+            ("PROBE_VICTIM_FILE".into(), s(&self.victim_file)),
+        ]
+    }
+
+    fn sim_args(&self, kind: &str, event: &str) -> Vec<String> {
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        let forbid = [&self.home, &self.config, &self.data_root, &self.store]
+            .iter()
+            .map(|p| s(p))
+            .collect::<Vec<_>>()
+            .join(",");
+        vec![
+            format!("kind={kind}"),
+            format!("event={event}"),
+            format!("name={}", self.name),
+            format!("plugin={}", s(&self.plugin)),
+            format!("data={}", s(&self.data)),
+            format!("parent={}", s(&self.plugins)),
+            format!("forbid={forbid}"),
+            format!("program={}", s(&self.program)),
+            format!("bwrap={}", bwrap()),
+            "leak=1".into(),
+            format!("leak_path={}", s(&self.home)),
+            format!("static={}", if harness_is_static() { 1 } else { 0 }),
+        ]
+    }
+
+    fn check_untouched(&self) {
+        assert_eq!(
+            std::fs::read_to_string(&self.victim_file).unwrap(),
+            "victim contents"
+        );
+        assert!(!self.victim_dir.join("created-by-probe").exists());
+        assert!(!self.victim_dir.join("moved").exists());
+        assert!(!self.home.join("made-by-probe").exists());
+        assert!(!self.home.join("made-by-probe-file").exists());
+        assert_eq!(
+            std::fs::read_to_string(self.plugin.join("main.js")).unwrap(),
+            "globalThis.ok = true;"
+        );
+        assert!(
+            procscan::is_running(self.canary.id() as i32),
+            "the canary outside the jail died"
+        );
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        let _ = self.canary.kill();
+        let _ = self.canary.wait();
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+fn abstract_listen(name: &str) -> OwnedFd {
+    unsafe {
+        let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0);
+        assert!(fd >= 0);
+        let mut address: libc::sockaddr_un = std::mem::zeroed();
+        address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        for (index, byte) in name.bytes().enumerate() {
+            address.sun_path[index + 1] = byte as libc::c_char;
+        }
+        let length = std::mem::size_of::<libc::sa_family_t>() + 1 + name.len();
+        assert_eq!(
+            libc::bind(
+                fd,
+                &address as *const _ as *const libc::sockaddr,
+                length as libc::socklen_t
+            ),
+            0
+        );
+        assert_eq!(libc::listen(fd, 4), 0);
+        OwnedFd::from_raw_fd(fd)
+    }
+}
+
+struct Sim {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    lines: Receiver<String>,
+    seen: Vec<String>,
+}
+
+impl Sim {
+    fn start(world: &World, args: Vec<String>, wrap: &[&str]) -> Sim {
+        Sim::start_with(world, args, wrap, Vec::new())
+    }
+
+    fn start_with(
+        world: &World,
+        args: Vec<String>,
+        wrap: &[&str],
+        extra: Vec<(String, String)>,
+    ) -> Sim {
+        let mut command = if wrap.is_empty() {
+            Command::new(harness())
+        } else {
+            let mut command = Command::new(wrap[0]);
+            command.args(&wrap[1..]).arg(harness());
+            command
+        };
+        command
+            .arg("broker-sim")
+            .args(args)
+            .envs(world.probe_env())
+            .envs(extra)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut child = command.spawn().expect("broker-sim");
+        let stdout = child.stdout.take().unwrap();
+        let (tx, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let stdin = child.stdin.take();
+        Sim {
+            child,
+            stdin,
+            lines,
+            seen: Vec::new(),
+        }
+    }
+
+    fn wait_for(&mut self, prefix: &str, timeout: Duration) -> Option<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match self.lines.recv_timeout(left) {
+                Ok(line) => {
+                    self.seen.push(line.clone());
+                    if line.starts_with(prefix) {
+                        return Some(line);
+                    }
+                }
+                Err(_) => return None,
+            }
+        }
+    }
+
+    fn send(&mut self, text: &str) {
+        if let Some(stdin) = self.stdin.as_mut() {
+            let _ = writeln!(stdin, "{text}");
+            let _ = stdin.flush();
+        }
+    }
+
+    fn close_stdin(&mut self) {
+        self.stdin = None;
+    }
+
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+    }
+
+    fn finish(mut self, timeout: Duration) -> Vec<String> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                let _ = self.child.kill();
+                let _ = self.child.wait();
+                self.seen
+                    .push("TIMEOUT broker-sim was killed by the test".into());
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        while let Ok(line) = self.lines.recv_timeout(Duration::from_millis(300)) {
+            self.seen.push(line);
+        }
+        self.seen
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Caps {
+    abi: Option<u32>,
+    full: bool,
+}
+
+fn caps_from(lines: &[String]) -> Caps {
+    let line = lines
+        .iter()
+        .find(|l| l.starts_with("CAPS "))
+        .cloned()
+        .unwrap_or_default();
+    let abi = line
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("abi="))
+        .and_then(|v| v.parse().ok());
+    let full = line.contains("full=ok");
+    Caps { abi, full }
+}
+
+fn field(line: &str, name: &str) -> i32 {
+    line.split_whitespace()
+        .find_map(|w| w.strip_prefix(&format!("{name}=")))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+fn run_to_end(world: &World, args: Vec<String>) -> Vec<String> {
+    Sim::start(world, args, &[]).finish(Duration::from_secs(60))
+}
+
+fn summarize(test: &str, lines: &[String]) -> (u32, u32) {
+    let results: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("LINE RESULT "))
+        .collect();
+    let escaped: Vec<&&String> = results
+        .iter()
+        .filter(|l| l.split_whitespace().nth(3) == Some("ESCAPED"))
+        .collect();
+    let denied = results.len() as u32 - escaped.len() as u32;
+    eprintln!(
+        "SUMMARY {test} attempts={} denied={denied} escaped={}",
+        results.len(),
+        escaped.len()
+    );
+    for line in lines {
+        eprintln!("  {line}");
+    }
+    (denied, escaped.len() as u32)
+}
+
+fn expect_landlock_refusal(test: &str, lines: &[String]) {
+    eprintln!("SUMMARY {test} refused-without-landlock");
+    for line in lines {
+        eprintln!("  {line}");
+    }
+    let refused = lines
+        .iter()
+        .find(|l| l.starts_with("REFUSED"))
+        .expect("a refusal");
+    assert!(refused.contains(jail::LANDLOCK_MISSING), "{refused}");
+    assert!(!lines.iter().any(|l| l.starts_with("SPAWNED")));
+}
+
+fn assert_contained(test: &str, world: &World, lines: &[String], level: &str, minimum: u32) {
+    let (denied, escaped) = summarize(test, lines);
+    let spawned = lines
+        .iter()
+        .find(|l| l.starts_with("SPAWNED"))
+        .unwrap_or_else(|| panic!("{test} didn't spawn: {lines:#?}"));
+    assert!(spawned.contains(&format!("level={level}")), "{spawned}");
+    assert!(
+        lines.iter().any(|l| l.starts_with("LINE DONE")),
+        "{test}: the probe never finished"
+    );
+    assert_eq!(escaped, 0, "{test}: something escaped");
+    assert!(denied >= minimum, "{test}: only {denied} attempts ran");
+    world.check_untouched();
+    let exit = lines
+        .iter()
+        .find(|l| l.starts_with("EXIT"))
+        .expect("an exit report");
+    assert!(exit.contains("tree_gone=true"), "{exit}");
+    for name in ["outer", "init", "main"] {
+        let pid = field(spawned, name);
+        if pid > 0 {
+            assert!(
+                !procscan::is_running(pid),
+                "{test}: {name} {pid} is still running"
+            );
+        }
+    }
+}
+
+fn result_detail<'a>(lines: &'a [String], name: &str) -> Option<&'a str> {
+    lines
+        .iter()
+        .find(|l| l.starts_with(&format!("LINE RESULT {name} ")))
+        .map(|s| s.as_str())
+}
+
+#[test]
+fn full_sidecar_escape() {
+    let world = World::new("full-sidecar");
+    let mut args = world.sim_args("sidecar", "probe");
+    args.push("probe=escape".into());
+    let lines = run_to_end(&world, args);
+    let caps = caps_from(&lines);
+    match caps.abi {
+        None => expect_landlock_refusal("full_sidecar_escape", &lines),
+        Some(abi) if abi < 2 || !caps.full => {
+            summarize("full_sidecar_escape", &lines);
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.starts_with("REFUSED") && l.contains("Sidecars need")),
+                "{lines:#?}"
+            );
+        }
+        Some(_) => {
+            assert_contained("full_sidecar_escape", &world, &lines, "full", 28);
+            for name in ["fcntl-setown-outside", "exec-from-data"] {
+                let line =
+                    result_detail(&lines, name).unwrap_or_else(|| panic!("{name} didn't run"));
+                assert!(line.contains(" denied "), "{line}");
+            }
+            let tiocsti = result_detail(&lines, "tiocsti").unwrap();
+            assert!(tiocsti.ends_with("errno=1"), "{tiocsti}");
+        }
+    }
+}
+
+#[test]
+fn full_sidecar_escape_on_landlock_abi_2() {
+    let world = World::new("full-sidecar-abi2");
+    let mut args = world.sim_args("sidecar", "probe");
+    args.push("probe=escape".into());
+    args.push("abi=2".into());
+    let mut sim = Sim::start_with(
+        &world,
+        args,
+        &[],
+        vec![("PROBE_EXPECT_TRUNCATE_FILTERED".into(), "1".into())],
+    );
+    let _ = sim.wait_for("CAPS", Duration::from_secs(10));
+    let lines = sim.finish(Duration::from_secs(60));
+    let caps = caps_from(&lines);
+    match caps.abi {
+        None => expect_landlock_refusal("full_sidecar_escape_on_landlock_abi_2", &lines),
+        Some(abi) if abi < 2 || !caps.full => {
+            summarize("full_sidecar_escape_on_landlock_abi_2", &lines);
+            assert!(lines.iter().any(|l| l.starts_with("REFUSED")));
+        }
+        Some(_) => {
+            assert_contained(
+                "full_sidecar_escape_on_landlock_abi_2",
+                &world,
+                &lines,
+                "full",
+                26,
+            );
+            assert!(lines.iter().any(|l| l.contains("abi=2")));
+            let filtered = result_detail(&lines, "truncate-path-abi2-filtered")
+                .expect("the ABI 2 truncate probe ran");
+            assert!(filtered.contains(" denied "), "{filtered}");
+            assert!(lines
+                .iter()
+                .any(|l| l.contains("ftruncate-on-writable-fd allowed")));
+        }
+    }
+}
+
+fn spawn_env_probe(world: &World) -> Vec<(String, String)> {
+    let mut env = world.probe_env();
+    env.push(("PROBE_EXPECT_TRUNCATE_FILTERED".into(), "1".into()));
+    env
+}
+
+#[test]
+fn full_host_escape() {
+    let world = World::new("full-host");
+    let mut args = world.sim_args("host", "probe");
+    args.push("host_mode=probe".into());
+    let lines = run_to_end(&world, args);
+    let caps = caps_from(&lines);
+    match caps.abi {
+        None => expect_landlock_refusal("full_host_escape", &lines),
+        Some(_) if !caps.full => {
+            summarize("full_host_escape", &lines);
+            assert!(lines.iter().any(|l| l.contains("level=hostReduced")));
+        }
+        Some(_) => {
+            assert_contained("full_host_escape", &world, &lines, "full", 33);
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("trusted-init-read-entry=21")),
+                "the host couldn't read its entry before confining"
+            );
+        }
+    }
+}
+
+#[test]
+fn host_reduced_escape() {
+    let world = World::new("host-reduced");
+    let mut args = world.sim_args("host", "probe");
+    args.push("host_mode=probe".into());
+    args.push("level=reduced".into());
+    let lines = run_to_end(&world, args);
+    match caps_from(&lines).abi {
+        None => expect_landlock_refusal("host_reduced_escape", &lines),
+        Some(_) => {
+            assert_contained("host_reduced_escape", &world, &lines, "hostReduced", 33);
+            let setown = result_detail(&lines, "fcntl-setown-outside").unwrap();
+            assert!(setown.contains("errno=1"), "{setown}");
+            assert!(
+                lines
+                    .iter()
+                    .any(|l| l.contains("trusted-init-read-entry=21")),
+                "the host couldn't read its entry before confining"
+            );
+            let exec = result_detail(&lines, "execve-permitted").unwrap();
+            assert!(exec.ends_with("errno=1"), "{exec}");
+        }
+    }
+}
+
+#[test]
+fn landlock_missing_refuses_everything() {
+    let world = World::new("no-landlock");
+    let mut sidecar = world.sim_args("sidecar", "probe");
+    sidecar.push("probe=escape".into());
+    let lines = run_to_end(&world, sidecar);
+    let caps = caps_from(&lines);
+    if caps.abi.is_some() {
+        assert!(
+            std::env::var("JAIL_EXPECT_NO_LANDLOCK").is_err(),
+            "this kernel has Landlock, but the run expected none"
+        );
+        eprintln!("SUMMARY landlock_missing_refuses_everything not-applicable (kernel has Landlock ABI {:?})", caps.abi);
+        return;
+    }
+    expect_landlock_refusal("landlock_missing/sidecar", &lines);
+    for level in ["auto", "reduced"] {
+        let mut host = world.sim_args("host", "probe");
+        host.push(format!("level={level}"));
+        let lines = run_to_end(&world, host);
+        expect_landlock_refusal(&format!("landlock_missing/host-{level}"), &lines);
+    }
+}
+
+#[test]
+fn controls_outside_the_jail_escape() {
+    let world = World::new("controls");
+    for kind in ["sidecar", "host"] {
+        let output = Command::new(harness())
+            .arg("control")
+            .arg(kind)
+            .envs(spawn_env_probe(&world))
+            .output()
+            .unwrap();
+        let lines: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| format!("LINE {l}"))
+            .collect();
+        let (denied, escaped) = summarize(&format!("controls_outside/{kind}"), &lines);
+        assert!(escaped >= 12, "only {escaped} probes escaped without the jail; the probes may be broken ({denied} denied)");
+        for name in [
+            "socket-unix-stream",
+            "socket-inet-tcp",
+            "connect-control-socket",
+            "read-home",
+            "read-other-plugin-data",
+            "write-outside",
+            "signal-outside",
+        ] {
+            let line = result_detail(&lines, name).unwrap_or_else(|| panic!("{name} missing"));
+            assert!(
+                line.contains(" ESCAPED "),
+                "control {name} should succeed outside the jail: {line}"
+            );
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(&world.victim_file).unwrap(),
+        "victim contents"
+    );
+}
+
+#[test]
+fn root_checks_refuse_bad_folders() {
+    let world = World::new("roots");
+    let caps = caps_from(&run_to_end(&world, {
+        let mut a = world.sim_args("host", "probe");
+        a.push("level=reduced".into());
+        a.push("host_mode=probe".into());
+        a
+    }));
+    if caps.abi.is_none() {
+        eprintln!(
+            "SUMMARY root_checks not-applicable (no Landlock, everything is refused earlier)"
+        );
+        return;
+    }
+    let s = |p: &Path| p.to_string_lossy().into_owned();
+    let stray = world.root.join("stray-plugin");
+    write(&stray.join("main.js"), "x");
+    let cases = [
+        ("plugin-is-home", format!("plugin={}", s(&world.home))),
+        ("plugin-outside-plugins", format!("plugin={}", s(&stray))),
+        (
+            "plugin-is-plugins-folder",
+            format!("plugin={}", s(&world.plugins)),
+        ),
+        ("data-is-plugin", format!("data={}", s(&world.plugin))),
+        ("data-takes-in-home", format!("data={}", s(&world.root))),
+    ];
+    for (name, change) in cases {
+        let key = change.split('=').next().unwrap().to_string();
+        let mut args: Vec<String> = world
+            .sim_args("host", "probe")
+            .into_iter()
+            .filter(|a| !a.starts_with(&format!("{key}=")))
+            .collect();
+        args.push(change);
+        args.push("level=reduced".into());
+        let lines = run_to_end(&world, args);
+        eprintln!(
+            "SUMMARY root_checks/{name}: {}",
+            lines
+                .iter()
+                .find(|l| l.starts_with("REFUSED"))
+                .cloned()
+                .unwrap_or_default()
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("REFUSED") && l.contains("can't start")),
+            "{name}: {lines:#?}"
+        );
+        assert!(!lines.iter().any(|l| l.starts_with("SPAWNED")), "{name}");
+    }
+}
+
+#[test]
+fn a_swapped_plugin_folder_mounts_the_verified_inode() {
+    let world = World::new("swap");
+    let mut args = world.sim_args("sidecar", "marker");
+    args.push("probe=marker".into());
+    args.push("swap=1".into());
+    let lines = run_to_end(&world, args);
+    let caps = caps_from(&lines);
+    if caps.abi.map(|abi| abi < 2).unwrap_or(true) || !caps.full {
+        summarize("swapped_folder", &lines);
+        assert!(lines.iter().any(|l| l.starts_with("REFUSED")));
+        return;
+    }
+    summarize("swapped_folder", &lines);
+    let marker = lines
+        .iter()
+        .find(|l| l.starts_with("LINE MARKER"))
+        .expect("the marker probe answered");
+    assert!(marker.contains("cwd=original"), "{marker}");
+    assert!(!marker.contains("swapped"), "{marker}");
+}
+
+fn token_processes(token: &str) -> Vec<i32> {
+    let needle = format!("--token={token}");
+    procscan::all_pids()
+        .into_iter()
+        .filter(|pid| procscan::is_running(*pid) && procscan::cmdline_contains(*pid, &needle))
+        .collect()
+}
+
+fn wait_gone(pids: &[i32], token: Option<&str>, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let alive: Vec<i32> = pids
+            .iter()
+            .copied()
+            .filter(|pid| *pid > 0 && procscan::is_running(*pid))
+            .collect();
+        let tokens = token.map(token_processes).unwrap_or_default();
+        if alive.is_empty() && tokens.is_empty() {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "still running: pids {alive:?}, token processes {tokens:?}"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn cleanup(kind: &str, level: &str, event: &str, wrap: &[&str]) {
+    let test = format!(
+        "cleanup/{kind}-{level}-{event}{}",
+        if wrap.is_empty() { "" } else { "-cgroup" }
+    );
+    let world = World::new(&format!("cleanup-{kind}-{level}-{event}-{}", wrap.len()));
+    let token = format!("tok-{}-{}", std::process::id(), test.replace('/', "-"));
+    let mut args = world.sim_args(kind, event);
+    args.push(format!("token={token}"));
+    args.push(format!(
+        "probe={}",
+        if event == "natural" {
+            "grandchild-exit"
+        } else {
+            "grandchild"
+        }
+    ));
+    args.push("host_mode=idle".into());
+    args.push("deadline=1500".into());
+    if level == "reduced" {
+        args.push("level=reduced".into());
+    }
+    if !wrap.is_empty() {
+        args.push("cgroup=1".into());
+    }
+    let mut sim = Sim::start(&world, args, wrap);
+    let caps_line = sim
+        .wait_for("CAPS", Duration::from_secs(15))
+        .unwrap_or_default();
+    let caps = caps_from(&[caps_line]);
+    if caps.abi.is_none() || (kind == "sidecar" && (!caps.full || caps.abi < Some(2))) {
+        let lines = sim.finish(Duration::from_secs(20));
+        eprintln!("SUMMARY {test} refused-as-expected");
+        assert!(
+            lines.iter().any(|l| l.starts_with("REFUSED")),
+            "{test}: {lines:#?}"
+        );
+        return;
+    }
+    let mut pids = Vec::new();
+    let mut grandchild_seen = false;
+    let outcome = match event {
+        "crash-before-release" => {
+            let recorded = sim
+                .wait_for("RECORDED", Duration::from_secs(15))
+                .unwrap_or_else(|| panic!("{test}: {:#?}", sim.seen));
+            pids.extend([field(&recorded, "outer"), field(&recorded, "init")]);
+            let _ = sim.finish(Duration::from_secs(10));
+            "broker killed itself between recording the run and releasing --block-fd".to_string()
+        }
+        "bad-policy" | "withhold" => {
+            let recorded = sim
+                .wait_for("RECORDED", Duration::from_secs(15))
+                .unwrap_or_else(|| panic!("{test}: {:#?}", sim.seen));
+            pids.extend([field(&recorded, "outer"), field(&recorded, "init")]);
+            let failed = sim
+                .wait_for("SETUP-FAILED", Duration::from_secs(15))
+                .unwrap_or_else(|| panic!("{test}: {:#?}", sim.seen));
+            let runs = sim
+                .wait_for("RUNS", Duration::from_secs(5))
+                .unwrap_or_default();
+            assert_eq!(runs, "RUNS 0", "{test}: the failed run stayed recorded");
+            let _ = sim.finish(Duration::from_secs(10));
+            failed
+        }
+        _ => {
+            let spawned = sim
+                .wait_for("SPAWNED", Duration::from_secs(15))
+                .unwrap_or_else(|| panic!("{test}: {:#?}", sim.seen));
+            let wanted = if level == "reduced" || !caps.full {
+                "level=hostReduced"
+            } else {
+                "level=full"
+            };
+            assert!(spawned.contains(wanted), "{test}: {spawned}");
+            pids.extend([
+                field(&spawned, "outer"),
+                field(&spawned, "init"),
+                field(&spawned, "main"),
+            ]);
+            sim.wait_for("READY", Duration::from_secs(20))
+                .unwrap_or_else(|| panic!("{test}: {:#?}", sim.seen));
+            if kind == "sidecar" {
+                grandchild_seen = sim.seen.iter().any(|l| l.contains("GRANDCHILD up"));
+                let alive = token_processes(&token);
+                assert!(
+                    alive.len() >= 2 || event == "natural",
+                    "{test}: expected the main and the grandchild running, saw {alive:?}"
+                );
+            }
+            match event {
+                "stop" => {
+                    sim.send("go");
+                    let exit = sim
+                        .wait_for("EXIT", Duration::from_secs(15))
+                        .unwrap_or_default();
+                    let _ = sim.finish(Duration::from_secs(10));
+                    exit
+                }
+                "eof" => {
+                    sim.close_stdin();
+                    let exit = sim
+                        .wait_for("EXIT", Duration::from_secs(15))
+                        .unwrap_or_default();
+                    let _ = sim.finish(Duration::from_secs(10));
+                    exit
+                }
+                "crash" => {
+                    sim.kill();
+                    let _ = sim.finish(Duration::from_secs(10));
+                    "broker SIGKILLed".to_string()
+                }
+                "natural" => {
+                    let exit = sim
+                        .wait_for("EXIT", Duration::from_secs(15))
+                        .unwrap_or_default();
+                    let _ = sim.finish(Duration::from_secs(10));
+                    exit
+                }
+                other => panic!("unknown event {other}"),
+            }
+        }
+    };
+    let token_filter = (kind == "sidecar").then_some(token.as_str());
+    let gone = wait_gone(&pids, token_filter, Duration::from_secs(5));
+    eprintln!(
+        "SUMMARY {test} grandchild_started={grandchild_seen} outcome=[{outcome}] all_gone={}",
+        gone.is_ok()
+    );
+    if outcome.starts_with("EXIT") {
+        assert!(outcome.contains("tree_gone=true"), "{test}: {outcome}");
+    }
+    gone.unwrap_or_else(|why| panic!("{test}: {why}"));
+}
+
+#[test]
+fn cleanup_sidecar_stop() {
+    cleanup("sidecar", "full", "stop", &[]);
+}
+#[test]
+fn cleanup_sidecar_browser_eof() {
+    cleanup("sidecar", "full", "eof", &[]);
+}
+#[test]
+fn cleanup_sidecar_broker_crash() {
+    cleanup("sidecar", "full", "crash", &[]);
+}
+#[test]
+fn cleanup_sidecar_natural_exit() {
+    cleanup("sidecar", "full", "natural", &[]);
+}
+#[test]
+fn cleanup_sidecar_interrupted_before_release() {
+    cleanup("sidecar", "full", "crash-before-release", &[]);
+}
+#[test]
+fn cleanup_sidecar_interrupted_bad_policy() {
+    cleanup("sidecar", "full", "bad-policy", &[]);
+}
+#[test]
+fn cleanup_sidecar_interrupted_no_readiness() {
+    cleanup("sidecar", "full", "withhold", &[]);
+}
+#[test]
+fn cleanup_host_full_stop() {
+    cleanup("host", "full", "stop", &[]);
+}
+#[test]
+fn cleanup_host_full_browser_eof() {
+    cleanup("host", "full", "eof", &[]);
+}
+#[test]
+fn cleanup_host_full_broker_crash() {
+    cleanup("host", "full", "crash", &[]);
+}
+#[test]
+fn cleanup_host_full_interrupted_before_release() {
+    cleanup("host", "full", "crash-before-release", &[]);
+}
+#[test]
+fn cleanup_host_reduced_stop() {
+    cleanup("host", "reduced", "stop", &[]);
+}
+#[test]
+fn cleanup_host_reduced_browser_eof() {
+    cleanup("host", "reduced", "eof", &[]);
+}
+#[test]
+fn cleanup_host_reduced_broker_crash() {
+    cleanup("host", "reduced", "crash", &[]);
+}
+#[test]
+fn cleanup_host_reduced_interrupted_before_policy() {
+    cleanup("host", "reduced", "crash-before-release", &[]);
+}
+#[test]
+fn cleanup_host_reduced_interrupted_bad_policy() {
+    cleanup("host", "reduced", "bad-policy", &[]);
+}
+#[test]
+fn cleanup_host_reduced_interrupted_no_readiness() {
+    cleanup("host", "reduced", "withhold", &[]);
+}
+
+fn delegated_scope() -> Option<Vec<&'static str>> {
+    let ok = Command::new("systemd-run")
+        .args(["--user", "--scope", "-q", "-p", "Delegate=yes", "true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    ok.then(|| {
+        vec![
+            "systemd-run",
+            "--user",
+            "--scope",
+            "-q",
+            "-p",
+            "Delegate=yes",
+            "--",
+        ]
+    })
+}
+
+#[test]
+fn cleanup_sidecar_with_delegated_cgroup() {
+    let Some(wrap) = delegated_scope() else {
+        eprintln!("SUMMARY cleanup/cgroup not-applicable (no systemd user manager)");
+        return;
+    };
+    for event in ["stop", "eof", "crash", "natural"] {
+        cleanup("sidecar", "full", event, &wrap);
+    }
+}
+
+fn full_sidecars_available(lines: &[String]) -> bool {
+    let caps = caps_from(lines);
+    caps.full && caps.abi.map(|abi| abi >= 2).unwrap_or(false)
+}
+
+fn build_preload(world: &World) -> Option<PathBuf> {
+    let source = world.root.join("preload.c");
+    std::fs::write(
+        &source,
+        "#include <unistd.h>\n#include <stdio.h>\n#include <string.h>\n__attribute__((constructor)) static void announce(void) {\n  char exe[512] = {0}; char line[600];\n  ssize_t n = readlink(\"/proc/self/exe\", exe, sizeof exe - 1);\n  if (n < 0) strcpy(exe, \"unknown\");\n  int len = snprintf(line, sizeof line, \"PRELOADED %s\\n\", exe);\n  write(2, line, len);\n}\n",
+    )
+    .unwrap();
+    let output = world.plugin.join("preload.so");
+    let built = Command::new("cc")
+        .args(["-shared", "-fPIC", "-o"])
+        .arg(&output)
+        .arg(&source)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    built.then_some(output)
+}
+
+#[test]
+fn a_loader_variable_in_the_request_never_reaches_the_launcher() {
+    let world = World::new("preload");
+    let Some(_library) = build_preload(&world) else {
+        eprintln!("SUMMARY preload not-applicable (no C compiler)");
+        return;
+    };
+    let mut host = world.sim_args("host", "probe");
+    host.push("level=reduced".into());
+    host.push(format!("preload={}/preload.so", jail::PLUGIN_IN_JAIL));
+    let lines = run_to_end(&world, host);
+    if caps_from(&lines).abi.is_some() {
+        let refused = lines
+            .iter()
+            .find(|l| l.starts_with("REFUSED"))
+            .cloned()
+            .unwrap_or_default();
+        eprintln!("SUMMARY preload/host {refused}");
+        assert!(refused.contains("takes no environment"), "{lines:#?}");
+    }
+    let mut sidecar = world.sim_args("sidecar", "marker");
+    sidecar.push("probe=marker".into());
+    sidecar.push(format!("preload={}/preload.so", jail::PLUGIN_IN_JAIL));
+    let lines = run_to_end(&world, sidecar);
+    if !full_sidecars_available(&lines) {
+        eprintln!("SUMMARY preload/sidecar not-applicable (no full isolation)");
+        return;
+    }
+    let preloaded: Vec<&String> = lines.iter().filter(|l| l.contains("PRELOADED")).collect();
+    eprintln!(
+        "SUMMARY preload/sidecar launcher_static={} preloaded_lines={:?}",
+        harness_is_static(),
+        preloaded
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("LINE MARKER")),
+        "{lines:#?}"
+    );
+    assert!(
+        !preloaded.iter().any(|l| l.contains("ardia-plugins")),
+        "the trusted launcher loaded a library from the request: {preloaded:?}"
+    );
+    if !harness_is_static() {
+        assert!(
+            !preloaded.is_empty(),
+            "the dynamic sidecar should have received its own approved LD_PRELOAD"
+        );
+    }
+}
+
+#[test]
+fn a_dynamic_launcher_is_refused_when_static_is_required() {
+    let world = World::new("static");
+    let mut args: Vec<String> = world
+        .sim_args("host", "probe")
+        .into_iter()
+        .filter(|a| !a.starts_with("static="))
+        .collect();
+    args.push("static=1".into());
+    args.push("level=reduced".into());
+    args.push("host_mode=probe".into());
+    let lines = run_to_end(&world, args);
+    let fatal = lines.iter().find(|l| l.starts_with("FATAL")).cloned();
+    eprintln!(
+        "SUMMARY static_launcher harness_static={} fatal={fatal:?}",
+        harness_is_static()
+    );
+    if harness_is_static() {
+        assert!(fatal.is_none(), "{lines:#?}");
+        assert!(
+            lines.iter().any(|l| l.contains("launcher=Static")),
+            "{lines:#?}"
+        );
+    } else {
+        assert!(
+            fatal.unwrap_or_default().contains("dynamically linked"),
+            "{lines:#?}"
+        );
+    }
+}
+
+#[test]
+fn a_program_swapped_after_verification_still_runs_the_verified_inode() {
+    let world = World::new("program-swap");
+    let mut args = world.sim_args("sidecar", "marker");
+    args.push("probe=marker".into());
+    args.push("swap_program=1".into());
+    let lines = run_to_end(&world, args);
+    if !full_sidecars_available(&lines) {
+        eprintln!("SUMMARY program_swap not-applicable");
+        assert!(lines.iter().any(|l| l.starts_with("REFUSED")));
+        return;
+    }
+    summarize("program_swap", &lines);
+    assert!(lines.iter().any(|l| l == "SWAPPED-PROGRAM"), "{lines:#?}");
+    assert!(
+        lines.iter().any(|l| l.starts_with("LINE MARKER")),
+        "{lines:#?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.contains("DECOY")),
+        "the swapped-in program ran: {lines:#?}"
+    );
+    let on_disk = std::fs::read_to_string(&world.program).unwrap_or_default();
+    assert!(on_disk.contains("DECOY"), "the swap didn't happen on disk");
+}
+
+#[test]
+fn a_script_program_runs_from_its_pinned_fd() {
+    let world = World::new("script");
+    let script = world.root.join("progs/script-pkg/bin/hello.sh");
+    write(
+        &script,
+        "#!/bin/sh\necho \"SCRIPT-RAN args=$1 home=$HOME\" >&3\necho DONE >&3\n",
+    );
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let mut args: Vec<String> = world
+        .sim_args("sidecar", "probe")
+        .into_iter()
+        .filter(|a| !a.starts_with("program="))
+        .collect();
+    args.push(format!("program={}", script.display()));
+    args.push("probe=from-script".into());
+    let lines = run_to_end(&world, args);
+    if !full_sidecars_available(&lines) {
+        eprintln!("SUMMARY script not-applicable");
+        return;
+    }
+    summarize("script_program", &lines);
+    let ran = lines
+        .iter()
+        .find(|l| l.starts_with("LINE SCRIPT-RAN"))
+        .unwrap_or_else(|| panic!("{lines:#?}"));
+    assert!(ran.contains("args=probe"), "{ran}");
+    assert!(ran.contains("home=/run/ardia/data/home"), "{ran}");
+}
+
+#[test]
+fn nested_mounts_inside_granted_trees_are_refused() {
+    let world = World::new("nested");
+    let nested = world.plugin.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let script = format!(
+        "mount -t tmpfs nested '{}' && exec \"$@\"",
+        nested.display()
+    );
+    let wrap = [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--propagation",
+        "private",
+        "sh",
+        "-c",
+        &script,
+        "sh",
+    ];
+    let usable = Command::new("unshare")
+        .args(["--user", "--map-root-user", "--mount", "true"])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    if !usable {
+        eprintln!(
+            "SUMMARY nested_mounts not-applicable (no unprivileged user namespaces for the test)"
+        );
+        return;
+    }
+    let mut args = world.sim_args("host", "probe");
+    args.push("level=reduced".into());
+    args.push("host_mode=probe".into());
+    let lines = Sim::start(&world, args, &wrap).finish(Duration::from_secs(30));
+    if caps_from(&lines).abi.is_none() {
+        expect_landlock_refusal("nested_mounts", &lines);
+        return;
+    }
+    let refused = lines
+        .iter()
+        .find(|l| l.starts_with("REFUSED"))
+        .cloned()
+        .unwrap_or_default();
+    eprintln!("SUMMARY nested_mounts {refused}");
+    assert!(
+        refused.contains("a filesystem is mounted inside the plugin folder"),
+        "{lines:#?}"
+    );
+    assert!(!lines.iter().any(|l| l.starts_with("SPAWNED")));
+}
